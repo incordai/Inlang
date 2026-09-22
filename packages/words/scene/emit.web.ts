@@ -10,6 +10,9 @@
 import type { SpecBlock } from '../../core/src/spec.ts';
 import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
+/** The manifest default (scene-spec §12), for a block built without one. */
+const DEFAULT_RATIO = '4:3';
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'inline';
@@ -28,19 +31,26 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     return { tag: 'div', attrs: { class: 'az-scene az-scene--none', hidden: 'hidden' }, children: [] };
   }
 
+  // Through the asset sandbox, so the file is copied into the build — a raw
+  // path in an attribute left the poster behind.
+  const poster = block.props.poster ? ctx.asset(block.props.poster) : null;
+  // `4:3` is how an author writes a ratio; CSS needs `4 / 3`, and drops the
+  // declaration silently otherwise. The enum admits only `a:b` forms.
+  const aspect = (block.props.ratio ?? DEFAULT_RATIO).replace(':', ' / ');
+
   children.push({
     tag: 'figure',
     attrs: {
       class: 'az-scene-viewport',
       'data-variant': variant,
-      'data-poster': block.props.poster ?? '',
+      'data-poster': poster ?? '',
       role: 'img',
       'aria-label': block.props.alt ?? '',
     },
     style: {
       margin: 0,
       // Reserve the box before anything loads, or arrival shifts the page.
-      aspectRatio: block.props.ratio ?? '16 / 9',
+      aspectRatio: aspect,
       background: t.color['surface-alt'],
 
       // §2/§6, three different relationships to the page:
@@ -59,7 +69,18 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       pointerEvents: variant === 'backdrop' ? 'none' : undefined,
       height: variant === 'backdrop' ? '100svh' : undefined,
     },
-    children: block.props.caption
+    children: [
+      // §8: `static` is posters only, and until the 3D runtime lands every
+      // scene is static. The figure carries the name (role="img" + alt), so
+      // the image itself is decorative and is not announced twice.
+      ...(poster
+        ? [{
+            tag: 'img',
+            attrs: { src: poster, alt: '', class: 'az-scene-poster', decoding: 'async' },
+            style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+          } satisfies EmittedNode]
+        : []),
+      ...(block.props.caption
       ? [{
           tag: 'figcaption',
           style: {
@@ -69,7 +90,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
           },
           children: [block.props.caption],
         }]
-      : [],
+      : []),
+    ],
   });
 
   return {
