@@ -16,6 +16,9 @@ import { emit, PathEscapeError } from '../../target-web/src/emit.ts';
 // The CLI is the composition root (ARCHITECTURE §1a): it owns which target and
 // which words are in play, and hands both to a compiler that knows neither.
 import { WEB_EMITTERS } from '../../words/registry.ts';
+// dev.ts imports `build` from here; the cycle is safe because neither module
+// touches the other's exports until a command runs.
+import { dev, devLine } from './dev.ts';
 
 /** Exit codes are meaningful — word-quality-gate §5.2. */
 export const EXIT = { ok: 0, missing: 1, config: 2 } as const;
@@ -110,15 +113,24 @@ export function specOf(options: Omit<BuildOptions, 'outDir'>): string | null {
 const USAGE = `az — words to a website
 
   az build <file.az> [--out dir]   compile to a runnable project
+  az dev   <file.az> [--out dir]   build, then rebuild on every save
   az spec  <file.az>               print the Spec as JSON
   az check <file.az>               report diagnostics only, write nothing
 `;
+
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check']);
 
 export function main(argv: string[]): number {
   const [cmd, file, ...rest] = argv;
   if (!cmd || cmd === '--help' || cmd === '-h') {
     process.stdout.write(USAGE);
     return EXIT.ok;
+  }
+  // An unknown command must not fall through to `check` — a typo would then
+  // report "no problems found" and do nothing, which reads as success.
+  if (!COMMANDS.has(cmd)) {
+    process.stderr.write(`az: unknown command "${cmd}"\n\n${USAGE}`);
+    return EXIT.config;
   }
   if (!file) {
     process.stderr.write(`az: ${cmd} needs a file — try: az ${cmd} site.az\n`);
@@ -134,6 +146,21 @@ export function main(argv: string[]): number {
       const json = specOf({ source: file, wordsDir });
       if (!json) { process.stderr.write('az: nothing to print\n'); return EXIT.missing; }
       process.stdout.write(json);
+      return EXIT.ok;
+    }
+
+    if (cmd === 'dev') {
+      // The watcher keeps the process alive; Ctrl-C closes it cleanly.
+      const handle = dev({
+        source: file,
+        outDir,
+        wordsDir,
+        onResult: (outcome, ms) => {
+          const stream = outcome.ok ? process.stdout : process.stderr;
+          stream.write(devLine(outcome, ms) + '\n');
+        },
+      });
+      process.once('SIGINT', () => handle.close());
       return EXIT.ok;
     }
 

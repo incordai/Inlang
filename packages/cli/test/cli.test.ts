@@ -4,6 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -117,4 +118,59 @@ test('devLine reports the file count and timing on success', () => {
   // scaffold broke a test that was never about how many files there are.
   assert.ok(line.includes(`${outcome.files.length} files in 12.3ms`), line);
   assert.ok(outcome.files.length > 1, 'CONTROL: a real project has several files');
+});
+
+/* ---- the real binary: what a user actually types ---------------------- */
+
+const BIN = join(ROOT, 'packages/cli/bin/az.js');
+const DEV_TIMEOUT_MS = 10_000;
+
+function runBin(args: string[]) {
+  return spawnSync(process.execPath, [...process.execArgv, BIN, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, AZ_WORDS: WORDS },
+  });
+}
+
+test('an unknown command fails instead of falling through to check', () => {
+  const p = project(GOOD);
+  const r = runBin(['biuld', p.file]);
+  assert.equal(r.status, EXIT.config, r.stderr);
+  assert.match(r.stderr, /unknown command "biuld"/);
+  assert.doesNotMatch(r.stdout, /no problems found/, 'a typo must not read as success');
+});
+
+test('CONTROL: a known command still runs through the binary', () => {
+  const p = project(GOOD);
+  const r = runBin(['check', p.file]);
+  assert.equal(r.status, EXIT.ok, r.stderr);
+  assert.match(r.stdout, /no problems found/);
+});
+
+test('az dev builds, rebuilds on save, and exits cleanly on SIGINT', async () => {
+  const p = project(GOOD);
+  const child = spawn(process.execPath, [...process.execArgv, BIN, 'dev', p.file, '--out', p.out], {
+    env: { ...process.env, AZ_WORDS: WORDS },
+  });
+  let stdout = '';
+  child.stdout.setEncoding('utf8');
+  const lines = (n: number) => new Promise<void>((done, fail) => {
+    const timer = setTimeout(() => fail(new Error(`timed out waiting for ${n} builds; got:\n${stdout}`)), DEV_TIMEOUT_MS);
+    const check = () => {
+      if ((stdout.match(/files in/g) ?? []).length >= n) { clearTimeout(timer); done(); }
+    };
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; check(); });
+    check();
+  });
+  try {
+    await lines(1);
+    assert.ok(existsSync(join(p.out, 'src/App.tsx')), 'the first build must write output');
+    writeFileSync(p.file, GOOD.replace('Built in the dark', 'Made to last'), 'utf8');
+    await lines(2);
+    assert.match(readFileSync(join(p.out, 'src/App.tsx'), 'utf8'), /Made to last/);
+  } finally {
+    const exited = new Promise<number | null>((done) => child.once('exit', done));
+    child.kill('SIGINT');
+    assert.equal(await exited, EXIT.ok, 'Ctrl-C must close the watcher and exit 0');
+  }
 });

@@ -15,7 +15,13 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  packages/cli: {}
+
   packages/core: {}
+
+  packages/target-web: {}
+
+  packages/theme: {}
 
 packages:
 
