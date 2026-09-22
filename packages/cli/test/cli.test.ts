@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -173,4 +173,62 @@ test('az dev builds, rebuilds on save, and exits cleanly on SIGINT', async () =>
     child.kill('SIGINT');
     assert.equal(await exited, EXIT.ok, 'Ctrl-C must close the watcher and exit 0');
   }
+});
+
+/* ---- assets: referenced files reach the built project ----------------- */
+
+const WITH_LOGO = 'az 1\nsite aurora\npage /\n  nav bar\n    logo ./assets/logo.svg\n  hero center\n    title "Built in the dark"\n';
+const LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>';
+
+function withAsset(source: string) {
+  const p = project(source);
+  mkdirSync(join(p.dir, 'assets'));
+  writeFileSync(join(p.dir, 'assets/logo.svg'), LOGO_SVG, 'utf8');
+  return p;
+}
+
+test('a referenced asset is copied into public/ and linked from the site root', () => {
+  const p = withAsset(WITH_LOGO);
+  const r = build({ source: p.file, outDir: p.out, wordsDir: WORDS });
+  assert.equal(r.ok, true, r.report);
+  assert.deepEqual(r.assets, ['assets/logo.svg']);
+  assert.equal(readFileSync(join(p.out, 'public/assets/logo.svg'), 'utf8'), LOGO_SVG);
+  // Root-relative: a relative URL would break on every route below `/`.
+  assert.match(readFileSync(join(p.out, 'src/App.tsx'), 'utf8'), /"\/assets\/logo\.svg"/);
+});
+
+test('CONTROL: a site with no assets writes no public/ directory', () => {
+  const p = project(GOOD);
+  const r = build({ source: p.file, outDir: p.out, wordsDir: WORDS });
+  assert.equal(r.ok, true, r.report);
+  assert.deepEqual(r.assets, []);
+  assert.ok(!existsSync(join(p.out, 'public')));
+});
+
+test('a missing asset fails the build and writes nothing', () => {
+  const p = project(WITH_LOGO);
+  const r = build({ source: p.file, outDir: p.out, wordsDir: WORDS });
+  assert.equal(r.ok, false);
+  assert.notEqual(r.exit, EXIT.ok);
+  assert.match(r.report, /'\.\/assets\/logo\.svg' does not exist/);
+  assert.ok(!existsSync(join(p.out, 'src/App.tsx')), 'a failed build must not write output');
+});
+
+test('SECURITY: a symlinked asset that resolves outside the project is refused', (t) => {
+  const p = project(WITH_LOGO);
+  const outside = mkdtempSync(join(tmpdir(), 'az-outside-'));
+  writeFileSync(join(outside, 'secret.txt'), 'do not publish', 'utf8');
+  mkdirSync(join(p.dir, 'assets'));
+  try {
+    symlinkSync(join(outside, 'secret.txt'), join(p.dir, 'assets/logo.svg'));
+  } catch (e) {
+    // Creating symlinks needs a privilege some Windows accounts lack; without
+    // one the attack this test models cannot be set up either.
+    if ((e as NodeJS.ErrnoException).code === 'EPERM') { t.skip('symlinks not permitted here'); return; }
+    throw e;
+  }
+  const r = build({ source: p.file, outDir: p.out, wordsDir: WORDS });
+  assert.equal(r.ok, false, 'a symlink escape must not build');
+  assert.match(r.report, /resolves outside the project/);
+  assert.ok(!existsSync(join(p.out, 'public')), 'the outside file must not be copied');
 });

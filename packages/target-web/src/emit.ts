@@ -248,9 +248,33 @@ function themeFor(spec: Spec, override?: Theme): ThemeLike {
   };
 }
 
+/**
+ * The generated project plus the assets its pages reference.
+ *
+ * `assets` are project-relative paths (`assets/shoe.webp`), sorted and
+ * de-duplicated, for the caller to copy into the project's `public/` — this
+ * stage has no filesystem (ARCHITECTURE §1a). The page refers to each one as
+ * `/assets/shoe.webp`: root-relative, because a relative URL resolves against
+ * the current route and breaks on any page below `/`.
+ */
+export interface EmittedProject {
+  readonly files: EmittedFile[];
+  readonly assets: string[];
+}
+
 export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
+  return emitProject(spec, options).files;
+}
+
+export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProject {
   const theme = themeFor(spec, options.theme);
-  const pages = emitPages(spec, theme, options.emitters ?? {});
+  const used = new Set<string>();
+  const asset = (raw: string): string => {
+    const path = safeAssetPath(raw);
+    used.add(path);
+    return `/${path}`;
+  };
+  const pages = emitPages(spec, theme, options.emitters ?? {}, asset);
   const files: EmittedFile[] = [
     { path: 'src/App.tsx', content: appTsx(spec, pages) },
     { path: 'src/runtime.tsx', content: runtimeTsx() },
@@ -353,5 +377,9 @@ export default defineConfig({
 `,
     },
   ];
-  return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const byPath = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  return {
+    files: files.sort((x, y) => byPath(x.path, y.path)),
+    assets: [...used].sort(byPath),
+  };
 }

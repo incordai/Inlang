@@ -89,6 +89,9 @@ try {
   /* ---- 1. compile ------------------------------------------------------ */
   const site = join(work, 'site.az');
   cpSync(join(ROOT, 'packages/core/test/fixture-site.az'), site);
+  // The images the fixture names. It must stay byte-identical to GRAMMAR §8,
+  // so its files live beside it rather than being edited out of it.
+  cpSync(join(ROOT, 'packages/core/test/fixture-assets'), work, { recursive: true });
   const proj = join(work, 'proj');
   node(CLI, ['build', site, '--out', proj], work);
   console.log('compiled the GRAMMAR §8 fixture\n');
@@ -106,6 +109,12 @@ try {
   vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], proj);
   const html = node(join(proj, 'ssr-out/ssr.js'), [], proj);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
+
+  /* ---- the images the page names are in the build ---------------------- */
+  for (const a of ['assets/logo.svg', 'assets/logo-w.svg', 'assets/orbit.webp']) {
+    check(`asset shipped: dist/${a}`, existsSync(join(proj, 'dist', a)));
+    check(`asset linked from the site root: /${a}`, html.includes(`src="/${a}"`));
+  }
 
   /* ---- 4. the DOM obeys the specs -------------------------------------- */
   const h1s = (html.match(/<h1/g) ?? []).length;

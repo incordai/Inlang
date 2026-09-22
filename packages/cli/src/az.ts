@@ -9,10 +9,12 @@
  * describes the site; this does things to it.
  */
 
-import { readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import {
+  readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
+} from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import { compile, formatDiagnostics, serialiseSpec, type Manifest } from '../../core/src/index.ts';
-import { emit, PathEscapeError } from '../../target-web/src/emit.ts';
+import { emitProject, PathEscapeError } from '../../target-web/src/emit.ts';
 // The CLI is the composition root (ARCHITECTURE §1a): it owns which target and
 // which words are in play, and hands both to a compiler that knows neither.
 import { WEB_EMITTERS } from '../../words/registry.ts';
@@ -60,8 +62,43 @@ export interface BuildOptions {
 export interface BuildOutcome {
   readonly ok: boolean;
   readonly files: { path: string; content: string }[];
+  /** Project-relative asset paths, copied to `<out>/public/`. */
+  readonly assets: string[];
   readonly report: string;
   readonly exit: number;
+}
+
+/**
+ * Where each referenced asset really is on disk, or why it cannot be used.
+ *
+ * The target already refused `..` and absolute paths as STRINGS. That cannot
+ * see a symlink: `./assets/x.webp -> /home/me/.ssh/id_ed25519` is a clean
+ * string and would be copied into `public/` and deployed. So the real path is
+ * resolved and must still sit inside the project directory. Everything is
+ * checked before anything is written, so a failed build writes nothing.
+ */
+function locateAssets(projectDir: string, assets: string[]): { sources: string[]; problems: string[] } {
+  const root = realpathSync(projectDir);
+  const sources: string[] = [];
+  const problems: string[] = [];
+  for (const a of assets) {
+    const candidate = resolve(root, a);
+    if (!existsSync(candidate)) {
+      problems.push(`asset: './${a}' does not exist — add the file or fix the path`);
+      continue;
+    }
+    const real = realpathSync(candidate);
+    if (real !== root && !real.startsWith(root + sep)) {
+      problems.push(`asset: './${a}' resolves outside the project — assets must live inside it`);
+      continue;
+    }
+    if (!statSync(real).isFile()) {
+      problems.push(`asset: './${a}' is not a file`);
+      continue;
+    }
+    sources.push(real);
+  }
+  return { sources, problems };
 }
 
 export function build(options: BuildOptions): BuildOutcome {
@@ -75,17 +112,27 @@ export function build(options: BuildOptions): BuildOutcome {
 
   // Errors block; warnings never do — CONVENTIONS §5.
   if (!result.ok || !result.spec) {
-    return { ok: false, files: [], report, exit: EXIT.missing };
+    return { ok: false, files: [], assets: [], report, exit: EXIT.missing };
   }
 
-  let files;
+  let project;
   try {
-    files = emit(result.spec, { emitters: WEB_EMITTERS });
+    project = emitProject(result.spec, { emitters: WEB_EMITTERS });
   } catch (e) {
     if (e instanceof PathEscapeError) {
-      return { ok: false, files: [], report: `${report}\n${e.message}`.trim(), exit: EXIT.missing };
+      return { ok: false, files: [], assets: [], report: `${report}\n${e.message}`.trim(), exit: EXIT.missing };
     }
     throw e;
+  }
+  const { files, assets } = project;
+
+  const located = locateAssets(dirname(resolve(options.source)), assets);
+  if (located.problems.length > 0) {
+    return {
+      ok: false, files: [], assets: [],
+      report: [report, ...located.problems].filter(Boolean).join('\n'),
+      exit: EXIT.missing,
+    };
   }
 
   if (options.write !== false) {
@@ -97,9 +144,16 @@ export function build(options: BuildOptions): BuildOutcome {
       // determinism claim dies quietly (CONVENTIONS §6).
       writeFileSync(target, f.content.replace(/\r\n/g, '\n'), 'utf8');
     }
+    // Vite serves `public/` at the site root and copies it into the build
+    // untouched, which is what makes the page's `/assets/...` URLs resolve.
+    assets.forEach((a, i) => {
+      const target = resolve(options.outDir, 'public', a);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(located.sources[i], target);
+    });
   }
 
-  return { ok: true, files, report, exit: EXIT.ok };
+  return { ok: true, files, assets, report, exit: EXIT.ok };
 }
 
 export function specOf(options: Omit<BuildOptions, 'outDir'>): string | null {

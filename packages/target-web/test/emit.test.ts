@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
-import { emit, escapeText, safeAssetPath, PathEscapeError } from '../src/emit.ts';
+import { emit, emitProject, escapeText, safeAssetPath, PathEscapeError } from '../src/emit.ts';
 // A TEST may compose target + words, exactly as the CLI does. `deps.test.ts`
 // forbids this in `src/` — that rule is about the shipped dependency arrow,
 // and it scans src only. Without the real registry these tests would exercise
@@ -82,6 +82,27 @@ test('SECURITY: a path cannot escape the project', () => {
 test('CONTROL: a legitimate asset path resolves', () => {
   assert.equal(safeAssetPath('./assets/shoe.glb'), 'assets/shoe.glb');
   assert.equal(safeAssetPath('assets/nested/../shoe.glb'), 'assets/shoe.glb');
+});
+
+test('emitProject lists each referenced asset once, sorted, and links it from the root', () => {
+  const src = 'az 1\nsite aurora\n  nav bar\n    logo ./assets/z-logo.svg\n' +
+    '  footer minimal\n    logo ./assets/z-logo.svg\n' +
+    'page /\n  hero center\n    title "x"\n' +
+    'page /work\n  cta split\n    title "y"\n    media ./assets/a-bench.webp\n';
+  const r = compile(src, { manifests });
+  assert.ok(r.spec, JSON.stringify(r.diagnostics));
+  const { files, assets } = emitProject(r.spec, { emitters: WEB_EMITTERS });
+  assert.deepEqual(assets, ['assets/a-bench.webp', 'assets/z-logo.svg']);
+  const app = fileNamed(files, 'src/App.tsx').content;
+  assert.match(app, /"\/assets\/z-logo\.svg"/);
+  assert.doesNotMatch(app, /"\.\/assets\//, 'the author path must not reach the page unresolved');
+});
+
+test('CONTROL: emit() returns the same files as emitProject()', () => {
+  const r = compile(MINIMAL, { manifests });
+  assert.ok(r.spec);
+  assert.deepEqual(emit(r.spec, { emitters: WEB_EMITTERS }),
+    emitProject(r.spec, { emitters: WEB_EMITTERS }).files);
 });
 
 /* ---------------- determinism, CONVENTIONS §6 ---------------- */

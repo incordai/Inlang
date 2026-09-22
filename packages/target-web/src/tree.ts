@@ -13,9 +13,11 @@ import { blocksFor, type Spec, type SpecBlock } from '../../core/src/index.ts';
 import type { EmitContext, EmittedNode, ThemeLike, WordEmitter }
   from '../../core/src/emit-contract.ts';
 import { px } from '../../core/src/emit-contract.ts';
-import { safeAssetPath } from './emit.ts';
 
 export type EmitterMap = Readonly<Record<string, WordEmitter>>;
+
+/** Resolves an author's asset path to the URL the page uses. Sandboxed. */
+export type AssetResolver = (path: string) => string;
 
 /**
  * A slot child rendered without a word emitter of its own.
@@ -114,7 +116,7 @@ function fallback(block: SpecBlock, ctx: EmitContext): EmittedNode {
 }
 
 /** Build the context one block sees. */
-function contextFor(block: SpecBlock, theme: ThemeLike): EmitContext {
+function contextFor(block: SpecBlock, theme: ThemeLike, asset: AssetResolver): EmitContext {
   return {
     theme,
     target: 'web',
@@ -122,27 +124,29 @@ function contextFor(block: SpecBlock, theme: ThemeLike): EmitContext {
     // rule the linker uses, so what validated is what renders.
     slot: (name) => block.children
       .filter((c) => c.word === name)
-      .map((c) => defaultChild(c, contextFor(c, theme))),
-    asset: safeAssetPath,
+      .map((c) => defaultChild(c, contextFor(c, theme, asset))),
+    asset,
   };
 }
 
 /** One block, through its word's emitter or the fallback. */
-export function emitBlock(block: SpecBlock, theme: ThemeLike, emitters: EmitterMap): EmittedNode {
-  const ctx = contextFor(block, theme);
+export function emitBlock(
+  block: SpecBlock, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver,
+): EmittedNode {
+  const ctx = contextFor(block, theme, asset);
   const word = emitters[block.word];
   return word ? word.emit(block, ctx) : fallback(block, ctx);
 }
 
 /** Every page, with the site's inherited blocks in front of each page's own. */
 export function emitPages(
-  spec: Spec, theme: ThemeLike, emitters: EmitterMap,
+  spec: Spec, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver,
 ): { route: string; nodes: EmittedNode[] }[] {
   return spec.pages.map((page) => ({
     route: page.route,
     // blocksFor resolves inheritance: overrides, `none` suppression, and the
     // nav-first/footer-last placement. Concatenating the two lists here put
     // the footer above the page content and rendered a suppressed nav twice.
-    nodes: blocksFor(spec, page).map((b) => emitBlock(b, theme, emitters)),
+    nodes: blocksFor(spec, page).map((b) => emitBlock(b, theme, emitters, asset)),
   }));
 }
