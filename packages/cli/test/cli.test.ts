@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -118,6 +118,41 @@ test('devLine reports the file count and timing on success', () => {
   // scaffold broke a test that was never about how many files there are.
   assert.ok(line.includes(`${outcome.files.length} files in 12.3ms`), line);
   assert.ok(outcome.files.length > 1, 'CONTROL: a real project has several files');
+});
+
+/** Resolve once `count` results have arrived, or fail after DEV_TIMEOUT_MS. */
+function results(count: number, seen: () => number): Promise<void> {
+  return new Promise((done, fail) => {
+    const started = Date.now();
+    const tick = setInterval(() => {
+      if (seen() >= count) { clearInterval(tick); done(); }
+      else if (Date.now() - started > DEV_TIMEOUT_MS) {
+        clearInterval(tick);
+        fail(new Error(`timed out waiting for ${count} builds; saw ${seen()}`));
+      }
+    }, 10);
+  });
+}
+
+test('dev rebuilds after a save that renames a temp file over the source', async () => {
+  // How vim and many IDEs save. A watch on the file itself follows the old
+  // inode and never hears about the new one.
+  const p = project(GOOD);
+  let builds = 0;
+  const h = dev({ source: p.file, outDir: p.out, wordsDir: WORDS, onResult: () => builds++ });
+  try {
+    await results(1, () => builds);
+    for (const [n, title] of [[2, 'Made to last'], [3, 'Made again']] as const) {
+      const tmp = join(p.dir, `.site.az.${n}.tmp`);
+      writeFileSync(tmp, GOOD.replace('Built in the dark', title), 'utf8');
+      renameSync(tmp, p.file);
+      await results(n, () => builds);
+      assert.match(readFileSync(join(p.out, 'src/App.tsx'), 'utf8'), new RegExp(title),
+        `save ${n - 1} must be built`);
+    }
+  } finally {
+    h.close();
+  }
 });
 
 /* ---- the real binary: what a user actually types ---------------------- */

@@ -10,8 +10,19 @@
  * and build does not.
  */
 
-import { watch, type FSWatcher } from 'node:fs';
+import { watch, statSync, type FSWatcher } from 'node:fs';
+import { basename, dirname } from 'node:path';
 import { build, type BuildOutcome } from './az.ts';
+
+/**
+ * How often the source is re-checked against what was last built.
+ *
+ * File events are a fast path, not a guarantee: macOS delivers them through
+ * FSEvents, which starts asynchronously and can drop a change that lands
+ * just after the watch begins. A cheap stat on this tick reconciles any
+ * missed event, so a save is never silently ignored.
+ */
+const RECONCILE_MS = 250;
 
 export interface DevOptions {
   readonly source: string;
@@ -50,33 +61,56 @@ export function dev(options: DevOptions): DevHandle {
   const debounceMs = options.debounceMs ?? 40;
   let timer: NodeJS.Timeout | null = null;
   let watcher: FSWatcher | null = null;
+  /** mtime and size of the source as last compiled; null when unreadable. */
+  let built: string | null = null;
+
+  const stamp = (): string | null => {
+    try {
+      const st = statSync(options.source);
+      return `${st.mtimeMs}:${st.size}`;
+    } catch {
+      return null;
+    }
+  };
 
   const run = () => {
+    // Stamped BEFORE compiling, so a save during the compile differs from it
+    // and is picked up on the next tick.
+    built = stamp();
     const { outcome, ms } = once(options);
     options.onResult?.(outcome, ms);
     return outcome;
   };
 
-  // Watch BEFORE the first build. Watching after it left a window in which a
-  // save landing between the first build's report and `watch()` was lost —
-  // an editor saving while the first compile ran got no rebuild.
+  // Debounce: an editor save can fire several events, and recompiling per
+  // event would report three builds for one edit.
+  const schedule = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(run, debounceMs);
+  };
+
+  // The DIRECTORY, not the file. Many editors save by writing a temporary
+  // file and renaming it over the original; a watch on the file follows the
+  // replaced inode and goes quiet after the first such save.
+  const file = basename(options.source);
   try {
-    watcher = watch(options.source, () => {
-      // Debounce: an editor save can fire `change` two or three times, and
-      // recompiling per event would report three builds for one edit.
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(run, debounceMs);
+    watcher = watch(dirname(options.source), (_event, name) => {
+      if (name === null || name === file) schedule();
     });
   } catch {
-    // A missing file is reported by the first build; not being able to watch
-    // it is not a second error worth crashing over.
+    // A missing directory is reported by the first build; the reconcile tick
+    // below still notices the file once it can be read.
   }
 
   run();
+  const reconcile = setInterval(() => {
+    if (stamp() !== built) schedule();
+  }, RECONCILE_MS);
 
   return {
     close: () => {
       if (timer) clearTimeout(timer);
+      clearInterval(reconcile);
       watcher?.close();
     },
     rebuild: run,
