@@ -175,6 +175,29 @@ const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img",
   "input", "link", "meta", "source", "track", "wbr"]);
 
 /**
+ * HTML attribute names React spells differently.
+ *
+ * Emitted nodes carry real HTML names, so a word writes \`for\` and
+ * \`autocomplete\` as the spec does. React only honours its own spelling for
+ * these; given the HTML one it warns and, for \`for\`, the label is not tied
+ * to its input. \`data-*\` and \`aria-*\` pass through unchanged.
+ */
+const REACT_NAME: Record<string, string> = {
+  "accept-charset": "acceptCharset", accesskey: "accessKey", autocapitalize: "autoCapitalize",
+  autocomplete: "autoComplete", autofocus: "autoFocus", autoplay: "autoPlay",
+  charset: "charSet", class: "className", colspan: "colSpan",
+  contenteditable: "contentEditable", crossorigin: "crossOrigin", datetime: "dateTime",
+  enctype: "encType", enterkeyhint: "enterKeyHint", fetchpriority: "fetchPriority",
+  for: "htmlFor", formaction: "formAction", formenctype: "formEncType",
+  formmethod: "formMethod", formnovalidate: "formNoValidate", formtarget: "formTarget",
+  "http-equiv": "httpEquiv", inputmode: "inputMode", itemprop: "itemProp",
+  maxlength: "maxLength", minlength: "minLength", novalidate: "noValidate",
+  playsinline: "playsInline", readonly: "readOnly", referrerpolicy: "referrerPolicy",
+  rowspan: "rowSpan", spellcheck: "spellCheck", srcdoc: "srcDoc", srclang: "srcLang",
+  srcset: "srcSet", tabindex: "tabIndex", usemap: "useMap",
+};
+
+/**
  * Render one emitted node.
  *
  * Text arrives as a plain string and React escapes it. Nothing here builds
@@ -185,7 +208,7 @@ export function Node({ node }: { node: EmittedNode | string }): ReactNode {
 
   const props: Record<string, unknown> = { style: node.style };
   for (const [k, v] of Object.entries(node.attrs ?? {})) {
-    props[k === "class" ? "className" : k] = v;
+    props[REACT_NAME[k] ?? k] = v;
   }
 
   if (VOID.has(node.tag)) return createElement(node.tag, props);

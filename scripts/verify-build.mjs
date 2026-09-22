@@ -19,7 +19,7 @@
  * heading, and that a title containing </script> is inert.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -107,7 +107,12 @@ try {
     'import App from "./src/App.tsx";\n' +
     'process.stdout.write(renderToStaticMarkup(<App />));\n');
   vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], proj);
-  const html = node(join(proj, 'ssr-out/ssr.js'), [], proj);
+  // stderr is kept: React reports a misspelt DOM attribute there as a
+  // warning, and the page still renders — so only stderr shows it.
+  const ssr = spawnSync(process.execPath, [join(proj, 'ssr-out/ssr.js')], { cwd: proj, encoding: 'utf8' });
+  if (ssr.status !== 0) throw new Error(`ssr failed: ${ssr.stderr}`);
+  const html = ssr.stdout;
+  check('React renders without warnings', ssr.stderr.trim() === '', ssr.stderr.trim().split('\n')[0]);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
 
   /* ---- the images the page names are in the build ---------------------- */
@@ -147,6 +152,10 @@ try {
     firstFocusable ? firstFocusable[0].slice(0, 48) : 'none found');
   check('nav §7: the logo link is named by the site, not left empty',
     /class="az-nav-logo"[^>]*>(?:(?!<\/a>)[^])*class="az-visually-hidden"[^>]*>aurora<\/span>/.test(html));
+  check('auth §8: every field label is tied to its input (for → htmlFor)',
+    /<label[^>]*for="[^"]+"/.test(html));
+  check('auth §8: autocomplete reaches the inputs',
+    /<input[^>]*autocomplete="current-password"/i.test(html));
   check('nav §7: the main landmark is labelled',
     /<nav[^>]*aria-label="Main"/.test(html));
   check('nav §6: the toggle is a button wired to a panel that exists',
