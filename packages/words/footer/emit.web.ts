@@ -16,7 +16,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** `link "Shoes" /shoes` — one list item. */
 function footerLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
@@ -67,11 +67,15 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       tag: 'a',
       attrs: { class: 'az-footer-logo', href: '/' },
       style: { display: 'inline-flex', minHeight: px(t.size.tap), alignItems: 'center' },
-      children: [{
-        tag: 'img',
-        attrs: { src: ctx.asset(block.props.logo), alt: '', class: 'az-footer-logo-img' },
-        style: { display: 'block', height: px(t.space[24]) },
-      }],
+      // The image is decorative; the site name is the link's name (§9).
+      children: [
+        {
+          tag: 'img',
+          attrs: { src: ctx.asset(block.props.logo), alt: '', class: 'az-footer-logo-img' },
+          style: { display: 'block', height: px(t.space[24]) },
+        },
+        visuallyHidden(ctx.site.name),
+      ],
     });
   }
 

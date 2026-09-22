@@ -145,6 +145,8 @@ try {
   check('nav §7: the skip link is the FIRST focusable element',
     !!firstFocusable && firstFocusable[0].includes('az-skip-link'),
     firstFocusable ? firstFocusable[0].slice(0, 48) : 'none found');
+  check('nav §7: the logo link is named by the site, not left empty',
+    /class="az-nav-logo"[^>]*>(?:(?!<\/a>)[^])*class="az-visually-hidden"[^>]*>aurora<\/span>/.test(html));
   check('nav §7: the main landmark is labelled',
     /<nav[^>]*aria-label="Main"/.test(html));
   check('nav §6: the toggle is a button wired to a panel that exists',

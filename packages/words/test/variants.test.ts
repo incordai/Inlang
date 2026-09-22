@@ -43,6 +43,7 @@ function context(): EmitContext {
       typeSize: t.typeSize as unknown as Record<string, string>,
     },
     target: 'web',
+    site: { name: 'aurora' },
     // Slots must return SOMETHING. A word that lays its slot children out
     // differently per variant — most of them — renders an empty container
     // either way when this returns [], and every such variant reads as

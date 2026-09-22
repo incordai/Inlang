@@ -31,6 +31,7 @@ function context(): EmitContext {
       typeSize: t.typeSize as unknown as Record<string, string>,
     },
     target: 'web',
+    site: { name: 'aurora' },
     slot: () => [],
     asset: (p) => p,
   };
@@ -184,3 +185,33 @@ test('footer-spec §5: `year dynamic` emits the SINCE literal, marked for the cl
   assert.ok(!rendered.includes(thisYear) || thisYear === '2019',
     'the current year must never be baked into the output');
 });
+
+/* ---- the logo link has a name: nav-spec §7, footer-spec §9 ------------ */
+
+/** The text a screen reader would read for a node: every string beneath it. */
+const textOf = (n: EmittedNode | string): string =>
+  typeof n === 'string' ? n : (n.children ?? []).map(textOf).join('');
+
+const logoLink = (n: EmittedNode, klass: string) => {
+  const link = walk(n).find((x) => cls(x) === klass);
+  assert.ok(link, `CONTROL: a ${klass} link was emitted`);
+  return link;
+};
+
+for (const [word, emitWord, klass] of [
+  ['nav', emitNav, 'az-nav-logo'],
+  ['footer', emitFooter, 'az-footer-logo'],
+] as const) {
+  test(`${word}: the logo link is named by the site, not left empty`, () => {
+    const link = logoLink(emitWord(block({ word, props: { logo: './logo.svg' } }), context()), klass);
+    assert.equal(textOf(link), 'aurora', 'the link text must be the site name');
+    const img = walk(link).find((x) => x.tag === 'img');
+    assert.equal(img?.attrs?.alt, '', 'the image stays decorative, so the name is not read twice');
+  });
+
+  test(`${word}: CONTROL — the name comes from the site, not a constant`, () => {
+    const ctx = { ...context(), site: { name: 'Harbour Studio' } };
+    const link = logoLink(emitWord(block({ word, props: { logo: './logo.svg' } }), ctx), klass);
+    assert.equal(textOf(link), 'Harbour Studio');
+  });
+}

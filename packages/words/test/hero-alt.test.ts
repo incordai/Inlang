@@ -38,7 +38,7 @@ function heroOf(lines: string[]) {
 }
 
 const render = (hero: SpecBlock) =>
-  emitBlock(hero, THEME, WEB_EMITTERS, (p) => `/${p.replace(/^\.\//, '')}`);
+  emitBlock(hero, THEME, WEB_EMITTERS, (p) => `/${p.replace(/^\.\//, '')}`, { name: 'aurora' });
 
 const kids = (n: EmittedNode): EmittedNode[] =>
   (n.children ?? []).filter((c): c is EmittedNode => typeof c !== 'string');

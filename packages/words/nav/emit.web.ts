@@ -21,7 +21,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** A nav child that points somewhere: `link "Work" /work`. */
 function navLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
@@ -150,9 +150,12 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       tag: 'a',
       attrs: { class: 'az-nav-logo', href: '/' },
       style: { display: 'inline-flex', alignItems: 'center', minHeight: px(t.size.tap) },
-      children: swaps
-        ? [logoImg(block.props.inverse, 'top', false), logoImg(block.props.logo, 'solid', true)]
-        : [logoImg(block.props.logo, 'solid', false)],
+      children: [
+        ...(swaps
+          ? [logoImg(block.props.inverse, 'top', false), logoImg(block.props.logo, 'solid', true)]
+          : [logoImg(block.props.logo, 'solid', false)]),
+        visuallyHidden(ctx.site.name),
+      ],
     });
   }
 

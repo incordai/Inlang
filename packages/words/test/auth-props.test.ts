@@ -42,6 +42,7 @@ function context(): EmitContext {
       typeSize: t.typeSize as unknown as Record<string, string>,
     },
     target: 'web',
+    site: { name: 'aurora' },
     slot: () => [],
     asset: (p) => p,
   };

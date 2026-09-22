@@ -34,6 +34,7 @@ function context() {
       breakpoint: t.breakpoint, typeSize: t.typeSize,
     },
     target: 'web',
+    site: { name: 'aurora' },
     slot: (name) => [
       { tag: 'li', attrs: { class: `az-child--${name}` }, children: ['one'] },
       { tag: 'li', attrs: { class: `az-child--${name}` }, children: ['two'] },

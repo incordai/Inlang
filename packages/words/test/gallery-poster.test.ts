@@ -32,6 +32,7 @@ function context(): EmitContext {
       typeSize: t.typeSize as unknown as Record<string, string>,
     },
     target: 'web',
+    site: { name: 'aurora' },
     slot: (name) => [
       { tag: 'li', attrs: { class: `az-child--${name}` }, children: ['one'] },
       { tag: 'li', attrs: { class: `az-child--${name}` }, children: ['two'] },

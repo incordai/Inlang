@@ -19,6 +19,8 @@ export type EmitterMap = Readonly<Record<string, WordEmitter>>;
 /** Resolves an author's asset path to the URL the page uses. Sandboxed. */
 export type AssetResolver = (path: string) => string;
 
+export type SiteInfo = EmitContext['site'];
+
 /**
  * A slot child rendered without a word emitter of its own.
  *
@@ -116,24 +118,25 @@ function fallback(block: SpecBlock, ctx: EmitContext): EmittedNode {
 }
 
 /** Build the context one block sees. */
-function contextFor(block: SpecBlock, theme: ThemeLike, asset: AssetResolver): EmitContext {
+function contextFor(block: SpecBlock, theme: ThemeLike, asset: AssetResolver, site: SiteInfo): EmitContext {
   return {
     theme,
     target: 'web',
+    site,
     // A slot is filled by children whose word IS the slot's name — the same
     // rule the linker uses, so what validated is what renders.
     slot: (name) => block.children
       .filter((c) => c.word === name)
-      .map((c) => defaultChild(c, contextFor(c, theme, asset))),
+      .map((c) => defaultChild(c, contextFor(c, theme, asset, site))),
     asset,
   };
 }
 
 /** One block, through its word's emitter or the fallback. */
 export function emitBlock(
-  block: SpecBlock, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver,
+  block: SpecBlock, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver, site: SiteInfo,
 ): EmittedNode {
-  const ctx = contextFor(block, theme, asset);
+  const ctx = contextFor(block, theme, asset, site);
   const word = emitters[block.word];
   return word ? word.emit(block, ctx) : fallback(block, ctx);
 }
@@ -142,11 +145,12 @@ export function emitBlock(
 export function emitPages(
   spec: Spec, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver,
 ): { route: string; nodes: EmittedNode[] }[] {
+  const site: SiteInfo = { name: spec.site.name };
   return spec.pages.map((page) => ({
     route: page.route,
     // blocksFor resolves inheritance: overrides, `none` suppression, and the
     // nav-first/footer-last placement. Concatenating the two lists here put
     // the footer above the page content and rendered a suppressed nav twice.
-    nodes: blocksFor(spec, page).map((b) => emitBlock(b, theme, emitters, asset)),
+    nodes: blocksFor(spec, page).map((b) => emitBlock(b, theme, emitters, asset, site)),
   }));
 }

@@ -64,7 +64,7 @@ test('the hero emitter renders to safe markup end to end', async () => {
   const node = emit(
     { word: 'hero', variant: 'center', modifiers: [], args: [], as: null, children: [],
       props: { title: '</script>evil', height: 'peek' } },
-    { theme: t as never, target: 'web', slot: () => [], asset: (p) => p },
+    { theme: t as never, target: 'web', site: { name: 'aurora' }, slot: () => [], asset: (p) => p },
   );
   const html = renderNode(node);
   assert.ok(!html.includes('<script'), 'content escaped through the whole path');

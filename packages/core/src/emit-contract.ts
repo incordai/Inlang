@@ -40,6 +40,12 @@ export interface EmitContext {
   /** The ONLY source of colour, space, type and layer values. */
   readonly theme: ThemeLike;
   readonly target: string;
+  /**
+   * The site this block belongs to. A word needs its name wherever the page
+   * must say what the site is without an image to say it — nav-spec §7: the
+   * logo link carries the site name as text, or it is an unlabelled link.
+   */
+  readonly site: { readonly name: string };
   /** Children filling a named slot — `hero`'s `cta`, `footer`'s `link`. */
   readonly slot: (name: string) => EmittedNode[];
   /**
@@ -79,3 +85,27 @@ export interface WordEmitter {
 
 /** Convenience for emitters: px from a space step, so no word writes `13px`. */
 export const px = (n: number): string => `${n}px`;
+
+/**
+ * Text that assistive technology reads and the screen does not show.
+ *
+ * For a link whose visible content is an image with `alt=""` — the logo link
+ * (nav-spec §7, footer-spec §9) — this is its name. Clipped rather than
+ * `display: none`, which would hide it from screen readers too.
+ */
+export const visuallyHidden = (text: string): EmittedNode => ({
+  tag: 'span',
+  attrs: { class: 'az-visually-hidden' },
+  style: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: '0',
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0 0 0 0)',
+    whiteSpace: 'nowrap',
+    border: '0',
+  },
+  children: [text],
+});

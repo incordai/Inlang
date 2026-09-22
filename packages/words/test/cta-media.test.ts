@@ -29,6 +29,7 @@ function context(): EmitContext {
       typeSize: t.typeSize as unknown as Record<string, string>,
     },
     target: 'web',
+    site: { name: 'aurora' },
     slot: () => [],
     // Marks the path as resolved, so a test can tell it went through the resolver.
     asset: (p) => `resolved:${p}`,
