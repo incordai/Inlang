@@ -9,6 +9,7 @@
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit",
     "test:determinism": "node --experimental-strip-types scripts/determinism.ts",
+    "test:engines": "node --experimental-strip-types scripts/cross-engine.ts",
     "test:probe": "node --experimental-strip-types scripts/probe.test.ts",
     "test:browser": "node --experimental-strip-types scripts/browser.test.ts",
     "shoot": "node --experimental-strip-types scripts/shoot.ts",

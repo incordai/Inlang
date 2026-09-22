@@ -313,9 +313,10 @@ alongside the model prop. What replaces it as critical-path work is **A8b**.
 
 ## A8b — A seeded generator is reproducible across engines
 
-**Status:** `TESTING` — reproducible in one engine, cross-engine unproven ·
-**Measured 2026-08-21** (M0 spike) · **Blocks:** the procedural default, and
-therefore the determinism claim on any page using it
+**Status:** `HOLDS` for the vertex buffer across three engines · visual
+snapshot stability (10 consecutive runs) still unmeasured ·
+**Measured 2026-08-21, engine axis 2026-09-22** (M0 spike) · **Blocks:** the
+procedural default, and therefore the determinism claim on any page using it
 
 ### What has been verified
 
@@ -334,12 +335,26 @@ The build also completes with every network route poisoned, producing the same
 hash — the offline claim in PRD §6.7, with a control confirming the poison
 genuinely blocks (curl exit 7, npm proxy error).
 
+### Cross-engine — verified 2026-09-22
+
+`spike-m0/scripts/cross-engine.ts` (`pnpm test:engines`) bundles the generator
+once and runs the same bytes in Chromium (V8), Firefox (SpiderMonkey) and
+WebKit (JavaScriptCore) via Playwright on macOS arm64. All three produce the
+Node reference hash `cc723c2a1b107de4` (4802 vertices), and in each engine a
+different seed yields `6b1465d6a818ef5c` — the control that the bundled
+generator responds to its seed. The Node hash on macOS arm64 also matches the
+one first recorded on Windows x64, so the OS/CPU axis holds within V8.
+
+**Scope of the claim.** The hash covers the Float32 position buffer — what the
+GPU receives. A last-bit difference in a Float64 `Math.sin` that rounds away
+in Float32 would not be detected, and does not need to be: it cannot reach a
+frame.
+
 ### What is still open
 
-**The cross-engine axis is untested.** Everything above ran in one V8. The
-stated threshold is "identical hash across two builds, two runs **and two
-browser engines**", and a second engine has not been run. Float differences
-between engines remain the specific way this could still be false.
+Visual snapshot stability across 10 consecutive runs (the second half of the
+threshold) has not been measured. Engine versions are Playwright's bundled
+builds; a real Safari or mobile engine has not been run.
 
 Created when A8 was narrowed. Making procedural geometry the default moves
 determinism from a purely *build-time* property to a *runtime* one: the same
