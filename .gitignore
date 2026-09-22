@@ -8,3 +8,4 @@ dist-shots/
 *.log
 .env
 .env.*
+.visual-out/
