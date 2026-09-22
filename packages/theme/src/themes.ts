@@ -13,6 +13,7 @@ import type { Theme } from './tokens.ts';
 export const midnight: Theme = {
   name: "midnight",
   description: "dark-native, for the 3D product launch",
+  defaultScheme: "dark",
   color: {
     light: {
       "bg": "hsl(220 30% 97%)",

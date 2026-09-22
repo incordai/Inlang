@@ -147,6 +147,12 @@ export interface ShadowTokens {
 export interface Theme {
   readonly name: string;
   readonly description: string;
+  /**
+   * The scheme written to bare `:root` — what a visitor gets before the OS
+   * preference or an explicit choice says otherwise (theme-spec §3.2).
+   * Defaults to light; `midnight` is dark-native.
+   */
+  readonly defaultScheme?: Scheme;
   readonly color: Readonly<Record<Scheme, ColorTokens>>;
   readonly shadow: Readonly<Record<Scheme, ShadowTokens>>;
   readonly size: SizeTokens;

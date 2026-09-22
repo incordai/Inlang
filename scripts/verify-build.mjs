@@ -20,7 +20,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -159,7 +159,16 @@ try {
   // button. It was once swallowed as the poster's alt text, with no error.
   check('hero §1: the secondary `alt` button renders beside the primary',
     /class="az-hero-actions"[^]*href="tel:\+50412345678"/.test(html));
-  check('theme colour tokens reached the DOM', /hsl\(/.test(html));
+  // theme-spec §3.3: the page carries references; the stylesheet the colours.
+  check('theme colour tokens reached the DOM as references', /var\(--az-color-/.test(html));
+  check('no colour literal reached the DOM', !/hsl\(|rgb\(/.test(html));
+  {
+    const cssFile = readdirSync(join(proj, 'dist/assets')).find((f) => f.endsWith('.css'));
+    const css = cssFile ? readFileSync(join(proj, 'dist/assets', cssFile), 'utf8') : '';
+    check('theme-spec §3.2: the built CSS defines both colour schemes',
+      /--az-color-bg:/.test(css) && /prefers-color-scheme:\s*light/.test(css) && /\[data-scheme="?light"?\]/.test(css),
+      cssFile ?? 'no css in dist/assets');
+  }
   check('a behaviour prop is an attribute, never prose',
     /data-mobile="drawer"/.test(html) && !/>drawer</.test(html));
 

@@ -105,6 +105,17 @@ test('CONTROL: emit() returns the same files as emitProject()', () => {
     emitProject(r.spec, { emitters: WEB_EMITTERS }).files);
 });
 
+test('theme-spec §3.3: pages carry colour references, the stylesheet carries colours', () => {
+  const files = build(MINIMAL);
+  const app = fileNamed(files, 'src/App.tsx').content;
+  assert.match(app, /var\(--az-color-/);
+  assert.doesNotMatch(app, /hsl\(|rgb\(|#[0-9a-fA-F]{3,8}\b/, 'no colour literal may reach a page');
+  const css = fileNamed(files, 'src/theme.css').content;
+  assert.match(css, /--az-color-accent: hsl\(/);
+  assert.match(css, /@media \(prefers-color-scheme: light\)/, 'midnight is dark by default');
+  assert.match(fileNamed(files, 'index.html').content, /<meta name="color-scheme" content="light dark"/);
+});
+
 /* ---------------- determinism, CONVENTIONS §6 ---------------- */
 
 test('DETERMINISM: two emits are byte-identical', () => {

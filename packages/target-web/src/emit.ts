@@ -13,7 +13,7 @@
 
 import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
-import { resolve, THEMES, type Theme } from '../../theme/src/index.ts';
+import { resolve, schemeCss, schemeReferences, THEMES, type Theme } from '../../theme/src/index.ts';
 import { emitPages, type EmitterMap } from './tree.ts';
 
 export interface EmittedFile {
@@ -254,15 +254,24 @@ export interface EmitOptions {
 }
 
 /** The theme the site asked for, falling back to the default. */
-function themeFor(spec: Spec, override?: Theme): ThemeLike {
-  const named = override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
-  const t = resolve(named, 'dark');
+function namedTheme(spec: Spec, override?: Theme): Theme {
+  return override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
+}
+
+/**
+ * What words read. Colour and shadow are `var(--az-…)` references, resolved
+ * by the browser per scheme (theme-spec §3.3); every other group is the same
+ * in both schemes, so either resolution gives it.
+ */
+function themeFor(named: Theme): ThemeLike {
+  const t = resolve(named, named.defaultScheme ?? 'light');
+  const schemed = schemeReferences(named);
   return {
-    color: t.color as unknown as Record<string, string>,
+    color: schemed.color as unknown as Record<string, string>,
     size: t.size as unknown as Record<string, number>,
     type: t.type as unknown as Record<string, string | number>,
     radius: t.radius as unknown as Record<string, number>,
-    shadow: t.shadow as unknown as Record<string, string>,
+    shadow: schemed.shadow as unknown as Record<string, string>,
     space: t.space as unknown as Record<string, number>,
     motion: t.motion as unknown as Record<string, string | number>,
     layer: t.layer as unknown as Record<string, number>,
@@ -290,7 +299,8 @@ export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
 }
 
 export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProject {
-  const theme = themeFor(spec, options.theme);
+  const named = namedTheme(spec, options.theme);
+  const theme = themeFor(named);
   const used = new Set<string>();
   const asset = (raw: string): string => {
     const path = safeAssetPath(raw);
@@ -315,10 +325,12 @@ createRoot(el).render(<StrictMode><App /></StrictMode>);
     },
     {
       path: 'src/theme.css',
-      content: `${HEADER}/* A reset only.
+      content: `${HEADER}/* A reset, and the theme's colour schemes.
    Every design value — colour, space, type — is emitted by the WORD from a
-   theme token (A7). Type scales lived here once, which meant the stylesheet
-   silently overrode what the words computed. */
+   theme token (A7). Colours reach words as var(--az-color-…) references;
+   the declarations below are what they resolve to, per scheme. Type scales
+   lived here once, which meant the stylesheet silently overrode what the
+   words computed. */
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
 body { margin: 0; }
@@ -326,7 +338,8 @@ body { margin: 0; }
 ul, ol { margin: 0; padding: 0; }
 img, video, canvas { max-width: 100%; height: auto; display: block; }
 a { color: inherit; }
-`,
+
+${schemeCss(named)}`,
     },
     {
       /**
@@ -390,6 +403,7 @@ export default defineConfig({
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>${escapeText(spec.site.name)}</title>
   </head>
   <body>
