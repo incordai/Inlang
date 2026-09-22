@@ -1,0 +1,111 @@
+{
+  "name": "pricing",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "cards",
+    "table"
+  ],
+  "modifiers": [
+    "reveal"
+  ],
+  "props": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxWords": 8
+    },
+    "sub": {
+      "type": "string",
+      "maxWords": 24
+    },
+    "currency": {
+      "type": "enum",
+      "values": "iso4217"
+    },
+    "locale": {
+      "type": "string",
+      "default": "en-US"
+    },
+    "billing": {
+      "type": "enum",
+      "values": [
+        "monthly",
+        "annual"
+      ],
+      "default": "monthly"
+    },
+    "period": {
+      "type": "string",
+      "maxWords": 6
+    }
+  },
+  "slots": {
+    "plan": {
+      "min": 1,
+      "max": 4,
+      "props": {
+        "monthly": {
+          "type": "string",
+          "required": true
+        },
+        "annual": {
+          "type": "string"
+        },
+        "highlight": {
+          "type": "enum",
+          "values": [
+            "on",
+            "off"
+          ],
+          "default": "off"
+        },
+        "badge": {
+          "type": "string",
+          "maxWords": 4
+        }
+      },
+      "slots": {
+        "feature": {
+          "max": 24
+        },
+        "cta": {
+          "min": 1,
+          "max": 1
+        }
+      }
+    }
+  },
+  "requires": {},
+  "themeReads": [
+    "color.accent",
+    "color.accent-contrast",
+    "color.surface",
+    "color.surface-alt",
+    "color.text",
+    "color.muted",
+    "color.border",
+    "color.focus",
+    "space.*",
+    "radius.md",
+    "radius.lg",
+    "type.body"
+  ],
+  "deps": {},
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ],
+    "with": [
+      "nav",
+      "hero",
+      "footer"
+    ]
+  }
+}

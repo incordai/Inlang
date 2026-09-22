@@ -1,0 +1,83 @@
+{
+  "name": "cta",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "band",
+    "card",
+    "split"
+  ],
+  "modifiers": [
+    "glass",
+    "reveal"
+  ],
+  "props": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxWords": 12
+    },
+    "sub": {
+      "type": "string",
+      "maxWords": 24
+    },
+    "media": {
+      "type": "path",
+      "ext": [
+        ".jpg",
+        ".png",
+        ".webp",
+        ".avif"
+      ],
+      "maxBytes": 512000
+    },
+    "describe": {
+      "type": "string",
+      "maxWords": 20
+    }
+  },
+  "slots": {
+    "cta": {
+      "max": 1
+    },
+    "alt": {
+      "max": 1
+    }
+  },
+  "requires": {
+    "split": [
+      "media"
+    ]
+  },
+  "themeReads": [
+    "color.accent",
+    "color.accent-contrast",
+    "color.surface",
+    "color.surface-alt",
+    "color.text",
+    "color.muted",
+    "color.focus",
+    "space.*",
+    "radius.lg",
+    "type.display",
+    "type.body"
+  ],
+  "deps": {},
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ],
+    "with": [
+      "nav",
+      "hero",
+      "pricing",
+      "footer"
+    ]
+  }
+}

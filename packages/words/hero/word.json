@@ -1,0 +1,104 @@
+{
+  "name": "hero",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "center",
+    "split",
+    "full",
+    "stack",
+    "minimal"
+  ],
+  "modifiers": [
+    "3d",
+    "scroll",
+    "parallax",
+    "glass"
+  ],
+  "props": {
+    "eyebrow": {
+      "type": "string",
+      "maxWords": 6
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxWords": 12
+    },
+    "sub": {
+      "type": "string",
+      "maxWords": 30
+    },
+    "model": {
+      "type": "path",
+      "ext": [
+        ".glb"
+      ],
+      "maxBytes": 5242880
+    },
+    "poster": {
+      "type": "path",
+      "ext": [
+        ".jpg",
+        ".png",
+        ".webp"
+      ]
+    },
+    "alt": {
+      "type": "string"
+    },
+    "height": {
+      "type": "enum",
+      "values": [
+        "compact",
+        "peek",
+        "tall",
+        "full"
+      ],
+      "default": "peek"
+    }
+  },
+  "slots": {
+    "cta": {
+      "max": 2
+    }
+  },
+  "requires": {
+    "scroll": [
+      "3d"
+    ]
+  },
+  "themeReads": [
+    "color.bg",
+    "color.text",
+    "color.muted",
+    "color.accent",
+    "color.accent-contrast",
+    "color.scrim",
+    "color.on-scrim",
+    "space.*",
+    "type.display",
+    "type.body",
+    "motion.*",
+    "size.ring"
+  ],
+  "deps": {
+    "three": "0.170.0",
+    "@react-three/fiber": "8.17.10"
+  },
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ],
+    "with": [
+      "nav",
+      "footer"
+    ]
+  }
+}

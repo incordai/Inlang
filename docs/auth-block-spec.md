@@ -1,0 +1,354 @@
+# `auth` — block specification
+
+**Status** draft for M4 · Companion to word-quality-gate §4, distribution-and-hosting §5.1, PRD §6.5
+
+**This word generates a user interface. It does not implement authentication,
+and it never will.** PRD §6.5 settled that: a static site cannot do auth alone,
+and rolling our own crypto inside a *design tool* is how projects get people
+breached. `auth` compiles against an adapter; the security lives there. That
+makes it the most dangerous word in Phase 1, twice over — a mistake here leaks a
+key that opens someone's database, and a well-designed login form on a free
+subdomain is a phishing kit. Both are hard build rules below, not advice.
+
+---
+
+## 1. Syntax
+
+```
+az 1
+
+site aurora
+  auth                         # site-level: one adapter per site
+    adapter session
+
+page /login
+  auth login
+    title    "Welcome back"
+    methods  password link
+    redirect /account
+    alt      "Create an account" /signup
+```
+
+**Variants are mutually exclusive:** `login` `signup` `reset`. Two is a compile
+error. **There is no default** — `auth` with no variant is an error, because
+guessing which form a page wants is not a thing a compiler should do.
+**Modifiers stack freely:** `glass`.
+
+**Grammar note.** PRD §6.5 writes the adapter positionally (`auth hosted`) and
+PRD:126 writes `auth login` with `login` undeclared. Both resolve here: `login`
+is a **variant**, the adapter is a **site-level property**, and the positional
+form is dropped — the taxonomy admits no bare positional arguments. One adapter
+per site is not a limitation; two identity systems is two sites.
+
+## 2. Choosing a variant
+
+| Variant | Use when | Watch out for |
+|---|---|---|
+| `login` | returning users; where a protected route redirects | it is the phishing target — §9 |
+| `signup` | first contact; the only variant that may ask beyond credentials | every extra field costs sign-ups; name and password is usually the whole form |
+| `reset` | request a link **and** set the new password | two states in one variant — §5 |
+
+**Each variant is a page, not a modal.** A login overlay cannot be linked to,
+returned to after an email round-trip, or bookmarked by a password manager; the
+overlay engine exists and this is not one of its jobs. **Every `auth` page needs
+the route to its siblings** — a `login` with no path to `signup` or `reset` is a
+dead end for exactly the users already stuck.
+
+## 3. The adapter contract
+
+A **stable interface the block compiles against**. `auth` knows these calls and
+nothing else about any identity system:
+
+```ts
+export interface AuthAdapter {
+  readonly id: "hosted" | "session" | "azbackend" | "custom";
+  signIn(input: Credentials): Promise<AuthResult>;
+  signUp(input: Credentials): Promise<AuthResult>;
+  requestReset(email: string): Promise<AuthResult>;
+  setPassword(token: string, password: string): Promise<AuthResult>;
+  session(): AuthSession | null;                              // synchronous read
+  onChange(fn: (s: AuthSession | null) => void): () => void;  // returns unsubscribe
+}
+```
+
+`AuthResult` is `{ ok: true, session }` or `{ ok: false, code, field? }`, where
+`AuthErrorCode` is a **closed set owned by AZ**: `invalid_credentials` ·
+`email_taken` · `weak_password` · `rate_limited` · `expired_token` · `network` ·
+`unknown`. Each adapter maps its own errors into it and the block maps it to
+copy, so no generated component contains a provider-specific string — switching
+adapters is one line in the `.az` file and nothing in the output moves.
+
+The four ids are the pre-existing vocabulary from PRD §6.5:
+
+| `adapter` | Runs | Key that reaches the browser |
+|---|---|---|
+| `hosted` | a managed provider | the **public/anon** key only — §4 |
+| `session` | a session library, needs a server route | a public client id only |
+| `azbackend` | the self-hoster's own backend | a public base URL only |
+| `custom` | a user-written file implementing `AuthAdapter` | their choice; §4 still applies |
+
+**`custom` is a real tier, not a placeholder** — the escape hatch principle 4
+requires, and it keeps the compiler out of blessing identity providers.
+
+**Adapter packages are not `auth`'s dependencies.** `auth`'s `deps` is empty
+(§10); the concrete package and its exact pin live in the adapter's own manifest,
+resolved through the same union-and-install-once path as everything else (PRD
+§6.7). Provider names stay out of the core word, and an adapter can be versioned
+without republishing `auth`.
+
+## 4. Secret leakage — a hard build error
+
+word-quality-gate §4 governs, and it bites here because **a static bundler
+inlines environment variables into the shipped JavaScript**. A `VITE_`-prefixed
+variable is not a secret, it is public text with an extra step, and nobody
+discovers this until the site is live.
+
+| Key class | Reaches the browser? |
+|---|---|
+| public / anon / publishable key | **yes** — designed for it, protected by row-level security |
+| service key (full database access, bypasses row-level security) | **never** |
+| session-signing secret | **never** — server-side only |
+| `AZ_SECRET` (backend adapter token signing) | **never** |
+
+Three compiler behaviours, mandatory at M4: **(1)** refuse to build when a
+service-key-pattern variable would be inlined — hard error, not suppressible;
+**(2)** scan the produced bundle for known prefixes and high-entropy strings
+(`sk_`, `service_role`, `-----BEGIN`) and fail on a hit, because rule 1 catches
+the variable and rule 2 catches the string pasted straight into a file;
+**(3)** refuse a literal key in the `.az` file — credentials are environment
+configuration, never site description. Exact text in §11.
+
+**No example anywhere — this document, generated files, READMEs, fixtures —
+contains a real key;** fixtures use `<PLACEHOLDER>`, because a copyable key in
+documentation gets pasted into a real project by somebody in a hurry.
+
+### 4.1 What actually protects the data
+
+**Row-level security in the user's own backend is the protection.** Not the
+form, not the route guard, not the session hook — none of which run anywhere an
+attacker cannot modify. The public key is public. Every row the backend's
+policies let an anonymous or authenticated role read **is readable by anyone who
+opens dev tools**, whatever the generated UI does. The adapter docs must say
+this in those words, `az doctor` must check for policy-less tables where the
+adapter exposes that, and this spec must not soften it. A design tool that lets
+someone believe their login form is their security has done real harm.
+
+---
+
+## 5. What the word emits, and what it does not
+
+| Artefact | Detail |
+|---|---|
+| Form markup | one real `<form>` per variant, themed, labelled, autocompleted (§6) |
+| Client wiring | a submit handler calling the §3 interface — nothing else |
+| Session hook | `useSession()` over `session()` + `onChange()`, unsubscribe on unmount |
+| Protected-route wrapper | `<Protected>` — loading state, then children or a redirect to `login` |
+| Error states | the closed `AuthErrorCode` set mapped to copy, inline errors, error summary |
+| Loading / success | fixed-width submit spinner, `aria-busy`, redirect to `redirect` |
+| `reset` two states | request form and set-new-password form, chosen by a URL token |
+
+**Never emits, at any tier:** password hashing, token minting or verification,
+any cryptography · session storage format, refresh logic, cookie flags — the
+adapter owns the session, the block only reads it · rate limiting, lockout, bot
+defence, captcha · email sending, templates, delivery · OAuth redirect handling
+beyond calling the adapter · server middleware or route protection (**a static
+site has no server**) · row-level security policies, roles, backend config ·
+account deletion, data export, consent records.
+
+**The protected-route wrapper is UX, not security.** It stops a signed-out user
+seeing a broken empty dashboard; it does not stop anyone reading the data behind
+it, because the code enforcing it runs on their machine and the request goes out
+either way. §4.1 is the sentence that matters and this wrapper is the one people
+mistake for it — so the generated file carries §4.1 in its header comment.
+
+## 6. Form accessibility, done properly
+
+**Labels.** A real `<label for>` per field, always visible. Not a placeholder —
+it disappears on focus, fails contrast, and is not an accessible name. Not
+`aria-label` either: a sighted user with a cognitive disability needs the label
+on screen as much as a screen-reader user needs it in the tree.
+
+**`autocomplete` tokens, exactly** — wrong is worse than none, since
+`current-password` on a signup form makes a manager offer the wrong entry:
+
+| Field | Token | `type` |
+|---|---|---|
+| email (`login`, `signup`) | `username` | `email` |
+| password, `login` | `current-password` | `password` |
+| password, `signup` / `reset` set-new | `new-password` | `password` |
+| name, `signup` | `name` | `text` |
+| one-time code | `one-time-code` | `text`, `inputmode="numeric"` |
+
+**Inline errors, tied by id.** Each error sits in an element whose id is named
+in the field's `aria-describedby`, and the field carries `aria-invalid="true"`.
+An error rendered beside a field but not associated with it is invisible to the
+tool that most needs it.
+
+**Error summary and focus management.** On a failed submit, render a summary at
+the top of the form — `<div role="alert" tabindex="-1">`, one entry per failing
+field, each an in-page link to it — and **move focus to the summary**, not to
+the first failing field, or the user loses the count of what is wrong. Do not
+also wrap it in `aria-live`: focus entering a `role="alert"` announces once, and
+both together announce twice — a stutter, and a real bug in shipped forms.
+`aria-live="polite"` is for **asynchronous status** ("Sending your link…"), a
+different thing that does not take focus.
+
+**Validate on submit, not on keystroke** — flagging an email on the fourth
+character is hostile. Re-validate on blur *after* a field has failed once, so a
+correction clears the error immediately.
+
+**Never disable the submit button.** buttons-and-sections §1.5 says this and
+auth proves it: a disabled submit gives no reason, is not focusable in most
+implementations, is skipped in screen-reader form-control lists, and leaves the
+user staring at a greyed button with no way to discover which field is at fault.
+It stays enabled, submit runs validation, the errors explain. The `loading`
+state after a real submit is different and allowed — `aria-busy="true"`, fixed
+width so the layout does not jump.
+
+**Also:** exactly one `<h1>` per auth page — the form title, since these pages
+have no hero. 44×44px touch targets. Visible `focus-visible` ring on every
+control, never `outline: none`. Contrast ≥4.5:1 including error text, most often
+shipped as thin red on white and failing.
+
+## 7. Password-manager compatibility
+
+Managers are heuristic, and the heuristics reward doing the ordinary thing:
+
+- **A real `<form>`** with a real submit button — managers do not reliably detect
+  a `<div>` with a click handler, and Enter will not submit it.
+- **A username field on every password form**, including the set-new-password
+  step of `reset`, or the manager cannot file the new password. When the address
+  is known, render it `readonly`, never `display: none`.
+- **Never block paste**, and never split a one-time code across six inputs
+  without `autocomplete="one-time-code"` on a single field — paste-blocking is
+  theatre that pushes people toward weaker passwords.
+- **No `autocomplete="off"` on credential fields** — largely ignored on
+  passwords, and where honoured it makes things worse.
+- **The visibility toggle is `<button type="button">`** (a bare `<button>` in a
+  form submits it), with `aria-pressed` and an `aria-label`.
+- **State strength requirements up front**, tied to the field with
+  `aria-describedby` — discovering the rule by failing it is avoidable friction.
+
+## 8. Layout, spacing and responsive
+
+Tokens only, no literals (CONVENTIONS §4): form measure ~40ch — wider reads as
+an app settings panel; `space.8` label to input, `space.16` between fields,
+`space.4` from error text to its field so it reads as attached, and `space.32`
+before the submit, which is the largest internal gap; `space.24` from submit to
+the sibling link.
+
+| Variant | <768px |
+|---|---|
+| `login` | full-width card inside the page gutter; submit full-width |
+| `signup` | identical; any two-across field pair (first/last name) stacks |
+| `reset` | identical; both states are single-column already |
+
+Centre the form vertically with a **minimum top offset**, not
+`justify-content: center` alone — a centred form on a short landscape viewport
+pushes the submit off-screen. Keep one column at every width: "form beside a
+marketing image" is where the phishing resemblance is strongest and the mobile
+result worst. `glass` is a taste risk here — blur behind a credential form
+reduces contrast on exactly the fields that must not lose it.
+
+## 9. The phishing constraint
+
+distribution-and-hosting §5.1 is blunt: **a free host plus a subdomain plus a
+generated `auth` page is, functionally, a phishing kit with good design.** Free
+static hosts are abused this way constantly. For the word that means:
+
+- **`auth` compiles in the CLI, always** — local builds, self-hosting and paid
+  verified accounts are unaffected; nothing about the language changes.
+- **A build containing `auth` is rejected at publish on the free tier** — at
+  publish, not at compile, so the failure names the real constraint (§11).
+- Platform mitigations, recorded so the word's design does not undermine them:
+  no custom domains on free, no anonymous publishing, safe-browsing checks on
+  publish, a report button, a human on the takedown path.
+
+The design consequence: **`auth` never renders another entity's name or mark.**
+No borrowed wordmarks, no provider logos in the theme — the author supplies
+their own, exactly as `footer` §6 requires. A generated form that cannot dress
+itself up as somebody else is harder to weaponise, and it keeps the word inside
+CONVENTIONS §5.
+
+## 10. Manifest sketch — `words/auth/word.json`
+
+```jsonc
+{
+  "name": "auth",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": ["login", "signup", "reset"],
+  "modifiers": ["glass"],
+  "props": {
+    "adapter":  { "type": "enum", "values": ["hosted", "session", "azbackend", "custom"],
+                  "required": true, "scope": "site" },
+    "title":    { "type": "string", "maxWords": 8 },
+    "sub":      { "type": "string", "maxWords": 20 },
+    "methods":  { "type": "list", "of": "enum", "values": ["password", "link", "oauth"],
+                  "max": 3, "default": ["password"] },
+    "redirect": { "type": "route" },
+    "terms":    { "type": "route" },
+    "impl":     { "type": "path", "ext": [".ts", ".tsx"] }
+  },
+  "slots": { "alt": { "max": 2 } },
+  "requires": { "custom": ["impl"], "signup": ["terms"] },
+  "themeReads": ["color.surface", "color.text", "color.muted", "color.border", "color.accent",
+                 "color.danger", "space.*", "type.body", "type.size.sm", "radius.md"],
+  "deps": {},
+  "targets": ["web"],
+  "tested": {
+    "browsers": ["chrome-latest", "safari-latest", "firefox-latest", "ios-17"],
+    "with": ["nav", "footer"]
+  }
+}
+```
+
+`deps` is empty on purpose (§3) — the adapter package carries its own exact pin.
+`"scope": "site"` is a new manifest field; see §12.2.
+
+---
+
+## 11. Compiler validations
+
+| Check | Severity | Message |
+|---|---|---|
+| service key would be inlined | **error, unsuppressible** | `auth: 'VITE_SERVICE_KEY' is a service key and would be readable in the shipped bundle — use the public key here and keep the service key on your server` |
+| key pattern in the built bundle | **error, unsuppressible** | `auth: a service-key pattern was found in the built bundle — remove it from source and rebuild` |
+| key literal in the `.az` file | error | `auth: a key literal in 'key' would be committed to source control — move it to an environment variable` |
+| no variant | error | `auth: no form named — pick one of 'login', 'signup', 'reset'` |
+| two variants | error | `auth: 'login' and 'signup' are both forms — pick one` |
+| no adapter declared | error | `auth: no adapter — add to 'site': auth adapter hosted` |
+| two adapters in one site | error | `auth: 'hosted' and 'session' are both adapters — one site, one adapter` |
+| `custom` without `impl` | error | `auth: 'custom' needs an implementation — add: impl ./auth/adapter.ts` |
+| `signup` without `terms` | error | `auth: 'signup' has no terms link — add: terms /terms` |
+| `redirect` to an undeclared page | error | `auth: '/account' is not a page in this site — add it or fix the redirect` |
+| two `auth` blocks on a page | error | `auth: only one form per page (it owns the <h1>)` |
+| free-tier publish | error | `auth: login forms are not published on free sites — publish from the CLI to your own host, or verify your account` |
+| `login` with no sibling route | warning | `auth: 'login' offers no way to sign up or recover — add: alt "Create an account" /signup` |
+| `signup` with >4 fields | warning | `auth: 'signup' asks for 6 fields — every extra field costs sign-ups, ask for them later` |
+| `glass` on an auth page | warning | `auth: 'glass' reduces contrast on credential fields — use the plain surface` |
+| submit label in the denylist | warning | `auth: 'Submit' is not what the button does — name the action, e.g. "Sign in"` |
+| `<Protected>` with no `login` page | warning | `auth: a protected route has nowhere to send signed-out users — add a page with 'auth login'` |
+
+The two unsuppressible errors are the only ones in the product. Everything else
+in AZ is a judgement call with an escape hatch; shipping a database key is not.
+
+## 12. Open questions
+
+1. **Does `auth` own the `<h1>` on its page, or a `text` block above it?**
+   *(Recommend: `auth` — no hero here, and the form title is the page's subject.
+   The two-blocks error above assumes this.)*
+2. **`"scope": "site"` is a new manifest field.** Nav and footer inherit at the
+   *block* level; this is the first inherited **property**. *(Recommend: add
+   `scope: "site" | "page"` to ARCHITECTURE §4.1 rather than special-casing
+   `auth` in core, which principle 5 forbids.)*
+3. **Does `methods oauth` earn Phase 1?** It needs a redirect round-trip a static
+   site cannot fully own, and provider buttons are the branded surface §9 forbids
+   shipping. *(Recommend: defer to M5 — `password` and `link` cover the dogfood
+   site, and deferring keeps the phishing surface smallest for the release where
+   abuse risk is highest.)*
+4. **Should `<Protected>` exist at all in Phase 1**, given §5's admission that it
+   protects nothing? *(Recommend: yes, with the header comment stating what it is
+   not. Without it every user writes a worse one, without the warning.)*
+5. **Mobile-app target:** an app has a keychain, a secure store and biometric
+   unlock, so §4.1 changes shape entirely. *(Needs its own Phase 3 decision.)*

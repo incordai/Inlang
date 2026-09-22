@@ -1,0 +1,204 @@
+/**
+ * The token schema — the closed set a word may read.
+ *
+ * theme-spec.md §1. Categories split two ways, and the split is load-bearing:
+ *
+ *   GLOBAL   space, motion, layer, breakpoint — defined once, and a theme may
+ *            NOT override them. This is what lets a word be dropped into any
+ *            theme and still lay out correctly: the geometry and the timing
+ *            are the contract; only the palette is the theme's to choose.
+ *
+ *   PER-THEME  color, size, type, radius, shadow — and of these, only the
+ *            colour-bearing ones resolve per scheme. A theme that changed its
+ *            spacing between light and dark would be two themes in one name.
+ */
+
+/** Colour scheme. Every colour-bearing token resolves per scheme. */
+export type Scheme = 'light' | 'dark';
+
+/* ---------------- global: a theme may not override these ---------------- */
+
+/**
+ * PRD §7.3 — one scale, no arbitrary values.
+ *
+ * Keyed by VALUE, not by index. `space.4` is 4px because the scale IS the set
+ * of legal values, so a key that is not on the scale is self-evidently wrong.
+ */
+export const SPACE = {
+  0: 0, 4: 4, 8: 8, 12: 12, 16: 16, 24: 24,
+  32: 32, 48: 48, 64: 64, 96: 96, 128: 128,
+} as const;
+export type SpaceStep = keyof typeof SPACE;
+
+/** overlays-spec §3 fixes these. Themes do not get to be slower. */
+export const MOTION = {
+  fast: 120,
+  normal: 160,
+  slow: 240,
+  spring: 280,
+  ease: 'cubic-bezier(0.16, 1, 0.3, 1)',
+  easeIn: 'cubic-bezier(0.4, 0, 1, 1)',
+} as const;
+
+/** CONVENTIONS §4 bans raw z-index; overlays-spec §1 needs a layer manager. */
+export const LAYER = {
+  base: 0, raised: 10, scrim: 20, sticky: 100, dropdown: 200,
+  backdrop: 300, modal: 400, toast: 500, tooltip: 600, skip: 700,
+} as const;
+
+/** A raw `768px` in a media query is an off-scale px, i.e. a lint error. */
+export const BREAKPOINT = { sm: 768, md: 1024, lg: 1280 } as const;
+
+/** The 6-step type scale plus the display steps — global, per theme-spec §1.5. */
+export const TYPE_SIZE = {
+  xs: 'clamp(0.75rem, 0.72rem + 0.15vw, 0.82rem)',
+  sm: 'clamp(0.875rem, 0.84rem + 0.18vw, 0.95rem)',
+  base: 'clamp(1rem, 0.96rem + 0.2vw, 1.08rem)',
+  lg: 'clamp(1.125rem, 1.05rem + 0.36vw, 1.35rem)',
+  xl: 'clamp(1.5rem, 1.32rem + 0.9vw, 2rem)',
+  '2xl': 'clamp(2rem, 1.7rem + 1.5vw, 2.75rem)',
+  display: 'clamp(2.5rem, 1.9rem + 3vw, 5.5rem)',
+  'display-lg': 'clamp(3rem, 2rem + 5vw, 7rem)',
+} as const;
+
+/* ---------------- per theme ---------------- */
+
+/** The colour roles. Named by ROLE, never by appearance — theme-spec §2. */
+export interface ColorTokens {
+  readonly bg: string;
+  readonly surface: string;
+  readonly 'surface-alt': string;
+  readonly text: string;
+  readonly muted: string;
+  readonly border: string;
+  /** A border that must clear 3:1 — a visible edge, not a hairline. */
+  readonly 'border-strong': string;
+  readonly accent: string;
+  readonly 'accent-hover': string;
+  readonly 'accent-contrast': string;
+  readonly focus: string;
+  readonly danger: string;
+  readonly 'danger-contrast': string;
+  readonly scrim: string;
+  /** Text drawn OVER a scrim. Light in BOTH schemes, because a scrim is dark
+   *  in both — the fix theme-spec §6.1 forced when contrast came out 1.00:1. */
+  readonly 'on-scrim': string;
+  /** The modal backdrop. Distinct from `scrim`, which sits over media. */
+  readonly overlay: string;
+}
+
+export interface SizeTokens {
+  readonly container: number;
+  readonly 'gutter-sm': number;
+  readonly 'gutter-lg': number;
+  readonly nav: number;
+  readonly 'nav-shrink': number;
+  readonly tap: number;
+  readonly ring: number;
+  /** theme-spec §6.1: setting this to 0 reintroduces an invisible focus ring
+   *  on a filled accent button. Load-bearing, not decorative. */
+  readonly 'ring-offset': number;
+  readonly 'measure-display': number;
+  readonly 'measure-body': number;
+  readonly 'hero-min': number;
+  /**
+   * Minimum width of an auto-filled column, in px.
+   *
+   * Proposed by `gallery`'s masonry variant, which needs a floor for
+   * `minmax()`. theme-spec §1 is explicit that a word needing a value outside
+   * the closed set does not invent one — it proposes the token. This is that.
+   */
+  readonly 'column-min': number;
+  /**
+   * Width of a vertical `side` nav, in px.
+   *
+   * nav-block-spec §2 says a side nav "eats 240-280px of width"; 256 sits
+   * inside that range. Proposed rather than written inline, because a second
+   * word needing a sidebar must get the SAME width — theme-spec §1.
+   */
+  readonly 'nav-side': number;
+}
+
+export interface TypeTokens {
+  readonly display: string;
+  readonly body: string;
+  readonly mono: string;
+  readonly 'leading-display': number;
+  readonly 'leading-tight': number;
+  readonly 'leading-body': number;
+  readonly 'weight-display': number;
+  readonly 'weight-body': number;
+  readonly 'weight-bold': number;
+}
+
+export interface RadiusTokens {
+  readonly sm: number;
+  readonly md: number;
+  readonly lg: number;
+  readonly full: number;
+}
+
+export interface ShadowTokens {
+  readonly sm: string;
+  readonly md: string;
+  readonly lg: string;
+}
+
+export interface Theme {
+  readonly name: string;
+  readonly description: string;
+  readonly color: Readonly<Record<Scheme, ColorTokens>>;
+  readonly shadow: Readonly<Record<Scheme, ShadowTokens>>;
+  readonly size: SizeTokens;
+  readonly type: TypeTokens;
+  readonly radius: RadiusTokens;
+}
+
+/** A theme resolved for one scheme — what an emitter actually reads. */
+export interface ResolvedTheme {
+  readonly name: string;
+  readonly scheme: Scheme;
+  readonly color: ColorTokens;
+  readonly shadow: ShadowTokens;
+  readonly size: SizeTokens;
+  readonly type: TypeTokens;
+  readonly radius: RadiusTokens;
+  readonly space: typeof SPACE;
+  readonly motion: typeof MOTION;
+  readonly layer: typeof LAYER;
+  readonly breakpoint: typeof BREAKPOINT;
+  readonly typeSize: typeof TYPE_SIZE;
+}
+
+export function resolve(theme: Theme, scheme: Scheme): ResolvedTheme {
+  return {
+    name: theme.name,
+    scheme,
+    color: theme.color[scheme],
+    shadow: theme.shadow[scheme],
+    size: theme.size,
+    type: theme.type,
+    radius: theme.radius,
+    space: SPACE,
+    motion: MOTION,
+    layer: LAYER,
+    breakpoint: BREAKPOINT,
+    typeSize: TYPE_SIZE,
+  };
+}
+
+/** Every legal token path, generated from the schema — the CLOSED set. */
+export function tokenPaths(theme: Theme): string[] {
+  const out: string[] = [];
+  for (const k of Object.keys(theme.color.light)) out.push(`color.${k}`);
+  for (const k of Object.keys(theme.shadow.light)) out.push(`shadow.${k}`);
+  for (const k of Object.keys(theme.size)) out.push(`size.${k}`);
+  for (const k of Object.keys(theme.type)) out.push(`type.${k}`);
+  for (const k of Object.keys(theme.radius)) out.push(`radius.${k}`);
+  for (const k of Object.keys(SPACE)) out.push(`space.${k}`);
+  for (const k of Object.keys(MOTION)) out.push(`motion.${k}`);
+  for (const k of Object.keys(LAYER)) out.push(`layer.${k}`);
+  for (const k of Object.keys(BREAKPOINT)) out.push(`breakpoint.${k}`);
+  for (const k of Object.keys(TYPE_SIZE)) out.push(`type.size.${k}`);
+  return out.sort();
+}

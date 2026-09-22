@@ -1,0 +1,96 @@
+{
+  "name": "scene",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "inline",
+    "full",
+    "backdrop",
+    "none"
+  ],
+  "modifiers": [
+    "3d",
+    "scroll",
+    "parallax"
+  ],
+  "props": {
+    "model": {
+      "type": "path",
+      "ext": [
+        ".glb"
+      ],
+      "maxBytes": 5242880
+    },
+    "poster": {
+      "type": "path",
+      "ext": [
+        ".webp",
+        ".jpg"
+      ],
+      "maxBytes": 262144,
+      "required": true
+    },
+    "alt": {
+      "type": "string",
+      "required": true,
+      "maxWords": 20
+    },
+    "ratio": {
+      "type": "enum",
+      "values": [
+        "1:1",
+        "4:3",
+        "3:2",
+        "16:9"
+      ],
+      "default": "4:3"
+    },
+    "caption": {
+      "type": "string",
+      "maxWords": 16
+    },
+    "camera": {
+      "type": "enum",
+      "values": [
+        "fixed",
+        "orbit",
+        "scroll"
+      ],
+      "default": "fixed"
+    }
+  },
+  "slots": {},
+  "requires": {
+    "3d": [
+      "poster",
+      "alt"
+    ]
+  },
+  "themeReads": [
+    "color.surface",
+    "color.border",
+    "space.*",
+    "type.caption",
+    "radius.md"
+  ],
+  "deps": {
+    "three": "0.170.0",
+    "@react-three/fiber": "8.17.10"
+  },
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ],
+    "with": [
+      "nav",
+      "footer",
+      "hero"
+    ]
+  }
+}

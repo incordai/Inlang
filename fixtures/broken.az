@@ -1,0 +1,6 @@
+az 1
+site a
+page /
+  hero center split
+    title "x"
+  nonsense wide

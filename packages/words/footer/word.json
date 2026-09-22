@@ -1,0 +1,101 @@
+{
+  "name": "footer",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "minimal",
+    "columns",
+    "mega"
+  ],
+  "modifiers": [
+    "glass"
+  ],
+  "props": {
+    "logo": {
+      "type": "path",
+      "ext": [
+        ".svg",
+        ".png"
+      ],
+      "maxBytes": 262144
+    },
+    "tagline": {
+      "type": "string",
+      "maxWords": 14
+    },
+    "copyright": {
+      "type": "string",
+      "maxWords": 8
+    },
+    "since": {
+      "type": "int",
+      "min": 1990,
+      "max": 2100
+    },
+    "year": {
+      "type": "enum",
+      "values": [
+        "none",
+        "since",
+        "dynamic"
+      ],
+      "default": "none"
+    }
+  },
+  "slots": {
+    "group": {
+      "max": 5,
+      "slots": {
+        "link": {
+          "max": 12
+        }
+      }
+    },
+    "link": {
+      "max": 24
+    },
+    "social": {
+      "max": 6
+    },
+    "legal": {
+      "max": 4
+    }
+  },
+  "requires": {
+    "columns": [
+      "group"
+    ],
+    "mega": [
+      "group"
+    ],
+    "dynamic": [
+      "since"
+    ]
+  },
+  "themeReads": [
+    "color.surface",
+    "color.muted",
+    "color.border",
+    "color.text",
+    "space.*",
+    "type.body",
+    "type.size.sm",
+    "radius.sm"
+  ],
+  "deps": {},
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ],
+    "with": [
+      "nav",
+      "hero"
+    ]
+  }
+}

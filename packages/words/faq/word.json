@@ -1,0 +1,79 @@
+{
+  "name": "faq",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "list",
+    "columns"
+  ],
+  "modifiers": [
+    "single",
+    "reveal"
+  ],
+  "props": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxWords": 8
+    },
+    "sub": {
+      "type": "string",
+      "maxWords": 24
+    },
+    "schema": {
+      "type": "enum",
+      "values": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    }
+  },
+  "slots": {
+    "item": {
+      "min": 1,
+      "max": 12,
+      "props": {
+        "text": {
+          "type": "string",
+          "required": true,
+          "maxWords": 120
+        }
+      },
+      "slots": {
+        "more": {
+          "max": 1
+        }
+      }
+    }
+  },
+  "requires": {},
+  "themeReads": [
+    "color.surface",
+    "color.text",
+    "color.muted",
+    "color.border",
+    "color.border-strong",
+    "color.focus",
+    "space.*",
+    "radius.sm",
+    "type.body"
+  ],
+  "deps": {},
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ],
+    "with": [
+      "nav",
+      "hero",
+      "footer"
+    ]
+  }
+}

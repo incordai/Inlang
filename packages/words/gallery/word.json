@@ -1,0 +1,145 @@
+{
+  "name": "gallery",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "grid",
+    "masonry",
+    "carousel",
+    "orbit"
+  ],
+  "modifiers": [
+    "reveal",
+    "lightbox"
+  ],
+  "props": {
+    "title": {
+      "type": "string",
+      "maxWords": 10
+    },
+    "sub": {
+      "type": "string",
+      "maxWords": 30
+    },
+    "columns": {
+      "type": "int",
+      "min": 2,
+      "max": 4,
+      "default": 3
+    },
+    "ratio": {
+      "type": "enum",
+      "default": "3:2",
+      "values": [
+        "square",
+        "4:3",
+        "3:2",
+        "16:9",
+        "portrait",
+        "auto"
+      ]
+    },
+    "poster": {
+      "type": "path",
+      "ext": [
+        ".webp",
+        ".jpg"
+      ],
+      "maxBytes": 262144
+    }
+  },
+  "slots": {
+    "image": {
+      "min": 2,
+      "max": 200,
+      "props": {
+        "src": {
+          "type": "path",
+          "required": true,
+          "maxBytes": 512000,
+          "ext": [
+            ".webp",
+            ".jpg",
+            ".png",
+            ".avif"
+          ]
+        },
+        "alt": {
+          "type": "string",
+          "required": true
+        },
+        "caption": {
+          "type": "string",
+          "maxWords": 12
+        },
+        "focus": {
+          "type": "enum",
+          "default": "center",
+          "values": [
+            "center",
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ]
+        }
+      }
+    },
+    "cta": {
+      "max": 1
+    },
+    "alt": {
+      "max": 1
+    }
+  },
+  "requires": {
+    "orbit": [
+      "poster"
+    ]
+  },
+  "themeReads": [
+    "color.text",
+    "color.muted",
+    "color.surface",
+    "color.focus",
+    "color.scrim",
+    "color.on-scrim",
+    "color.overlay",
+    "space.*",
+    "type.*",
+    "radius.md",
+    "motion.emphasis",
+    "motion.backdrop",
+    "motion.fast",
+    "motion.reduced",
+    "motion.ease.emphasis",
+    "layer.modal",
+    "layer.backdrop",
+    "size.measure-display",
+    "size.measure-body",
+    "size.tap",
+    "size.ring",
+    "size.ring-offset",
+    "breakpoint.sm"
+  ],
+  "deps": {
+    "three": "0.170.0",
+    "@react-three/fiber": "8.17.10"
+  },
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "with": [
+      "nav",
+      "hero",
+      "footer"
+    ],
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ]
+  }
+}

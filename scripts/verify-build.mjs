@@ -1,0 +1,201 @@
+/**
+ * End-to-end proof: a .az file becomes a site that actually renders.
+ *
+ * `pnpm test` proves the compiler produces the right FILES. It cannot prove
+ * those files build and render, because that needs react and vite installed —
+ * a network install, which the unit suite must never require. So this lives
+ * apart and is run deliberately:
+ *
+ *     node scripts/verify-build.mjs
+ *
+ * It does four things the unit suite cannot:
+ *   1. compiles the GRAMMAR §8 fixture through the real CLI entry point
+ *   2. installs the emitted package.json and runs `vite build`
+ *   3. EXECUTES the generated app (react-dom/server) to get real DOM
+ *   4. asserts that DOM against the rules the specs state
+ *
+ * Step 3 is the point. A green `vite build` proves the code COMPILED; only
+ * rendering it proves the hero has one <h1>, that the eyebrow is not a
+ * heading, and that a title containing </script> is inert.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const WORDS = join(ROOT, 'packages/words');
+const CLI = join(ROOT, 'packages/cli/bin/az.js');
+
+/**
+ * Run a command without a shell.
+ *
+ * `npm` and `npx` are batch files on Windows. Naming them needs `shell: true`,
+ * which is what Node's DEP0190 warns about (arguments get concatenated, not
+ * escaped); naming `npm.cmd` instead fails outright with EINVAL, because Node
+ * refuses to spawn a .cmd without a shell at all.
+ *
+ * So neither wrapper is used. npm ships as JavaScript beside the node binary,
+ * and vite installs its own JS entry point — running those with `process
+ * .execPath` is the same program, one process shallower, with a real argv.
+ */
+const NPM_CLI = join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
+
+const run = (file, args, cwd) =>
+  execFileSync(file, args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, AZ_WORDS: WORDS },
+  });
+
+/** node <script> … */
+const node = (script, args, cwd) => run(process.execPath, [script, ...args], cwd);
+/** npm … , via npm's own JS rather than the .cmd wrapper */
+const npm = (args, cwd) => node(NPM_CLI, args, cwd);
+/** vite … , from the project's own install */
+const vite = (args, cwd) => node(join(cwd, 'node_modules/vite/bin/vite.js'), args, cwd);
+
+let failures = 0;
+const check = (name, pass, detail = '') => {
+  if (!pass) failures++;
+  console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? '   ' + detail : ''}`);
+};
+
+/** Find an element by class, whatever order React emitted its attributes in. */
+function elementWithClass(html, cls) {
+  const at = html.indexOf(`class="${cls}"`);
+  if (at < 0) return null;
+  return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1);
+}
+
+const work = mkdtempSync(join(tmpdir(), 'az-verify-'));
+console.log(`working in ${work}\n`);
+
+try {
+  /* ---- 1. compile ------------------------------------------------------ */
+  const site = join(work, 'site.az');
+  cpSync(join(ROOT, 'packages/core/test/fixture-site.az'), site);
+  const proj = join(work, 'proj');
+  node(CLI, ['build', site, '--out', proj], work);
+  console.log('compiled the GRAMMAR §8 fixture\n');
+
+  /* ---- 2. install and build -------------------------------------------- */
+  npm(['install', '--no-audit', '--no-fund'], proj);
+  vite(['build'], proj);
+  console.log('npm install + vite build succeeded\n');
+
+  /* ---- 3. execute it --------------------------------------------------- */
+  writeFileSync(join(proj, 'ssr.tsx'),
+    'import { renderToStaticMarkup } from "react-dom/server";\n' +
+    'import App from "./src/App.tsx";\n' +
+    'process.stdout.write(renderToStaticMarkup(<App />));\n');
+  vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], proj);
+  const html = node(join(proj, 'ssr-out/ssr.js'), [], proj);
+  check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
+
+  /* ---- 4. the DOM obeys the specs -------------------------------------- */
+  const h1s = (html.match(/<h1/g) ?? []).length;
+  const eyebrow = elementWithClass(html, 'az-hero-eyebrow');
+  const title = elementWithClass(html, 'az-hero-title');
+
+  check('exactly one <h1> on the page — hero-spec §4', h1s === 1, `h1=${h1s}`);
+  check('section headings are <h2>', (html.match(/<h2/g) ?? []).length > 0);
+  check('the eyebrow is a <p>, not a heading — hero-spec §4',
+    !!eyebrow && eyebrow.startsWith('<p'));
+  check('the title is the <h1>', !!title && title.startsWith('<h1'));
+  check('the measure is on the TEXT — hero-spec §3',
+    !!title && /max-width:\d+ch/.test(title),
+    (title?.match(/max-width:[^;"]+/) ?? ['none'])[0]);
+  check('the CONTAINER carries no measure — hero-spec §3',
+    !/class="az-hero [^"]*"[^>]*max-width/.test(html));
+  check('hero uses svh, not vh — hero-spec §6', /min-height:\d+svh/.test(html));
+  check('theme colour tokens reached the DOM', /hsl\(/.test(html));
+  check('a behaviour prop is an attribute, never prose',
+    /data-mobile="drawer"/.test(html) && !/>drawer</.test(html));
+
+  /* ---- nav and footer, in the rendered document ------------------------ */
+  const firstFocusable = /<(a|button)\b[^>]*>/.exec(html);
+  check('nav §7: the skip link is the FIRST focusable element',
+    !!firstFocusable && firstFocusable[0].includes('az-skip-link'),
+    firstFocusable ? firstFocusable[0].slice(0, 48) : 'none found');
+  check('nav §7: the main landmark is labelled',
+    /<nav[^>]*aria-label="Main"/.test(html));
+  check('nav §6: the toggle is a button wired to a panel that exists',
+    /<button[^>]*aria-controls="az-nav-panel"/.test(html) && /id="az-nav-panel"/.test(html));
+
+  /**
+   * The markup of one page.
+   *
+   * App.tsx renders EVERY page into one document — there is no router yet —
+   * so a check that scanned the whole string would happily find `/`'s nav
+   * while looking at `/login`.
+   */
+  const pageHtml = (route) => {
+    const open = html.indexOf(`data-route="${route}"`);
+    if (open < 0) return '';
+    const rest = html.slice(open);
+    const next = rest.indexOf('<main', 1);
+    return next < 0 ? rest : rest.slice(0, next);
+  };
+
+  const home = pageHtml('/');
+  check('CONTROL: both fixture pages rendered', !!home && !!pageHtml('/login'));
+
+  // The ORDER is the point: targets used to concatenate inherited blocks in
+  // front of the page, which rendered the footer above the hero.
+  check('the nav opens the page and the footer closes it',
+    home.indexOf('<nav') < home.indexOf('<h1') &&
+    home.indexOf('<footer') > home.indexOf('<h1'),
+    `nav@${home.indexOf('<nav')} h1@${home.indexOf('<h1')} footer@${home.indexOf('<footer')}`);
+
+  const footerHtml = home.slice(home.indexOf('<footer'));
+  check('footer §9: no <h1> inside the footer', !/<h1/.test(footerHtml));
+  check('footer §9: `minimal` with <=3 links emits no nav landmark',
+    !/<nav/.test(footerHtml), 'the fixture footer has three links');
+
+  // GRAMMAR §5.2 — `page /login` declares `nav none`.
+  const login = pageHtml('/login');
+  check('GRAMMAR §5.2: `nav none` suppresses the inherited nav entirely',
+    !/<nav[^>]*aria-label="Main"/.test(login));
+  check('CONTROL: that same page still has its inherited footer',
+    /<footer/.test(login));
+
+  /* ---- the security claim, at DOM level -------------------------------- */
+  const evil = join(work, 'evil.az');
+  writeFileSync(evil,
+    'az 1\nsite evil\n\npage /\n  hero center\n' +
+    '    title "</script><script>alert(1)</script>"\n');
+  const evilProj = join(work, 'evil');
+  node(CLI, ['build', evil, '--out', evilProj], work);
+  cpSync(join(proj, 'node_modules'), join(evilProj, 'node_modules'), { recursive: true });
+  cpSync(join(proj, 'ssr.tsx'), join(evilProj, 'ssr.tsx'));
+  vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], evilProj);
+  const evilHtml = node(join(evilProj, 'ssr-out/ssr.js'), [], evilProj);
+
+  check('SECURITY: no executable <script> reaches the DOM', !/<script/i.test(evilHtml));
+  check('SECURITY: the text survives ESCAPED, not silently dropped',
+    evilHtml.includes('&lt;/script&gt;'));
+
+  /* ---- determinism ------------------------------------------------------ */
+  const a = join(work, 'a'), b = join(work, 'b');
+  node(CLI, ['build', site, '--out', a], work);
+  node(CLI, ['build', site, '--out', b], work);
+  const read = (d) => readFileSync(join(d, 'src/App.tsx'), 'utf8');
+  check('DETERMINISM: two builds of one source are identical', read(a) === read(b));
+
+  const changed = join(work, 'changed.az');
+  writeFileSync(changed, readFileSync(site, 'utf8').replace('site aurora', 'site borealis'));
+  const c = join(work, 'c');
+  node(CLI, ['build', changed, '--out', c], work);
+  check('CONTROL: a CHANGED source produces different output', read(a) !== read(c));
+} finally {
+  // Keep the directory when something failed — it is the evidence.
+  if (failures === 0) rmSync(work, { recursive: true, force: true });
+  else console.log(`\nleft ${work} in place for inspection`);
+}
+
+console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);
+process.exitCode = failures === 0 ? 0 : 1;

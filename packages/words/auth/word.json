@@ -1,0 +1,101 @@
+{
+  "name": "auth",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "login",
+    "signup",
+    "reset"
+  ],
+  "modifiers": [
+    "glass"
+  ],
+  "props": {
+    "adapter": {
+      "type": "enum",
+      "values": [
+        "hosted",
+        "session",
+        "azbackend",
+        "custom"
+      ],
+      "required": true,
+      "scope": "site"
+    },
+    "title": {
+      "type": "string",
+      "maxWords": 8
+    },
+    "sub": {
+      "type": "string",
+      "maxWords": 20
+    },
+    "methods": {
+      "type": "list",
+      "of": "enum",
+      "values": [
+        "password",
+        "link",
+        "oauth"
+      ],
+      "max": 3,
+      "default": [
+        "password"
+      ]
+    },
+    "redirect": {
+      "type": "route"
+    },
+    "terms": {
+      "type": "route"
+    },
+    "impl": {
+      "type": "path",
+      "ext": [
+        ".ts",
+        ".tsx"
+      ]
+    }
+  },
+  "slots": {
+    "alt": {
+      "max": 2
+    }
+  },
+  "requires": {
+    "custom": [
+      "impl"
+    ],
+    "signup": [
+      "terms"
+    ]
+  },
+  "themeReads": [
+    "color.surface",
+    "color.text",
+    "color.muted",
+    "color.border",
+    "color.accent",
+    "color.danger",
+    "space.*",
+    "type.body",
+    "type.size.sm",
+    "radius.md"
+  ],
+  "deps": {},
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ],
+    "with": [
+      "nav",
+      "footer"
+    ]
+  }
+}

@@ -1,0 +1,57 @@
+az 1
+
+# Aurora — a studio site. One file, top to bottom.
+
+site aurora
+  theme midnight
+  font
+    display serif
+    body    sans
+
+  nav split sticky solid
+    logo       ./assets/logo.svg
+    inverse ./assets/logo-w.svg
+    link  "Work"   /work
+    link  "Studio" /studio
+    group "Products" as dropdown
+      link "Shoes" /shoes
+      link "Bags"  /bags
+    cta    "Reserve" /reserve
+    mobile drawer
+
+  auth
+    adapter azbackend
+
+  footer
+    link "Pricing" #pricing
+    link "Privacy" /legal
+    link "Email"   mailto:studio@aurora.example
+
+page /
+  hero split 3d scroll
+    eyebrow "Limited run"
+    title   "Built in the dark"
+    sub     "Handmade. Forty pairs a month."
+    cta     "Reserve a pair"  /reserve
+    alt     "Call the studio" tel:+50412345678
+    model   ./assets/shoe.glb
+    height  peek
+    slot after ./custom/Ticker.tsx
+
+  feature grid
+    columns 3
+  gallery orbit
+    poster ./assets/orbit.webp
+
+  text
+    title "Made to be repaired"
+    body  ./content/repair.md
+
+  cta band
+    title "Reserve for the autumn run"
+
+  raw ./custom/Badge.tsx
+
+page /login       # no nav, nothing to distract
+  nav none
+  auth login

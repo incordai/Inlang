@@ -1,0 +1,74 @@
+{
+  "name": "text",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "prose",
+    "centered",
+    "columns"
+  ],
+  "modifiers": [
+    "reveal"
+  ],
+  "props": {
+    "title": {
+      "type": "string",
+      "required": false,
+      "maxWords": 10
+    },
+    "body": {
+      "type": "markdown",
+      "required": true,
+      "ext": [
+        ".md"
+      ],
+      "maxBytes": 262144,
+      "maxWords": 800
+    }
+  },
+  "slots": {
+    "cta": {
+      "max": 1
+    },
+    "alt": {
+      "max": 1
+    }
+  },
+  "requires": {},
+  "themeReads": [
+    "color.text",
+    "color.muted",
+    "color.accent",
+    "color.border",
+    "color.focus",
+    "color.surface-alt",
+    "space.*",
+    "type.*",
+    "motion.slow",
+    "motion.reduced",
+    "motion.ease.emphasis",
+    "size.measure-body",
+    "size.measure-display",
+    "breakpoint.sm"
+  ],
+  "deps": {
+    "micromark": "4.0.2",
+    "micromark-extension-gfm": "3.0.0"
+  },
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "with": [
+      "nav",
+      "hero",
+      "footer"
+    ],
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ]
+  }
+}

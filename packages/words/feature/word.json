@@ -1,0 +1,116 @@
+{
+  "name": "feature",
+  "version": "1.0.0",
+  "kind": "block",
+  "variants": [
+    "grid",
+    "rows",
+    "bento"
+  ],
+  "modifiers": [
+    "reveal"
+  ],
+  "props": {
+    "title": {
+      "type": "string",
+      "required": false,
+      "maxWords": 10
+    },
+    "sub": {
+      "type": "string",
+      "required": false,
+      "maxWords": 30
+    },
+    "columns": {
+      "type": "int",
+      "min": 2,
+      "max": 4,
+      "default": 3
+    }
+  },
+  "slots": {
+    "item": {
+      "min": 2,
+      "max": 12,
+      "slots": {
+        "link": {
+          "max": 1
+        }
+      },
+      "props": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "maxWords": 6
+        },
+        "text": {
+          "type": "string",
+          "maxWords": 40
+        },
+        "icon": {
+          "type": "path",
+          "ext": [
+            ".svg"
+          ],
+          "maxBytes": 16384
+        },
+        "media": {
+          "type": "path",
+          "maxBytes": 512000,
+          "ext": [
+            ".webp",
+            ".jpg",
+            ".png",
+            ".avif"
+          ]
+        },
+        "lead": {
+          "type": "flag"
+        }
+      }
+    },
+    "cta": {
+      "max": 1
+    },
+    "alt": {
+      "max": 1
+    }
+  },
+  "requires": {},
+  "themeReads": [
+    "color.text",
+    "color.muted",
+    "color.surface",
+    "color.accent",
+    "color.border",
+    "color.focus",
+    "space.*",
+    "type.*",
+    "radius.md",
+    "motion.slow",
+    "motion.reduced",
+    "motion.ease.emphasis",
+    "size.measure-display",
+    "size.measure-body",
+    "size.ring",
+    "size.ring-offset",
+    "breakpoint.sm"
+  ],
+  "deps": {},
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "with": [
+      "nav",
+      "hero",
+      "footer"
+    ],
+    "browsers": [
+      "chrome-latest",
+      "safari-latest",
+      "firefox-latest",
+      "ios-17"
+    ]
+  }
+}

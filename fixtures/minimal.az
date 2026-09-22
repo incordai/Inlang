@@ -1,0 +1,17 @@
+az 1
+
+site aurora
+  width center
+  theme midnight
+    accent violet
+    pattern glow
+
+  nav bar
+    link "Work" /work
+
+page /
+  hero center
+    eyebrow "Limited run"
+    title   "Built in the dark"
+    sub     "Handmade. Forty pairs a month."
+    height  peek
