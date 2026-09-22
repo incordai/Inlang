@@ -1,0 +1,15 @@
+az 1
+
+site aurora
+  nav bar
+    link   "Work"   /work
+    link   "Studio" /studio
+    cta    "Reserve" /reserve
+
+page /
+
+page /work
+
+page /studio
+
+page /reserve

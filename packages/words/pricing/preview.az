@@ -1,0 +1,25 @@
+az 1
+
+site aurora
+
+page /
+  pricing cards
+    title    "Simple pricing"
+    currency usd
+    period   "per seat, per month"
+    plan "Studio"
+      monthly 29
+      annual  290
+      feature "Projects" "10"
+      cta     "Start with Studio" /signup/studio
+    plan "Practice"
+      highlight on
+      badge   "Most popular"
+      monthly 79
+      annual  790
+      feature "Projects" "Unlimited"
+      cta     "Start with Practice" /signup/practice
+
+page /signup/studio
+
+page /signup/practice

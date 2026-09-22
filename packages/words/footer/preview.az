@@ -1,0 +1,17 @@
+az 1
+
+site aurora
+  footer minimal
+    tagline   "Handmade in the dark."
+    link      "About"   /about
+    link      "Contact" /contact
+    legal     "Privacy" /privacy
+    copyright "Aurora Studio"
+
+page /
+
+page /about
+
+page /contact
+
+page /privacy

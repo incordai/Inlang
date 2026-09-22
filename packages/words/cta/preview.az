@@ -1,0 +1,12 @@
+az 1
+
+site aurora
+
+page /
+  cta band
+    title "Forty pairs a month. One of them could be yours."
+    sub   "Reserve now for the autumn run."
+    cta   "Reserve a pair" /reserve
+    alt   "Call the studio" tel:+50412345678
+
+page /reserve

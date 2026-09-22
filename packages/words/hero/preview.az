@@ -1,0 +1,16 @@
+az 1
+
+site aurora
+
+page /
+  hero center
+    eyebrow "Limited run"
+    title   "Built in the dark"
+    sub     "Handmade. Forty pairs a month."
+    cta     "Reserve a pair" /reserve
+    alt     "See the process" /process
+    height  peek
+
+page /reserve
+
+page /process

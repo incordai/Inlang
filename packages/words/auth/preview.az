@@ -1,0 +1,16 @@
+az 1
+
+site aurora
+  auth
+    adapter session
+
+page /login
+  auth login
+    title    "Welcome back"
+    sub      "Sign in to see your orders."
+    redirect /account
+    alt      "Create an account" /signup
+
+page /account
+
+page /signup

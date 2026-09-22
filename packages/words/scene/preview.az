@@ -1,0 +1,10 @@
+az 1
+
+site aurora
+
+page /
+  scene inline
+    poster  ./preview-assets/assets/shoe.webp
+    alt     "A black running shoe seen from the side"
+    ratio   4:3
+    caption "Cut from a single hide."

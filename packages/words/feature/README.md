@@ -1,0 +1,95 @@
+# `feature`
+
+A set of product features or claims: a grid of peers, rows with media, or a bento tiling where one item leads.
+
+Full specification: [`docs/feature-block-spec.md`](../../../docs/feature-block-spec.md). This page summarises it; the spec is authoritative.
+
+## Example
+
+[`preview.az`](preview.az), the default variant:
+
+```
+az 1
+
+site aurora
+
+page /
+  feature grid
+    title   "Made properly, or not at all"
+    sub     "Three things we refuse to compromise on."
+    columns 3
+    item "Hand-cut leather"
+      text "Every panel is cut by hand from a single hide."
+    item "Sewn, not glued"
+      text "A stitched welt, so the sole is replaceable."
+      link "How we do it" /process
+    item "Forty a month"
+      text "The workshop holds two people. That is the ceiling."
+    cta "See the collection" /shop
+
+page /process
+
+page /shop
+```
+
+## Variants
+
+Pick one. The first is the default.
+
+| Variant | Use when |
+|---|---|
+| `grid` | 3–6 peer features of equal weight |
+| `rows` | each feature needs a real screenshot or photo |
+| `bento` | one feature genuinely outranks the others |
+
+## Modifiers
+
+Combine freely.
+
+| Modifier | Effect |
+|---|---|
+| `reveal` | entrance motion, suppressed under reduced motion |
+
+## Properties
+
+| Property | Type | Values | Default | Constraints | Meaning |
+|---|---|---|---|---|---|
+| `title` | string |  |  | ≤ 10 words | section heading, as an `<h2>` |
+| `sub` | string |  |  | ≤ 30 words | one supporting line |
+| `columns` | int |  | `3` | 2–4 | grid columns, 2–4 |
+
+## Children
+
+- `item`: a feature (2–12): `title`, `text`, `icon`, `media`, `lead`, and an optional `link`
+- `cta`: one primary button
+- `alt`: one secondary action
+
+## Accessibility
+
+- `title` is an `<h2>`, item titles are `<h3>`; never an `<h1>`
+- Items are a `<ul>` of peers
+- Icons are `aria-hidden`
+- A visible focus ring; hover is never the only affordance
+
+The full floor is in the spec.
+
+## Status
+
+Every variant renders distinctly. Properties not yet implemented (`pnpm coverage`):
+
+- none — every declared property changes the output
+
+Known gaps:
+
+- Buttons render as plain links until the button primitive exists
+- Phone and tablet layouts from the spec's responsive table are not implemented for any word yet: the web target emits inline styles only, with no media queries.
+
+## Tested
+
+What is automated today:
+
+- `packages/words/test/props.test.ts`, `variants.test.ts`, `structure.test.ts` and `conformance.test.ts` run every word: each property changes the output, each variant renders differently, lists are valid HTML, and the emitter reads only declared properties
+- `words.test.ts` runs the theme lint over the emitter (also `az lint`)
+- `scripts/verify-build.mjs` compiles the GRAMMAR §8 fixture, which includes this word, builds it with the real toolchain and checks the server-rendered HTML
+
+**Not yet tested:** no browser, visual, keyboard or axe run has been made for this word (quality-gate items 3–7). The manifest's `tested` field lists browsers, but those runs have not happened; treat it as a target, not a result.

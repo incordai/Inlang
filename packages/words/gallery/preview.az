@@ -1,0 +1,16 @@
+az 1
+
+site aurora
+
+page /
+  gallery grid
+    title   "The workshop"
+    sub     "Eighteen months, one room."
+    columns 3
+    ratio   3:2
+    image ./preview-assets/assets/bench.webp
+      alt "An empty workbench under a single lamp"
+    image ./preview-assets/assets/welt.webp
+      alt "A welt being stitched by hand"
+    image ./preview-assets/assets/lasts.webp
+      alt "Wooden lasts lined up on a shelf"
