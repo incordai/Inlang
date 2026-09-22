@@ -152,6 +152,10 @@ try {
     firstFocusable ? firstFocusable[0].slice(0, 48) : 'none found');
   check('nav §7: the logo link is named by the site, not left empty',
     /class="az-nav-logo"[^>]*>(?:(?!<\/a>)[^])*class="az-visually-hidden"[^>]*>aurora<\/span>/.test(html));
+  // The fixture declares `adapter azbackend` once at site level; /login's
+  // `auth login` must carry it rather than fall back to `custom`.
+  check('auth §2: the login form uses the adapter declared at site level',
+    /class="az-auth-form"[^>]*data-adapter="azbackend"|data-adapter="azbackend"[^>]*class="az-auth-form"/.test(html));
   check('auth §8: every field label is tied to its input (for → htmlFor)',
     /<label[^>]*for="[^"]+"/.test(html));
   check('auth §8: autocomplete reaches the inputs',

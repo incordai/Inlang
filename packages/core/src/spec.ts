@@ -82,11 +82,39 @@ const INHERITABLE = new Set(['nav', 'footer', 'scene']);
  * same complete value and two targets cannot disagree about what `height`
  * means when the author omitted it.
  */
-function toBlock(w: LinkedWord, manifests: Map<string, Manifest>): SpecBlock {
+/**
+ * Site-scoped prop values, by word: `auth` -> { adapter: "azbackend" }.
+ *
+ * A `scope: "site"` prop is declared once, on the site-level instance of its
+ * word, and belongs to every instance on every page (auth-spec §2: one
+ * adapter per site). The link stage refuses it at page level (AZ1304), so
+ * without carrying it down a page's `auth login` never learned its adapter.
+ */
+type SiteScoped = ReadonlyMap<string, Readonly<Record<string, string>>>;
+
+function siteScopedProps(kids: LinkedWord[], manifests: Map<string, Manifest>): SiteScoped {
+  const out = new Map<string, Record<string, string>>();
+  for (const w of kids) {
+    const m = manifests.get(w.word);
+    for (const [key, spec] of Object.entries(m?.props ?? {})) {
+      if (spec.scope !== 'site' || !(key in w.props)) continue;
+      const values = out.get(w.word) ?? {};
+      values[key] ??= w.props[key].value;
+      out.set(w.word, values);
+    }
+  }
+  return out;
+}
+
+function toBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteScoped = new Map()): SpecBlock {
   const m = manifests.get(w.word);
   const props: Record<string, string> = {};
 
   for (const [key, arg] of Object.entries(w.props)) props[key] = arg.value;
+
+  for (const [key, value] of Object.entries(site.get(w.word) ?? {})) {
+    if (!(key in props)) props[key] = value;
+  }
 
   for (const [key, spec] of Object.entries(m?.props ?? {})) {
     if (key in props) continue;
@@ -109,7 +137,7 @@ function toBlock(w: LinkedWord, manifests: Map<string, Manifest>): SpecBlock {
       .map((a) => ({ kind: a.kind, value: a.value })),
     props: ordered,
     as: w.as,
-    children: w.children.map((c) => toBlock(c, manifests)),
+    children: w.children.map((c) => toBlock(c, manifests, site)),
   };
 }
 
@@ -189,9 +217,10 @@ export function buildSpec(
     .filter((w) => INHERITABLE.has(w.word))
     .map((w) => toBlock(w, manifests));
 
+  const site = siteScopedProps(kids, manifests);
   const pages: SpecPage[] = pageWords.map((p) => ({
     route: p.args[0]?.value ?? '/',
-    blocks: p.children.map((c) => toBlock(c, manifests)),
+    blocks: p.children.map((c) => toBlock(c, manifests, site)),
   }));
 
   // A word's own first argument is its value: `width wide` -> "wide".
