@@ -32,6 +32,8 @@ site aurora
 
 page /checkout
   footer minimal          # override: no IA to escape into mid-purchase
+
+page /privacy           # the legal link's page — an internal link must name one (§11)
 ```
 
 **Variants are mutually exclusive:** `minimal` `columns` `mega`. Two is a

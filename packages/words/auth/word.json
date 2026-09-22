@@ -105,5 +105,49 @@
       "nav",
       "footer"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2000",
+      "kind": "when",
+      "severity": "error",
+      "message": "no form named — pick one of 'login', 'signup', 'reset'",
+      "when": {
+        "noVariant": true,
+        "inPage": true
+      }
+    },
+    {
+      "code": "AZ2001",
+      "kind": "perPage",
+      "severity": "error",
+      "message": "only one form per page (it owns the <h1>)",
+      "atMost": 1
+    },
+    {
+      "code": "AZ2002",
+      "kind": "count",
+      "severity": "warning",
+      "message": "'login' offers no way to sign up or recover — add: alt \"Create an account\" /signup",
+      "slots": [
+        "alt"
+      ],
+      "atMost": 0,
+      "when": {
+        "variant": [
+          "login"
+        ],
+        "inPage": true
+      }
+    },
+    {
+      "code": "AZ2003",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'glass' reduces contrast on credential fields — use the plain surface",
+      "when": {
+        "modifier": "glass"
+      }
+    }
+  ]
 }

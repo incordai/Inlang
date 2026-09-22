@@ -141,5 +141,171 @@
       "firefox-latest",
       "ios-17"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2100",
+      "kind": "count",
+      "severity": "error",
+      "message": "no images — add: image ./photo.webp",
+      "slots": [
+        "image"
+      ],
+      "atMost": 0
+    },
+    {
+      "code": "AZ2101",
+      "kind": "count",
+      "severity": "error",
+      "message": "1 image is not a gallery — use 'feature' or a hero",
+      "slots": [
+        "image"
+      ],
+      "atLeast": 1,
+      "atMost": 1
+    },
+    {
+      "code": "AZ2102",
+      "kind": "count",
+      "severity": "warning",
+      "message": "{n} images means {n} tab stops before the footer — split it or use 'carousel'",
+      "slots": [
+        "image"
+      ],
+      "atLeast": 61,
+      "atMost": 200
+    },
+    {
+      "code": "AZ2103",
+      "kind": "count",
+      "severity": "error",
+      "message": "{n} images is an archive, not a section — paginate it with 'content'",
+      "slots": [
+        "image"
+      ],
+      "atLeast": 201
+    },
+    {
+      "code": "AZ2104",
+      "kind": "count",
+      "severity": "error",
+      "message": "'orbit' caps at 16 images, got {n} — use 'grid', or cut the set",
+      "slots": [
+        "image"
+      ],
+      "atLeast": 17,
+      "when": {
+        "variant": [
+          "orbit"
+        ]
+      }
+    },
+    {
+      "code": "AZ2105",
+      "kind": "count",
+      "severity": "error",
+      "message": "'orbit' needs at least 4 images to read as a ring — use 'grid'",
+      "slots": [
+        "image"
+      ],
+      "atMost": 3,
+      "when": {
+        "variant": [
+          "orbit"
+        ]
+      }
+    },
+    {
+      "code": "AZ2106",
+      "kind": "childMissing",
+      "severity": "warning",
+      "message": "'{label}' has no alt text — add: alt \"what it shows\", or alt \"\" if the caption says it",
+      "slot": "image",
+      "prop": "alt"
+    },
+    {
+      "code": "AZ2107",
+      "kind": "childEqual",
+      "severity": "warning",
+      "message": "alt and caption are identical on '{label}' — set alt \"\" so it isn't read twice",
+      "slot": "image",
+      "props": [
+        "alt",
+        "caption"
+      ]
+    },
+    {
+      "code": "AZ2108",
+      "kind": "childAllOrNone",
+      "severity": "warning",
+      "message": "{k} of {n} images have captions — caption all of them or none",
+      "slot": "image",
+      "prop": "caption"
+    },
+    {
+      "code": "AZ2109",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'columns' only applies to 'grid' — remove it or switch variant",
+      "when": {
+        "prop": "columns",
+        "notVariant": [
+          "grid"
+        ]
+      }
+    },
+    {
+      "code": "AZ2110",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'ratio auto' leaves ragged rows in 'grid' — set a ratio, or use 'masonry'",
+      "when": {
+        "variant": [
+          "grid"
+        ],
+        "prop": "ratio",
+        "value": "auto"
+      }
+    },
+    {
+      "code": "AZ2111",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'orbit' opens its own viewer — 'lightbox' has no effect",
+      "when": {
+        "variant": [
+          "orbit"
+        ],
+        "modifier": "lightbox"
+      }
+    },
+    {
+      "code": "AZ2112",
+      "kind": "count",
+      "severity": "warning",
+      "message": "{n} images fit on one screen — 'carousel' hides two of them for nothing",
+      "slots": [
+        "image"
+      ],
+      "atLeast": 1,
+      "atMost": 3,
+      "when": {
+        "variant": [
+          "carousel"
+        ]
+      }
+    },
+    {
+      "code": "AZ2113",
+      "kind": "perPage",
+      "severity": "error",
+      "message": "{n} orbit scenes on one page — one WebGL context per page",
+      "atMost": 1,
+      "when": {
+        "variant": [
+          "orbit"
+        ]
+      }
+    }
+  ]
 }

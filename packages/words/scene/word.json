@@ -92,5 +92,61 @@
       "footer",
       "hero"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2180",
+      "kind": "when",
+      "severity": "error",
+      "message": "no renderer named — add: scene inline 3d",
+      "when": {
+        "notModifier": "3d",
+        "notVariant": [
+          "none"
+        ]
+      }
+    },
+    {
+      "code": "AZ2181",
+      "kind": "notFirst",
+      "severity": "error",
+      "message": "a scene cannot open a page — the LCP element must be text, use 'hero 3d'"
+    },
+    {
+      "code": "AZ2182",
+      "kind": "perPage",
+      "severity": "error",
+      "message": "{n} scenes on one page, maximum is 8 — split the page",
+      "atMost": 8
+    },
+    {
+      "code": "AZ2183",
+      "kind": "perPage",
+      "severity": "warning",
+      "message": "{n} scenes on one page, budget is 4 — compress them or reuse one model",
+      "atMost": 4
+    },
+    {
+      "code": "AZ2184",
+      "kind": "perPage",
+      "severity": "warning",
+      "message": "{n} full-bleed scenes compete for the same attention — make one 'inline'",
+      "atMost": 1,
+      "when": {
+        "variant": [
+          "full"
+        ]
+      }
+    },
+    {
+      "code": "AZ2185",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'orbit' is drag-only for keyboard users — the emitter adds arrow-key control, check it reads sensibly",
+      "when": {
+        "prop": "camera",
+        "value": "orbit"
+      }
+    }
+  ]
 }

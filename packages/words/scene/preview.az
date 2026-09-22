@@ -3,7 +3,10 @@ az 1
 site aurora
 
 page /
-  scene inline
+  hero split
+    title "Built in the dark"
+    sub   "Handmade. Forty pairs a month."
+  scene inline 3d
     poster  ./preview-assets/assets/shoe.webp
     alt     "A black running shoe seen from the side"
     ratio   4:3

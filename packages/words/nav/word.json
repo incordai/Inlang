@@ -102,5 +102,54 @@
     "solid": [
       "inverse"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2140",
+      "kind": "count",
+      "severity": "warning",
+      "message": "{n} links. Max 7 — group them or simplify the IA",
+      "slots": [
+        "link",
+        "group"
+      ],
+      "atLeast": 8
+    },
+    {
+      "code": "AZ2141",
+      "kind": "count",
+      "severity": "error",
+      "message": "'mega' needs 2+ groups. Use a plain dropdown",
+      "slots": [
+        "group"
+      ],
+      "atMost": 1,
+      "when": {
+        "variant": [
+          "mega"
+        ]
+      }
+    },
+    {
+      "code": "AZ2142",
+      "kind": "count",
+      "severity": "error",
+      "message": "{n} CTAs. Nav gets one",
+      "slots": [
+        "cta"
+      ],
+      "atLeast": 2
+    },
+    {
+      "code": "AZ2143",
+      "kind": "childLabelWords",
+      "severity": "warning",
+      "message": "\"{label}\" — nav labels should be 1–2 words",
+      "slots": [
+        "link",
+        "group"
+      ],
+      "atMost": 2
+    }
+  ]
 }

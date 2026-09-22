@@ -916,8 +916,20 @@ page /
 
   feature grid
     columns 3
+    item "Hand-cut leather"
+      text "One hide, cut by hand, for every pair."
+    item "Sewn, not glued"
+      text "Every seam can be opened and redone."
   gallery orbit
     poster ./assets/orbit.webp
+    image ./assets/orbit-1.webp
+      alt "The last, before the upper goes on"
+    image ./assets/orbit-2.webp
+      alt "Welting the sole by hand"
+    image ./assets/orbit-3.webp
+      alt "A finished pair on the bench"
+    image ./assets/orbit-4.webp
+      alt "The sole, stitched and trimmed"
 
   text
     title "Made to be repaired"
@@ -925,12 +937,18 @@ page /
 
   cta band
     title "Reserve for the autumn run"
+    cta   "Reserve a pair" /reserve
 
   raw ./custom/Badge.tsx
 
 page /login       # no nav, nothing to distract
   nav none
   auth login
+
+page /legal
+  text
+    title "Privacy"
+    body  "We keep your order and your address, and nothing else."
 ```
 
 ### 8.1 Line-by-line commentary

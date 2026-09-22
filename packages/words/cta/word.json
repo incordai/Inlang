@@ -79,5 +79,42 @@
       "pricing",
       "footer"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2020",
+      "kind": "count",
+      "severity": "error",
+      "message": "no action declared — add: cta \"Reserve a pair\" /reserve",
+      "slots": [
+        "cta"
+      ],
+      "atMost": 0
+    },
+    {
+      "code": "AZ2021",
+      "kind": "notFirst",
+      "severity": "warning",
+      "message": "this is the first block on the page — an opening statement is a 'hero'"
+    },
+    {
+      "code": "AZ2022",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'glass' on 'band' blurs nothing — the band paints its own background",
+      "when": {
+        "variant": [
+          "band"
+        ],
+        "modifier": "glass"
+      }
+    },
+    {
+      "code": "AZ2023",
+      "kind": "perPage",
+      "severity": "warning",
+      "message": "{n} CTA blocks on one page — the ask stops being an ask",
+      "atMost": 2
+    }
+  ]
 }

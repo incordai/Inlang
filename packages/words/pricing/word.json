@@ -107,5 +107,77 @@
       "hero",
       "footer"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2160",
+      "kind": "count",
+      "severity": "error",
+      "message": "no plans declared — add: plan \"Studio\"",
+      "slots": [
+        "plan"
+      ],
+      "atMost": 0
+    },
+    {
+      "code": "AZ2161",
+      "kind": "childAtMostOne",
+      "severity": "error",
+      "message": "'{first}' and '{second}' are both highlighted — highlight one",
+      "slot": "plan",
+      "prop": "highlight",
+      "value": "on"
+    },
+    {
+      "code": "AZ2162",
+      "kind": "childAllOrNone",
+      "severity": "error",
+      "message": "'{with}' has an annual price and '{without}' does not — declare annual on every plan or none",
+      "slot": "plan",
+      "prop": "annual"
+    },
+    {
+      "code": "AZ2163",
+      "kind": "valuePattern",
+      "severity": "error",
+      "message": "'{prop} {value}' is an expression — declare the number",
+      "slot": "plan",
+      "prop": "monthly",
+      "pattern": "[*/+×=]"
+    },
+    {
+      "code": "AZ2164",
+      "kind": "valuePattern",
+      "severity": "error",
+      "message": "'{prop} {value}' is an expression — declare the number",
+      "slot": "plan",
+      "prop": "annual",
+      "pattern": "[*/+×=]"
+    },
+    {
+      "code": "AZ2165",
+      "kind": "count",
+      "severity": "error",
+      "message": "'billing annual' but no plan declares one — add: annual 290",
+      "slots": [
+        "plan"
+      ],
+      "prop": "annual",
+      "atMost": 0,
+      "when": {
+        "prop": "billing",
+        "value": "annual"
+      }
+    },
+    {
+      "code": "AZ2166",
+      "kind": "count",
+      "severity": "warning",
+      "message": "{n} plans, 4 is the practical maximum — merge two or move the detail into 'table'",
+      "slots": [
+        "plan"
+      ],
+      "atLeast": 5
+    }
+  ]
 }

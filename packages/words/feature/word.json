@@ -112,5 +112,114 @@
       "firefox-latest",
       "ios-17"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2060",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'columns' only applies to 'grid' — remove it or switch variant",
+      "when": {
+        "prop": "columns",
+        "notVariant": [
+          "grid"
+        ]
+      }
+    },
+    {
+      "code": "AZ2061",
+      "kind": "count",
+      "severity": "error",
+      "message": "{n} item — a feature section needs at least 2, or use 'text'",
+      "slots": [
+        "item"
+      ],
+      "atMost": 1
+    },
+    {
+      "code": "AZ2062",
+      "kind": "count",
+      "severity": "error",
+      "message": "'bento' needs 3–7 items, got {n} — use 'grid'",
+      "slots": [
+        "item"
+      ],
+      "atMost": 2,
+      "when": {
+        "variant": [
+          "bento"
+        ]
+      }
+    },
+    {
+      "code": "AZ2063",
+      "kind": "count",
+      "severity": "error",
+      "message": "'bento' needs 3–7 items, got {n} — use 'grid'",
+      "slots": [
+        "item"
+      ],
+      "atLeast": 8,
+      "when": {
+        "variant": [
+          "bento"
+        ]
+      }
+    },
+    {
+      "code": "AZ2064",
+      "kind": "childAtMostOne",
+      "severity": "error",
+      "message": "{n} items marked 'lead' — only one can lead",
+      "slot": "item",
+      "prop": "lead"
+    },
+    {
+      "code": "AZ2065",
+      "kind": "count",
+      "severity": "warning",
+      "message": "{n} rows is a long scroll — use 'grid', or cut to 3",
+      "slots": [
+        "item"
+      ],
+      "atLeast": 6,
+      "when": {
+        "variant": [
+          "rows"
+        ]
+      }
+    },
+    {
+      "code": "AZ2066",
+      "kind": "childLabelWords",
+      "severity": "warning",
+      "message": "'{label}' is a sentence — item titles are 2–5 words",
+      "slots": [
+        "item"
+      ],
+      "atMost": 6
+    },
+    {
+      "code": "AZ2067",
+      "kind": "childMissing",
+      "severity": "warning",
+      "message": "'rows' gives each item half a screen — add 'text' or use 'grid'",
+      "slot": "item",
+      "prop": "text",
+      "when": {
+        "variant": [
+          "rows"
+        ]
+      }
+    },
+    {
+      "code": "AZ2068",
+      "kind": "notFirst",
+      "severity": "warning",
+      "message": "'reveal' on the first block animates what is already on screen — drop it",
+      "when": {
+        "modifier": "reveal"
+      }
+    }
+  ]
 }

@@ -12,6 +12,7 @@
 
 import type { Diagnostic, Pos } from './lex.ts';
 import type { Arg, Statement, AzFile } from './parse.ts';
+import { routePath, runBlockChecks, type Check, type CheckChild } from './checks.ts';
 
 export interface PropSpec {
   readonly type: string;
@@ -48,8 +49,10 @@ export interface PropSpec {
    * no provider buttons. Listing it here names it and refuses it (AZ1214).
    */
   readonly deferred?: string[];
-  /** `list` props: the most items the list may hold. */
+  /** `list` props: the most items the list may hold. `int`: the largest value. */
   readonly max?: number;
+  /** `int` props: the smallest value. */
+  readonly min?: number;
 }
 
 export interface Manifest {
@@ -82,6 +85,12 @@ export interface Manifest {
    */
   readonly requiresWhen?: Record<string, Record<string, string[]>>;
   readonly slots?: Record<string, unknown>;
+  /**
+   * The rows of the word's spec validation table, as data (checks.ts).
+   * A `count` check with no `when` on exactly one slot takes over that slot's
+   * bounds: its message is the spec's, so the generic min/max stays silent.
+   */
+  readonly checks?: Check[];
 }
 
 /**
@@ -146,6 +155,30 @@ function slotManifest(name: string, def: unknown): Manifest {
   return { name, props: d.props, slots: d.slots };
 }
 
+/** A slot's declared bounds. */
+function slotBounds(def: unknown): { min?: number; max?: number } {
+  const d = (def ?? {}) as { min?: unknown; max?: unknown };
+  return {
+    min: typeof d.min === 'number' ? d.min : undefined,
+    max: typeof d.max === 'number' ? d.max : undefined,
+  };
+}
+
+/**
+ * Is one of this slot's bounds owned by the word's own checks?
+ *
+ * An unconditional `count` on exactly this slot that fires from zero upward
+ * owns the minimum; one open-ended above owns the maximum. Its message is the
+ * spec's, and its severity may be the spec's warning where the manifest's
+ * bound would have been an error — faq-spec §9 warns at 13 questions.
+ */
+const countOwned = (m: Manifest | undefined, slot: string, bound: 'min' | 'max') =>
+  (m?.checks ?? []).some((c) =>
+    c.kind === 'count' && !c.when && !c.prop && c.slots?.length === 1 && c.slots[0] === slot &&
+    (bound === 'min' ? (c.atLeast ?? 0) === 0 : c.atMost === undefined));
+
+const wordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+
 const isProp = (s: Statement, m: Manifest | undefined) =>
   m?.props ? Object.prototype.hasOwnProperty.call(m.props, s.word) : false;
 
@@ -157,9 +190,6 @@ const isProp = (s: Statement, m: Manifest | undefined) =>
  * author wrote the list or the manifest supplied it.
  */
 export const LIST_SEPARATOR = ',';
-
-/** The path part of a route, without a query or fragment. */
-const routePath = (value: string) => value.replace(/[?#].*$/, '') || '/';
 
 export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult {
   const diagnostics: Diagnostic[] = [];
@@ -173,6 +203,130 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
   // `page` at file level and nowhere else.
   const routes = new Set(
     file.body.filter((s) => s.word === 'page').map((s) => routePath(s.args[0]?.value ?? '/')));
+
+  /**
+   * The checks that depend only on a prop's own value and its declaration.
+   *
+   * One function for a block's props and a slot fill's: a slot fill's props
+   * were never checked at all, so `item … media ../../x` and `focus sideways`
+   * passed the link stage that a block's would not.
+   */
+  function checkValues(word: string, props: Record<string, Arg>, specs: Record<string, PropSpec> | undefined) {
+    // ---- path sandboxing, VERIFICATION §5 --------------------------------
+    //
+    // A core invariant, not a target concern: `model ../../../etc/passwd` must
+    // not resolve, and enforcing it HERE means every target inherits it rather
+    // than each one remembering. Pure string logic, because core cannot import
+    // node:path (ARCHITECTURE §1a).
+    // Any value WRITTEN as a path is sandboxed, not only `path`-typed props:
+    // text's `body` is `markdown` and takes a file (text-spec §11).
+    for (const [key, arg] of Object.entries(props)) {
+      if (specs?.[key]?.type !== 'path' && arg.kind !== 'path') continue;
+      const cleaned = arg.value.replace(/\\/g, '/');
+      if (/^[a-zA-Z]:/.test(cleaned) || cleaned.startsWith('/')) {
+        err('AZ1210',
+            `${word}: '${arg.value}' is an absolute path — assets must live inside the project`,
+            arg.pos);
+        continue;
+      }
+      let depth = 0;
+      let escapes = false;
+      for (const seg of cleaned.split('/')) {
+        if (seg === '' || seg === '.') continue;
+        if (seg === '..') { if (depth === 0) { escapes = true; break; } depth--; }
+        else depth++;
+      }
+      if (escapes) {
+        err('AZ1210',
+            `${word}: '${arg.value}' points outside the project — assets must live inside it`,
+            arg.pos);
+      }
+    }
+
+    // ---- enum values must be known words ---------------------------------
+    for (const [key, arg] of Object.entries(props)) {
+      const spec = specs?.[key];
+      if (spec?.type !== 'enum' || !spec.values) continue;
+
+      if (Array.isArray(spec.values)) {
+        if (!spec.values.includes(arg.value)) {
+          err('AZ1208',
+              `${word}: '${arg.value}' is not a ${key} — try: ${spec.values.join(', ')}`,
+              arg.pos);
+        }
+        continue;
+      }
+
+      const set = NAMED_VALUE_SETS[spec.values];
+      if (!set) {
+        // The manifest names a set the compiler does not know. That is a bug
+        // in the manifest, and it is reported as one instead of crashing.
+        err('AZ1212',
+            `${word}: ${key} names an unknown value set '${spec.values}' — `
+            + `known sets: ${Object.keys(NAMED_VALUE_SETS).join(', ')}`,
+            arg.pos);
+        continue;
+      }
+      if (!set.test(arg.value)) {
+        err('AZ1208', `${word}: '${arg.value}' is not a ${key} — expected ${set.describe}`,
+            arg.pos);
+      }
+    }
+
+    // ---- int ranges: `columns 5` where 2–4 is declared ------------------
+    for (const [key, arg] of Object.entries(props)) {
+      const spec = specs?.[key];
+      if (spec?.type !== 'int') continue;
+      if (!/^-?\d+$/.test(arg.value)) {
+        err('AZ1407', `${word}: '${arg.value}' is not a whole number — ${key} takes one`, arg.pos);
+        continue;
+      }
+      const n = Number(arg.value);
+      if ((spec.min !== undefined && n < spec.min) || (spec.max !== undefined && n > spec.max)) {
+        err('AZ1408',
+            `${word}: '${key} ${arg.value}' is out of range — use ${spec.min ?? '…'} to ${spec.max ?? '…'}`,
+            arg.pos);
+      }
+    }
+
+    // ---- file types: `ext` is declared for path props ---------------------
+    // Checked on anything written as a path, so a `markdown` prop given a
+    // file (`body ./about.txt`) is typed like a `path` prop.
+    for (const [key, arg] of Object.entries(props)) {
+      const ext = specs?.[key]?.ext;
+      if (!ext || arg.kind !== 'path') continue;
+      const lower = arg.value.toLowerCase();
+      if (ext.some((e) => lower.endsWith(e))) continue;
+      const file = arg.value.split('/').pop() ?? arg.value;
+      err('AZ1410', `${word}: '${file}' is not a ${key} file — use ${ext.join(', ')}`, arg.pos);
+    }
+
+    // ---- word limits: advice, never a block (CONVENTIONS §5) --------------
+    for (const [key, arg] of Object.entries(props)) {
+      const max = specs?.[key]?.maxWords;
+      if (max === undefined || arg.kind !== 'string') continue;
+      const n = wordCount(arg.value);
+      if (n > max) {
+        warn('AZ1409', `${word}: ${key} is ${n} words, ${max} is the limit — shorten it`, arg.pos);
+      }
+    }
+  }
+
+  /** Slot fills above a slot's max or below its min. */
+  function checkSlotBounds(
+    word: string, m: Manifest | undefined, children: LinkedWord[], pos: Pos,
+  ) {
+    for (const [slot, def] of Object.entries(m?.slots ?? {})) {
+      const { min, max } = slotBounds(def);
+      const used = children.filter((c) => c.word === slot).length;
+      if (max !== undefined && used > max && !countOwned(m, slot, 'max')) {
+        err('AZ1209', `${word}: ${used} ${slot}s, maximum is ${max} — remove ${used - max}`, pos);
+      }
+      if (min !== undefined && used < min && !countOwned(m, slot, 'min')) {
+        err('AZ1216', `${word}: ${used} ${slot}s, minimum is ${min} — add ${min - used}`, pos);
+      }
+    }
+  }
 
   /**
    * Resolve one statement.
@@ -217,6 +371,10 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
         const linked = resolve(c, def, s.word);
         if (linked) children.push(linked);
       }
+      // A fill is checked like a block: pricing's `plan` must have exactly
+      // one `cta` (pricing-spec §11), and nothing enforced it.
+      checkValues(s.word, props, def.props);
+      checkSlotBounds(s.word, def, children, s.pos);
       return { word: s.word, variant: null, modifiers: [], args: s.args, props, as: s.as,
                children, pos: s.pos };
     }
@@ -299,16 +457,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     }
 
     // ---- slot limits, ARCHITECTURE §4.1 ---------------------------------
-    for (const [slot, spec] of Object.entries(m?.slots ?? {})) {
-      const max = (spec as { max?: number }).max;
-      if (typeof max !== 'number') continue;
-      const used = children.filter((c) => c.word === slot).length;
-      if (used > max) {
-        err('AZ1209',
-            `${s.word}: ${used} ${slot}s, maximum is ${max} — remove ${used - max}`,
-            s.pos);
-      }
-    }
+    checkSlotBounds(s.word, m, children, s.pos);
 
     // ---- requires, ARCHITECTURE §4.1 ------------------------------------
     for (const [trigger, needed] of Object.entries(m?.requires ?? {})) {
@@ -390,64 +539,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
       }
     }
 
-    // ---- path sandboxing, VERIFICATION §5 --------------------------------
-    //
-    // A core invariant, not a target concern: `model ../../../etc/passwd` must
-    // not resolve, and enforcing it HERE means every target inherits it rather
-    // than each one remembering. Pure string logic, because core cannot import
-    // node:path (ARCHITECTURE §1a).
-    for (const [key, arg] of Object.entries(props)) {
-      if (m?.props?.[key]?.type !== 'path') continue;
-      const cleaned = arg.value.replace(/\\/g, '/');
-      if (/^[a-zA-Z]:/.test(cleaned) || cleaned.startsWith('/')) {
-        err('AZ1210',
-            `${s.word}: '${arg.value}' is an absolute path — assets must live inside the project`,
-            arg.pos);
-        continue;
-      }
-      let depth = 0;
-      let escapes = false;
-      for (const seg of cleaned.split('/')) {
-        if (seg === '' || seg === '.') continue;
-        if (seg === '..') { if (depth === 0) { escapes = true; break; } depth--; }
-        else depth++;
-      }
-      if (escapes) {
-        err('AZ1210',
-            `${s.word}: '${arg.value}' points outside the project — assets must live inside it`,
-            arg.pos);
-      }
-    }
-
-    // ---- enum values must be known words ---------------------------------
-    for (const [key, arg] of Object.entries(props)) {
-      const spec = m?.props?.[key];
-      if (spec?.type !== 'enum' || !spec.values) continue;
-
-      if (Array.isArray(spec.values)) {
-        if (!spec.values.includes(arg.value)) {
-          err('AZ1208',
-              `${s.word}: '${arg.value}' is not a ${key} — try: ${spec.values.join(', ')}`,
-              arg.pos);
-        }
-        continue;
-      }
-
-      const set = NAMED_VALUE_SETS[spec.values];
-      if (!set) {
-        // The manifest names a set the compiler does not know. That is a bug
-        // in the manifest, and it is reported as one instead of crashing.
-        err('AZ1212',
-            `${s.word}: ${key} names an unknown value set '${spec.values}' — `
-            + `known sets: ${Object.keys(NAMED_VALUE_SETS).join(', ')}`,
-            arg.pos);
-        continue;
-      }
-      if (!set.test(arg.value)) {
-        err('AZ1208', `${s.word}: '${arg.value}' is not a ${key} — expected ${set.describe}`,
-            arg.pos);
-      }
-    }
+    checkValues(s.word, props, m?.props);
 
     // ---- list items must be known, available, unique and few enough -----
     for (const [key, items] of Object.entries(listItems)) {
@@ -490,6 +582,26 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
       err('AZ1215',
           `${s.word}: '${arg.value}' is not a page in this site — add it or fix the ${key}`,
           arg.pos);
+    }
+
+    // ---- the word's own validation table (checks.ts) --------------------
+    if (m?.checks?.length) {
+      const values = (p: Record<string, Arg>) =>
+        Object.fromEntries(Object.entries(p).map(([k, a]) => [k, a.value]));
+      const fills: CheckChild[] = children.map((c) => ({
+        word: c.word, args: c.args, props: values(c.props), pos: c.pos,
+      }));
+      runBlockChecks(m.checks, {
+        word: s.word,
+        variant: variant ?? m.variants?.[0] ?? null,
+        variantWritten: variant !== null,
+        modifiers,
+        props: values(props),
+        propKinds: Object.fromEntries(Object.entries(props).map(([k, a]) => [k, a.kind])),
+        children: fills,
+        inPage: parentWord === 'page',
+        pos: s.pos,
+      }, routes, (d) => diagnostics.push(d));
     }
 
     return { word: s.word, variant, modifiers, args: s.args, props, as: s.as, children, pos: s.pos };

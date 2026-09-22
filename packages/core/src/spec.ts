@@ -14,9 +14,16 @@
  * begins here — if the Spec is unstable, nothing downstream can be stable.
  */
 
-import type { Diagnostic } from './lex.ts';
+import type { Diagnostic, Pos } from './lex.ts';
 import type { LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
+import { runPageChecks, type CheckSubject, type PageEntry } from './checks.ts';
+
+/**
+ * Where each block was written. A SpecBlock carries no position — it is the
+ * target-facing shape — but a page-level check must point at a line.
+ */
+const written = new WeakMap<SpecBlock, Pos>();
 
 export interface SpecBlock {
   readonly word: string;
@@ -107,6 +114,12 @@ function siteScopedProps(kids: LinkedWord[], manifests: Map<string, Manifest>): 
 }
 
 function toBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteScoped = new Map()): SpecBlock {
+  const block = buildBlock(w, manifests, site);
+  written.set(block, w.pos);
+  return block;
+}
+
+function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteScoped): SpecBlock {
   const m = manifests.get(w.word);
   const props: Record<string, string> = {};
 
@@ -246,7 +259,81 @@ export function buildSpec(
     pages,
   };
 
+  // ---- one site, one value for a site-scoped prop ------------------------
+  //
+  // auth-spec §11: "'hosted' and 'session' are both adapters — one site, one
+  // adapter". Two site-level declarations used to resolve silently to the
+  // first.
+  {
+    const firstSeen = new Map<string, { value: string; word: string; key: string }>();
+    for (const w of kids) {
+      for (const [key, ps] of Object.entries(manifests.get(w.word)?.props ?? {})) {
+        if (ps.scope !== 'site' || !(key in w.props)) continue;
+        const id = `${w.word}.${key}`;
+        const value = w.props[key].value;
+        const before = firstSeen.get(id);
+        if (!before) { firstSeen.set(id, { value, word: w.word, key }); continue; }
+        if (before.value === value) continue;
+        diagnostics.push({
+          code: 'AZ1505',
+          message: `${w.word}: '${before.value}' and '${value}' are both ${key}s — one site, one ${key}`,
+          pos: w.props[key].pos,
+          severity: 'error',
+        });
+      }
+    }
+  }
+
+  // ---- page-level rows of each word's validation table (checks.ts) -----
+  for (const page of pages) {
+    const entries = pageEntries(spec, page, manifests);
+    runPageChecks(entries, (d) => diagnostics.push(d));
+  }
+
   return { spec, diagnostics };
+}
+
+/**
+ * The blocks one page renders, for page-level checks.
+ *
+ * Inherited blocks the page does not override or suppress, then the page's
+ * own — including a SECOND declaration of the same word, which blocksFor
+ * collapses (it can render only one) and which is exactly what "only one per
+ * page" must see.
+ */
+function pageEntries(spec: Spec, page: SpecPage, manifests: Map<string, Manifest>): PageEntry[] {
+  const own = page.blocks.filter((b) => b.variant !== 'none');
+  const overridden = new Set(page.blocks.map((b) => b.word));
+  const inherited = spec.site.inherited.filter((b) => !overridden.has(b.word) && b.variant !== 'none');
+
+  // Content opens with the first own block that is not page chrome: nav and
+  // footer frame a page, and a backdrop scene is a layer behind it.
+  const chrome = (b: SpecBlock) =>
+    b.word === 'nav' || b.word === 'footer' || (b.word === 'scene' && b.variant === 'backdrop');
+  const opener = own.find((b) => !chrome(b));
+
+  const entry = (b: SpecBlock, inPage: boolean): PageEntry => ({
+    subject: subjectOf(b, inPage),
+    checks: manifests.get(b.word)?.checks ?? [],
+    opensContent: b === opener,
+  });
+  return [...inherited.map((b) => entry(b, false)), ...own.map((b) => entry(b, true))];
+}
+
+function subjectOf(b: SpecBlock, inPage: boolean): CheckSubject {
+  const at = written.get(b) ?? { line: 1, col: 1 };
+  return {
+    word: b.word,
+    variant: b.variant,
+    variantWritten: true,
+    modifiers: b.modifiers,
+    props: b.props,
+    children: b.children.map((c) => ({
+      word: c.word, args: c.args, props: c.props, pos: written.get(c) ?? at,
+    })),
+    inPage,
+    pos: at,
+  };
 }
 
 /**
@@ -284,6 +371,20 @@ const PLACEMENT: Record<string, 'start' | 'end'> = {
 };
 
 /**
+ * Where a block sits if it is an inherited one, else undefined.
+ *
+ * Only `scene backdrop` is inherited like nav (scene-spec §6); `scene inline`
+ * and `scene full` are ordinary page content. Treating every scene as
+ * inheritable hoisted a page's inline scene to the top, and let it replace
+ * the site's backdrop. `none` stays placed, because it is how a page opts
+ * out of the inherited backdrop.
+ */
+function placementOf(b: SpecBlock): 'start' | 'end' | undefined {
+  if (b.word === 'scene' && b.variant !== 'backdrop' && b.variant !== 'none') return undefined;
+  return PLACEMENT[b.word];
+}
+
+/**
  * The blocks a page actually renders, inheritance resolved.
  *
  * This is a CORE function, not a target's job. Two targets doing this
@@ -307,17 +408,17 @@ export function blocksFor(spec: Spec, page: SpecPage): SpecBlock[] {
   // What the page says about each inheritable word, if anything.
   const overrides = new Map<string, SpecBlock>();
   for (const b of page.blocks) {
-    if (PLACEMENT[b.word] !== undefined) overrides.set(b.word, b);
+    if (placementOf(b) !== undefined) overrides.set(b.word, b);
   }
 
   for (const inheritedBlock of spec.site.inherited) {
     const chosen = overrides.get(inheritedBlock.word) ?? inheritedBlock;
     if (chosen.variant === 'none') continue;
-    (PLACEMENT[chosen.word] === 'end' ? end : start).push(chosen);
+    (placementOf(chosen) === 'end' ? end : start).push(chosen);
   }
 
   for (const b of page.blocks) {
-    const placement = PLACEMENT[b.word];
+    const placement = placementOf(b);
     if (placement === undefined) { body.push(b); continue; }
     // Already handled above as an override of an inherited block.
     if (spec.site.inherited.some((i) => i.word === b.word)) continue;

@@ -155,7 +155,19 @@ export function lex(source: string): LexResult {
         let out = '';
         let closed = false;
         while (c < raw.length) {
-          if (raw[c] === '\\' && c + 1 < raw.length) { out += raw[c + 1]; c += 2; continue; }
+          // GRAMMAR §1.5: exactly three escapes. `\n` is a newline — keeping
+          // the bare `n` made an inline paragraph break impossible to write.
+          if (raw[c] === '\\' && c + 1 < raw.length) {
+            const next = raw[c + 1];
+            if (next === 'n') out += '\n';
+            else if (next === '"' || next === '\\') out += next;
+            else {
+              err('AZ1011', `string: '\\${next}' is not a legal escape — use \\" \\\\ or \\n`, lineNo, c + 1);
+              out += next;
+            }
+            c += 2;
+            continue;
+          }
           if (raw[c] === '"') { closed = true; c++; break; }
           out += raw[c]; c++;
         }

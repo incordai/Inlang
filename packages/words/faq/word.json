@@ -75,5 +75,72 @@
       "hero",
       "footer"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2040",
+      "kind": "count",
+      "severity": "error",
+      "message": "no questions declared — add: item \"How long does it take?\"",
+      "slots": [
+        "item"
+      ],
+      "atMost": 0
+    },
+    {
+      "code": "AZ2041",
+      "kind": "childMissing",
+      "severity": "error",
+      "message": "'{label}' has no answer — add: text \"…\"",
+      "slot": "item",
+      "prop": "text"
+    },
+    {
+      "code": "AZ2042",
+      "kind": "childUnique",
+      "severity": "error",
+      "message": "'{label}' is declared twice — the two anchors would collide, rename one",
+      "slot": "item"
+    },
+    {
+      "code": "AZ2043",
+      "kind": "perPage",
+      "severity": "error",
+      "message": "two FAQPage blocks on one page is invalid structured data — add 'schema off' to the second",
+      "atMost": 1,
+      "when": {
+        "prop": "schema",
+        "value": "on"
+      }
+    },
+    {
+      "code": "AZ2044",
+      "kind": "count",
+      "severity": "warning",
+      "message": "{n} questions is a paragraph, not an FAQ — write it as 'text' or add more",
+      "slots": [
+        "item"
+      ],
+      "atLeast": 1,
+      "atMost": 2
+    },
+    {
+      "code": "AZ2045",
+      "kind": "count",
+      "severity": "warning",
+      "message": "{n} questions is a help centre — group them or move to a content system",
+      "slots": [
+        "item"
+      ],
+      "atLeast": 13
+    },
+    {
+      "code": "AZ2046",
+      "kind": "childLabelPattern",
+      "severity": "warning",
+      "message": "\"{label}\" is not a question — phrase it the way a visitor would ask it",
+      "slot": "item",
+      "pattern": "\\?\\s*$"
+    }
+  ]
 }

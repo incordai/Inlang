@@ -70,5 +70,66 @@
       "firefox-latest",
       "ios-17"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2200",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'reveal' delays the one block people came to read — drop it, or use 'centered'",
+      "when": {
+        "variant": [
+          "prose"
+        ],
+        "modifier": "reveal"
+      }
+    },
+    {
+      "code": "AZ2201",
+      "kind": "valuePattern",
+      "severity": "warning",
+      "message": "inline body is one paragraph — move it to a .md file",
+      "prop": "body",
+      "pattern": "\\n\\s*\\n"
+    },
+    {
+      "code": "AZ2202",
+      "kind": "propWords",
+      "severity": "warning",
+      "message": "'centered' is for one statement, this is {n} words — use 'prose'",
+      "prop": "body",
+      "atLeast": 61,
+      "when": {
+        "variant": [
+          "centered"
+        ]
+      }
+    },
+    {
+      "code": "AZ2203",
+      "kind": "propWords",
+      "severity": "warning",
+      "message": "{n} words is too short to split — use 'prose'",
+      "prop": "body",
+      "atMost": 119,
+      "when": {
+        "variant": [
+          "columns"
+        ]
+      }
+    },
+    {
+      "code": "AZ2204",
+      "kind": "propWords",
+      "severity": "warning",
+      "message": "{n} words makes columns taller than the screen — use 'prose'",
+      "prop": "body",
+      "atLeast": 301,
+      "when": {
+        "variant": [
+          "columns"
+        ]
+      }
+    }
+  ]
 }

@@ -67,9 +67,6 @@
     ],
     "mega": [
       "group"
-    ],
-    "dynamic": [
-      "since"
     ]
   },
   "themeReads": [
@@ -97,5 +94,68 @@
       "nav",
       "hero"
     ]
+  },
+  "checks": [
+    {
+      "code": "AZ2080",
+      "kind": "perPage",
+      "severity": "error",
+      "message": "only one per page (it owns the contentinfo landmark)",
+      "atMost": 1
+    },
+    {
+      "code": "AZ2081",
+      "kind": "childRoute",
+      "severity": "error",
+      "message": "'{value}' is not a page in this site — add it or fix the link",
+      "slots": [
+        "link",
+        "legal"
+      ]
+    },
+    {
+      "code": "AZ2082",
+      "kind": "count",
+      "severity": "warning",
+      "message": "'mega' has {n} groups — use 'columns'",
+      "slots": [
+        "group"
+      ],
+      "atMost": 3,
+      "when": {
+        "variant": [
+          "mega"
+        ]
+      }
+    },
+    {
+      "code": "AZ2083",
+      "kind": "count",
+      "severity": "warning",
+      "message": "{n} links, max is 24 — this is a sitemap, move it to a page",
+      "slots": [
+        "link"
+      ],
+      "atLeast": 25
+    },
+    {
+      "code": "AZ2084",
+      "kind": "childLabelWords",
+      "severity": "warning",
+      "message": "'{label}' — footer labels should be 1–3 words",
+      "slots": [
+        "link",
+        "legal",
+        "social"
+      ],
+      "atMost": 3
+    }
+  ],
+  "requiresWhen": {
+    "year": {
+      "dynamic": [
+        "since"
+      ]
+    }
   }
 }

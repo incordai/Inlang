@@ -110,5 +110,35 @@
       "nav",
       "footer"
     ]
-  }
+  },
+  "checks": [
+    {
+      "code": "AZ2120",
+      "kind": "count",
+      "severity": "error",
+      "message": "{n} CTAs. Maximum is 2 (one primary, one secondary)",
+      "slots": [
+        "cta",
+        "alt"
+      ],
+      "atLeast": 3
+    },
+    {
+      "code": "AZ2121",
+      "kind": "perPage",
+      "severity": "error",
+      "message": "only one per page (it owns the <h1>)",
+      "atMost": 1
+    },
+    {
+      "code": "AZ2122",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'full' fills the screen and hides the page below it — 'tall' keeps the peek that earns the scroll",
+      "when": {
+        "prop": "height",
+        "value": "full"
+      }
+    }
+  ]
 }
