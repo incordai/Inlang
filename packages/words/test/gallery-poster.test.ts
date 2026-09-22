@@ -43,9 +43,15 @@ function context(): EmitContext {
   };
 }
 
+const image = (src: string): SpecBlock => ({
+  word: 'image', variant: null, modifiers: [], as: null, children: [],
+  args: [{ kind: 'path', value: src }], props: {},
+});
+
 const block = (variant: string, props: Record<string, string> = {}): SpecBlock => ({
   word: 'gallery', variant, modifiers: [], args: [], as: null,
-  props: { title: 'The workshop', ...props }, children: [],
+  props: { title: 'The workshop', ...props },
+  children: [image('./a.webp'), image('./b.webp')],
 });
 
 function find(node: EmittedNode | string, match: (n: EmittedNode) => boolean): EmittedNode[] {
@@ -72,8 +78,9 @@ test('the poster is decorative, lazy, and never claims fetch priority (§7, §9)
 
 test('the poster reserves the canvas box at the gallery ratio', () => {
   const [byDefault] = posters(emit(block('orbit', { poster: POSTER }), context()));
-  const [custom] = posters(emit(block('orbit', { poster: POSTER, ratio: '1 / 1' }), context()));
-  assert.equal(byDefault.style?.aspectRatio, '4 / 3');
+  const [custom] = posters(emit(block('orbit', { poster: POSTER, ratio: 'square' }), context()));
+  // The manifest's words, as valid CSS: `3:2` itself is dropped by browsers.
+  assert.equal(byDefault.style?.aspectRatio, '3 / 2');
   assert.equal(custom.style?.aspectRatio, '1 / 1');
 });
 
