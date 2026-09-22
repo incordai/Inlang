@@ -21,6 +21,9 @@ import { WEB_EMITTERS } from '../../words/registry.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
+import { lintWords } from './lint.ts';
+import { migrate, GRAMMAR_VERSION } from './migrate.ts';
+import { formatFindings } from '../../theme/src/lint.ts';
 
 /** Exit codes are meaningful — word-quality-gate §5.2. */
 export const EXIT = { ok: 0, missing: 1, config: 2 } as const;
@@ -170,9 +173,49 @@ const USAGE = `az — words to a website
   az dev   <file.az> [--out dir]   build, then rebuild on every save
   az spec  <file.az>               print the Spec as JSON
   az check <file.az>               report diagnostics only, write nothing
+  az lint  [words-dir]             theme-token check of every word pack
+  az migrate <file.az>             upgrade the file to this grammar version
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate']);
+
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+/** `az lint`: findings are errors (exit 1), and a clean run says how much it checked. */
+function runLint(wordsDir: string): number {
+  if (!existsSync(wordsDir)) {
+    process.stderr.write(`az: no words directory at '${wordsDir}' — try: az lint path/to/words\n`);
+    return EXIT.config;
+  }
+  const report = lintWords(wordsDir);
+  if (report.words.length === 0) {
+    process.stderr.write(`az: no word packs in '${wordsDir}' — a word pack is a folder with a word.json\n`);
+    return EXIT.missing;
+  }
+  if (report.findings.length > 0) {
+    process.stderr.write(formatFindings(report.findings) + '\n');
+    process.stderr.write(`az: ${count(report.findings.length, 'theme violation')} in ${count(report.words.length, 'word')}\n`);
+    return EXIT.missing;
+  }
+  process.stdout.write(`az: ${count(report.words.length, 'word')}, no theme violations\n`);
+  return EXIT.ok;
+}
+
+/** `az migrate`: rewrites the file only when a migration step changed it. */
+function runMigrate(file: string): number {
+  const result = migrate(readFileSync(file, 'utf8'));
+  if (!result.ok) {
+    process.stderr.write(`az: ${file}: ${result.message}\n`);
+    return EXIT.missing;
+  }
+  if (!result.changed) {
+    process.stdout.write(`az: ${file} is already az ${GRAMMAR_VERSION} — nothing to migrate\n`);
+    return EXIT.ok;
+  }
+  writeFileSync(file, result.source, 'utf8');
+  process.stdout.write(`az: migrated ${file} from az ${result.from} to az ${GRAMMAR_VERSION}\n`);
+  return EXIT.ok;
+}
 
 export function main(argv: string[]): number {
   const [cmd, file, ...rest] = argv;
@@ -186,10 +229,12 @@ export function main(argv: string[]): number {
     process.stderr.write(`az: unknown command "${cmd}"\n\n${USAGE}`);
     return EXIT.config;
   }
+  if (cmd === 'lint') return runLint(file ?? process.env.AZ_WORDS ?? 'words');
   if (!file) {
     process.stderr.write(`az: ${cmd} needs a file — try: az ${cmd} site.az\n`);
     return EXIT.config;
   }
+  if (cmd === 'migrate') return runMigrate(file);
 
   const outFlag = rest.indexOf('--out');
   const outDir = outFlag >= 0 ? rest[outFlag + 1] : '.az-build';
