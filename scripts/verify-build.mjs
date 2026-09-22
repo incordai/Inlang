@@ -23,9 +23,12 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
+/** PRD §9: "Bundle, non-3D pages < 150KB gz". */
+const NON_3D_BUDGET_BYTES = 150 * 1024;
 const WORDS = join(ROOT, 'packages/words');
 const CLI = join(ROOT, 'packages/cli/bin/az.js');
 
@@ -114,6 +117,18 @@ try {
   const html = ssr.stdout;
   check('React renders without warnings', ssr.stderr.trim() === '', ssr.stderr.trim().split('\n')[0]);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
+
+  /* ---- gate item 9: the bundle is inside the PRD §9 budget ------------ */
+  // Non-3D pages ship under 150KB gzipped (PRD §9), so 3D never taxes a page
+  // that does not use it. No generated site carries the 3D runtime yet, so the
+  // whole fixture is a non-3D page. Measured as the browser receives it.
+  {
+    const assetsDir = join(proj, 'dist/assets');
+    const code = readdirSync(assetsDir).filter((f) => /\.(js|css)$/.test(f));
+    const gz = code.reduce((n, f) => n + gzipSync(readFileSync(join(assetsDir, f))).length, 0);
+    check('gate 9 / PRD §9: non-3D bundle under 150KB gzipped', gz < NON_3D_BUDGET_BYTES,
+      `${(gz / 1024).toFixed(1)}KB gz across ${code.length} files`);
+  }
 
   /* ---- the images the page names are in the build ---------------------- */
   for (const a of ['assets/logo.svg', 'assets/logo-w.svg', 'assets/orbit.webp']) {
