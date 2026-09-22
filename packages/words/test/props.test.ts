@@ -183,7 +183,7 @@ const wordDirs = readdirSync(WORDS).filter((d) =>
  * too and the list shrinks as work lands.
  */
 const KNOWN_INERT: Record<string, string[]> = {
-  auth: ['impl', 'methods', 'redirect'],
+  auth: ['impl'],
   hero: ['model'],
   scene: ['camera', 'model'],
 };

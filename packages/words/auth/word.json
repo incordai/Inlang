@@ -41,6 +41,9 @@
       "max": 3,
       "default": [
         "password"
+      ],
+      "deferred": [
+        "oauth"
       ]
     },
     "redirect": {
@@ -54,7 +57,8 @@
       "ext": [
         ".ts",
         ".tsx"
-      ]
+      ],
+      "scope": "site"
     }
   },
   "slots": {
@@ -63,12 +67,16 @@
     }
   },
   "requires": {
-    "custom": [
-      "impl"
-    ],
     "signup": [
       "terms"
     ]
+  },
+  "requiresWhen": {
+    "adapter": {
+      "custom": [
+        "impl"
+      ]
+    }
   },
   "themeReads": [
     "color.surface",

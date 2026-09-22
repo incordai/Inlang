@@ -39,6 +39,17 @@ export interface PropSpec {
    * The file-wide check lives in spec.ts (AZ1303), which has the whole file.
    */
   readonly scope?: 'site' | 'block';
+  /**
+   * Values of the vocabulary that are declared but not available yet.
+   *
+   * auth-spec §12.3 defers `methods oauth` past the first release. Dropping it
+   * from `values` would make `oauth` read as a typo ("not a methods — try: …");
+   * keeping it in `values` unrefused would compile a form that silently has
+   * no provider buttons. Listing it here names it and refuses it (AZ1214).
+   */
+  readonly deferred?: string[];
+  /** `list` props: the most items the list may hold. */
+  readonly max?: number;
 }
 
 export interface Manifest {
@@ -58,6 +69,18 @@ export interface Manifest {
    * genuinely mean two different strengths.
    */
   readonly recommends?: Record<string, string[]>;
+  /**
+   * Requirements triggered by a PROP VALUE: `{ prop: { value: [needs] } }`.
+   *
+   * `requires` keys on variants and modifiers, and a word's behaviour can also
+   * turn on the value of an enum prop — auth's `adapter custom` needs an
+   * `impl` file (auth-spec §11). Written into `requires` as `"custom"` it was
+   * never active, because `custom` is neither a variant nor a modifier, so
+   * the error the spec promises was never raised. Nested rather than a
+   * `"adapter=custom"` key, so a manifest never carries syntax inside a
+   * string and the prop name is checked like any other key.
+   */
+  readonly requiresWhen?: Record<string, Record<string, string[]>>;
   readonly slots?: Record<string, unknown>;
 }
 
@@ -126,12 +149,30 @@ function slotManifest(name: string, def: unknown): Manifest {
 const isProp = (s: Statement, m: Manifest | undefined) =>
   m?.props ? Object.prototype.hasOwnProperty.call(m.props, s.word) : false;
 
+/**
+ * A `list` prop's items, in the Spec's serialisation.
+ *
+ * Comma-joined because that is what a manifest default already becomes when
+ * spec.ts writes `String(["password", "link"])` — one format whether the
+ * author wrote the list or the manifest supplied it.
+ */
+export const LIST_SEPARATOR = ',';
+
+/** The path part of a route, without a query or fragment. */
+const routePath = (value: string) => value.replace(/[?#].*$/, '') || '/';
+
 export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult {
   const diagnostics: Diagnostic[] = [];
   const err = (code: string, message: string, pos: Pos) =>
     diagnostics.push({ code, message, pos, severity: 'error' });
   const warn = (code: string, message: string, pos: Pos) =>
     diagnostics.push({ code, message, pos, severity: 'warning' });
+
+  // Every page the file declares, so a `route` prop can be checked against
+  // the site rather than only its shape. Top-level only: GRAMMAR §5 puts
+  // `page` at file level and nowhere else.
+  const routes = new Set(
+    file.body.filter((s) => s.word === 'page').map((s) => routePath(s.args[0]?.value ?? '/')));
 
   /**
    * Resolve one statement.
@@ -233,10 +274,21 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
 
     // ---- children -------------------------------------------------------
     const children: LinkedWord[] = [];
+    // A `list` prop keeps every item with its own position, so a bad item is
+    // reported where it was written, not at the start of the line.
+    const listItems: Record<string, Arg[]> = {};
     for (const c of s.children) {
       // A child that names a prop of THIS word carries its value.
       if (m?.props && Object.prototype.hasOwnProperty.call(m.props, c.word)) {
-        if (c.args.length > 0) props[c.word] = c.args[0];
+        if (c.args.length > 0 && m.props[c.word].type === 'list') {
+          // `methods password link` is ONE prop with two items. Taking only
+          // the first argument, as a scalar prop does, silently dropped `link`.
+          listItems[c.word] = c.args;
+          props[c.word] = {
+            ...c.args[0],
+            value: c.args.map((a) => a.value).join(LIST_SEPARATOR),
+          };
+        } else if (c.args.length > 0) props[c.word] = c.args[0];
         else {
           err('AZ1205', `${s.word}: '${c.word}' has no value — write: ${c.word} <value>`, c.pos);
         }
@@ -292,6 +344,24 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
         warn('AZ1211',
              `${s.word}: '${trigger}' works better with ${need} — add: ${need} <value>`,
              s.pos);
+      }
+    }
+
+    // ---- requirements keyed on a prop's value ----------------------------
+    //
+    // The same unmet-requirement error as `requires` (AZ1206), because to the
+    // author it is the same thing: this choice needs that. It is reported at
+    // the value that triggered it, which is the line the author must look at.
+    for (const [prop, byValue] of Object.entries(m?.requiresWhen ?? {})) {
+      const trigger = props[prop];
+      if (!trigger) continue;
+      const needed = byValue[trigger.value];
+      if (!needed) continue;
+      for (const need of needed) {
+        if (need in props) continue;
+        err('AZ1206',
+            `${s.word}: ${prop} '${trigger.value}' needs ${need} — add: ${need} <value>`,
+            trigger.pos);
       }
     }
 
@@ -377,6 +447,49 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
         err('AZ1208', `${s.word}: '${arg.value}' is not a ${key} — expected ${set.describe}`,
             arg.pos);
       }
+    }
+
+    // ---- list items must be known, available, unique and few enough -----
+    for (const [key, items] of Object.entries(listItems)) {
+      const spec = m?.props?.[key];
+      if (!spec) continue;
+      const allowed = Array.isArray(spec.values) ? spec.values : null;
+      const available = allowed?.filter((v) => !spec.deferred?.includes(v)) ?? [];
+      const seen = new Set<string>();
+      for (const item of items) {
+        if (seen.has(item.value)) {
+          warn('AZ1203', `${s.word}: '${item.value}' repeated — once is enough`, item.pos);
+          continue;
+        }
+        seen.add(item.value);
+        if (spec.deferred?.includes(item.value)) {
+          err('AZ1214',
+              `${s.word}: ${key} '${item.value}' is not available yet — use: ${available.join(', ')}`,
+              item.pos);
+        } else if (allowed && !allowed.includes(item.value)) {
+          err('AZ1208',
+              `${s.word}: '${item.value}' is not a ${key} — try: ${available.join(', ')}`,
+              item.pos);
+        }
+      }
+      if (typeof spec.max === 'number' && seen.size > spec.max) {
+        err('AZ1213',
+            `${s.word}: ${seen.size} ${key}, maximum is ${spec.max} — remove ${seen.size - spec.max}`,
+            items[0].pos);
+      }
+    }
+
+    // ---- a route must be a page of this site ----------------------------
+    //
+    // auth-spec §11: a redirect to an undeclared page is an error. It holds
+    // for every `route` prop, not only auth's: a route the site does not have
+    // is a dead link the compiler can see, whichever word carries it.
+    for (const [key, arg] of Object.entries(props)) {
+      if (m?.props?.[key]?.type !== 'route') continue;
+      if (routes.has(routePath(arg.value))) continue;
+      err('AZ1215',
+          `${s.word}: '${arg.value}' is not a page in this site — add it or fix the ${key}`,
+          arg.pos);
     }
 
     return { word: s.word, variant, modifiers, args: s.args, props, as: s.as, children, pos: s.pos };

@@ -92,6 +92,25 @@ const SUBMIT: Record<string, string> = {
   reset: 'Email me a link',
 };
 
+/** A passwordless submit says what happens next: an email, not a sign-in. */
+const LINK_SUBMIT = 'Email me a link';
+const LINK_ALTERNATIVE = 'Email me a link instead';
+
+/**
+ * The sign-in methods this form offers, in manifest order.
+ *
+ * `methods` arrives comma-joined (core's list serialisation) and defaulted to
+ * `password`. Only the two methods Phase 1 ships are read: `oauth` is refused
+ * by the compiler (AZ1214, auth-spec §12.3), so an emitter that met it would
+ * be looking at a file that did not compile.
+ */
+function methodsOf(block: SpecBlock): { password: boolean; link: boolean } {
+  const items = (block.props.methods ?? 'password').split(',');
+  const link = items.includes('link');
+  // A list naming only unknown methods still gets a form that works.
+  return { password: items.includes('password') || !link, link };
+}
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'login';
@@ -128,7 +147,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  const formChildren: EmittedNode[] = (FIELDS[variant] ?? FIELDS.login).map((f) => field(f, ctx));
+  // `reset` requests a link whatever the site's methods are (§5), so methods
+  // shape only the two credential forms. A passwordless form asks for no
+  // password at all — a field that is never used is one a manager fills and
+  // a user wonders about.
+  const methods = variant === 'reset' ? { password: false, link: true } : methodsOf(block);
+  const fields = (FIELDS[variant] ?? FIELDS.login)
+    .filter((f) => methods.password || f.type !== 'password');
+  const formChildren: EmittedNode[] = fields.map((f) => field(f, ctx));
 
   // §2: signup is the only variant that may ask beyond credentials, and terms
   // must be an explicit choice — never a pre-ticked box or an implied consent.
@@ -152,21 +178,40 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  formChildren.push({
+  const button = (method: string, label: string, primary: boolean): EmittedNode => ({
     tag: 'button',
-    attrs: { type: 'submit', class: 'az-auth-submit' },
+    attrs: {
+      type: 'submit',
+      class: primary ? 'az-auth-submit' : 'az-auth-submit az-auth-submit--alt',
+      // Which method this press chose, for the adapter call (§3).
+      name: 'method',
+      value: method,
+      // §6/§7: one real form, so Enter submits the FIRST button and a manager
+      // sees one credential form. The link button must not demand the
+      // password it is the alternative to, so it skips validation.
+      ...(primary ? {} : { formnovalidate: 'formnovalidate' }),
+    },
     style: {
       minHeight: px(t.size.tap),
       paddingInline: px(t.space[16]),
-      background: t.color.accent,
-      color: t.color['accent-contrast'],
-      border: '0',
+      background: primary ? t.color.accent : 'transparent',
+      color: primary ? t.color['accent-contrast'] : t.color.text,
+      border: primary ? '0' : `1px solid ${t.color.border}`,
       borderRadius: px(t.radius.sm),
       fontSize: t.typeSize.base,
       fontFamily: t.type.body,
     },
-    children: [SUBMIT[variant] ?? SUBMIT.login],
+    children: [label],
   });
+
+  if (variant === 'reset') {
+    formChildren.push(button('link', SUBMIT.reset, true));
+  } else if (methods.password) {
+    formChildren.push(button('password', SUBMIT[variant] ?? SUBMIT.login, true));
+    if (methods.link) formChildren.push(button('link', LINK_ALTERNATIVE, false));
+  } else {
+    formChildren.push(button('link', LINK_SUBMIT, true));
+  }
 
   children.push({
     tag: 'form',
@@ -176,6 +221,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // The adapter is a ROLE, never a vendor name (PRD §6.5).
       'data-adapter': block.props.adapter ?? 'custom',
       'data-flow': variant,
+      'data-methods': [methods.password && 'password', methods.link && 'link']
+        .filter(Boolean).join(' '),
+      // Where the M4 runtime sends a successful sign-in. The compiler has
+      // already checked it is a page of this site (AZ1215).
+      ...(block.props.redirect ? { 'data-redirect': block.props.redirect } : {}),
     },
     style: {
       display: 'grid',

@@ -27,6 +27,8 @@ page /login
     methods  password link
     redirect /account
     alt      "Create an account" /signup
+
+page /account                  # a redirect must name a page of this site (§11)
 ```
 
 **Variants are mutually exclusive:** `login` `signup` `reset`. Two is a compile
@@ -285,13 +287,14 @@ CONVENTIONS §5.
     "title":    { "type": "string", "maxWords": 8 },
     "sub":      { "type": "string", "maxWords": 20 },
     "methods":  { "type": "list", "of": "enum", "values": ["password", "link", "oauth"],
-                  "max": 3, "default": ["password"] },
+                  "max": 3, "default": ["password"], "deferred": ["oauth"] },
     "redirect": { "type": "route" },
     "terms":    { "type": "route" },
-    "impl":     { "type": "path", "ext": [".ts", ".tsx"] }
+    "impl":     { "type": "path", "ext": [".ts", ".tsx"], "scope": "site" }
   },
   "slots": { "alt": { "max": 2 } },
-  "requires": { "custom": ["impl"], "signup": ["terms"] },
+  "requires": { "signup": ["terms"] },
+  "requiresWhen": { "adapter": { "custom": ["impl"] } },
   "themeReads": ["color.surface", "color.text", "color.muted", "color.border", "color.accent",
                  "color.danger", "space.*", "type.body", "type.size.sm", "radius.md"],
   "deps": {},
