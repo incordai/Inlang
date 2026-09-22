@@ -179,9 +179,12 @@ between two floors can, without a schema change.
 |---|---|---|
 | `breakpoint.xs` | 480px | hero-spec §5 — primary CTA goes full-width below this |
 | `breakpoint.sm` | 768px | hero-spec §10 (`split` restacks), nav-spec §6 (mobile menu) |
+| `breakpoint.md` | 1024px | feature, gallery and text specs, open question 6 — the band where three columns stop having a measure |
 | `breakpoint.lg` | 1440px | hero-spec §3 container ceiling; word-gate §1 check 3 test width |
 
-Three, not five. 390px is a **test width** (word-gate §1 check 3), not a
+Four, not five. `md` was added when three block specs each needed the same
+~1024px band; hard-coding it in three words is the drift CONVENTIONS §4
+exists to stop. 390px is a **test width** (word-gate §1 check 3), not a
 breakpoint — nothing changes there.
 
 ### 1.10 The set is closed

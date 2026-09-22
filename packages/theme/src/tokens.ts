@@ -46,8 +46,12 @@ export const LAYER = {
   backdrop: 300, modal: 400, toast: 500, tooltip: 600, skip: 700,
 } as const;
 
-/** A raw `768px` in a media query is an off-scale px, i.e. a lint error. */
-export const BREAKPOINT = { sm: 768, md: 1024, lg: 1280 } as const;
+/**
+ * theme-spec §1.9. A raw `768px` in a media query is an off-scale px, i.e. a
+ * lint error. `md` is the band where three columns lose their measure —
+ * feature, gallery and text all need it (their specs' open question 6).
+ */
+export const BREAKPOINT = { xs: 480, sm: 768, md: 1024, lg: 1440 } as const;
 
 /** The 6-step type scale plus the display steps — global, per theme-spec §1.5. */
 export const TYPE_SIZE = {
