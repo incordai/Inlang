@@ -91,10 +91,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // destination is handled exactly as a `cta`'s is.
   const actions = [...ctx.slot('cta'), ...ctx.slot('alt')];
   if (actions.length > 0) {
+    // Slot fills are <li>; an <li> in a <div> is invalid HTML.
     children.push({
-      tag: 'div',
+      tag: 'ul',
       attrs: { class: 'az-hero-actions' },
-      style: { display: 'flex', gap: px(t.space[16]), marginTop: px(t.space[48]) },
+      style: {
+        display: 'flex', gap: px(t.space[16]), marginTop: px(t.space[48]),
+        marginBottom: 0, listStyle: 'none', padding: 0,
+      },
       children: actions,
     });
   }

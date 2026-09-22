@@ -243,10 +243,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // its absence on a login is a hole worth seeing.
   const alt = ctx.slot('alt');
   if (alt.length > 0) {
+    // Slot fills are <li>; a <p> cannot hold one, so this is a list.
     children.push({
-      tag: 'p',
+      tag: 'ul',
       attrs: { class: 'az-auth-alt' },
-      style: { marginTop: px(t.space[16]), fontSize: t.typeSize.sm, color: t.color.muted },
+      style: {
+        marginTop: px(t.space[16]), marginBottom: 0, padding: 0, listStyle: 'none',
+        fontSize: t.typeSize.sm, color: t.color.muted,
+      },
       children: alt,
     });
   }

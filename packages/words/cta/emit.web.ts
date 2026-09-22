@@ -69,15 +69,17 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
 
   const actions = [...ctx.slot('cta'), ...ctx.slot('alt')];
   if (actions.length > 0) {
+    // Slot fills are <li>, so the row is a list — an <li> in a <div> is
+    // invalid HTML, and a list also tells a reader how many actions there are.
     children.push({
-      tag: 'div',
+      tag: 'ul',
       attrs: {
         class: 'az-cta-actions',
         // Marks which palette the buttons must be checked against — contrast
         // is measured against the BAND, not the page (§3, gate item 4).
         'data-palette': inverted ? 'inverted' : 'page',
       },
-      style: { display: 'flex', gap: px(t.space[16]), flexWrap: 'wrap' },
+      style: { display: 'flex', gap: px(t.space[16]), flexWrap: 'wrap', listStyle: 'none', padding: 0, margin: 0 },
       children: actions,
     });
   }

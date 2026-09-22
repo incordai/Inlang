@@ -121,6 +121,24 @@ try {
     check(`asset linked from the site root: /${a}`, html.includes(`src="/${a}"`));
   }
 
+  /* ---- structure: every <li> is inside a list --------------------------- */
+  // Slot fills render as <li>; a container that is not a list makes invalid
+  // HTML (and a <p> cannot hold one at all). Walk the tags with a stack.
+  {
+    const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+      'link', 'meta', 'source', 'track', 'wbr']);
+    const stack = [];
+    const strays = [];
+    for (const m of html.matchAll(/<(\/?)([a-z][a-z0-9-]*)\b[^>]*?(\/?)>/g)) {
+      const [, closing, tag, selfClosing] = m;
+      if (closing) { stack.pop(); continue; }
+      if (tag === 'li' && !['ul', 'ol', 'menu'].includes(stack.at(-1))) strays.push(stack.at(-1));
+      if (!VOID.has(tag) && !selfClosing) stack.push(tag);
+    }
+    check('every <li> sits directly in a <ul>, <ol> or <menu>', strays.length === 0,
+      strays.length ? `${strays.length} inside: ${[...new Set(strays)].join(', ')}` : '');
+  }
+
   /* ---- 4. the DOM obeys the specs -------------------------------------- */
   const h1s = (html.match(/<h1/g) ?? []).length;
   const eyebrow = elementWithClass(html, 'az-hero-eyebrow');

@@ -57,8 +57,9 @@ export function dev(options: DevOptions): DevHandle {
     return outcome;
   };
 
-  run();
-
+  // Watch BEFORE the first build. Watching after it left a window in which a
+  // save landing between the first build's report and `watch()` was lost —
+  // an editor saving while the first compile ran got no rebuild.
   try {
     watcher = watch(options.source, () => {
       // Debounce: an editor save can fire `change` two or three times, and
@@ -70,6 +71,8 @@ export function dev(options: DevOptions): DevHandle {
     // A missing file is reported by the first build; not being able to watch
     // it is not a second error worth crashing over.
   }
+
+  run();
 
   return {
     close: () => {

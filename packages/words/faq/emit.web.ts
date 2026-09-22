@@ -95,10 +95,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
 
   const items = ctx.slot('item');
   if (items.length > 0) {
+    // Slot fills are <li>; their container must be a list to be valid HTML.
     children.push({
-      tag: 'div',
+      tag: 'ul',
       attrs: { class: 'az-faq-items' },
       style: {
+        listStyle: 'none',
+        padding: 0,
+        margin: 0,
         display: variant === 'columns' ? 'grid' : 'block',
         gridTemplateColumns: variant === 'columns' ? 'repeat(2, minmax(0, 1fr))' : 'none',
         columnGap: px(t.space[48]),
