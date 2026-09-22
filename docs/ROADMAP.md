@@ -41,7 +41,7 @@ the full protocol in VERIFICATION §2 and record it; if not, M0 still completes.
       (tests A2): once for scene structure alone, once including the shader and
       buffer code that carries the distinctive look. A2 splits into two claims
       and only the structural one is currently supported
-- [ ] procedural scene reproducible: identical vertex-buffer hash across two
+- [x] procedural scene reproducible: identical vertex-buffer hash across two
       builds, two runs and two browser engines (tests A8b) — this replaces the
       model budget as the critical-path 3D check
 - [ ] Draco model < 5MB **on the opt-in model path only** (tests A8)
@@ -189,14 +189,46 @@ A model only after real LSP usage data exists.
 
 ## Current status
 
-**M0 not started.** The repository contains documentation only — no code, no
-`package.json`, no lockfile, no git history. Every assumption in
-`ASSUMPTIONS.md` is `UNVERIFIED`.
+*Updated 2026-09-22. Every figure below is from a run on that date.*
 
-The device gate is cleared: M0 no longer waits on a mid-range Android
-(`ASSUMPTIONS.md` A1). **The next action is M0 — hand-build the hero with its
-three tiers and the runtime probe.**
+**Milestones were built out of order.** M0 is not closed, yet most of M1 and
+M2 exists. The gates above still stand: nothing below waives them.
 
-Still outstanding before M1, and not answerable by writing code — PRD §11:
-open-source vs internal, the fate of the backend project, a real client site
-for the M5 dogfood, and the licence.
+**M0 — partly done.** `spike-m0/` has the hand-built hero, the three tiers and
+the runtime probe.
+- Procedural determinism (A8b) is verified across builds, runs, macOS arm64
+  and Windows x64, and three engines — Chromium, Firefox, WebKit
+  (`pnpm test:engines`). Visual-snapshot stability over 10 runs is unmeasured.
+- Probe logic tests pass (`pnpm test:probe`); A1b stays `TESTING` until a
+  deliberately throttled device is measured.
+- Still open: the throttled-device probe run, the 60s no-oscillation scroll,
+  the fps and memory measurements, the two line counts, and the opt-in
+  `.glb`/Draco path — **which the spike never built**, so A8 cannot be
+  measured yet.
+
+**M1 — compiler core built.** Lexer, parser, link, validate, Spec and the web
+target exist; `az build`, `az dev`, `az spec` and `az check` work.
+`.github/workflows/ci.yml` runs typecheck and unit tests on every push, a
+nightly OS/Node matrix, and an end-to-end build that installs, builds and
+server-renders a compiled site (`pnpm verify:build`); its results on GitHub
+were not checked when this was written.
+Not yet checked against M1's exit list: the offline build and the <1s cold
+compile, as automated tests.
+
+**M2 — words mostly built.** All 11 blocks emit; 39/39 variants and 47/51
+props are implemented (`pnpm coverage`). Three themes exist; theme lint (A7)
+holds. The remaining four props are blocked:
+`hero.model`, `scene.model` and `scene.camera` need the 3D runtime ported
+from the spike (after M0, and after the pin, renderer-placement and Draco
+decoder decisions); `auth.impl` needs M4.
+Not built: responsive CSS (the target emits inline styles only, so no
+variant's phone layout exists), the button primitive, the overlay engine,
+thumbnails, the 12-point gate and `lint` as commands, and parts of each
+block's validation table (e.g. gallery's missing-alt and caption warnings,
+faq's one-FAQPage-per-page error, hero's three-button limit).
+
+**M3–M5 — not started.**
+
+Still outstanding and not answerable by writing code — PRD §11: open-source
+vs internal, the fate of the backend project (decides `auth azbackend`), a
+real client site for the M5 dogfood, and the licence.
