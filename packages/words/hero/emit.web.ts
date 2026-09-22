@@ -86,13 +86,34 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  const ctas = ctx.slot('cta');
-  if (ctas.length > 0) {
+  // §5 — one primary, one secondary. `alt` is the secondary (§1): it follows
+  // the primary in the same row and is rendered by the same slot path, so its
+  // destination is handled exactly as a `cta`'s is.
+  const actions = [...ctx.slot('cta'), ...ctx.slot('alt')];
+  if (actions.length > 0) {
     children.push({
       tag: 'div',
       attrs: { class: 'az-hero-actions' },
       style: { display: 'flex', gap: px(t.space[16]), marginTop: px(t.space[48]) },
-      children: ctas,
+      children: actions,
+    });
+  }
+
+  // §8 — every 3D hero ships a poster: the static tier, the loading state and
+  // reduced motion all show it. `describe` is its alt text (§9); `alt` is the
+  // secondary button, never an image description. Not lazy — it is in the
+  // first viewport — and no fetchpriority, because the TEXT is the LCP
+  // element (§8), not the media.
+  if (block.modifiers.includes('3d') && block.props.poster) {
+    children.push({
+      tag: 'img',
+      attrs: {
+        src: ctx.asset(block.props.poster),
+        alt: block.props.describe ?? '',
+        class: 'az-hero-poster',
+        decoding: 'async',
+      },
+      style: { display: 'block', width: '100%', height: 'auto', objectFit: 'cover' },
     });
   }
 

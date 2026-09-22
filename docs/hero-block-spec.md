@@ -244,7 +244,10 @@ Not optional, and cheap to bake in once:
   scroll-linked camera. Not "slower motion" — *no* motion
 - visible focus ring on both CTAs, never `outline: none`
 - background video/3D: no autoplay audio, ever; provide a pause control
-- `alt` text on the poster, and on the model a text equivalent of what it shows
+- alt text on the poster, written as `describe`, and on the model a text
+  equivalent of what it shows. `describe`, not `alt`: `alt` is the secondary
+  button (§1), and one word cannot be both. A `3d` hero without `poster` and
+  `describe` gets a warning (`recommends`)
 
 ---
 
@@ -312,11 +315,12 @@ lint, auto-install and validation are all generated from it.
     "sub":     { "type": "string", "maxWords": 30 },
     "model":   { "type": "path", "ext": [".glb"], "maxBytes": 5242880 },
     "poster":  { "type": "path", "ext": [".jpg", ".png", ".webp"] },
-    "alt":     { "type": "string" },
+    "describe": { "type": "string", "maxWords": 20 },
     "height":  { "type": "enum", "values": ["compact", "peek", "tall", "full"], "default": "peek" }
   },
-  "slots": { "cta": { "max": 2 } },
+  "slots": { "cta": { "max": 2 }, "alt": { "max": 1 } },
   "requires": { "scroll": ["3d"] },
+  "recommends": { "3d": ["poster", "describe"] },
   "themeReads": [
     "color.bg", "color.text", "color.muted", "color.accent",
     "color.accent-contrast", "color.scrim", "color.on-scrim",

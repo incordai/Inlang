@@ -44,8 +44,9 @@
         ".webp"
       ]
     },
-    "alt": {
-      "type": "string"
+    "describe": {
+      "type": "string",
+      "maxWords": 20
     },
     "height": {
       "type": "enum",
@@ -61,11 +62,20 @@
   "slots": {
     "cta": {
       "max": 2
+    },
+    "alt": {
+      "max": 1
     }
   },
   "requires": {
     "scroll": [
       "3d"
+    ]
+  },
+  "recommends": {
+    "3d": [
+      "poster",
+      "describe"
     ]
   },
   "themeReads": [

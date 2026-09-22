@@ -88,7 +88,8 @@ function pairFor(spec: PropSpec): [string, string] | null {
  * fixture measures itself. `cta.describe` is the alt text OF `media`, so it
  * has nothing to describe without one; `nav.inverse` is the logo shown over
  * the hero by a `solid` nav, so it needs both `solid` and a regular `logo`.
- * `faq.schema` describes answered questions and emits nothing below three
+ * `hero.describe` is the alt text of the poster a `3d` hero shows, so it
+ * needs both. `faq.schema` describes answered questions and emits nothing below three
  * (faq-spec §7.5), so the fixture carries three answered items.
  */
 const answered = (question: string, text: string): SpecBlock => ({
@@ -102,6 +103,7 @@ const GATES: Record<string, {
   children?: SpecBlock[];
 }> = {
   cta: { props: { media: './m.webp' } },
+  hero: { modifiers: ['3d'], props: { poster: './p.webp' } },
   faq: {
     children: [
       answered('Do you ship abroad?', 'Yes, to most countries.'),
@@ -182,7 +184,7 @@ const wordDirs = readdirSync(WORDS).filter((d) =>
  */
 const KNOWN_INERT: Record<string, string[]> = {
   auth: ['impl', 'methods', 'redirect'],
-  hero: ['alt', 'model', 'poster'],
+  hero: ['model'],
   scene: ['camera', 'model'],
 };
 

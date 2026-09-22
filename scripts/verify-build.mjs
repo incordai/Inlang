@@ -132,6 +132,10 @@ try {
   check('the CONTAINER carries no measure — hero-spec §3',
     !/class="az-hero [^"]*"[^>]*max-width/.test(html));
   check('hero uses svh, not vh — hero-spec §6', /min-height:\d+svh/.test(html));
+  // GRAMMAR §8's hero has `alt "Call the studio" tel:…` — the secondary
+  // button. It was once swallowed as the poster's alt text, with no error.
+  check('hero §1: the secondary `alt` button renders beside the primary',
+    /class="az-hero-actions"[^]*href="tel:\+50412345678"/.test(html));
   check('theme colour tokens reached the DOM', /hsl\(/.test(html));
   check('a behaviour prop is an attribute, never prose',
     /data-mobile="drawer"/.test(html) && !/>drawer</.test(html));
