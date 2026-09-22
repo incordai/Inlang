@@ -10,6 +10,50 @@
 import type { SpecBlock } from '../../core/src/spec.ts';
 import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
+/** faq-block-spec §7.5 — a two-question FAQPage is noise, so none is emitted. */
+const SCHEMA_MIN_ITEMS = 3;
+
+/**
+ * FAQPage JSON-LD — faq-block-spec §7.5.
+ *
+ * Built as a value and serialised by JSON.stringify, never concatenated
+ * (CONVENTIONS §6). The text sits inside a <script>, where HTML escaping does
+ * not apply, so the characters that could end the element or open a comment
+ * are spelled as JSON unicode escapes: the JSON parses back to exactly the
+ * author's text, and `</script>` or `<!--` in an answer stays inert.
+ * U+2028/U+2029 are escaped for the same reason target-web's stableJson does.
+ *
+ * Only items with both a question and an answer are described — the answer is
+ * rendered in the page by the item's own markup, so the markup never claims
+ * content a visitor cannot find.
+ */
+function faqSchema(block: SpecBlock): EmittedNode | null {
+  if (block.props.schema === 'off') return null;
+
+  const questions = block.children
+    .filter((c) => c.word === 'item')
+    .map((c) => ({ name: c.args[0]?.value ?? '', text: c.props.text ?? '' }))
+    .filter((q) => q.name && q.text);
+  if (questions.length < SCHEMA_MIN_ITEMS) return null;
+
+  const json = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: questions.map((q) => ({
+      '@type': 'Question',
+      name: q.name,
+      acceptedAnswer: { '@type': 'Answer', text: q.text },
+    })),
+  })
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+
+  return { tag: 'script', attrs: { type: 'application/ld+json' }, children: [json] };
+}
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'list';
@@ -63,6 +107,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       children: items,
     });
   }
+
+  const schema = faqSchema(block);
+  if (schema) children.push(schema);
 
   return {
     tag: 'section',

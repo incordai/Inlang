@@ -88,6 +88,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     children,
   };
 
+  // `split` is the only variant with a media column (§2, §10 `requires`).
+  const media = variant === 'split' ? splitMedia(block, ctx) : null;
+
   return {
     tag: 'section',
     attrs: { class: `az-cta az-cta--${variant}` },
@@ -110,6 +113,43 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       marginInline: variant === 'card' ? px(t.size['gutter-lg']) : undefined,
       border: variant === 'card' ? `1px solid ${t.color.border}` : undefined,
     },
-    children: variant === 'split' ? [text] : children,
+    children: variant === 'split' ? (media ? [text, media] : [text]) : children,
+  };
+}
+
+/**
+ * The `split` image, after the text so a restack puts it below (§6).
+ *
+ * Its alt text is `describe`, never `alt` — `alt` is the secondary-button slot
+ * (§11). Without a `describe` the image is decorative and gets `alt=""`; §9
+ * allows no third option. `data-media` records which, because §6 drops
+ * decorative media from the phone restack and keeps informative media.
+ */
+function splitMedia(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
+  if (!block.props.media) return null;
+  const describe = block.props.describe;
+  return {
+    tag: 'div',
+    attrs: {
+      class: 'az-cta-media',
+      'data-media': describe ? 'informative' : 'decorative',
+    },
+    children: [{
+      tag: 'img',
+      attrs: {
+        src: ctx.asset(block.props.media),
+        alt: describe ?? '',
+        class: 'az-cta-media-img',
+        // A closing cta sits below the fold; it must not compete for LCP.
+        loading: 'lazy',
+        decoding: 'async',
+      },
+      style: {
+        display: 'block',
+        width: '100%',
+        height: 'auto',
+        borderRadius: px(ctx.theme.radius.lg),
+      },
+    }],
   };
 }

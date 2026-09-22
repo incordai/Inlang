@@ -82,6 +82,36 @@ function pairFor(spec: PropSpec): [string, string] | null {
   }
 }
 
+/**
+ * Per-word gates, for props that only act in the presence of another prop or
+ * a modifier. Same reason as the footer baseline below: without the gate the
+ * fixture measures itself. `cta.describe` is the alt text OF `media`, so it
+ * has nothing to describe without one; `nav.inverse` is the logo shown over
+ * the hero by a `solid` nav, so it needs both `solid` and a regular `logo`.
+ * `faq.schema` describes answered questions and emits nothing below three
+ * (faq-spec §7.5), so the fixture carries three answered items.
+ */
+const answered = (question: string, text: string): SpecBlock => ({
+  word: 'item', variant: null, modifiers: [], as: null, children: [],
+  args: [{ kind: 'string', value: question }], props: { text },
+});
+
+const GATES: Record<string, {
+  modifiers?: string[];
+  props?: Record<string, string>;
+  children?: SpecBlock[];
+}> = {
+  cta: { props: { media: './m.webp' } },
+  faq: {
+    children: [
+      answered('Do you ship abroad?', 'Yes, to most countries.'),
+      answered('Can I return a pair?', 'Within thirty days.'),
+      answered('Are they handmade?', 'Every pair, in the studio.'),
+    ],
+  },
+  nav: { modifiers: ['solid'], props: { logo: './logo.svg' } },
+};
+
 const base = (word: string, variant: string | null): SpecBlock => {
   const arg = (value: string) => ({ kind: 'string', value });
   const kid = (w: string, ...values: string[]): SpecBlock => ({
@@ -89,7 +119,7 @@ const base = (word: string, variant: string | null): SpecBlock => {
     as: null, children: [],
   });
   return {
-    word, variant, modifiers: [], args: [], as: null,
+    word, variant, modifiers: GATES[word]?.modifiers ?? [], args: [], as: null,
     // A baseline of content, so a prop that only affects how children are laid
     // out still has children to affect.
     //
@@ -105,6 +135,7 @@ const base = (word: string, variant: string | null): SpecBlock => {
       copyright: 'Aurora Studio',
       year: 'since',
       since: '2019',
+      ...GATES[word]?.props,
     },
     children: [
       kid('link', 'Work', '/work'),
@@ -115,6 +146,7 @@ const base = (word: string, variant: string | null): SpecBlock => {
       { ...kid('plan', 'Studio'), props: { monthly: '29', annual: '290' } },
       kid('image', './a.webp'),
       kid('group', 'Shop'),
+      ...GATES[word]?.children ?? [],
     ],
   };
 };
@@ -150,11 +182,7 @@ const wordDirs = readdirSync(WORDS).filter((d) =>
  */
 const KNOWN_INERT: Record<string, string[]> = {
   auth: ['impl', 'methods', 'redirect'],
-  cta: ['describe', 'media'],
-  faq: ['schema'],
-  gallery: ['poster'],
   hero: ['alt', 'model', 'poster'],
-  nav: ['inverse'],
   scene: ['camera', 'model'],
 };
 

@@ -13,6 +13,9 @@ import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-cont
 /** §2 — orbit "caps at 16 images". Past that it is a cost, not a gallery. */
 const ORBIT_MAX = 16;
 
+/** The crop when the author sets no `ratio`; the poster reserves the same box. */
+const DEFAULT_RATIO = '4 / 3';
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'grid';
@@ -52,13 +55,41 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
+  // §9 — `orbit`'s poster is what the static tier, reduced motion and the
+  // loading state show in place of the ring. It occupies the canvas box, so
+  // the box is reserved at the same ratio before either one loads. The
+  // poster's alt is empty: it is a composite of the images below, which stay
+  // in the DOM as the real, labelled content — naming it again would make a
+  // screen reader announce the set twice. Lazy and without a priority hint,
+  // per §7: fetchpriority belongs to the hero's LCP element, never a gallery.
+  if (variant === 'orbit' && block.props.poster) {
+    children.push({
+      tag: 'img',
+      attrs: {
+        src: ctx.asset(block.props.poster),
+        alt: '',
+        class: 'az-gallery-poster',
+        loading: 'lazy',
+        decoding: 'async',
+      },
+      style: {
+        display: 'block',
+        width: '100%',
+        aspectRatio: block.props.ratio ?? DEFAULT_RATIO,
+        objectFit: 'cover',
+        borderRadius: px(t.radius.md),
+        margin: `0 0 ${px(t.space[16])}`,
+      },
+    });
+  }
+
   const images = ctx.slot('image');
   if (images.length > 0) {
     children.push({
       tag: 'ul',
       attrs: {
         class: 'az-gallery-items',
-        'data-ratio': block.props.ratio ?? '4 / 3',
+        'data-ratio': block.props.ratio ?? DEFAULT_RATIO,
         // `orbit` is the only variant that costs a 3D context. Declaring it
         // here is what lets the runtime load that machinery for this page and
         // nowhere else — scene-spec §5, one renderer per page.

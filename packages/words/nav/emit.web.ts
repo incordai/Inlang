@@ -125,15 +125,34 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // empty alt inside a link is an unlabelled link (§7), so the text is always
   // present; a visual build hides it against the image, it is never omitted.
   if (block.props.logo) {
+    const logoImg = (src: string, state: string, hidden: boolean): EmittedNode => ({
+      tag: 'img',
+      attrs: {
+        src: ctx.asset(src),
+        alt: '',
+        class: 'az-nav-logo-img',
+        'data-az-logo': state,
+        ...(hidden ? { hidden: 'hidden' } : {}),
+      },
+      // An inline `display` beats the `hidden` attribute's UA rule, so the
+      // waiting logo must say `none` itself or both logos render.
+      style: { display: hidden ? 'none' : 'block', height: px(t.space[32]) },
+    });
+
+    // §4: a `solid` nav sits transparent over the hero, then turns solid on
+    // scroll — so its logo needs two versions. The light `inverse` shows at
+    // the top, the regular logo once solid. Only the emitted (top) state is
+    // visible; the other is `hidden` until the scroll runtime swaps them, so
+    // a reader never meets two logos. Without `solid` there is no transparent
+    // state, and the inverse has nothing to be shown over.
+    const swaps = block.modifiers.includes('solid') && !!block.props.inverse;
     bar.push({
       tag: 'a',
       attrs: { class: 'az-nav-logo', href: '/' },
       style: { display: 'inline-flex', alignItems: 'center', minHeight: px(t.size.tap) },
-      children: [{
-        tag: 'img',
-        attrs: { src: ctx.asset(block.props.logo), alt: '', class: 'az-nav-logo-img' },
-        style: { display: 'block', height: px(t.space[32]) },
-      }],
+      children: swaps
+        ? [logoImg(block.props.inverse, 'top', false), logoImg(block.props.logo, 'solid', true)]
+        : [logoImg(block.props.logo, 'solid', false)],
     });
   }
 
