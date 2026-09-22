@@ -20,7 +20,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -37,11 +37,22 @@ const CLI = join(ROOT, 'packages/cli/bin/az.js');
  * escaped); naming `npm.cmd` instead fails outright with EINVAL, because Node
  * refuses to spawn a .cmd without a shell at all.
  *
- * So neither wrapper is used. npm ships as JavaScript beside the node binary,
+ * So neither wrapper is used. npm ships as JavaScript with the node install,
  * and vite installs its own JS entry point — running those with `process
  * .execPath` is the same program, one process shallower, with a real argv.
+ *
+ * Where npm's JS lives depends on the platform layout: beside node.exe on
+ * Windows (<prefix>/node_modules), under <prefix>/lib/node_modules on macOS
+ * and Linux, where node itself sits in <prefix>/bin.
  */
-const NPM_CLI = join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
+const NODE_DIR = dirname(process.execPath);
+const NPM_CLI = [
+  join(NODE_DIR, 'node_modules/npm/bin/npm-cli.js'),
+  join(NODE_DIR, '../lib/node_modules/npm/bin/npm-cli.js'),
+].find((candidate) => existsSync(candidate));
+if (!NPM_CLI) {
+  throw new Error(`verify-build: npm's npm-cli.js was not found in the node install at ${NODE_DIR}`);
+}
 
 const run = (file, args, cwd) =>
   execFileSync(file, args, {

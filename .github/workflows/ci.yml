@@ -1,0 +1,54 @@
+# VERIFICATION §7. Every step runs a script from package.json, so CI and a
+# local run use the same command (VERIFICATION §1: a check that exists only in
+# CI config will drift). Actions are pinned to commit SHAs, not moving tags.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck + unit (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pushes and PRs run the required job only. The nightly run adds
+        # macOS, Windows and the next Node line (VERIFICATION §7).
+        os: ${{ github.event_name == 'schedule' && fromJSON('["ubuntu-latest","macos-latest","windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+        node: ${{ github.event_name == 'schedule' && fromJSON('[22, 24]') || fromJSON('[22]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Enable pnpm (version from packageManager)
+        run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm verify
+
+  build:
+    name: end-to-end build and render
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm verify:build
