@@ -12,7 +12,7 @@
 import { blocksFor, type Spec, type SpecBlock } from '../../core/src/index.ts';
 import type { EmitContext, EmittedNode, ThemeLike, WordEmitter }
   from '../../core/src/emit-contract.ts';
-import { px } from '../../core/src/emit-contract.ts';
+import { componentNode, px } from '../../core/src/emit-contract.ts';
 
 export type EmitterMap = Readonly<Record<string, WordEmitter>>;
 
@@ -20,6 +20,31 @@ export type EmitterMap = Readonly<Record<string, WordEmitter>>;
 export type AssetResolver = (path: string) => string;
 
 export type SiteInfo = EmitContext['site'];
+
+/**
+ * Resolves a `raw` / `slot` component path to the module id the page imports
+ * (PRD §6.6). Sandboxed like assets; the caller records what it resolved.
+ */
+export type ComponentResolver = (path: string) => string;
+
+/** For callers that place no custom code: naming one is a loud error, never a silent drop. */
+const noComponents: ComponentResolver = (path) => {
+  throw new Error(`component '${path}': this caller cannot place custom components`);
+};
+
+/** A `raw` or `slot` statement's component, as a node. Its path is the last argument. */
+const custom = (c: SpecBlock, component: ComponentResolver): EmittedNode =>
+  componentNode(component(c.args[c.args.length - 1]?.value ?? ''));
+
+/** The escape-hatch statements are placed by the target, never rendered as content. */
+const isEscapeHatch = (c: SpecBlock) => c.word === 'raw' || c.word === 'slot';
+
+/** `slot before|after <path>`: components beside the block, in source order. */
+function injected(block: SpecBlock, point: string, component: ComponentResolver): EmittedNode[] {
+  return block.children
+    .filter((c) => c.word === 'slot' && c.args[0]?.value === point)
+    .map((c) => custom(c, component));
+}
 
 /**
  * A slot child rendered without a word emitter of its own.
@@ -118,21 +143,34 @@ function fallback(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // `mobile drawer` does not — and rendering every prop as a <p> put the
     // literal word "drawer" on the page. Nothing is lost: the values are all
     // still here, and the word's own emitter will place them properly.
-    children: block.children.map((c) => defaultChild(c, ctx)),
+    children: block.children.filter((c) => !isEscapeHatch(c)).map((c) => defaultChild(c, ctx)),
   };
 }
 
 /** Build the context one block sees. */
-function contextFor(block: SpecBlock, theme: ThemeLike, asset: AssetResolver, site: SiteInfo): EmitContext {
+function contextFor(
+  block: SpecBlock, theme: ThemeLike, asset: AssetResolver, site: SiteInfo, component: ComponentResolver,
+): EmitContext {
   return {
     theme,
     target: 'web',
     site,
     // A slot is filled by children whose word IS the slot's name — the same
-    // rule the linker uses, so what validated is what renders.
-    slot: (name) => block.children
-      .filter((c) => c.word === name)
-      .map((c) => defaultChild(c, contextFor(c, theme, asset, site))),
+    // rule the linker uses, so what validated is what renders — and by any
+    // `slot <name> <path>` component naming it, in source order, as a list
+    // item like the fills around it.
+    slot: (name) => block.children.flatMap((c): EmittedNode[] => {
+      if (c.word === name) return [defaultChild(c, contextFor(c, theme, asset, site, component))];
+      if (c.word === 'slot' && c.args[0]?.value === name) {
+        return [{
+          tag: 'li',
+          attrs: { class: 'az-child az-child--custom' },
+          style: { listStyle: 'none' },
+          children: [custom(c, component)],
+        }];
+      }
+      return [];
+    }),
     asset,
   };
 }
@@ -140,15 +178,21 @@ function contextFor(block: SpecBlock, theme: ThemeLike, asset: AssetResolver, si
 /** One block, through its word's emitter or the fallback. */
 export function emitBlock(
   block: SpecBlock, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver, site: SiteInfo,
+  component: ComponentResolver = noComponents,
 ): EmittedNode {
-  const ctx = contextFor(block, theme, asset, site);
+  // A page-level `raw` is a component in the page's flow.
+  if (block.word === 'raw') return custom(block, component);
+  const ctx = contextFor(block, theme, asset, site, component);
   const word = emitters[block.word];
-  return word ? word.emit(block, ctx) : fallback(block, ctx);
+  const node = word ? word.emit(block, ctx) : fallback(block, ctx);
+  // `raw` inside a block renders inside it, after the word's own content.
+  const inner = block.children.filter((c) => c.word === 'raw').map((c) => custom(c, component));
+  return inner.length > 0 ? { ...node, children: [...(node.children ?? []), ...inner] } : node;
 }
 
 /** Every page, with the site's inherited blocks in front of each page's own. */
 export function emitPages(
-  spec: Spec, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver,
+  spec: Spec, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver, component: ComponentResolver,
 ): { route: string; nodes: EmittedNode[] }[] {
   const site: SiteInfo = { name: spec.site.name };
   return spec.pages.map((page) => ({
@@ -156,6 +200,10 @@ export function emitPages(
     // blocksFor resolves inheritance: overrides, `none` suppression, and the
     // nav-first/footer-last placement. Concatenating the two lists here put
     // the footer above the page content and rendered a suppressed nav twice.
-    nodes: blocksFor(spec, page).map((b) => emitBlock(b, theme, emitters, asset, site)),
+    nodes: blocksFor(spec, page).flatMap((b) => [
+      ...injected(b, 'before', component),
+      emitBlock(b, theme, emitters, asset, site, component),
+      ...injected(b, 'after', component),
+    ]),
   }));
 }

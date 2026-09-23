@@ -143,6 +143,21 @@ try {
   check('React renders without warnings', ssr.stderr.trim() === '', ssr.stderr.trim().split('\n')[0]);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
 
+  /* ---- M3: the escape hatch mounts author components with the theme --- */
+  {
+    const home = rendered['/'];
+    // The hero's own root element, whatever tag the emitter chose.
+    const root = /<([a-z]+)[^>]*class="az-hero[ "]/.exec(home);
+    const heroClose = root ? home.indexOf(`</${root[1]}>`, root.index) + `</${root[1]}>`.length : -1;
+    check('M3: `slot after` mounts the component right after its block',
+      root !== null && home.slice(heroClose).startsWith('<p class="fixture-ticker"'),
+      root ? home.slice(heroClose, heroClose + 40) : 'no hero root');
+    check('M3: a custom component receives theme tokens, not colours',
+      /class="fixture-ticker"[^>]*style="color:var\(--az-color-accent\)"|style="color:var\(--az-color-accent\)"[^>]*class="fixture-ticker"/.test(home));
+    check('M3: a page-level `raw` component renders in the page flow',
+      /class="fixture-badge"/.test(home) && home.indexOf('fixture-badge') < home.indexOf('<footer'));
+  }
+
   /* ---- gate item 9: the bundle is inside the PRD §9 budget ------------ */
   // Non-3D pages ship under 150KB gzipped (PRD §9), so 3D never taxes a page
   // that does not use it. No generated site carries the 3D runtime yet, so the

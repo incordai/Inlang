@@ -10,55 +10,32 @@
  */
 
 import {
-  readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
+  readFileSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
 } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
-import { compile, formatDiagnostics, serialiseSpec, type Manifest } from '../../core/src/index.ts';
-import { emitProject, PathEscapeError } from '../../target-web/src/emit.ts';
-// The CLI is the composition root (ARCHITECTURE §1a): it owns which target and
-// which words are in play, and hands both to a compiler that knows neither.
-import { WEB_EMITTERS } from '../../words/registry.ts';
+import { dirname, resolve, sep } from 'node:path';
+import { compile, formatDiagnostics, serialiseSpec } from '../../core/src/index.ts';
+import { emitProject, PathEscapeError, USER_DIR } from '../../target-web/src/emit.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
 import { lintWords } from './lint.ts';
+import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
 import { formatFindings } from '../../theme/src/lint.ts';
 
 /** Exit codes are meaningful — word-quality-gate §5.2. */
 export const EXIT = { ok: 0, missing: 1, config: 2 } as const;
 
-/**
- * Load word manifests from disk.
- *
- * This is why the loader lives in the CLI and not in `core`: the Playground
- * has no filesystem and bundles the same objects instead (ARCHITECTURE §1a).
- */
-export function loadManifests(wordsDir: string): Map<string, Manifest> {
-  const manifests = new Map<string, Manifest>();
-  for (const entry of readdirSync(wordsDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const file = join(wordsDir, entry.name, 'word.json');
-    // A directory without a manifest is not a word — CONVENTIONS §3 says a
-    // word IS its manifest. Treating every subdirectory as a word made a
-    // single stray folder break the whole compiler.
-    if (!existsSync(file)) continue;
-    try {
-      const m = JSON.parse(readFileSync(file, 'utf8')) as Manifest;
-      manifests.set(m.name, m);
-    } catch (e) {
-      // A manifest that exists but is broken IS an error — silence here would
-      // make a word vanish with no explanation.
-      throw new Error(`words: ${entry.name}/word.json is unreadable — ${(e as Error).message}`);
-    }
-  }
-  return manifests;
-}
-
 export interface BuildOptions {
   readonly source: string;      // path to the .az file
   readonly outDir: string;
+  /** The word set: the bundled words, or `AZ_WORDS`. */
   readonly wordsDir: string;
+  /**
+   * The project's own words, overriding the set by name — where `az eject`
+   * puts a word. Defaults to `words/` beside the source; null for none.
+   */
+  readonly projectWordsDir?: string | null;
   readonly write?: boolean;
 }
 
@@ -80,23 +57,25 @@ export interface BuildOutcome {
  * resolved and must still sit inside the project directory. Everything is
  * checked before anything is written, so a failed build writes nothing.
  */
-function locateAssets(projectDir: string, assets: string[]): { sources: string[]; problems: string[] } {
+function locateAssets(
+  projectDir: string, assets: string[], kind: 'asset' | 'component' = 'asset',
+): { sources: string[]; problems: string[] } {
   const root = realpathSync(projectDir);
   const sources: string[] = [];
   const problems: string[] = [];
   for (const a of assets) {
     const candidate = resolve(root, a);
     if (!existsSync(candidate)) {
-      problems.push(`asset: './${a}' does not exist — add the file or fix the path`);
+      problems.push(`${kind}: './${a}' does not exist — add the file or fix the path`);
       continue;
     }
     const real = realpathSync(candidate);
     if (real !== root && !real.startsWith(root + sep)) {
-      problems.push(`asset: './${a}' resolves outside the project — assets must live inside it`);
+      problems.push(`${kind}: './${a}' resolves outside the project — ${kind}s must live inside it`);
       continue;
     }
     if (!statSync(real).isFile()) {
-      problems.push(`asset: './${a}' is not a file`);
+      problems.push(`${kind}: './${a}' is not a file`);
       continue;
     }
     sources.push(real);
@@ -104,10 +83,14 @@ function locateAssets(projectDir: string, assets: string[]): { sources: string[]
   return { sources, problems };
 }
 
+/** The words one build compiles with: the set, plus the project's own. */
+const wordsFor = (options: Omit<BuildOptions, 'outDir'>) => loadWords(options.wordsDir,
+  options.projectWordsDir === undefined ? resolve(dirname(options.source), 'words') : options.projectWordsDir);
+
 export function build(options: BuildOptions): BuildOutcome {
   const src = readFileSync(options.source, 'utf8');
-  const manifests = loadManifests(options.wordsDir);
-  const result = compile(src, { manifests });
+  const words = wordsFor(options);
+  const result = compile(src, { manifests: words.manifests });
 
   const report = result.diagnostics.length
     ? formatDiagnostics(result.diagnostics, options.source)
@@ -120,20 +103,25 @@ export function build(options: BuildOptions): BuildOutcome {
 
   let project;
   try {
-    project = emitProject(result.spec, { emitters: WEB_EMITTERS });
+    project = emitProject(result.spec, { emitters: words.emitters });
   } catch (e) {
     if (e instanceof PathEscapeError) {
       return { ok: false, files: [], assets: [], report: `${report}\n${e.message}`.trim(), exit: EXIT.missing };
     }
     throw e;
   }
-  const { files, assets } = project;
+  const { files, assets, modules } = project;
 
-  const located = locateAssets(dirname(resolve(options.source)), assets);
-  if (located.problems.length > 0) {
+  // The author's components go through the same sandbox as assets: they must
+  // exist and really be inside the project, symlinks followed.
+  const projectDir = dirname(resolve(options.source));
+  const located = locateAssets(projectDir, assets);
+  const components = locateAssets(projectDir, modules, 'component');
+  const problems = [...located.problems, ...components.problems];
+  if (problems.length > 0) {
     return {
       ok: false, files: [], assets: [],
-      report: [report, ...located.problems].filter(Boolean).join('\n'),
+      report: [report, ...problems].filter(Boolean).join('\n'),
       exit: EXIT.missing,
     };
   }
@@ -154,6 +142,12 @@ export function build(options: BuildOptions): BuildOutcome {
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(located.sources[i], target);
     });
+    // The generated App imports each one from here (target-web USER_DIR).
+    modules.forEach((m, i) => {
+      const target = resolve(options.outDir, USER_DIR, m);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(components.sources[i], target);
+    });
   }
 
   return { ok: true, files, assets, report, exit: EXIT.ok };
@@ -161,7 +155,7 @@ export function build(options: BuildOptions): BuildOutcome {
 
 export function specOf(options: Omit<BuildOptions, 'outDir'>): string | null {
   const src = readFileSync(options.source, 'utf8');
-  const r = compile(src, { manifests: loadManifests(options.wordsDir) });
+  const r = compile(src, { manifests: wordsFor(options).manifests });
   return r.spec ? serialiseSpec(r.spec) : null;
 }
 
@@ -175,9 +169,10 @@ const USAGE = `az — words to a website
   az check <file.az>               report diagnostics only, write nothing
   az lint  [words-dir]             theme-token check of every word pack
   az migrate <file.az>             upgrade the file to this grammar version
+  az eject <word> [--dir project]  take ownership of a word's source — one-way
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject']);
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
@@ -198,6 +193,29 @@ function runLint(wordsDir: string): number {
     return EXIT.missing;
   }
   process.stdout.write(`az: ${count(report.words.length, 'word')}, no theme violations\n`);
+  return EXIT.ok;
+}
+
+/** `az eject`: loud, because it is the one command that cannot be undone by az. */
+function runEject(word: string, projectDir: string | undefined): number {
+  if (!projectDir) {
+    process.stderr.write('az: --dir needs a directory — try: az eject hero --dir my-site\n');
+    return EXIT.config;
+  }
+  const r = eject(word, resolve(projectDir), process.env.AZ_WORDS ?? BUNDLED_WORDS);
+  if (!r.ok) {
+    process.stderr.write(`az: eject: ${r.message}\n`);
+    return EXIT.config;
+  }
+  const where = `words/${word}`;
+  process.stdout.write(
+    `az: ejected ${word} to ${where}\n\n`
+    + `  This is ONE-WAY. az will never update, merge or regenerate ${where},\n`
+    + `  and fixes to the bundled ${word} will not reach this project.\n`
+    + `  It is yours: edit it freely — every build of this project uses it.\n`
+    + `  Restart \`az dev\` after editing it. Deleting ${where} returns the\n`
+    + `  project to the managed word, and your edits go with it.\n\n`
+    + r.files.map((f) => `  wrote ${f}\n`).join(''));
   return EXIT.ok;
 }
 
@@ -235,10 +253,16 @@ export function main(argv: string[]): number {
     return EXIT.config;
   }
   if (cmd === 'migrate') return runMigrate(file);
+  if (cmd === 'eject') {
+    const dirFlag = rest.indexOf('--dir');
+    return runEject(file, dirFlag >= 0 ? rest[dirFlag + 1] : process.cwd());
+  }
 
   const outFlag = rest.indexOf('--out');
   const outDir = outFlag >= 0 ? rest[outFlag + 1] : '.az-build';
-  const wordsDir = process.env.AZ_WORDS ?? resolve(dirname(file), 'words');
+  // The bundled words (or AZ_WORDS); the project's own `words/` beside the
+  // file overrides them by name inside build().
+  const wordsDir = process.env.AZ_WORDS ?? BUNDLED_WORDS;
 
   try {
     if (cmd === 'spec') {

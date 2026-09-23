@@ -15,6 +15,15 @@ import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
 import { resolve, schemeCss, schemeReferences, THEMES, type Theme } from '../../theme/src/index.ts';
 import { emitPages, type EmitterMap } from './tree.ts';
+import { COMPONENT_EXT } from '../../core/src/index.ts';
+import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
+
+/**
+ * Where the author's `raw` / `slot` modules go in the generated project.
+ * A directory of their own, so an author file can never collide with a
+ * generated one (App.tsx, runtime.tsx). The CLI copies them here.
+ */
+export const USER_DIR = 'src/user';
 
 export interface EmittedFile {
   readonly path: string;
@@ -126,11 +135,28 @@ function stableJson(value: unknown): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
-function appTsx(spec: Spec, pages: { route: string; nodes: EmittedNode[] }[]): string {
-  return `${HEADER}import { Node, NotFound, Page, Site } from "./runtime.tsx";
-import type { EmittedNode } from "./runtime.tsx";
-
+function appTsx(
+  spec: Spec, pages: { route: string; nodes: EmittedNode[] }[], modules: string[], theme: ThemeLike,
+): string {
+  // Identifiers are derived from position, never from the author's path, and
+  // the path reaches the source only through JSON.stringify (CONVENTIONS §6).
+  const imports = modules.map((m, i) => `import U${i} from ${JSON.stringify(`./user/${m}`)};\n`).join('');
+  const table = modules.map((m, i) => `  ${JSON.stringify(m)}: U${i},\n`).join('');
+  return `${HEADER}import { Components, Node, NotFound, Page, Site } from "./runtime.tsx";
+import type { Custom, EmittedNode } from "./runtime.tsx";
+${imports}
 const PAGES: { route: string; nodes: EmittedNode[] }[] = ${stableJson(pages)};
+
+/**
+ * The author's own components (raw / slot, PRD §6.6), by source path, and
+ * the theme they receive — the same tokens a word reads, colours as
+ * var(--az-…) references (theme-spec §3.3).
+ */
+const CUSTOM: Custom = {
+  components: {
+${table}  },
+  theme: ${stableJson(theme)},
+};
 
 /** "/work/" and "/work/index.html" are "/work"; the root stays "/". */
 export function routeOf(pathname: string): string {
@@ -145,17 +171,19 @@ export function routeOf(pathname: string): string {
 export default function App({ route }: { route: string }) {
   const page = PAGES.find((p) => p.route === routeOf(route));
   return (
-    <Site
-      name=${lit(spec.site.name)}
-      width=${lit(spec.site.width)}
-      theme=${lit(spec.site.theme)}
-      accent=${lit(spec.site.accent)}
-      pattern=${lit(spec.site.pattern)}
-    >
-      {page
-        ? <Page route={page.route}>{page.nodes.map((node, i) => <Node key={i} node={node} />)}</Page>
-        : <NotFound />}
-    </Site>
+    <Components.Provider value={CUSTOM}>
+      <Site
+        name=${lit(spec.site.name)}
+        width=${lit(spec.site.width)}
+        theme=${lit(spec.site.theme)}
+        accent=${lit(spec.site.accent)}
+        pattern=${lit(spec.site.pattern)}
+      >
+        {page
+          ? <Page route={page.route}>{page.nodes.map((node, i) => <Node key={i} node={node} />)}</Page>
+          : <NotFound />}
+      </Site>
+    </Components.Provider>
   );
 }
 `;
@@ -170,13 +198,43 @@ export default function App({ route }: { route: string }) {
  * writes a description, the runtime knows how to render it.
  */
 function runtimeTsx(): string {
-  return `${HEADER}import { createElement, type ReactNode } from "react";
+  return `${HEADER}import { createContext, createElement, useContext, type ComponentType, type ReactNode } from "react";
 
 export interface EmittedNode {
   tag: string;
   attrs?: Record<string, string>;
   style?: Record<string, string | number>;
   children?: (EmittedNode | string)[];
+}
+
+/** The theme a custom component receives — the token groups a word reads. */
+export interface AzTheme {
+  color: Record<string, string>;
+  shadow: Record<string, string>;
+  size: Record<string, number>;
+  type: Record<string, string | number>;
+  radius: Record<string, number>;
+  space: Record<string, number>;
+  motion: Record<string, string | number>;
+  layer: Record<string, number>;
+  breakpoint: Record<string, number>;
+  typeSize: Record<string, string>;
+}
+
+/** The author's components (raw / slot) and the theme they are given. */
+export interface Custom {
+  components: Record<string, ComponentType<{ theme: AzTheme }>>;
+  theme: AzTheme;
+}
+
+export const Components = createContext<Custom | null>(null);
+
+/** One author component, found by the source path its node carries. */
+function CustomNode({ src }: { src: string }): ReactNode {
+  const custom = useContext(Components);
+  const C = custom?.components[src];
+  if (!custom || !C) throw new Error("az: component " + JSON.stringify(src) + " was not imported");
+  return createElement(C, { theme: custom.theme });
 }
 
 /** Elements that must not be given children — doing so throws in React. */
@@ -214,6 +272,7 @@ const REACT_NAME: Record<string, string> = {
  */
 export function Node({ node }: { node: EmittedNode | string }): ReactNode {
   if (typeof node === "string") return node;
+  if (node.tag === ${JSON.stringify(COMPONENT_TAG)}) return createElement(CustomNode, { src: node.attrs?.src ?? "" });
 
   const props: Record<string, unknown> = { style: node.style };
   for (const [k, v] of Object.entries(node.attrs ?? {})) {
@@ -354,6 +413,8 @@ function indexHtml(spec: Spec): string {
 export interface EmittedProject {
   readonly files: EmittedFile[];
   readonly assets: string[];
+  /** The author's component modules, project-relative, for the caller to copy into USER_DIR. */
+  readonly modules: string[];
 }
 
 export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
@@ -369,9 +430,21 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     used.add(path);
     return `/${path}`;
   };
-  const pages = emitPages(spec, theme, options.emitters ?? {}, asset);
+  const modules = new Set<string>();
+  const component = (raw: string): string => {
+    const path = safeAssetPath(raw);
+    // The link stage checks the type too (AZ1410); this is the second gate, so
+    // no caller can hand the target a stylesheet or a binary to import.
+    if (!COMPONENT_EXT.some((ext) => path.toLowerCase().endsWith(ext))) {
+      throw new PathEscapeError(`component: '${raw}' is not a component module — use ${COMPONENT_EXT.join(', ')}`);
+    }
+    modules.add(path);
+    return path;
+  };
+  const pages = emitPages(spec, theme, options.emitters ?? {}, asset, component);
+  const moduleList = [...modules].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
   const files: EmittedFile[] = [
-    { path: 'src/App.tsx', content: appTsx(spec, pages) },
+    { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme) },
     { path: 'src/runtime.tsx', content: runtimeTsx() },
     {
       path: 'src/main.tsx',
@@ -470,5 +543,6 @@ export default defineConfig({
   return {
     files: files.sort((x, y) => byPath(x.path, y.path)),
     assets: [...used].sort(byPath),
+    modules: moduleList,
   };
 }
