@@ -111,7 +111,19 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // §6: `columns` collapses to one column below sm, in declared order —
       // row-major DOM order, so one column reads 1, 2, 3.
       below: variant === 'columns' ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } } : undefined,
-      children: items,
+      // §3: rows are separated by one hairline, not boxed — dividers, not
+      // cards. §6: below sm the row padding GROWS (the row is the tap
+      // target), from the question padding space.16 to space.24.
+      children: items.map((row): EmittedNode => ({
+        ...row,
+        attrs: { ...row.attrs, class: `${row.attrs?.class ?? ''} az-faq-item`.trim() },
+        style: {
+          ...row.style,
+          paddingBlock: px(t.space[16]),
+          borderBottom: `1px solid ${t.color.border}`,
+        },
+        below: { sm: { paddingBlock: px(t.space[24]) } },
+      })),
     });
   }
 
