@@ -390,7 +390,14 @@ text only (§9); this code names no provider.
 
 `pnpm test:cloud-auth` runs this profile against the real server software in
 Docker (its image, database setup and settings are data in
-`docs/reference/token-endpoint-server.json`), with a captured SMTP mailbox.
+`docs/reference/token-endpoint-server.json`), with a captured SMTP mailbox —
+16 checks, all passing.
+
+**Cross-origin headers.** The adapter sends `apikey` and `authorization`.
+The bare server allows only `content-type` across origins, so a browser's
+preflight is refused until its allowed-headers setting adds those two (the
+reference config does; the real-server test found this). A managed cloud's
+gateway already allows them; a self-run server of this kind needs the setting.
 
 ## 4. Secret leakage — a hard build error
 

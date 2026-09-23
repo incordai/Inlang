@@ -145,9 +145,11 @@ Adapters only. **We never implement auth** (PRD §6.5).
       cloud is reached through `profile token-endpoint` (auth-spec §3.5, unit
       tested); `pnpm test:cloud-auth` drives it against the **real
       open-source server software** that cloud runs, in Docker, with no
-      account — **written but not yet run**: Docker was paused on the
-      development machine when it landed. Tick only after it passes; even then
-      it is the server software, not a hosted account.
+      account — **passes, 16/16** (2026-09-23): sign-up, sign-in, the
+      protected page, sign-out, the wrong-password copy, reset through the
+      emailed link, a sign-in link continuing to `next`, and the same answer
+      for an unknown address. The box stays open because that is the server
+      software, not a hosted account.
 - [x] build **fails** when a service key is present in env (verify-build, by
       name and by token role; `az build` refuses first — cli/test/secrets)
 - [x] bundle scan finds no high-entropy secrets (every generated build scans

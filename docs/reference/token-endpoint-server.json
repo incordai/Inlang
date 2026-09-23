@@ -1,7 +1,11 @@
 {
   "about": "Reference configuration for the open-source identity server that the managed cloud in docs/cloud-setup.md runs (Supabase Auth, formerly GoTrue). scripts/cloud-auth-e2e.mjs reads this file so the test code names no product. {{…}} placeholders are filled in per run; every secret is generated for that run and discarded.",
   "image": "supabase/auth:v2.197.0",
-  "database": { "image": "postgres:18.6-alpine", "user": "supabase_auth_admin", "schema": "auth" },
+  "database": {
+    "image": "postgres:18.6-alpine",
+    "user": "supabase_auth_admin",
+    "schema": "auth"
+  },
   "initSql": [
     "CREATE USER {{DB_USER}} NOINHERIT CREATEROLE LOGIN NOREPLICATION PASSWORD '{{DB_PASSWORD}}';",
     "CREATE SCHEMA IF NOT EXISTS {{DB_SCHEMA}} AUTHORIZATION {{DB_USER}};",
@@ -15,6 +19,7 @@
   "env": {
     "GOTRUE_API_HOST": "0.0.0.0",
     "PORT": "9999",
+    "API_EXTERNAL_URL": "{{EXTERNAL_URL}}",
     "GOTRUE_DB_DRIVER": "postgres",
     "GOTRUE_DB_DATABASE_URL": "postgres://{{DB_USER}}:{{DB_PASSWORD}}@{{DB_HOST}}:5432/postgres",
     "GOTRUE_SITE_URL": "{{SITE_URL}}",
@@ -32,6 +37,8 @@
     "GOTRUE_SMTP_ADMIN_EMAIL": "no-reply@studio.test",
     "GOTRUE_SMTP_SENDER_NAME": "Studio",
     "GOTRUE_RATE_LIMIT_EMAIL_SENT": "1000",
-    "GOTRUE_SMTP_MAX_FREQUENCY": "1s"
-  }
+    "GOTRUE_SMTP_MAX_FREQUENCY": "1s",
+    "GOTRUE_CORS_ALLOWED_HEADERS": "apikey,authorization"
+  },
+  "corsNote": "A browser on another origin sends apikey and authorization; the bare server allows only content-type across origins until GOTRUE_CORS_ALLOWED_HEADERS adds them. A managed cloud's API gateway already allows them; a self-run server needs this setting."
 }

@@ -164,7 +164,6 @@ site studio
   auth
     adapter hosted
     profile token-endpoint
-    methods password link
     protect /account
 
 page /
@@ -174,6 +173,7 @@ page /
 page /login
   auth login
     title    "Welcome back"
+    methods  password link
     redirect /account
     alt      "Create an account" /signup
     alt      "Forgot your password" /reset
@@ -212,14 +212,17 @@ try {
   cleanups.push(() => smtp.close());
   const sitePort = await freePort();
   const siteUrl = `http://127.0.0.1:${sitePort}`;
+  // The server's public address is fixed before it starts: its emailed links
+  // point at it, so the browser must be able to follow them.
+  const authPort = await freePort();
+  const authUrl = `http://127.0.0.1:${authPort}`;
 
   docker('network', 'create', network);
-  cleanups.push(() => docker('network', 'rm', network));
 
   const values = {
     DB_USER: SERVER.database.user, DB_SCHEMA: SERVER.database.schema, DB_PASSWORD: dbPassword,
     DB_HOST: `${network}-db`, SITE_URL: siteUrl, JWT_SECRET: secret,
-    SMTP_HOST: 'host.docker.internal', SMTP_PORT: String(smtp.port),
+    SMTP_HOST: 'host.docker.internal', SMTP_PORT: String(smtp.port), EXTERNAL_URL: authUrl,
   };
   // Postgres with the schema and role the server's own development setup
   // prepares; the server runs its migrations on start.
@@ -233,11 +236,10 @@ try {
   }, 'postgres');
 
   const serverEnv = Object.entries(SERVER.env).flatMap(([k, v]) => ['-e', `${k}=${fill(v, values)}`]);
-  const auth = await run('--network', network, '-p', `127.0.0.1::${SERVER.port}`,
+  const auth = await run('--network', network, '-p', `127.0.0.1:${authPort}:${SERVER.port}`,
     '--add-host', 'host.docker.internal:host-gateway', ...serverEnv, SERVER.image);
   containers.push(auth);
-  const authUrl = `http://${docker('port', auth, String(SERVER.port)).split('\n')[0].replace('0.0.0.0', '127.0.0.1')}`;
-  cleanups.unshift(() => { if (failures > 0) console.log(docker('logs', '--tail', '40', auth)); });
+  cleanups.unshift(() => { if (failures > 0) { try { console.log(docker('logs', '--tail', '40', auth)); } catch { /* gone */ } } });
   await until(async () => {
     const r = await fetch(`${authUrl}/health`);
     if (!r.ok) throw new Error(String(r.status));
@@ -265,6 +267,15 @@ try {
   };
   const linkIn = (text) => (/(https?:\/\/[^\s"'<>]+\/verify\?[^\s"'<>]+)/.exec(text) ?? [])[1] ?? null;
 
+  // The browser's cross-origin preflight must allow the two headers the
+  // adapter sends (see corsNote in the reference config).
+  {
+    const r = await fetch(`${authUrl}/token`, { method: 'OPTIONS', headers: {
+      origin: siteUrl, 'access-control-request-method': 'POST', 'access-control-request-headers': 'apikey,authorization,content-type' } });
+    check('the server allows the adapter\'s headers from the site\'s origin (CORS preflight)',
+      r.headers.get('access-control-allow-origin') !== null, `allow-headers: ${r.headers.get('access-control-allow-headers')}`);
+  }
+
   const browser = await chromium.launch();
   cleanups.unshift(() => browser.close());
   const page = await browser.newPage();
@@ -279,8 +290,9 @@ try {
   await page.fill('input[name="passwordConfirm"]', PASSWORD);
   await page.check('input[name="terms"]');
   await page.click('form[data-flow="signup"] button[type="submit"]');
-  await page.waitForURL(`${siteUrl}/account/`, { timeout: 15_000 }).catch(() => {});
-  check('sign-up creates the account on the real server and signs in', page.url() === `${siteUrl}/account/`, page.url());
+  const onAccount = () => new URL(page.url()).pathname.replace(/\/$/, '') === '/account';
+  await page.waitForURL((u) => u.pathname.replace(/\/$/, '') === '/account', { timeout: 15_000 }).catch(() => {});
+  check('sign-up creates the account on the real server and signs in', onAccount(), page.url());
   check('the protected page shows the signed-in address', await page.getByText('Signed in as ada@studio.test').isVisible().catch(() => false));
 
   // Sign-out ends it, locally and on the server.
@@ -299,8 +311,8 @@ try {
   // Sign-in with the right password.
   await page.fill('form[data-flow="login"] input[name="password"]', PASSWORD);
   await page.click('form[data-flow="login"] button[type="submit"]');
-  await page.waitForURL(`${siteUrl}/account/`, { timeout: 15_000 }).catch(() => {});
-  check('sign-in with the password grant reaches the protected page', page.url() === `${siteUrl}/account/`, page.url());
+  await page.waitForURL((u) => u.pathname.replace(/\/$/, '') === '/account', { timeout: 15_000 }).catch(() => {});
+  check('sign-in with the password grant reaches the protected page', onAccount(), page.url());
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.waitForURL(`${siteUrl}/login/`, { timeout: 15_000 }).catch(() => {});
 
@@ -336,7 +348,7 @@ try {
   await fresh.goto(`${siteUrl}/login/?next=%2Faccount`);
   const beforeLink = smtp.messages.length;
   await fresh.fill('form[data-flow="login"] input[name="email"]', 'ada@studio.test');
-  await fresh.click('form[data-flow="login"] button[value="link"]');
+  await fresh.getByRole('button', { name: 'Email me a link instead' }).click();
   const linkMail = await mailAfter(beforeLink + 1);
   const signInLink = linkIn(linkMail);
   check('the sign-in link email arrives', Boolean(signInLink), signInLink ?? 'no link');
@@ -349,10 +361,9 @@ try {
   await fresh.goto(`${siteUrl}/reset/`);
   await fresh.fill('form[data-flow="reset"] input[name="email"]', 'nobody@studio.test');
   await fresh.click('form[data-flow="reset"] button[type="submit"]');
-  await fresh.locator('form[data-flow="reset"] [role="status"]').filter({ hasText: /If an account exists/ })
-    .waitFor({ timeout: 10_000 }).catch(() => {});
-  check('an unknown address gets the same answer (no enumeration)',
-    /If an account exists/.test(await fresh.locator('form[data-flow="reset"] [role="status"]').innerText().catch(() => '')));
+  const sameAnswer = await fresh.locator('form[data-flow="reset"]').getByText(/If an account exists/)
+    .waitFor({ timeout: 10_000 }).then(() => true, () => false);
+  check('an unknown address gets the same answer (no enumeration)', sameAnswer);
   check('…and no email is sent to it', smtp.messages.length === unknownBefore);
 
   check('no page errors in the browser', errors.length === 0, errors.join(' | '));
@@ -362,6 +373,8 @@ try {
 } finally {
   for (const fn of cleanups) { try { await fn(); } catch { /* keep cleaning */ } }
   for (const id of containers.reverse()) { try { docker('rm', '-f', id); } catch { /* already gone */ } }
+  // The network last: it cannot be removed while a container is attached.
+  try { docker('network', 'rm', network); } catch { /* never created */ }
   rmSync(work, { recursive: true, force: true });
 }
 

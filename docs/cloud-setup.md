@@ -121,6 +121,9 @@ backend's).
   PostgreSQL and a captured mailbox, builds a site with this profile and drives
   it in a browser — sign-up, sign-in, a protected page, sign-out, the
   wrong-password message, reset through the emailed link, a sign-in link, and
-  the same answer for an unknown address. It needs Docker.
+  the same answer for an unknown address. It needs Docker, and passes
+  (16/16). Running that server yourself instead of the cloud? Allow the
+  `apikey` and `authorization` headers across origins in its CORS settings,
+  or the browser refuses every call (auth-block-spec §3.5).
 - **Not tested here**: a live Supabase project (it needs an account), and the
   social-provider round-trip against a real provider.
