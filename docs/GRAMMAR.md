@@ -896,7 +896,7 @@ site aurora
     mobile drawer
 
   auth
-    adapter azbackend
+    adapter hosted
 
   footer
     link "Pricing" #pricing
@@ -990,7 +990,7 @@ Line numbers count from the first line of the block above.
 | 44 | `  raw ./custom/Badge.tsx` | The escape hatch. Legal in a page body and inside a block (§3.3) |
 | 46 | `page /login       # no nav …` | The `#` is preceded by whitespace and followed by a space → comment (§1.8 rule 2) |
 | 47 | `  nav none` | Suppresses the inherited site nav (§5.2). `none` takes no other atoms |
-| 48 | `    adapter azbackend` | A **site-scoped** prop (`scope: "site"` in `auth`'s manifest): declared once under the site's `auth`, never per block — auth-block-spec §2, "one adapter per site". Checked file-wide, so a page's `auth login` is legitimately silent about it |
+| 48 | `    adapter hosted` | A **site-scoped** prop (`scope: "site"` in `auth`'s manifest): declared once under the site's `auth`, never per block — auth-block-spec §2, "one adapter per site". Checked file-wide, so a page's `auth login` is legitimately silent about it |
 
 ### 8.2 The same file, three ways to break it
 

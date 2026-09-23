@@ -18,7 +18,7 @@ import type { Diagnostic, Pos } from './lex.ts';
 import type { SpecBlock } from './spec-block.ts';
 import type { LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
-import { runPageChecks, type CheckSubject, type PageEntry } from './checks.ts';
+import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
 
 /**
  * Where each block was written. A SpecBlock carries no position — it is the
@@ -45,6 +45,12 @@ export interface SpecSite {
   readonly fonts: Record<string, string>;
   /** Blocks declared at site level and inherited by every page. */
   readonly inherited: SpecBlock[];
+  /**
+   * Site-scoped prop values by word — `{ auth: { adapter: "hosted" } }`.
+   * A site-level `auth` renders nothing, so it is not an inherited block,
+   * but the target still needs its settings to wire the site (M4).
+   */
+  readonly scoped: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
 
 export interface Spec {
@@ -242,6 +248,7 @@ export function buildSpec(
       pattern: valueOf(patternWord, SITE_DEFAULTS.pattern),
       fonts,
       inherited,
+      scoped: Object.fromEntries([...site.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
     },
     pages,
   };
@@ -272,10 +279,31 @@ export function buildSpec(
   }
 
   // ---- page-level rows of each word's validation table (checks.ts) -----
+  const rendered: CheckSubject[][] = [];
   for (const page of pages) {
     const entries = pageEntries(spec, page, manifests);
     runPageChecks(entries, (d) => diagnostics.push(d));
+    rendered.push(entries.map((e) => e.subject));
   }
+
+  // ---- site-level rows: one declaration, every page in view ------------
+  runSiteChecks(
+    kids.filter((w) => manifests.get(w.word)?.checks?.length).map((w) => ({
+      subject: {
+        word: w.word,
+        variant: w.variant,
+        variantWritten: w.variant !== null,
+        modifiers: w.modifiers,
+        props: Object.fromEntries(Object.entries(w.props).map(([k, a]) => [k, a.value])),
+        children: [],
+        inPage: false,
+        pos: w.pos,
+      },
+      checks: manifests.get(w.word)?.checks ?? [],
+    })),
+    rendered,
+    (d) => diagnostics.push(d),
+  );
 
   return { spec, diagnostics };
 }

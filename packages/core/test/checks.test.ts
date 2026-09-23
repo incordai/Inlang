@@ -19,7 +19,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile, type Manifest } from '../src/index.ts';
-import { BLOCK_KINDS, PAGE_KINDS, type Check } from '../src/checks.ts';
+import { BLOCK_KINDS, PAGE_KINDS, SITE_KINDS, type Check } from '../src/checks.ts';
 
 const WORDS = join(fileURLToPath(new URL('../../../', import.meta.url)), 'packages/words');
 const manifests = new Map<string, Manifest>();
@@ -69,6 +69,11 @@ const CASES: Case[] = [
   { code: 'AZ2002', severity: 'warning', bad: file('auth login'),
     good: file('auth login\n  alt "Create an account" /signup') },
   { code: 'AZ2003', severity: 'warning', bad: file('auth login glass'), good: file('auth login') },
+  // A site-level rule: `protect` needs a page with `auth login` somewhere.
+  { code: 'AZ2004', severity: 'warning',
+    bad: 'az 1\nsite probe\n  auth\n    adapter session\n    protect /account\npage /\npage /account\n',
+    good: 'az 1\nsite probe\n  auth\n    adapter session\n    protect /account\npage /\npage /account\n'
+      + 'page /login\n  auth login\n    alt "Create an account" /account\n' },
   // ---- cta ---------------------------------------------------------------
   { code: 'AZ2020', severity: 'error', bad: file(`${HERO}\ncta band\n  title "Reserve"`),
     good: file(`${HERO}\ncta band\n  title "Reserve"\n  cta "Reserve" /reserve`) },
@@ -298,7 +303,8 @@ test('every declared check code is unique, per-word (AZ2000+), and of a known ki
     assert.match(check.code, /^AZ2\d{3}$/, `${word}: ${check.code} is outside GRAMMAR §7's AZ2000+ range`);
     assert.ok(!seen.has(check.code), `${check.code} is declared by both ${seen.get(check.code)} and ${word}`);
     seen.set(check.code, word);
-    assert.ok(BLOCK_KINDS.has(check.kind) || PAGE_KINDS.has(check.kind), `${word}: unknown kind '${check.kind}'`);
+    assert.ok(BLOCK_KINDS.has(check.kind) || PAGE_KINDS.has(check.kind) || SITE_KINDS.has(check.kind),
+      `${word}: unknown kind '${check.kind}'`);
     assert.ok(check.severity === 'error' || check.severity === 'warning', `${word} ${check.code}: severity`);
   }
 });

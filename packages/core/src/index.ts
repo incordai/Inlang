@@ -20,6 +20,7 @@ import { lex, type Diagnostic } from './lex.ts';
 import { parse } from './parse.ts';
 import { link, type Manifest } from './link.ts';
 import { buildSpec, serialiseSpec, type Spec } from './spec.ts';
+import { secretLiterals } from './literals.ts';
 
 export type { Diagnostic, Pos, Token } from './lex.ts';
 export type { Arg, Statement, AzFile } from './parse.ts';
@@ -67,6 +68,7 @@ export function compile(source: string, options: CompileOptions): CompileResult 
     ...parsed.diagnostics,
     ...linked.diagnostics,
     ...built.diagnostics,
+    ...secretLiterals(parsed.file.body),
   ];
   const ok = !diagnostics.some((d) => d.severity === 'error');
 
@@ -85,4 +87,5 @@ export function formatDiagnostics(diagnostics: Diagnostic[], file = 'site.az'): 
     .join('\n');
 }
 
+export { scanText, scanEnv, isSecretLiteral, PUBLIC_ENV_PREFIX, envMessage, bundleMessage, type SecretFinding } from './secrets.ts';
 export { lex, parse, link, buildSpec, serialiseSpec as serialise };

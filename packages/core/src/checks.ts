@@ -38,6 +38,14 @@ export type PageCheckKind =
   | 'perPage'           // more than `atMost` of this word (matching `when`) on one page
   | 'notFirst';         // this word (matching `when`) opens the page's content
 
+/**
+ * SITE kinds run once per file, on the site-level declaration of a word,
+ * with every page in view — "a protected route has nowhere to send
+ * signed-out users" (auth-spec §11) is about the whole site.
+ */
+export type SiteCheckKind =
+  | 'siteNeeds';        // the site-level block holds `when`, and no page renders one matching `needs`
+
 /** A gate. Every field given must hold; an empty gate always holds. */
 export interface CheckWhen {
   /** The effective variant — the default when none was written — is one of these. */
@@ -58,7 +66,7 @@ export interface CheckWhen {
 export interface Check {
   /** Permanent diagnostic ID, AZ2000 or above (GRAMMAR §7). */
   readonly code: string;
-  readonly kind: BlockCheckKind | PageCheckKind;
+  readonly kind: BlockCheckKind | PageCheckKind | SiteCheckKind;
   readonly severity: 'error' | 'warning';
   /**
    * The message after `<word>: `. Placeholders: {n} a count, {k} how many
@@ -78,6 +86,8 @@ export interface Check {
   readonly atLeast?: number;
   readonly atMost?: number;
   readonly pattern?: string;
+  /** For `siteNeeds`: what a page's block of this word must match to satisfy it. */
+  readonly needs?: CheckWhen;
 }
 
 export const BLOCK_KINDS: ReadonlySet<string> = new Set<BlockCheckKind>([
@@ -85,6 +95,7 @@ export const BLOCK_KINDS: ReadonlySet<string> = new Set<BlockCheckKind>([
   'childUnique', 'childLabelWords', 'childLabelPattern', 'childRoute', 'propWords', 'valuePattern',
 ]);
 export const PAGE_KINDS: ReadonlySet<string> = new Set<PageCheckKind>(['perPage', 'notFirst']);
+export const SITE_KINDS: ReadonlySet<string> = new Set<SiteCheckKind>(['siteNeeds']);
 
 /** One argument of a fill, as either stage holds it. */
 export interface CheckArg {
@@ -287,6 +298,32 @@ export function runPageChecks(entries: readonly PageEntry[], report: Report): vo
       const matching = entries.filter((x) => x.subject.word === e.subject.word && holds(c.when, x.subject));
       const max = c.atMost ?? Infinity;
       if (matching.length > max) say(matching[max].subject.pos, { n: matching.length });
+    }
+  }
+}
+
+/** A site-level declaration of a word, with its word's checks. */
+export interface SiteEntry {
+  readonly subject: CheckSubject;
+  readonly checks: readonly Check[];
+}
+
+/**
+ * Run the SITE-kind checks: each site-level declaration against the blocks
+ * every page renders (`pages`, one list of subjects per page).
+ */
+export function runSiteChecks(
+  sites: readonly SiteEntry[], pages: readonly (readonly CheckSubject[])[], report: Report,
+): void {
+  for (const e of sites) {
+    for (const c of e.checks) {
+      if (!SITE_KINDS.has(c.kind) || !holds(c.when, e.subject)) continue;
+      const met = pages.some((blocks) =>
+        blocks.some((b) => b.word === e.subject.word && holds(c.needs, b)));
+      if (!met) {
+        report({ code: c.code, severity: c.severity, pos: e.subject.pos,
+                 message: `${e.subject.word}: ${fill(c.message, {})}` });
+      }
     }
   }
 }

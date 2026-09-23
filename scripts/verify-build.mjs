@@ -57,13 +57,33 @@ if (!NPM_CLI) {
   throw new Error(`verify-build: npm's npm-cli.js was not found in the node install at ${NODE_DIR}`);
 }
 
-const run = (file, args, cwd) =>
+/**
+ * The fixture's `auth` is `adapter hosted`, whose build requires the
+ * provider's URL and PUBLIC key (auth-spec §3.2). Placeholders — no example
+ * anywhere carries a real key (§4) — and a reserved, unresolvable host.
+ */
+const PUBLIC_AUTH = { AZ_PUBLIC_AUTH_URL: 'https://auth.invalid', AZ_PUBLIC_AUTH_KEY: '<PLACEHOLDER>' };
+
+const run = (file, args, cwd, env = {}) =>
   execFileSync(file, args, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, AZ_WORDS: WORDS },
+    env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH, ...env },
   });
+
+/** A command that must FAIL: its combined output, or null if it succeeded. */
+const failing = (file, args, cwd, env = {}) => {
+  try {
+    run(file, args, cwd, env);
+    return null;
+  } catch (e) {
+    return `${e.stdout ?? ''}${e.stderr ?? ''}`;
+  }
+};
+
+/** base64url, for building test tokens with a chosen role claim. */
+const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 
 /** node <script> … */
 const node = (script, args, cwd) => run(process.execPath, [script, ...args], cwd);
@@ -178,6 +198,52 @@ try {
       /class="fixture-badge"/.test(home) && home.indexOf('fixture-badge') < home.indexOf('<footer'));
   }
 
+  /* ---- M4: secret leakage is a hard, unsuppressible build error -------- */
+  // auth-spec §4 / word-quality-gate §4. The guard runs inside the generated
+  // project's own `vite build`; each case below must FAIL that build.
+  {
+    const viteBin = join(proj, 'node_modules/vite/bin/vite.js');
+    check('M4: the build guard ships the compiler\'s scanner verbatim',
+      readFileSync(join(proj, 'az-vite/secrets.ts'), 'utf8') === readFileSync(join(ROOT, 'packages/core/src/secrets.ts'), 'utf8'));
+    check('M4: only the AZ_PUBLIC_ prefix reaches the browser, through the guard',
+      /envPrefix: "AZ_PUBLIC_"/.test(readFileSync(join(proj, 'vite.config.ts'), 'utf8'))
+      && /plugins: \[secretGuard\(\)\]/.test(readFileSync(join(proj, 'vite.config.ts'), 'utf8')));
+
+    const named = failing(process.execPath, [viteBin, 'build'], proj, { AZ_PUBLIC_SERVICE_KEY: 'x'.repeat(40) });
+    check('M4 exit: the build FAILS when a service key is present in the env (by name)',
+      named !== null && /'AZ_PUBLIC_SERVICE_KEY' is a service key/.test(named));
+    const privileged = `${b64url({ alg: 'HS256' })}.${b64url({ role: 'service_role', iss: 'probe' })}.c2lnbmF0dXJlLXByb2Jl`;
+    const valued = failing(process.execPath, [viteBin, 'build'], proj, { AZ_PUBLIC_DB_KEY: privileged });
+    check('M4 exit: the build FAILS when a public-named variable holds a service-role token',
+      valued !== null && /'AZ_PUBLIC_DB_KEY' is a service key/.test(valued) && !valued.includes(privileged));
+
+    // A key pasted straight into source, past the env rule: the bundle scan.
+    const leak = join(work, 'proj-leak');
+    cpSync(proj, leak, { recursive: true, filter: (f) => !f.includes(`${join(proj, 'node_modules')}`) && !f.includes(join(proj, 'dist')) });
+    cpSync(join(proj, 'node_modules'), join(leak, 'node_modules'), { recursive: true });
+    writeFileSync(join(leak, 'src/main.tsx'),
+      readFileSync(join(leak, 'src/main.tsx'), 'utf8') + '\nconsole.info("-----BEGIN PRIVATE KEY-----");\n');
+    const bundled = failing(process.execPath, [join(leak, 'node_modules/vite/bin/vite.js'), 'build'], leak);
+    check('M4 exit: the bundle scan FAILS a build with a key pattern in its output',
+      bundled !== null && /a service-key pattern was found in the built bundle/.test(bundled));
+    // CONTROL: the untouched project built above, with its public key shipped.
+    check('CONTROL: the clean build (public key present) passed the same guard', existsSync(join(proj, 'dist/index.html')));
+  }
+
+  /* ---- M4: the login page's form is wired, and marked up per §6 ------- */
+  {
+    const login = rendered['/login'] ?? '';
+    check('M4: the login form is marked for the auth runtime',
+      /<form[^>]*data-az-behaviour="auth"/.test(login) && /data-flow="login"/.test(login));
+    check('auth §6: the email field files under `username` for password managers',
+      /<input[^>]*autocomplete="username"/i.test(login));
+    check('auth §6: an error summary (role=alert, focusable, hidden) and a polite status line exist',
+      /class="az-auth-summary[^"]*"[^>]*role="alert"|role="alert"[^>]*class="az-auth-summary/.test(login)
+      && /aria-live="polite"/.test(login));
+    check('auth §6: every field has its own (hidden) error element',
+      /id="az-auth-email-error"/.test(login) && /id="az-auth-password-error"/.test(login));
+  }
+
   /* ---- gate item 9: the bundle is inside the PRD §9 budget ------------ */
   // Non-3D pages ship under 150KB gzipped (PRD §9), so 3D never taxes a page
   // that does not use it. No generated site carries the 3D runtime yet, so the
@@ -282,10 +348,10 @@ try {
     firstFocusable ? firstFocusable[0].slice(0, 48) : 'none found');
   check('nav §7: the logo link is named by the site, not left empty',
     /class="az-nav-logo(?: [^"]*)?"[^>]*>(?:(?!<\/a>)[^])*class="az-visually-hidden(?: [^"]*)?"[^>]*>aurora<\/span>/.test(html));
-  // The fixture declares `adapter azbackend` once at site level; /login's
+  // The fixture declares `adapter hosted` once at site level; /login's
   // `auth login` must carry it rather than fall back to `custom`.
   check('auth §2: the login form uses the adapter declared at site level',
-    /class="az-auth-form(?: [^"]*)?"[^>]*data-adapter="azbackend"|data-adapter="azbackend"[^>]*class="az-auth-form(?: [^"]*)?"/.test(html));
+    /class="az-auth-form(?: [^"]*)?"[^>]*data-adapter="hosted"|data-adapter="hosted"[^>]*class="az-auth-form(?: [^"]*)?"/.test(html));
   check('auth §8: every field label is tied to its input (for → htmlFor)',
     /<label[^>]*for="[^"]+"/.test(html));
   check('auth §8: autocomplete reaches the inputs',
@@ -347,6 +413,13 @@ try {
   vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], evilProj);
   const evilHtml = JSON.parse(node(join(evilProj, 'ssr-out/ssr.js'), [JSON.stringify(['/'])], evilProj))['/'];
 
+  // M4: auth code is emitted only for a site that uses auth — this one does not.
+  check('M4: a site without auth ships no auth runtime or wiring',
+    !existsSync(join(evilProj, 'src/az-auth'))
+    && !readFileSync(join(evilProj, 'src/App.tsx'), 'utf8').includes('az-auth')
+    && !readFileSync(join(evilProj, 'src/theme.css'), 'utf8').includes('.az-session'));
+  check('CONTROL: the auth fixture does ship it',
+    existsSync(join(proj, 'src/az-auth/form.ts')) && readFileSync(join(proj, 'src/App.tsx'), 'utf8').includes('./az-auth/react.tsx'));
   check('SECURITY: no executable <script> reaches the DOM', !/<script/i.test(evilHtml));
   check('SECURITY: the text survives ESCAPED, not silently dropped',
     evilHtml.includes('&lt;/script&gt;'));

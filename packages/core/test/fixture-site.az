@@ -20,7 +20,7 @@ site aurora
     mobile drawer
 
   auth
-    adapter azbackend
+    adapter hosted
 
   footer
     link "Pricing" #pricing

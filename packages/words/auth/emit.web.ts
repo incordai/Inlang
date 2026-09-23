@@ -27,9 +27,25 @@ interface Field {
   readonly label: string;
   readonly type: string;
   readonly autocomplete: string;
+  /** §7: a requirement stated up front, tied to the field. */
+  readonly hint?: string;
+  /** §7: the address on the set-new step — shown, filed, not editable. */
+  readonly readonly?: boolean;
 }
 
-const EMAIL: Field = { name: 'email', label: 'Email', type: 'email', autocomplete: 'email' };
+/**
+ * §7's stated minimum for a NEW password. The auth runtime validates the same
+ * number (packages/auth-runtime contract MIN_PASSWORD); a test keeps them equal.
+ */
+export const MIN_PASSWORD = 12;
+const NEW_PASSWORD_HINT = `Use at least ${MIN_PASSWORD} characters.`;
+
+// §6's table: the email field's token is `username` — what a password
+// manager files the credential under.
+const EMAIL: Field = { name: 'email', label: 'Email', type: 'email', autocomplete: 'username' };
+const NEW_PASSWORD: Field = {
+  name: 'password', label: 'Password', type: 'password', autocomplete: 'new-password', hint: NEW_PASSWORD_HINT,
+};
 
 /** What each variant actually asks for. */
 const FIELDS: Record<string, Field[]> = {
@@ -40,17 +56,32 @@ const FIELDS: Record<string, Field[]> = {
   signup: [
     { name: 'name', label: 'Name', type: 'text', autocomplete: 'name' },
     EMAIL,
-    { name: 'password', label: 'Password', type: 'password', autocomplete: 'new-password' },
+    NEW_PASSWORD,
   ],
-  // §5's FIRST state. The set-new-password state is chosen by a URL token,
-  // which is runtime, so the emitted form is the request.
+  // §5's first state; the second (below) is chosen by a URL token at runtime.
   reset: [EMAIL],
 };
 
-/** The label/input pair. A placeholder is not a label — it vanishes on focus. */
-function field(f: Field, ctx: EmitContext): EmittedNode {
+/** §5's second `reset` state — the set-new-password form. */
+const RESET_SET: Field[] = [
+  { ...EMAIL, readonly: true },
+  { ...NEW_PASSWORD, label: 'New password' },
+];
+
+/**
+ * The label/input pair. A placeholder is not a label — it vanishes on focus.
+ * Each field carries its own error element, empty and hidden until the
+ * runtime fills it and names it in aria-describedby (§6).
+ */
+function field(f: Field, ctx: EmitContext, prefix = 'az-auth'): EmittedNode {
   const t = ctx.theme;
-  const id = `az-auth-${f.name}`;
+  const id = `${prefix}-${f.name}`;
+  const small = (kind: string, text: string | null, color: string): EmittedNode => ({
+    tag: 'p',
+    attrs: { id: `${id}-${kind}`, class: `az-auth-${kind}`, ...(text === null ? { hidden: 'hidden' } : {}) },
+    style: { margin: 0, fontSize: t.typeSize.sm, color },
+    children: text === null ? [] : [text],
+  });
   return {
     tag: 'div',
     attrs: { class: 'az-auth-field' },
@@ -70,6 +101,8 @@ function field(f: Field, ctx: EmitContext): EmittedNode {
           type: f.type,
           autocomplete: f.autocomplete,
           required: 'required',
+          ...(f.readonly ? { readonly: 'readonly' } : {}),
+          ...(f.hint ? { 'aria-describedby': `${id}-hint` } : {}),
         },
         style: {
           minHeight: px(t.size.tap),
@@ -81,11 +114,44 @@ function field(f: Field, ctx: EmitContext): EmittedNode {
           fontSize: t.typeSize.base,
         },
       },
+      ...(f.hint ? [small('hint', f.hint, t.color.muted)] : []),
+      small('error', null, t.color.danger),
     ],
   };
 }
 
-/** The submit label matches what the button DOES, never "Submit". */
+/**
+ * §6's error summary: at the top of the form, role="alert" and focusable,
+ * so focus moves to it and the count of problems is heard once. Emitted
+ * empty and hidden; the runtime lists each problem as a link to its field.
+ */
+function summary(ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  return {
+    tag: 'div',
+    attrs: { class: 'az-auth-summary', role: 'alert', tabindex: '-1', hidden: 'hidden' },
+    style: {
+      padding: px(t.space[16]),
+      border: `1px solid ${t.color.danger}`,
+      borderRadius: px(t.radius.sm),
+      color: t.color.text,
+    },
+    children: [
+      { tag: 'p', attrs: { class: 'az-auth-summary-title' }, style: { margin: `0 0 ${px(t.space[8])}`, fontWeight: t.type['weight-bold'] }, children: ['There is a problem'] },
+      { tag: 'ul', attrs: { class: 'az-auth-summary-list' }, style: { margin: 0, paddingInlineStart: px(t.space[16]) } },
+    ],
+  };
+}
+
+/** §6: asynchronous status ("Sending your link…") — polite, never takes focus. */
+function status(ctx: EmitContext): EmittedNode {
+  return {
+    tag: 'p',
+    attrs: { class: 'az-auth-status', 'aria-live': 'polite' },
+    style: { margin: 0, fontSize: ctx.theme.typeSize.sm, color: ctx.theme.color.muted },
+  };
+}
+
 /**
  * The page heading when the author writes no `title`. §11: the form title
  * IS the page's <h1>, so an untitled form would leave the page without one.
@@ -96,6 +162,7 @@ const HEADING: Record<string, string> = {
   reset: 'Reset password',
 };
 
+/** The submit label matches what the button DOES, never "Submit". */
 const SUBMIT: Record<string, string> = {
   login: 'Sign in',
   signup: 'Create account',
@@ -184,6 +251,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
             { tag: 'a', attrs: { href: block.props.terms }, children: ['terms'] },
           ],
         },
+        {
+          tag: 'p',
+          attrs: { id: 'az-auth-terms-error', class: 'az-auth-error', hidden: 'hidden' },
+          style: { margin: 0, fontSize: t.typeSize.sm, color: t.color.danger },
+        },
       ],
     });
   }
@@ -213,19 +285,25 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     formChildren.push(button('link', LINK_SUBMIT, true));
   }
 
-  children.push({
+  // The status line sits just above the buttons it reports on.
+  const buttons = formChildren.splice(formChildren.findIndex((n) => n.tag === 'button'));
+  const form = (flow: string, content: EmittedNode[], extra: Record<string, string> = {}): EmittedNode => ({
     tag: 'form',
     attrs: {
       class: 'az-auth-form',
       method: 'post',
+      // The auth runtime wires this form to the site's adapter (§5).
+      'data-az-behaviour': 'auth',
       // The adapter is a ROLE, never a vendor name (PRD §6.5).
       'data-adapter': block.props.adapter ?? 'custom',
-      'data-flow': variant,
+      'data-flow': flow,
       'data-methods': [methods.password && 'password', methods.link && 'link']
         .filter(Boolean).join(' '),
-      // Where the M4 runtime sends a successful sign-in. The compiler has
-      // already checked it is a page of this site (AZ1215).
+      // Where a successful sign-in goes. The compiler has already checked it
+      // is a page of this site (AZ1215); the runtime still only follows a
+      // same-origin path.
       ...(block.props.redirect ? { 'data-redirect': block.props.redirect } : {}),
+      ...extra,
     },
     style: {
       display: 'grid',
@@ -238,8 +316,23 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // §8 below sm: a full-width card inside the page gutter (every flow is
     // one column already).
     below: { sm: { maxWidth: 'none' } },
-    children: formChildren,
+    children: [summary(ctx), ...content],
   });
+
+  children.push(form(variant, [...formChildren, status(ctx), ...buttons]));
+
+  // §5: reset's second state — set a new password, chosen by the URL token
+  // the emailed link carries. Hidden until the runtime sees one; without JS
+  // the request form is what works.
+  if (variant === 'reset') {
+    children.push(form('reset-set', [
+      ...RESET_SET.map((f) => field(f, ctx, 'az-auth-set')),
+      status(ctx),
+      ctx.submit('Save new password', {
+        hierarchy: 'primary', name: 'method', value: 'set', fullWidthBelow: 'sm',
+      }),
+    ], { hidden: 'hidden' }));
+  }
 
   // §2: "a login with no path to signup or reset is a dead end". The routes
   // are the author's to name; what is emitted here is the slot they fill, and

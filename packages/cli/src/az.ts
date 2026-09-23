@@ -14,8 +14,9 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compile, formatDiagnostics, serialiseSpec } from '../../core/src/index.ts';
+import { compile, envMessage, formatDiagnostics, scanEnv, serialiseSpec } from '../../core/src/index.ts';
 import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../target-web/src/emit.ts';
+import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
@@ -114,15 +115,26 @@ export function build(options: BuildOptions): BuildOutcome {
   const { assets, modules } = project;
   // The behaviour runtime ships with every site, copied verbatim from the
   // overlay package into RUNTIME_DIR — part of the output, so it is written
-  // and checked like any emitted file.
-  const files = [...project.files, ...runtimeFiles()].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
+  // and checked like any emitted file. The build guard's scanner ships with
+  // every site too; the auth runtime only with a site that uses auth.
+  const files = [
+    ...project.files,
+    ...copied('../../overlay/src/runtime/', RUNTIME_DIR),
+    ...copied('../../core/src/', GUARD_DIR, (f) => f === 'secrets.ts'),
+    ...(project.auth ? copied('../../auth-runtime/src/runtime/', AUTH_DIR) : []),
+  ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
 
   // The author's components go through the same sandbox as assets: they must
   // exist and really be inside the project, symlinks followed.
   const projectDir = dirname(resolve(options.source));
   const located = locateAssets(projectDir, assets);
   const components = locateAssets(projectDir, modules, 'component');
-  const problems = [...located.problems, ...components.problems];
+  // auth-spec §4 rule 1, before anything is written: the environment this
+  // project's build will inline must hold no service key. The generated
+  // build checks again (its own env, then the bundle) — this is the early,
+  // loud copy of the same unsuppressible rule.
+  const secrets = scanEnv({ ...dotenv(projectDir), ...process.env }).map(envMessage);
+  const problems = [...located.problems, ...components.problems, ...secrets];
   if (problems.length > 0) {
     return {
       ok: false, files: [], assets: [],
@@ -158,13 +170,32 @@ export function build(options: BuildOptions): BuildOutcome {
   return { ok: true, files, assets, report, exit: EXIT.ok };
 }
 
-/** The overlay runtime's modules, as files of the generated project. */
-function runtimeFiles(): { path: string; content: string }[] {
-  const dir = fileURLToPath(new URL('../../overlay/src/runtime/', import.meta.url));
+/** A package directory's modules, copied verbatim into the generated project at `to`. */
+function copied(from: string, to: string, keep: (file: string) => boolean = () => true): { path: string; content: string }[] {
+  const dir = fileURLToPath(new URL(from, import.meta.url));
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.ts'))
+    .filter((f) => f.endsWith('.ts') && keep(f))
     .sort()
-    .map((f) => ({ path: `${RUNTIME_DIR}/${f}`, content: readFileSync(join(dir, f), 'utf8') }));
+    .map((f) => ({ path: `${to}/${f}`, content: readFileSync(join(dir, f), 'utf8') }));
+}
+
+/**
+ * The `.env` files Vite would load for a production build, merged in its
+ * order (later wins). Only read to check them — values never leave this
+ * process.
+ */
+function dotenv(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of ['.env', '.env.local', '.env.production', '.env.production.local']) {
+    const file = join(dir, name);
+    if (!existsSync(file)) continue;
+    for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (!m) continue;
+      out[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
+    }
+  }
+  return out;
 }
 
 export function specOf(options: Omit<BuildOptions, 'outDir'>): string | null {

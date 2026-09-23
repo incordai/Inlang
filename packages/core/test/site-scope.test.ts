@@ -35,7 +35,7 @@ function loginAuth(src: string) {
 }
 
 test('a page-level auth carries the adapter declared at site level', () => {
-  assert.equal(loginAuth(site('azbackend')).props.adapter, 'azbackend');
+  assert.equal(loginAuth(site('session')).props.adapter, 'session');
 });
 
 test('CONTROL: the value follows the site declaration, not a constant', () => {
@@ -54,4 +54,22 @@ test('CONTROL: a word with no site-scoped props gains nothing', () => {
   assert.ok(r.spec);
   const hero = r.spec.pages[0].blocks.find((b) => b.word === 'hero');
   assert.ok(hero && !('adapter' in hero.props));
+});
+
+/* ---- `protect`: a site-scoped LIST of routes (M4) ----------------------- */
+
+const protect = (routes: string) =>
+  `az 1\nsite aurora\n  auth\n    adapter session\n    protect ${routes}\npage /\npage /account\npage /orders\npage /login\n  auth login\n    alt "Create an account" /\n`;
+
+test('every protected route must be a page of the site (AZ1215, item by item)', () => {
+  const r = compile(protect('/account /nope'), { manifests });
+  const bad = r.diagnostics.filter((d) => d.code === 'AZ1215');
+  assert.equal(bad.length, 1, formatDiagnostics(r.diagnostics, 'site.az'));
+  assert.match(bad[0].message, /'\/nope' is not a page in this site/);
+});
+
+test('CONTROL: declared routes pass, and reach the Spec as the site\'s auth settings', () => {
+  const r = compile(protect('/account /orders'), { manifests });
+  assert.ok(r.ok, formatDiagnostics(r.diagnostics, 'site.az'));
+  assert.deepEqual((r.spec as Spec).site.scoped.auth, { adapter: 'session', protect: '/account,/orders' });
 });

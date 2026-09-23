@@ -71,4 +71,7 @@ jobs:
       - run: pnpm gate --self-test
       # All 12 gate items for every word; runs the browser checks itself.
       - run: pnpm gate
+      # M4: auth forms, <Protected> and the reset flow against a local mock
+      # provider (the real-provider exit criterion needs an account; open).
+      - run: pnpm test:auth
       - run: pnpm thumbnails --verify

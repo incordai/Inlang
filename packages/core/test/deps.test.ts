@@ -55,7 +55,7 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli', 'overlay'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime'];
 
 test('every package has sources to check — CONTROL', () => {
   // Without this, an empty glob would make every rule below pass vacuously.
@@ -113,8 +113,22 @@ test('overlay imports only theme — ARCHITECTURE §2', () => {
   }
 });
 
+test('auth-runtime imports nothing outside itself — it is copied whole into a site (M4)', () => {
+  for (const file of sources('packages/auth-runtime')) {
+    for (const spec of importsOf(file)) {
+      assert.equal(crossPackage(spec), null, `auth-runtime imports '${spec}' — it must stand alone`);
+      assert.ok(spec.startsWith('./'), `auth-runtime imports '${spec}' — only its own siblings`);
+    }
+  }
+});
+
+test('the secret scanner imports nothing — it is copied whole into every site (§4)', () => {
+  const file = join(ROOT, 'packages/core/src/secrets.ts');
+  assert.deepEqual(importsOf(file), []);
+});
+
 test('nothing imports from cli — ARCHITECTURE §2', () => {
-  for (const pkg of ['core', 'target-web', 'overlay']) {
+  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime']) {
     for (const file of sources(`packages/${pkg}`)) {
       for (const spec of importsOf(file)) {
         assert.ok(crossPackage(spec) !== 'cli', `${pkg} imports from cli (${spec})`);

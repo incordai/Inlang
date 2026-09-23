@@ -18,6 +18,10 @@ import { emitPages, type EmitterMap } from './tree.ts';
 import { compileStyles } from './stylesheet.ts';
 import { COMPONENT_EXT } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
+import { PUBLIC_ENV_PREFIX } from '../../core/src/index.ts';
+import {
+  AUTH_DIR, GUARD_DIR, HOSTED_ENV, authConfig, authCss, authPlan, authReact, guardTs, type AuthPlan,
+} from './auth.ts';
 
 /**
  * Where the author's `raw` / `slot` modules go in the generated project.
@@ -143,16 +147,41 @@ function stableJson(value: unknown): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
+/** How many of a page's leading nodes are its nav — shown while <Protected> checks. */
+function leadOf(nodes: readonly EmittedNode[]): number {
+  let n = 0;
+  while (n < nodes.length && /(^| )az-nav( |$)/.test(nodes[n].attrs?.class ?? '')) n++;
+  return n;
+}
+
 function appTsx(
   spec: Spec, pages: { route: string; nodes: EmittedNode[] }[], modules: string[], theme: ThemeLike,
+  plan: AuthPlan | null,
 ): string {
   // Identifiers are derived from position, never from the author's path, and
   // the path reaches the source only through JSON.stringify (CONVENTIONS §6).
-  const imports = modules.map((m, i) => `import U${i} from ${JSON.stringify(`./user/${m}`)};\n`).join('');
-  const table = modules.map((m, i) => `  ${JSON.stringify(m)}: U${i},\n`).join('');
+  // The auth adapter module (`impl`) is imported by the auth config instead.
+  const components = modules.filter((m) => m !== plan?.impl);
+  const imports = components.map((m, i) => `import U${i} from ${JSON.stringify(`./user/${m}`)};\n`).join('');
+  const table = components.map((m, i) => `  ${JSON.stringify(m)}: U${i},\n`).join('');
+  // Auth pages only (M4): a site without auth imports none of it.
+  const lead = Object.fromEntries((plan?.protect ?? [])
+    .map((r) => [r, leadOf(pages.find((p) => p.route === r)?.nodes ?? [])]));
+  const auth = plan ? `import { AuthRuntime, Protected } from "./az-auth/react.tsx";
+
+/** Pages wrapped in <Protected>, and how many leading nodes (the nav) show while it checks. */
+const PROTECT: Record<string, number> = ${stableJson(lead)};
+` : '';
+  const content = plan
+    ? `PROTECT[page.route] !== undefined
+            ? <Protected lead={page.nodes.slice(0, PROTECT[page.route]).map((node, i) => <Node key={i} node={node} />)}>
+                {page.nodes.slice(PROTECT[page.route]).map((node, i) => <Node key={i} node={node} />)}
+              </Protected>
+            : page.nodes.map((node, i) => <Node key={i} node={node} />)`
+    : `page.nodes.map((node, i) => <Node key={i} node={node} />)`;
   return `${HEADER}import { Components, Node, NotFound, Page, Site } from "./runtime.tsx";
 import type { Custom, EmittedNode } from "./runtime.tsx";
-${imports}
+${auth}${imports}
 const PAGES: { route: string; nodes: EmittedNode[] }[] = ${stableJson(pages)};
 
 /**
@@ -188,8 +217,9 @@ export default function App({ route }: { route: string }) {
         pattern=${lit(spec.site.pattern)}
       >
         {page
-          ? <Page route={page.route}>{page.nodes.map((node, i) => <Node key={i} node={node} />)}</Page>
-          : <NotFound />}
+          ? <Page route={page.route}>{${content}}</Page>
+          : <NotFound />}${plan ? `
+        <AuthRuntime />` : ''}
       </Site>
     </Components.Provider>
   );
@@ -445,6 +475,8 @@ export interface EmittedProject {
   readonly assets: string[];
   /** The author's component modules, project-relative, for the caller to copy into USER_DIR. */
   readonly modules: string[];
+  /** The site uses auth: the caller copies the auth runtime into AUTH_DIR (M4). */
+  readonly auth: boolean;
 }
 
 export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
@@ -479,9 +511,19 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     theme.breakpoint,
   );
   const pages = styled.value;
+  const planned = authPlan(spec);
+  // A custom adapter is the author's module, so it takes the components'
+  // path: sandboxed, type-checked, normalised, copied into USER_DIR.
+  const plan = planned && { ...planned, impl: planned.impl ? component(planned.impl) : null };
   const moduleList = [...modules].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
   const files: EmittedFile[] = [
-    { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme) },
+    { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme, plan) },
+    // The build guard, for every site (auth-spec §4): nothing may ship a key.
+    { path: `${GUARD_DIR}/guard.ts`, content: guardTs(plan?.adapter === 'hosted' ? HOSTED_ENV : []) },
+    ...(plan ? [
+      { path: `${AUTH_DIR}/config.ts`, content: authConfig(plan, USER_DIR.replace(/^src\//, '')) },
+      { path: `${AUTH_DIR}/react.tsx`, content: authReact() },
+    ] : []),
     { path: 'src/runtime.tsx', content: runtimeTsx() },
     {
       path: 'src/main.tsx',
@@ -543,7 +585,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${schemeCss(named)}`,
+${schemeCss(named)}${plan ? authCss(theme) : ''}`,
     },
     {
       /**
@@ -576,10 +618,15 @@ ${schemeCss(named)}`,
     {
       path: 'vite.config.ts',
       content: `${HEADER}import { defineConfig } from "vite";
+import { secretGuard } from "./${GUARD_DIR}/guard.ts";
 
 export default defineConfig({
   // Relative, so the built site works from a subdirectory as well as a root.
   base: "./",
+  // Only this prefix reaches the browser (auth-spec §4), and the guard
+  // refuses the build if a service key would be among it.
+  envPrefix: ${JSON.stringify(PUBLIC_ENV_PREFIX)},
+  plugins: [secretGuard()],
   build: {
     outDir: "dist",
     emptyOutDir: true,
@@ -613,5 +660,6 @@ export default defineConfig({
     files: files.sort((x, y) => byPath(x.path, y.path)),
     assets: [...used].sort(byPath),
     modules: moduleList,
+    auth: plan !== null,
   };
 }

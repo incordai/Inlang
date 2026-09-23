@@ -53,6 +53,8 @@ export interface PropSpec {
   readonly deferred?: string[];
   /** `list` props: the most items the list may hold. `int`: the largest value. */
   readonly max?: number;
+  /** `list` props: the type of each item — `enum` (checked against `values`) or `route`. */
+  readonly of?: 'enum' | 'route';
   /** `int` props: the smallest value. */
   readonly min?: number;
 }
@@ -262,9 +264,16 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
       if (spec?.type !== 'enum' || !spec.values) continue;
 
       if (Array.isArray(spec.values)) {
-        if (!spec.values.includes(arg.value)) {
+        const available = spec.values.filter((v) => !spec.deferred?.includes(v));
+        if (spec.deferred?.includes(arg.value)) {
+          // Declared vocabulary that is not built yet: named and refused, not
+          // compiled into something that silently does nothing (AZ1214).
+          err('AZ1214',
+              `${word}: ${key} '${arg.value}' is not available yet — use: ${available.join(', ')}`,
+              arg.pos);
+        } else if (!spec.values.includes(arg.value)) {
           err('AZ1208',
-              `${word}: '${arg.value}' is not a ${key} — try: ${spec.values.join(', ')}`,
+              `${word}: '${arg.value}' is not a ${key} — try: ${available.join(', ')}`,
               arg.pos);
         }
         continue;
@@ -629,13 +638,21 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     //
     // auth-spec §11: a redirect to an undeclared page is an error. It holds
     // for every `route` prop, not only auth's: a route the site does not have
-    // is a dead link the compiler can see, whichever word carries it.
-    for (const [key, arg] of Object.entries(props)) {
-      if (m?.props?.[key]?.type !== 'route') continue;
-      if (routes.has(routePath(arg.value))) continue;
-      err('AZ1215',
-          `${s.word}: '${arg.value}' is not a page in this site — add it or fix the ${key}`,
-          arg.pos);
+    // is a dead link the compiler can see, whichever word carries it. A list
+    // of routes (auth's `protect`) is checked item by item.
+    const routeArgs = (key: string): Arg[] => {
+      const spec = m?.props?.[key];
+      if (spec?.type === 'route') return props[key] ? [props[key]] : [];
+      if (spec?.type === 'list' && spec.of === 'route') return listItems[key] ?? [];
+      return [];
+    };
+    for (const key of Object.keys(props)) {
+      for (const arg of routeArgs(key)) {
+        if (arg.kind === 'route' && routes.has(routePath(arg.value))) continue;
+        err('AZ1215',
+            `${s.word}: '${arg.value}' is not a page in this site — add it or fix the ${key}`,
+            arg.pos);
+      }
     }
 
     // ---- the word's own validation table (checks.ts) --------------------

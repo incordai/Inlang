@@ -1,0 +1,144 @@
+/**
+ * The auth runtime's contract and adapters — auth-block-spec §3, §6.
+ * The DOM behaviour (form.ts) is exercised in a browser by scripts/auth-e2e.mjs.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  AUTH_ERROR_CODES, ERROR_COPY, MIN_PASSWORD, safeNext, toErrorCode, validate,
+} from '../src/runtime/contract.ts';
+import { createHostedAdapter, type HostedEnv } from '../src/runtime/hosted.ts';
+import { createSessionAdapter } from '../src/runtime/session.ts';
+
+/* ---- contract ------------------------------------------------------------ */
+
+test('every closed error code has copy, and nothing else does', () => {
+  assert.deepEqual(Object.keys(ERROR_COPY).sort(), [...AUTH_ERROR_CODES].sort());
+  for (const c of AUTH_ERROR_CODES) assert.ok(ERROR_COPY[c].length > 10, c);
+});
+
+test('invalid_credentials copy never says which of the two was wrong', () => {
+  assert.doesNotMatch(ERROR_COPY.invalid_credentials, /no account|not found|wrong password|unknown email/i);
+});
+
+test('a provider string outside the closed set becomes `unknown`', () => {
+  assert.equal(toErrorCode('invalid_credentials'), 'invalid_credentials');
+  assert.equal(toErrorCode('USER_NOT_FOUND'), 'unknown');
+  assert.equal(toErrorCode(undefined), 'unknown');
+});
+
+test('§6 validation: email, current vs new password, name, terms', () => {
+  assert.deepEqual(validate({ email: '', password: '' }, { password: 'current' }).map((e) => e.field), ['email', 'password']);
+  assert.deepEqual(validate({ email: 'a@b' }, {}).map((e) => e.field), ['email']);
+  assert.deepEqual(validate({ email: 'a@b.co', password: 'x' }, { password: 'current' }), []);
+  assert.deepEqual(validate({ password: 'x'.repeat(MIN_PASSWORD - 1) }, { password: 'new' }).map((e) => e.field), ['password']);
+  assert.deepEqual(validate({ password: 'x'.repeat(MIN_PASSWORD) }, { password: 'new' }), []);
+  assert.deepEqual(validate({ email: 'a@b.co', name: ' ', terms: false }, { name: true, terms: true }).map((e) => e.field), ['name', 'terms']);
+});
+
+test('SECURITY: `next` only ever returns a same-origin path (no open redirect)', () => {
+  const o = 'https://site.test';
+  assert.equal(safeNext('/account?tab=1#top', o), '/account?tab=1#top');
+  for (const bad of ['https://evil.test/x', '//evil.test/x', '/\\evil.test', 'javascript:alert(1)', 'account', '', null]) {
+    assert.equal(safeNext(bad as string | null, o), null, String(bad));
+  }
+});
+
+/* ---- hosted -------------------------------------------------------------- */
+
+interface Sent { url: string; init: RequestInit }
+
+function hostedEnv(reply: (url: string, init: RequestInit) => Response | Promise<Response>, now = 1_000) {
+  const sent: Sent[] = [];
+  const store = new Map<string, string>();
+  const env: HostedEnv = {
+    fetch: (async (url: string, init: RequestInit) => { sent.push({ url, init }); return reply(url, init); }) as typeof fetch,
+    storage: () => ({ getItem: (k) => store.get(k) ?? null, setItem: (k, v) => void store.set(k, v), removeItem: (k) => void store.delete(k) }),
+    now: () => now,
+  };
+  return { env, sent, store };
+}
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const SESSION = { user: { id: 'u1', email: 'ada@studio.test' }, token: 'tok-1', expiresAt: 5_000 };
+
+test('hosted: sign-in posts §3.2 JSON with the PUBLIC key, and keeps the session', async () => {
+  const { env, sent, store } = hostedEnv(() => json(200, { session: SESSION }));
+  const a = createHostedAdapter({ url: 'https://auth.test/', publicKey: 'pk-public' }, env);
+  const r = await a.signIn({ email: 'ada@studio.test', password: 'pw' });
+  assert.deepEqual(r, { ok: true, session: { user: SESSION.user, expiresAt: 5_000 } });
+  assert.equal(sent[0].url, 'https://auth.test/sign-in');
+  assert.equal((sent[0].init.headers as Record<string, string>)['x-public-key'], 'pk-public');
+  assert.deepEqual(JSON.parse(String(sent[0].init.body)), { email: 'ada@studio.test', password: 'pw' });
+  assert.deepEqual(a.session(), { user: SESSION.user, expiresAt: 5_000 });
+  assert.ok(store.has('az.auth.session'));
+});
+
+test('hosted: errors map into the closed set, with the field when given', async () => {
+  const cases: [Response, unknown][] = [
+    [json(401, { error: 'invalid_credentials' }), { ok: false, code: 'invalid_credentials' }],
+    [json(409, { error: 'email_taken', field: 'email' }), { ok: false, code: 'email_taken', field: 'email' }],
+    [json(400, { error: 'PROVIDER_SPECIFIC' }), { ok: false, code: 'unknown' }],
+    [json(400, { error: 'weak_password', field: '<script>' }), { ok: false, code: 'weak_password' }],
+    [new Response('slow down', { status: 429 }), { ok: false, code: 'rate_limited' }],
+    [json(200, { session: { user: { id: 1 } } }), { ok: false, code: 'unknown' }],
+  ];
+  for (const [response, expected] of cases) {
+    const { env } = hostedEnv(() => response);
+    assert.deepEqual(await createHostedAdapter({ url: 'https://auth.test', publicKey: 'k' }, env).signIn({ email: 'a@b.co', password: 'p' }), expected);
+  }
+  const offline = hostedEnv(() => { throw new TypeError('fetch failed'); });
+  assert.deepEqual(await createHostedAdapter({ url: 'https://auth.test', publicKey: 'k' }, offline.env).signIn({ email: 'a@b.co', password: 'p' }),
+    { ok: false, code: 'network' });
+});
+
+test('hosted: an expired session reads as signed out', async () => {
+  const { env } = hostedEnv(() => json(200, { session: SESSION }), 9_999);
+  const a = createHostedAdapter({ url: 'https://auth.test', publicKey: 'k' }, env);
+  await a.signIn({ email: 'a@b.co', password: 'p' });
+  assert.equal(a.session(), null);
+});
+
+test('hosted: link and reset requests never create a session', async () => {
+  const { env } = hostedEnv(() => json(200, {}));
+  const a = createHostedAdapter({ url: 'https://auth.test', publicKey: 'k' }, env);
+  assert.deepEqual(await a.requestReset('a@b.co'), { ok: true, session: null });
+  assert.deepEqual(await a.requestLink('a@b.co'), { ok: true, session: null });
+  assert.equal(a.session(), null);
+});
+
+test('hosted: sign-out clears locally, tells the provider with the token, and notifies', async () => {
+  const { env, sent } = hostedEnv((url) => (url.endsWith('/sign-out') ? new Response(null, { status: 204 }) : json(200, { session: SESSION })));
+  const a = createHostedAdapter({ url: 'https://auth.test', publicKey: 'k' }, env);
+  const seen: unknown[] = [];
+  a.onChange((s) => seen.push(s));
+  await a.signIn({ email: 'a@b.co', password: 'p' });
+  await a.signOut();
+  assert.equal(a.session(), null);
+  const out = sent.find((s) => s.url.endsWith('/sign-out'));
+  assert.equal((out?.init.headers as Record<string, string>).authorization, 'Bearer tok-1');
+  assert.equal(seen.length, 2);
+  assert.equal(seen[1], null);
+});
+
+/* ---- session (cookie) ---------------------------------------------------- */
+
+test('session: same-origin requests with the cookie, first read via GET /session', async () => {
+  const sent: Sent[] = [];
+  const env = {
+    fetch: (async (url: string, init: RequestInit) => {
+      sent.push({ url, init });
+      return url.endsWith('/session') ? json(200, { session: { user: { id: 'u2', email: 'b@c.co' } } }) : json(200, {});
+    }) as typeof fetch,
+  };
+  const a = createSessionAdapter({ base: '/api/auth' }, env);
+  assert.equal(a.session(), null, 'nothing known before ready()');
+  await a.ready?.();
+  assert.deepEqual(a.session(), { user: { id: 'u2', email: 'b@c.co' } });
+  assert.equal(sent[0].url, '/api/auth/session');
+  assert.equal(sent[0].init.credentials, 'same-origin');
+  await a.signOut();
+  assert.equal(a.session(), null);
+});

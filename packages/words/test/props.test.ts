@@ -188,7 +188,9 @@ const wordDirs = readdirSync(WORDS).filter((d) =>
  * too and the list shrinks as work lands.
  */
 const KNOWN_INERT: Record<string, string[]> = {
-  auth: ['impl'],
+  // Site configuration the TARGET consumes, not the form's markup: `impl` is
+  // the custom adapter module the app imports, `protect` the pages it wraps.
+  auth: ['impl', 'protect'],
   hero: ['model'],
   scene: ['camera', 'model'],
 };

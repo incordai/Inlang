@@ -20,7 +20,10 @@
         "custom"
       ],
       "required": true,
-      "scope": "site"
+      "scope": "site",
+      "deferred": [
+        "azbackend"
+      ]
     },
     "title": {
       "type": "string",
@@ -58,6 +61,11 @@
         ".ts",
         ".tsx"
       ],
+      "scope": "site"
+    },
+    "protect": {
+      "type": "list",
+      "of": "route",
       "scope": "site"
     }
   },
@@ -143,6 +151,20 @@
       "message": "'glass' reduces contrast on credential fields — use the plain surface",
       "when": {
         "modifier": "glass"
+      }
+    },
+    {
+      "code": "AZ2004",
+      "kind": "siteNeeds",
+      "severity": "warning",
+      "message": "a protected route has nowhere to send signed-out users — add a page with 'auth login'",
+      "when": {
+        "prop": "protect"
+      },
+      "needs": {
+        "variant": [
+          "login"
+        ]
       }
     }
   ]
