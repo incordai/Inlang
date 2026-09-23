@@ -93,6 +93,31 @@ const RULES: Rule[] = [
   },
 ];
 
+/**
+ * theme-spec §3.4: a literal colour for the active scheme exists for WebGL
+ * alone — a material cannot read a CSS custom property. CSS-capable code
+ * must use the `var(--az-…)` references, so the literal API (the 3D
+ * runtime's colours module, or `theme.value(`) is legal only in a file that
+ * imports three. A file-level rule: it needs the file's imports, not a line.
+ */
+const WEBGL_COLOUR_USE = /from\s+['"][^'"]*\/colours(?:\.ts|\.js)?['"]|\btheme\.value\s*\(/;
+const IMPORTS_THREE = /from\s+['"](?:three|three\/[^'"]*|@react-three\/fiber)['"]/;
+
+function webglColourOutsideScene(file: string, source: string): LintFinding[] {
+  // Comment lines are blanked, not removed, so line numbers still point home.
+  const code = source.split(/\r?\n/).map((l) => (/^\s*(?:\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n');
+  const m = WEBGL_COLOUR_USE.exec(code);
+  if (!m || IMPORTS_THREE.test(code)) return [];
+  const before = code.slice(0, m.index);
+  return [{
+    file,
+    line: before.split(/\r?\n/).length,
+    col: m.index - before.lastIndexOf('\n'),
+    rule: 'webgl-colour-outside-scene',
+    message: 'a literal theme colour is for WebGL only (theme-spec §3.4) — CSS reads ctx.theme.color.…, which follows the scheme',
+  }];
+}
+
 /** Lines that are comments or token references, which the rules must not flag. */
 function isExempt(line: string): boolean {
   const t = line.trim();
@@ -132,7 +157,7 @@ export function lintSource(file: string, source: string, scope: LintScope = 'wor
     }
   });
 
-  return findings;
+  return [...findings, ...webglColourOutsideScene(file, source)];
 }
 
 /** Format findings the same shape as compiler diagnostics, so tools parse both. */

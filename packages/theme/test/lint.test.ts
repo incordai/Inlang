@@ -171,3 +171,16 @@ test('the compiler\'s own source may write conditions; the value rules still hol
   assert.ok(rules.includes('no-off-scale-px'), 'CONTROL: the raw 768px is still a value violation');
   assert.equal(lintSource('target-web/src/x.ts', "color: '#ff0000'", 'package')[0]?.rule, 'no-hex');
 });
+
+test('theme-spec §3.4: the literal WebGL colour API outside a three file is refused', () => {
+  const css = "import { hex } from './colours.ts';\nexport const bg = hex(document, 'bg');\n";
+  const [f] = lintSource('words/bad/emit.web.ts', css);
+  assert.equal(f?.rule, 'webgl-colour-outside-scene');
+  assert.equal(f?.line, 1);
+  assert.equal(lintSource('x.ts', 'const c = theme.value("color.accent");')[0]?.rule, 'webgl-colour-outside-scene');
+});
+
+test('CONTROL: the same API in a file that imports three is its intended use', () => {
+  const scene = "import * as THREE from 'three';\nimport { hex } from './colours.ts';\nnew THREE.Color(hex(document, 'accent'));\n";
+  assert.deepEqual(lintSource('scene-runtime/stage.ts', scene, 'package'), []);
+});

@@ -52,6 +52,7 @@ const STATE_SELECTOR: Record<InteractionState, (cls: string) => string> = {
   scrolled: (c) => `${c}[data-scrolled="true"]`,
   shrunk: (c) => `${c}[data-shrunk="true"]`,
   retracted: (c) => `${c}[data-retracted="true"]`,
+  live: (c) => `${c}[data-live="true"]`,
   current: (c) => `${c}[aria-current="page"]`,
 };
 

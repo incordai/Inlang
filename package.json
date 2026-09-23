@@ -4,13 +4,14 @@
   "type": "module",
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/overlay/tsconfig.json && tsc --noEmit -p packages/auth-runtime/tsconfig.json",
-    "test": "node --experimental-strip-types --test packages/core/test/*.test.ts packages/theme/test/*.test.ts packages/words/test/*.test.ts packages/target-web/test/*.test.ts packages/cli/test/*.test.ts packages/overlay/test/*.test.ts packages/auth-runtime/test/*.test.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/overlay/tsconfig.json && tsc --noEmit -p packages/auth-runtime/tsconfig.json && tsc --noEmit -p packages/scene-runtime/tsconfig.json",
+    "test": "node --experimental-strip-types --test packages/core/test/*.test.ts packages/theme/test/*.test.ts packages/words/test/*.test.ts packages/target-web/test/*.test.ts packages/cli/test/*.test.ts packages/overlay/test/*.test.ts packages/auth-runtime/test/*.test.ts packages/scene-runtime/test/*.test.ts",
     "verify": "pnpm typecheck && pnpm test",
     "verify:build": "node scripts/verify-build.mjs",
     "coverage": "node scripts/word-coverage.mjs",
     "test:visual": "node scripts/visual.mjs",
     "test:auth": "node scripts/auth-e2e.mjs",
+    "test:3d": "node scripts/test-3d.mjs",
     "gate": "node scripts/gate.mjs",
     "thumbnails": "node scripts/thumbnails.mjs",
     "lint": "node packages/cli/bin/az.js lint packages/words"
@@ -18,7 +19,9 @@
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@types/node": "26.2.0",
+    "@types/three": "0.186.0",
     "playwright": "1.63.0",
+    "three": "0.186.0",
     "typescript": "7.0.2"
   }
 }

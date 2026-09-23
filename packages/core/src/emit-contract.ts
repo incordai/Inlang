@@ -44,10 +44,14 @@ export type BreakpointName = (typeof BREAKPOINT_NAMES)[number];
  * (nav-block-spec §4), `shrunk` a `shrink` nav past its threshold, and
  * `retracted` a `hide` nav moved out of view while the reader scrolls down
  * (nav-block-spec §3). The runtime sets them; the stylesheet styles them.
+ *
+ * `live` belongs to the 3D runtime: the page's shared canvas is drawing in
+ * this element's box (scene-spec §5), so the element steps aside — its
+ * background clears and the poster hides — until the stage tears down.
  */
 export const INTERACTION_STATES = [
   'hover', 'focusVisible', 'focusWithin', 'active', 'disabled', 'loading', 'expanded', 'open', 'scrolled', 'shrunk',
-  'retracted', 'current',
+  'retracted', 'live', 'current',
 ] as const;
 export type InteractionState = (typeof INTERACTION_STATES)[number];
 

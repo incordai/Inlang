@@ -35,6 +35,8 @@ const BANNED = [
   // theme-spec §4 note 3: overlay emits CSS and is in scope for the ban.
   ...sources(join(ROOT, 'packages/overlay/src')),
   ...sources(join(ROOT, 'packages/auth-runtime/src')),
+  // The 3D runtime reads colours from the theme at runtime; it names none.
+  ...sources(join(ROOT, 'packages/scene-runtime/src')),
 ].map((f) => relative(ROOT, f).replace(/\\/g, '/')).filter((f) => !THEME_DATA.has(f));
 
 test('CONTROL: the scope covers every package and still excludes the theme data', () => {

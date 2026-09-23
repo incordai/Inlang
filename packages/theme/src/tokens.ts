@@ -57,7 +57,7 @@ export const MOTION = {
 
 /** CONVENTIONS §4 bans raw z-index; overlays-spec §1 needs a layer manager. */
 export const LAYER = {
-  base: 0, raised: 10, scrim: 20, sticky: 100, dropdown: 200,
+  behind: -1, base: 0, raised: 10, scrim: 20, sticky: 100, dropdown: 200,
   backdrop: 300, modal: 400, toast: 500, tooltip: 600, skip: 700,
 } as const;
 

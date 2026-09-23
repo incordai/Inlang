@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // fileURLToPath, not URL.pathname — on Windows the latter yields '/D:/...'
@@ -55,7 +55,7 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime'];
 
 test('every package has sources to check — CONTROL', () => {
   // Without this, an empty glob would make every rule below pass vacuously.
@@ -122,13 +122,28 @@ test('auth-runtime imports nothing outside itself — it is copied whole into a 
   }
 });
 
+test('scene-runtime imports only itself and three — it is copied whole into a 3D site', () => {
+  for (const file of sources('packages/scene-runtime')) {
+    if (!file.includes(`${sep}src${sep}`)) continue;
+    for (const spec of importsOf(file)) {
+      assert.ok(spec.startsWith('./') || spec === 'three' || spec.startsWith('three/examples/jsm/'),
+        `scene-runtime imports '${spec}' — only its own siblings and three`);
+    }
+  }
+});
+
+test('CONTROL: the scene-runtime rule reads real imports', () => {
+  const stage = sources('packages/scene-runtime').find((f) => f.endsWith('stage.ts'));
+  assert.ok(stage && importsOf(stage).includes('three'), 'stage.ts imports three');
+});
+
 test('the secret scanner imports nothing — it is copied whole into every site (§4)', () => {
   const file = join(ROOT, 'packages/core/src/secrets.ts');
   assert.deepEqual(importsOf(file), []);
 });
 
 test('nothing imports from cli — ARCHITECTURE §2', () => {
-  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime']) {
+  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime']) {
     for (const file of sources(`packages/${pkg}`)) {
       for (const spec of importsOf(file)) {
         assert.ok(crossPackage(spec) !== 'cli', `${pkg} imports from cli (${spec})`);
