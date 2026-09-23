@@ -10,7 +10,8 @@ import { stripTypeScriptTypes } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  carousel, copy, drawer, dropdown, faq, faqDeepLink, hideShrink, lightbox, navMotion, overlayMotion, play, solid,
+  billing, carousel, copy, detach, drawer, dropdown, faq, faqDeepLink, hideShrink, lateContent, lightbox, navMotion,
+  overlayMotion, play, solid, year,
 } from './behaviours.mjs';
 
 const RUNTIME = fileURLToPath(new URL('../../packages/overlay/src/runtime/', import.meta.url));
@@ -18,7 +19,19 @@ const RUNTIME = fileURLToPath(new URL('../../packages/overlay/src/runtime/', imp
 const LOGO = (fill) => `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="16"><rect width="48" height="16" fill="${fill}"/></svg>`)}`;
 
 const NET = '@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-property: opacity !important; } }';
-const SCRIPT = '<script type="module">import { attach } from "./az/behaviours.js"; attach(document);</script>';
+const SCRIPT = '<script type="module">import { attach } from "./az/behaviours.js"; window.__azDetach = attach(document);</script>';
+
+/**
+ * Content that renders after the page — as a page behind <Protected> does
+ * once its session check resolves.
+ */
+const LATE = `<ul data-az-behaviour="faq" data-single="false" id="late-faq">
+  <li><h3 id="late-a"><button type="button" aria-expanded="true" aria-controls="late-a-panel" data-az-disclosure>Late question?</button></h3>
+    <div id="late-a-panel"><p>A late answer.</p></div></li>
+  <li><h3 id="late-b"><button type="button" aria-expanded="true" aria-controls="late-b-panel" data-az-disclosure>Another late one?</button></h3>
+    <div id="late-b-panel"><p>Another late answer.</p></div></li>
+</ul>`;
+const LATER = `<script>setTimeout(() => document.querySelector('main').insertAdjacentHTML('beforeend', ${JSON.stringify(LATE)}), 300);</script>`;
 
 const page = ({ runtime, net }) => `<!doctype html><html lang="en"><head><title>behaviours</title><style>
 [hidden]:not([hidden="until-found"]) { display: none !important; }
@@ -34,7 +47,10 @@ nav[data-scrolled="true"] { background: rgb(250, 250, 250); }
 [data-az-logo="solid"][data-scrolled="true"] { display: inline; }
 [data-az-logo="top"][data-scrolled="true"] { display: none; }
 .group { position: relative; display: inline-block; }
-.dd { position: absolute; top: 100%; background: white; }
+.dd { position: absolute; top: 100%; background: white; opacity: 0; transition: opacity 120ms; }
+.dd[data-state="open"] { opacity: 1; transition: opacity 160ms; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+.target { margin-top: 1200px; }
 button { min-width: 44px; min-height: 44px; }
 .track { display: flex; overflow-x: auto; width: 400px; margin: 0; padding: 0; list-style: none; }
 .track li { flex: 0 0 300px; }
@@ -48,6 +64,7 @@ ${net ? NET : ''}
   <button type="button" class="az-nav-toggle" aria-controls="az-nav-panel" aria-expanded="false" aria-label="Menu">Menu</button>
   <dialog id="az-nav-panel" data-az-behaviour="dialog" data-az-overlay="drawer" aria-label="Menu">
     <button type="button" data-az-close aria-label="Close menu">Close</button><a href="#one">One</a> <a href="#two">Two</a>
+    <p style="height: 200px">A menu with room below its links.</p>
   </dialog>
 </nav></div>
 <main>
@@ -73,7 +90,17 @@ ${net ? NET : ''}
   <button type="button" data-az-behaviour="copy" data-az-target="copy:hello@example.org">Copy the address</button>
   <button type="button" data-az-behaviour="play" aria-haspopup="dialog" aria-expanded="false" data-az-target="video:film">Watch</button><dialog data-az-behaviour="dialog" data-az-overlay="popup" aria-label="Film">
     <button type="button" data-az-close aria-label="Close video">Close</button><video controls preload="none"></video></dialog>
+  <section aria-label="Pricing">
+    <fieldset data-az-behaviour="billing" data-billing="monthly"><legend>Billing period</legend>
+      <label><input type="radio" name="az-billing" value="monthly" checked> Monthly</label>
+      <label><input type="radio" name="az-billing" value="annual"> Annual</label></fieldset>
+    <p data-monthly="$29" data-annual="$290">$29</p><p data-monthly="$79" data-annual="$790">$79</p>
+  </section>
+  <h2 class="target" id="one">One</h2>
+  <h2 class="target" id="two">Two</h2>
 </main>
+<footer><p>© <span data-year="dynamic">2019</span> Aurora</p></footer>
+${LATER}
 ${runtime ? SCRIPT : ''}
 </body></html>`;
 
@@ -113,6 +140,8 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
     ['behaviour: faq', faq, 1440], ['behaviour: copy', copy, 1440], ['behaviour: play', play, 1440],
     ['behaviour: hide and shrink', hideShrink, 1440],
     ['behaviour: carousel', carousel, 1440], ['behaviour: lightbox', lightbox, 1440],
+    ['behaviour: billing', billing, 1440], ['behaviour: year', year, 1440],
+    ['behaviour: late content', lateContent, 1440], ['behaviour: cleanup with a modal open', detach, 390],
   ]) {
     expect(`${label} without the runtime`, await run('none', width, check), false);
     expect(`${label} with the runtime`, await run('good', width, check), true);

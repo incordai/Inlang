@@ -290,7 +290,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   if (plans.some((p) => p.props.annual)) {
     children.push({
       tag: 'fieldset',
-      attrs: { class: 'az-pricing-billing', 'data-billing': billing },
+      // The runtime swaps the prices and keeps ?billing= current (§7.1).
+      attrs: { class: 'az-pricing-billing', 'data-billing': billing, 'data-az-behaviour': 'billing' },
       style: { border: '0', margin: `0 0 ${px(t.space[24])}`, padding: 0 },
       children: [
         {

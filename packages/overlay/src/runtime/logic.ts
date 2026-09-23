@@ -131,3 +131,75 @@ export function swipeOf(dx: number, dy: number): Swipe {
 export function carouselEnds(scrollLeft: number, clientWidth: number, scrollWidth: number): { atStart: boolean; atEnd: boolean } {
   return { atStart: scrollLeft <= 1, atEnd: scrollLeft + clientWidth >= scrollWidth - 1 };
 }
+
+/**
+ * A URL fragment's text. A fragment is attacker-controlled and need not be
+ * valid percent-encoding (`#100%`); a malformed one is used as written rather
+ * than throwing — a throw here would leave the rest of the page unwired.
+ */
+export function safeDecode(fragment: string): string {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+/**
+ * Whether a click landed OUTSIDE a box — on a modal's backdrop, not in its
+ * padding. `e.target === dialog` is true for both, so the point decides.
+ */
+export function outsideBox(
+  x: number, y: number, box: { left: number; top: number; right: number; bottom: number },
+): boolean {
+  return x < box.left || x > box.right || y < box.top || y > box.bottom;
+}
+
+/**
+ * Where Tab moves inside a modal: the next stop, wrapping round. From
+ * somewhere that is not a stop (`at` -1: the dialog itself, or a control the
+ * list omits) Tab goes to the first stop and Shift+Tab to the last.
+ */
+export function trapIndex(at: number, count: number, back: boolean): number {
+  if (at < 0) return back ? count - 1 : 0;
+  return (at + (back ? -1 : 1) + count) % count;
+}
+
+/**
+ * Whether a link's target is a fragment of the page already shown — a jump
+ * the browser makes in place, which a scroll-locked page cannot perform.
+ */
+export function samePageFragment(
+  link: { origin: string; pathname: string; search: string; hash: string },
+  here: { origin: string; pathname: string; search: string },
+): boolean {
+  return link.hash.length > 1 && link.origin === here.origin
+    && link.pathname === here.pathname && link.search === here.search;
+}
+
+/**
+ * footer-spec §4 `year dynamic`: the emitted `since` year is the fallback;
+ * the client writes the range to the current year once that has moved on.
+ * Null leaves the fallback as it is.
+ */
+export function rollingYear(since: string, now: number): string | null {
+  const from = /^\d{4}$/.test(since.trim()) ? Number(since.trim()) : NaN;
+  if (!Number.isFinite(from) || now <= from) return null;
+  return `${from}–${now}`;
+}
+
+export type Billing = 'monthly' | 'annual';
+
+/**
+ * pricing-spec §7.1: the billing period's one source of truth is the query
+ * string (`?billing=annual`), defaulting to the block's `billing` prop.
+ */
+export function billingFrom(search: string, fallback: string): Billing {
+  const q = new URLSearchParams(search).get('billing');
+  if (q === 'monthly' || q === 'annual') return q;
+  return fallback === 'annual' ? 'annual' : 'monthly';
+}
+
+/** §7.1: one polite line naming the mode, not the numbers. */
+export const billingAnnouncement = (mode: Billing): string =>
+  mode === 'annual' ? 'showing annual pricing, billed yearly' : 'showing monthly pricing, billed monthly';

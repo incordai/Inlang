@@ -22,6 +22,28 @@ const TRAP_TABS = 12;
 const until = (page, fn, arg) =>
   page.waitForFunction(fn, arg, { timeout: WAIT_MS }).then(() => true, () => false);
 
+/**
+ * Close a modal with `close()` and record, every frame for a while after it
+ * shut, the lowest scroll offset seen. A restore that jumps to the top and
+ * glides back (or is cut short) shows as a low minimum.
+ */
+async function scrollWhileClosing(page, dialogSel, close) {
+  await page.evaluate((d) => {
+    const dialog = document.querySelector(d);
+    window.__azScroll = { min: Infinity, done: false, until: performance.now() + 1200 };
+    const tick = () => {
+      const w = window.__azScroll;
+      if (!dialog.open) w.min = Math.min(w.min, window.scrollY);
+      if (performance.now() < w.until) requestAnimationFrame(tick);
+      else w.done = true;
+    };
+    requestAnimationFrame(tick);
+  }, dialogSel);
+  await close();
+  await page.waitForFunction(() => window.__azScroll.done, undefined, { timeout: WAIT_MS * 2 });
+  return page.evaluate(() => ({ min: window.__azScroll.min, y: window.scrollY }));
+}
+
 const visible = (page, sel) => page.evaluate((s) => {
   const el = document.querySelector(s);
   if (!el) return false;
@@ -77,7 +99,94 @@ export async function drawer(page) {
       problems.push('a click outside did not close the menu');
     }
   }
+  problems.push(...await drawerDetails(page));
   return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
+/** Open the menu without the scroll a Playwright click would make first. */
+async function openDrawer(page) {
+  await until(page, () => document.querySelector('#az-nav-panel')?.open === false);
+  await page.$eval('.az-nav-toggle', (b) => b.click());
+  return until(page, () => document.querySelector('#az-nav-panel')?.open === true);
+}
+
+/**
+ * overlays §2/§6 in detail: a click in the menu's own padding is not the
+ * backdrop; Shift+Tab from the dialog itself goes to the LAST control;
+ * closing restores the page where it was without a jump to the top; and a
+ * link to a part of this page gets there once the menu has closed.
+ */
+async function drawerDetails(page) {
+  const problems = [];
+  await page.evaluate(() => { document.body.style.minHeight = '3000px'; });
+
+  if (await openDrawer(page)) {
+    // After the entrance: mid-slide the box is still off-screen.
+    await page.waitForTimeout(500);
+    // Low in the part of the box that is on screen: a drawer's box can run
+    // past the viewport's bottom edge.
+    const box = await page.$eval('#az-nav-panel', (d) => {
+      const r = d.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: Math.min(r.bottom, innerHeight) - 6 };
+    });
+    // Only a point with nothing of the menu's own under it is its padding.
+    const empty = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) === document.querySelector('#az-nav-panel'), box);
+    if (empty) {
+      await page.mouse.click(box.x, box.y);
+      await page.waitForTimeout(400);
+      if (!(await page.$eval('#az-nav-panel', (d) => d.open))) problems.push('a click inside the menu (its padding) closed it');
+    }
+  }
+  if (await page.$eval('#az-nav-panel', (d) => d.open)) {
+    // Focus on the dialog itself — not one of its stops — as after a click
+    // on its empty area.
+    await page.evaluate(() => {
+      const d = document.querySelector('#az-nav-panel');
+      d.setAttribute('tabindex', '-1');
+      d.focus();
+    });
+    await page.keyboard.press('Shift+Tab');
+    const onLast = await page.evaluate(() => {
+      const d = document.querySelector('#az-nav-panel');
+      d.removeAttribute('tabindex');
+      const stops = [...d.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), video[controls], [tabindex]:not([tabindex="-1"])')]
+        .filter((el) => el.getClientRects().length > 0);
+      return document.activeElement === stops[stops.length - 1];
+    });
+    if (!onLast) problems.push('Shift+Tab from the menu itself did not go to its last control');
+    await page.keyboard.press('Escape');
+  }
+
+  // Close from part-way down the page: the page must stay where it was.
+  await until(page, () => document.querySelector('#az-nav-panel')?.open === false);
+  await page.evaluate(() => window.scrollTo({ top: 300, behavior: 'instant' }));
+  await page.waitForTimeout(100);
+  if (await openDrawer(page)) {
+    const r = await scrollWhileClosing(page, '#az-nav-panel', () => page.keyboard.press('Escape'));
+    if (Math.abs(r.y - 300) > 2 || r.min < 290) {
+      problems.push(`closing the menu moved the page (lowest ${Math.round(r.min)}, ended ${Math.round(r.y)}, was 300)`);
+    }
+  }
+
+  // A link to a part of THIS page, if the menu has one whose target exists.
+  const anchor = await page.evaluate(() => {
+    const a = [...document.querySelectorAll('#az-nav-panel a[href^="#"]')]
+      .find((l) => l.hash.length > 1 && document.getElementById(decodeURIComponent(l.hash.slice(1))));
+    return a ? a.getAttribute('href') : null;
+  });
+  if (anchor) {
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    if (await openDrawer(page)) {
+      await page.click(`#az-nav-panel a[href="${anchor}"]`);
+      const arrived = await until(page, (h) => {
+        const t = document.getElementById(decodeURIComponent(h.slice(1)));
+        const r = t.getBoundingClientRect();
+        return !document.querySelector('#az-nav-panel').open && r.top >= 0 && r.top < innerHeight && window.scrollY > 0;
+      }, anchor);
+      if (!arrived) problems.push(`the menu link ${anchor} did not take the page to its target`);
+    }
+  }
+  return problems;
 }
 
 /**
@@ -109,12 +218,38 @@ export async function dropdown(page) {
   if (second.index !== 1) problems.push(`ArrowDown moved to link ${second.index}, not the second`);
   if (second.roving !== 1) problems.push(`${second.roving} links in the tab order, not one (roving tabindex)`);
   if (second.expanded !== 'true') problems.push('aria-expanded stayed false while open');
+  // The list stays in the layout for its exit transition: `hidden` comes
+  // after it, not with aria-expanded (overlays-spec §3).
+  await page.evaluate((b) => {
+    const btn = document.querySelector(b);
+    const list = document.getElementById(btn.getAttribute('aria-controls'));
+    window.__azExit = { collapsed: null, hidden: null };
+    new MutationObserver(() => {
+      if (window.__azExit.collapsed === null && btn.getAttribute('aria-expanded') === 'false') window.__azExit.collapsed = performance.now();
+      if (window.__azExit.hidden === null && list.hidden) window.__azExit.hidden = performance.now();
+    }).observe(btn.parentElement, { attributes: true, subtree: true, attributeFilter: ['aria-expanded', 'hidden'] });
+  }, button);
   await page.keyboard.press('Escape');
   const escaped = await until(page, (b) => {
     const btn = document.querySelector(b);
     return document.getElementById(btn.getAttribute('aria-controls')).hidden && document.activeElement === btn;
   }, button);
   if (!escaped) problems.push('Escape did not close the list and return focus to its button');
+  else {
+    const exit = await page.evaluate((b) => {
+      const list = document.getElementById(document.querySelector(b).getAttribute('aria-controls'));
+      // The closed state's transition — what the exit runs.
+      list.hidden = false;
+      const cs = getComputedStyle(list);
+      const ms = (v) => (v.trim().endsWith('ms') ? parseFloat(v) : parseFloat(v) * 1000) || 0;
+      const longest = Math.max(...cs.transitionDuration.split(',').map(ms));
+      list.hidden = true;
+      return { longest, gap: window.__azExit.hidden - window.__azExit.collapsed };
+    }, button);
+    if (exit.longest >= 100 && !(exit.gap >= exit.longest * 0.5)) {
+      problems.push(`the list was hidden ${Math.round(exit.gap)}ms after closing, before its ${exit.longest}ms exit could run`);
+    }
+  }
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Tab');
   const left = await until(page, (b) => {
@@ -219,6 +354,19 @@ export async function faq(page) {
     return { expanded: b.getAttribute('aria-expanded'), hidden: panel.hasAttribute('hidden') };
   });
   if (found.hidden || found.expanded !== 'true') problems.push('find-in-page did not open the answer it found');
+  // A malformed fragment (`#%E0%A4`) must not stop the runtime: the answers
+  // still collapse, as they do on any other arrival.
+  const url = new URL(page.url());
+  url.hash = '';
+  // A fresh load: the same URL with only a new fragment would be a jump
+  // within the page, and nothing would run again.
+  await page.goto('about:blank');
+  await page.goto(`${url.href}#%E0%A4`, { waitUntil: 'load' });
+  if (await page.$('#root')) await page.waitForSelector('#root > *', { state: 'attached' });
+  await page.waitForTimeout(300);
+  const malformed = await page.evaluate(() => [...document.querySelectorAll('[data-az-disclosure]')]
+    .every((b) => b.getAttribute('aria-expanded') === 'false'));
+  if (!malformed) problems.push('with a malformed #fragment in the address the answers were never collapsed (the runtime stopped)');
   return { pass: problems.length === 0, detail: problems.join('; ') };
 }
 
@@ -243,6 +391,22 @@ export async function copy(page) {
   const problems = [];
   if (!said) problems.push('no polite "Copied" announcement');
   if (clipboard !== expected) problems.push(`clipboard holds ${JSON.stringify(clipboard)}, not ${JSON.stringify(expected)}`);
+  // A second copy must be heard too: the region has to change, so it is
+  // emptied for a moment first — setting the same text again is no change.
+  if (said) {
+    await page.evaluate(() => {
+      const region = document.querySelector('[role="status"][aria-live="polite"]');
+      window.__azSaid = [];
+      const until = performance.now() + 600;
+      const tick = () => { window.__azSaid.push(region.textContent); if (performance.now() < until) setTimeout(tick, 5); };
+      tick();
+    });
+    await page.click(button);
+    await page.waitForTimeout(700);
+    const seq = await page.evaluate(() => window.__azSaid);
+    const emptied = seq.indexOf('');
+    if (emptied < 0 || !seq.slice(emptied).includes('Copied')) problems.push('a second copy was not announced again (the region never changed)');
+  }
   return { pass: problems.length === 0, detail: problems.join('; ') };
 }
 
@@ -350,8 +514,45 @@ export async function hideShrink(page) {
     await page.waitForTimeout(400);
     const focused = await state();
     if (focused.top < 0 || focused.bottom <= 0) problems.push('focus inside the hidden bar did not bring it back');
+    problems.push(...await modalIsNotAScroll(page, sel));
   }
   return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
+/**
+ * A modal locks the page (scrollY reads 0) and unlocks it (scrollY jumps
+ * back). Neither is the reader scrolling: a shown bar stays shown after a
+ * lightbox or video closes, and a solid bar stays solid while one is open.
+ */
+async function modalIsNotAScroll(page, sel) {
+  const trigger = await page.evaluate(() => {
+    const t = document.querySelector('[data-az-behaviour="play"][aria-haspopup="dialog"], [data-az-behaviour="lightbox"] button[data-az-index]');
+    return t ? (t.matches('[data-az-behaviour="play"]') ? '[data-az-behaviour="play"][aria-haspopup="dialog"]' : '[data-az-behaviour="lightbox"] button[data-az-index]') : null;
+  });
+  if (!trigger) return [];
+  const problems = [];
+  await settleAt(page, 0, 100);
+  for (const y of [150, 300, 450, 600]) await settleAt(page, y, 60);
+  await settleAt(page, 560);
+  const bar = () => page.evaluate((s) => {
+    const nav = document.querySelector(s);
+    return { retracted: nav.getAttribute('data-retracted'), scrolled: nav.getAttribute('data-scrolled') };
+  }, sel);
+  const before = await bar();
+  if (before.retracted !== 'false') return ['could not bring the bar back before opening a modal'];
+  const dialogOf = (t) => (t.startsWith('[data-az-behaviour="play"]')
+    ? `${t} + dialog` : '[data-az-behaviour="lightbox"] dialog');
+  await page.$eval(trigger, (b) => b.click());
+  if (!(await until(page, (d) => document.querySelector(d)?.open === true, dialogOf(trigger)))) return ['the modal did not open'];
+  await page.waitForTimeout(200);
+  const during = await bar();
+  if (before.scrolled === 'true' && during.scrolled !== 'true') problems.push('the solid bar turned transparent while a modal was open');
+  await page.keyboard.press('Escape');
+  await until(page, (d) => document.querySelector(d)?.open === false, dialogOf(trigger));
+  await page.waitForTimeout(400);
+  const after = await bar();
+  if (after.retracted !== 'false') problems.push('the bar hid itself after a modal closed, though the reader had not scrolled');
+  return problems;
 }
 
 /**
@@ -559,5 +760,121 @@ export async function lightbox(page) {
     const after = await read();
     if (after.focusedThumb !== count - 1) problems.push(`focus returned to thumbnail ${after.focusedThumb + 1}, not ${count} — the one on show`);
   }
+  // From part-way down the page, open and close: the page stays put, with
+  // no jump to the top and glide back (the site smooth-scrolls).
+  const y = await page.evaluate((t) => {
+    document.body.style.minHeight = '4000px';
+    const thumb = document.querySelector(t);
+    const at = Math.max(0, Math.round(thumb.getBoundingClientRect().top + window.scrollY - 200));
+    window.scrollTo({ top: at, behavior: 'instant' });
+    return Math.round(window.scrollY);
+  }, thumbs);
+  if (y > 0) {
+    await page.$eval(thumbs, (b) => b.click());
+    const dialog = '[data-az-behaviour="lightbox"] dialog';
+    if (await until(page, (d) => document.querySelector(d).open, dialog)) {
+      const r = await scrollWhileClosing(page, dialog, () => page.keyboard.press('Escape'));
+      if (Math.abs(r.y - y) > 2 || r.min < y - 10) {
+        problems.push(`closing the lightbox moved the page (lowest ${Math.round(r.min)}, ended ${Math.round(r.y)}, was ${y})`);
+      }
+    }
+  }
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
+/**
+ * pricing §7.1: choosing Annual shows every annual price in the section, is
+ * kept in the query string without a new history entry, is announced as a
+ * mode, and a load with ?billing=annual starts there.
+ */
+export async function billing(page) {
+  const group = '[data-az-behaviour="billing"]';
+  if (!(await page.$(group))) return null;
+  const read = () => page.evaluate((g) => {
+    const f = document.querySelector(g);
+    const s = f.closest('section') ?? f.parentElement;
+    const prices = [...s.querySelectorAll('[data-monthly]')];
+    return {
+      annual: prices.filter((p) => p.hasAttribute('data-annual')).every((p) => p.textContent.trim() === p.getAttribute('data-annual')),
+      monthly: prices.every((p) => p.textContent.trim() === p.getAttribute('data-monthly')),
+      some: prices.some((p) => p.hasAttribute('data-annual')),
+      checked: f.querySelector('input:checked')?.value,
+      search: location.search, history: history.length,
+    };
+  }, group);
+  const problems = [];
+  const start = await read();
+  if (!start.some) return { pass: false, detail: 'no annual prices to switch to' };
+  await page.click(`${group} input[value="annual"]`);
+  const switched = await until(page, (g) => {
+    const s = document.querySelector(g).closest('section') ?? document.querySelector(g).parentElement;
+    return [...s.querySelectorAll('[data-annual]')].every((p) => p.textContent.trim() === p.getAttribute('data-annual'));
+  }, group);
+  if (!switched) return { pass: false, detail: 'choosing Annual did not show the annual prices' };
+  const after = await read();
+  if (!/[?&]billing=annual\b/.test(after.search)) problems.push('the chosen period is not in the query string');
+  if (after.history !== start.history) problems.push('the choice added a history entry (Back must leave the page)');
+  const said = await until(page, () => /annual pricing/.test(document.querySelector('[role="status"][aria-live="polite"]')?.textContent ?? ''));
+  if (!said) problems.push('the change of period was not announced');
+  await page.reload({ waitUntil: 'load' });
+  if (await page.$('#root')) await page.waitForSelector('#root > *', { state: 'attached' });
+  await page.waitForTimeout(200);
+  const loaded = await read();
+  if (!loaded.annual || loaded.checked !== 'annual') problems.push('a load with ?billing=annual did not start on annual prices');
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
+/** footer §4 `year dynamic`: the client writes the current year (a range from `since`). */
+export async function year(page) {
+  const sel = '[data-year="dynamic"]';
+  if (!(await page.$(sel))) return null;
+  const text = await page.$eval(sel, (s) => s.textContent.trim());
+  const now = new Date().getFullYear();
+  const pass = text === String(now) || new RegExp(`^\\d{4}–${now}$`).test(text);
+  return { pass, detail: pass ? '' : `the dynamic year reads "${text}", not ${now}` };
+}
+
+/**
+ * Markup rendered AFTER the first render — a page behind <Protected> — is
+ * wired like the rest: the self-test page adds a FAQ and a copy button late.
+ */
+export async function lateContent(page) {
+  const arrived = await until(page, () => !!document.getElementById('late-faq'));
+  if (!arrived) return { pass: false, detail: 'the late content never arrived' };
+  await page.waitForTimeout(100);
+  const collapsed = await page.evaluate(() => [...document.querySelectorAll('#late-faq [data-az-disclosure]')]
+    .every((b) => b.getAttribute('aria-expanded') === 'false'));
+  await page.click('#late-faq [data-az-disclosure]');
+  const opened = await page.$eval('#late-faq [data-az-disclosure]', (b) => b.getAttribute('aria-expanded') === 'true');
+  const problems = [];
+  if (!collapsed) problems.push('late FAQ answers were not collapsed');
+  if (!opened) problems.push('a late FAQ question does not open its answer');
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
+/**
+ * The runtime's cleanup with a modal open gives the page back: the dialog
+ * closed, its trigger collapsed, the body unfixed.
+ */
+export async function detach(page) {
+  if (!(await page.evaluate(() => typeof window.__azDetach === 'function'))) {
+    return { pass: false, detail: 'no runtime attached' };
+  }
+  await page.$eval('.az-nav-toggle', (b) => b.click());
+  if (!(await until(page, () => document.querySelector('#az-nav-panel')?.open === true))) {
+    return { pass: false, detail: 'the menu did not open' };
+  }
+  const r = await page.evaluate(() => {
+    window.__azDetach();
+    return {
+      open: document.querySelector('#az-nav-panel').open,
+      fixed: getComputedStyle(document.body).position === 'fixed',
+      expanded: document.querySelector('.az-nav-toggle').getAttribute('aria-expanded'),
+    };
+  });
+  const problems = [];
+  if (r.open) problems.push('the menu stayed open');
+  if (r.fixed) problems.push('the page stayed scroll-locked');
+  if (r.expanded !== 'false') problems.push('the toggle still says expanded');
   return { pass: problems.length === 0, detail: problems.join('; ') };
 }
