@@ -982,7 +982,7 @@ Line numbers count from the first line of the block above.
 | 31 | `    alt "Call the studio" tel:+…` | Scheme `tel` → intent `call`, phone icon, tap-to-call (buttons §1.2) |
 | 32 | `    model ./assets/shoe.glb` | `path`, `ext: [".glb"]`, `maxBytes: 5242880`. Required by the `3d` modifier via manifest `requires` (ARCHITECTURE §4.1) |
 | 33 | `    height 85` | `number`. `85` is a `BARE` at parse time and becomes a number only when typed (§1.6) |
-| 34 | `    slot after ./custom/Ticker.tsx` | Slot name then path (PRD §6.6, ROADMAP M3). `after` must be a slot declared in `hero`'s manifest |
+| 34 | `    slot after ./custom/Ticker.tsx` | Slot name then path (PRD §6.6, ROADMAP M3). `before` and `after` are injection points every block has — the component renders beside the block; any other name must be a slot the block's manifest declares, and the component joins that slot's fills (AZ1218 otherwise) |
 | 36 | `  feature grid 3` | `grid` is a `feature` variant; `3` is the positional consumed by the manifest's `arg` (§3.2). The parser sees two indistinguishable `BARE`s |
 | 37 | `  gallery orbit` | `orbit` is a `gallery` variant, declared in `gallery/word.json` — not a global modifier. There is no global modifier list |
 | 39–41 | `text` block | Two props; `body` is a `path` to markdown, not inline content — `.az` holds no markup (§6) |

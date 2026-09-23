@@ -122,8 +122,8 @@ themes, so it goes in the backlog too and gets decided, not slipped in.
 - `az migrate` skeleton (no-op for v1 grammar, proves the path exists)
 
 **Exit criteria**
-- [ ] a custom component mounts via `raw` and receives theme tokens
-- [ ] `az eject hero` produces editable source that still builds
+- [x] a custom component mounts via `raw` and receives theme tokens
+- [x] `az eject hero` produces editable source that still builds
 
 ---
 
@@ -227,7 +227,19 @@ thumbnails, the 12-point gate and `lint` as commands, and parts of each
 block's validation table (e.g. gallery's missing-alt and caption warnings,
 faq's one-FAQPage-per-page error, hero's three-button limit).
 
-**M3–M5 — not started.**
+**M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
+validated at the link stage (placement AZ1217, slot name AZ1218, shape
+AZ1219, sandbox and type AZ1210/AZ1410); the CLI copies each module into the
+generated project's `src/user/` through the asset sandbox, and the App renders
+it with the theme (verify-build: a `slot after` component follows its hero, a
+page `raw` sits in the flow, both receive `var(--az-…)` tokens). `az eject`
+hands a word to the project's `words/`, whose words override the bundled ones;
+an edited ejected hero builds through `az build` and `vite build`. `az lint`
+and the `az migrate` skeleton exist. Known limits: a component is copied as a
+single file (its own relative imports are not carried), and `az dev` must be
+restarted to pick up edits to an ejected emitter.
+
+**M4–M5 — not started.**
 
 Still outstanding and not answerable by writing code — PRD §11: open-source
 vs internal, the fate of the backend project (decides `auth azbackend`), a

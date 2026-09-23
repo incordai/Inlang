@@ -178,6 +178,13 @@ export interface EmitContext {
 }
 ```
 
+A **component node** — `{ tag: '#component', attrs: { src } }` (`COMPONENT_TAG`
+in `emit-contract.ts`) — stands for an author component named by `raw` or
+`slot` (PRD §6.6). Targets create them; words never need to. `#` can never
+begin an HTML tag, so one is never mistaken for markup. The web target imports
+each module into the generated App and renders it with a `theme` prop: the
+same token object words read, colours as `var(--az-…)` references.
+
 One emitter file per word **per target**: `emit.web.ts`, later `emit.mobile.ts`.
 A word with no emitter for a target is simply unavailable there — the compiler
 reports it, it is not an error in the word.
@@ -235,5 +242,7 @@ says it is generated; the spelling follows the format, and a test checks each
 file by its extension rather than exempting the ones that are awkward.
 
 Output goes to `.az-build/` (gitignored). `dist/` is the built site.
-`az eject <word>` copies a word's source into `src/words/` and removes it from
+`az eject <word>` copies a word's source into the project's `words/<word>/`
+(with verbatim copies of the emit contract in `words/_az/`, which its imports
+are pointed at) and removes it from
 management — one-way, and it prints that it is one-way.
