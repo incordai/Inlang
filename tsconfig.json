@@ -9,6 +9,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "erasableSyntaxOnly": true,
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["node"]
