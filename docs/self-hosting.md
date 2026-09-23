@@ -83,8 +83,11 @@ Migrations run on every start and are safe to repeat.
 - **Behind TLS**, on the **same site** as the pages (`api.example.org` beside
   `www.example.org`): the session cookie is then `SameSite=Lax`. A different
   site needs `AZ_COOKIE_SAMESITE=none`, which some browsers restrict.
-- Behind a reverse proxy you control, set `AZ_TRUST_PROXY=true` so rate limits
-  see real client addresses.
+- Behind reverse proxies you control, set `AZ_TRUST_PROXY` to how many of them
+  append to `X-Forwarded-For` (`true` means one) so rate limits use the address
+  the outermost one saw — never the client-supplied first entry.
+- A session unused for `AZ_SESSION_IDLE_MINUTES` ends (default a day; 30 for
+  stricter security requirements).
 - Rate limits are counted per server process, so run a single process for
   now; limits are not yet shared between processes (backend-spec).
 
