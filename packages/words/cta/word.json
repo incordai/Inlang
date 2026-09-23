@@ -10,8 +10,8 @@
       "split": "Text beside a supporting image"
     },
     "modifiers": {
-      "glass": "Blurred translucent surface over an image",
-      "reveal": "Fades in when scrolled into view"
+      "glass": "Blurred translucent surface (not rendered yet)",
+      "reveal": "Fades in when scrolled into view (not rendered yet)"
     }
   },
   "variants": [

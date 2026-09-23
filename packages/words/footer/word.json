@@ -10,7 +10,7 @@
       "mega": "Many groups; accordions on phones"
     },
     "modifiers": {
-      "glass": "Blurred translucent surface"
+      "glass": "Blurred translucent surface (not rendered yet)"
     }
   },
   "variants": [
@@ -80,7 +80,7 @@
     },
     "social": {
       "max": 6,
-      "description": "Link to a social profile, opens a new tab"
+      "description": "Social profile link; external ones open a new tab"
     },
     "legal": {
       "max": 4,

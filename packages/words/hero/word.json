@@ -15,7 +15,7 @@
       "3d": "Adds a 3D scene (procedural or model)",
       "scroll": "3D camera follows page scroll; needs 3d",
       "parallax": "Visual moves slower than the page on scroll",
-      "glass": "Blurred translucent panel behind the text"
+      "glass": "Blurred translucent surface (not rendered yet)"
     }
   },
   "variants": [

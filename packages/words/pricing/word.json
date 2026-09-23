@@ -9,7 +9,7 @@
       "table": "Comparison table; per-plan panels on phones"
     },
     "modifiers": {
-      "reveal": "Fades in when scrolled into view"
+      "reveal": "Fades in when scrolled into view (not rendered yet)"
     }
   },
   "variants": [

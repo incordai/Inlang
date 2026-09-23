@@ -10,7 +10,7 @@
       "columns": "Two text columns; one below 1024px"
     },
     "modifiers": {
-      "reveal": "Fades in when scrolled into view"
+      "reveal": "Fades in when scrolled into view (not rendered yet)"
     }
   },
   "variants": [
@@ -36,7 +36,7 @@
       ],
       "maxBytes": 262144,
       "maxWords": 800,
-      "description": "Text, or a path to a .md file"
+      "description": "Body text; a .md file path is not rendered yet"
     }
   },
   "slots": {
