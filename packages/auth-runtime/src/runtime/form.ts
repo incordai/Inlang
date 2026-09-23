@@ -42,8 +42,10 @@ export function attachAuth(doc: Document, adapter: AuthAdapter, options?: Attach
   if (!loc) return () => ac.abort();
   const params = new URLSearchParams(loc.search);
 
-  const forms = [...doc.querySelectorAll<HTMLFormElement>('form[data-az-behaviour="auth"]')];
-  showResetState(forms, params);
+  // Every form wired so far. A protected page renders its content only after
+  // the session check, so forms can arrive later; each is wired exactly once.
+  const forms: HTMLFormElement[] = [];
+  const wired = new WeakSet<Element>();
   // §3.5: an email link or a provider may have brought a session back to
   // this page. A recovery session opens the set-new-password form; a
   // sign-in on a login or sign-up page continues where the visitor was going.
@@ -58,12 +60,24 @@ export function attachAuth(doc: Document, adapter: AuthAdapter, options?: Attach
       if (start) loc.assign(safeNext(params.get('next'), loc.origin) ?? start.dataset.redirect ?? '/');
     });
   }
-  showReturnedError(forms, params, win);
-  for (const box of doc.querySelectorAll<HTMLElement>('[data-az-oauth="providers"]')) {
-    void fillProviders(box, adapter, loc, params, ac.signal);
-  }
 
-  for (const form of forms) {
+  /** Wire the auth forms and provider lists under `root` not wired yet. */
+  const scan = (root: ParentNode) => {
+    const fresh = within<HTMLFormElement>(root, 'form[data-az-behaviour="auth"]').filter((f) => !wired.has(f));
+    for (const f of fresh) { wired.add(f); forms.push(f); }
+    if (fresh.length > 0) {
+      showResetState(fresh, params);
+      showReturnedError(fresh, params, win);
+    }
+    for (const box of within<HTMLElement>(root, '[data-az-oauth="providers"]')) {
+      if (wired.has(box)) continue;
+      wired.add(box);
+      void fillProviders(box, adapter, loc, params, ac.signal);
+    }
+    for (const form of fresh) wireForm(form);
+  };
+
+  function wireForm(form: HTMLFormElement) {
     // JS validates on submit with a summary (§6); without JS the browser's own
     // `required` checks still run, because this line never executes.
     form.noValidate = true;
@@ -89,6 +103,13 @@ export function attachAuth(doc: Document, adapter: AuthAdapter, options?: Attach
       }
     }, { signal: ac.signal });
   }
+
+  scan(doc);
+  const observer = win ? new win.MutationObserver((records) => {
+    for (const r of records) for (const n of r.addedNodes) if (n.nodeType === 1) scan(n as Element);
+  }) : null;
+  if (doc.body) observer?.observe(doc.body, { childList: true, subtree: true });
+  ac.signal.addEventListener('abort', () => observer?.disconnect());
 
   async function submit(form: HTMLFormElement, submitter: HTMLButtonElement | null, failed: Set<string>) {
     const how = method(form, submitter);
@@ -305,4 +326,10 @@ async function fillProviders(
     parent?.append(item);
   }
   box.hidden = false;
+}
+
+/** Elements under `root` (itself included) matching `selector`. */
+function within<T extends Element>(root: ParentNode, selector: string): T[] {
+  const self = root instanceof Element && root.matches(selector) ? [root as T] : [];
+  return [...self, ...root.querySelectorAll<T>(selector)];
 }

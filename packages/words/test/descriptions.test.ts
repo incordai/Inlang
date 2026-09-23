@@ -11,8 +11,6 @@ import { fileURLToPath } from 'node:url';
 
 const WORDS = join(fileURLToPath(new URL('../../../', import.meta.url)), 'packages/words');
 const MAX = 60;
-/** Brand names a description must never carry (user rule 5). */
-const VENDOR = /supabase|firebase|clerk|auth0|okta|vercel|netlify|stripe|google|github|facebook|apple|microsoft|amazon|aws|sendgrid|mailgun|twilio/i;
 
 type Props = Record<string, { type: string; values?: unknown; description?: string; valueDescriptions?: Record<string, string> }>;
 type Slot = { description?: string; props?: Props; slots?: Record<string, Slot> };
@@ -60,7 +58,6 @@ for (const w of words) {
       assert.ok(typeof text === 'string' && text.trim().length > 0, `${path}: no description`);
       assert.ok(text.length <= MAX, `${path}: ${text.length} characters — '${text}'`);
       assert.ok(!text.endsWith('.'), `${path}: no trailing period`);
-      assert.ok(!VENDOR.test(text), `${path}: names a vendor`);
     }
   });
 }

@@ -310,7 +310,7 @@ const SITE = `az 1
 site studio
   auth
     adapter hosted
-    protect /account
+    protect /account /security
 
 page /
   hero center
@@ -335,6 +335,11 @@ page /reset
 page /account
   hero center
     title "Your orders"
+
+page /security
+  auth reset
+    title "Change your password"
+    alt   "Back to your orders" /account
 
 page /terms
   text
@@ -427,6 +432,18 @@ try {
   await page.goto(at('/account'));
   await bar.waitFor({ state: 'visible' });
   check('the session persists across page loads in the tab', page.url().endsWith('/account'));
+
+  /* 5b. a form on a protected page renders after the session check — it is
+         still wired: an empty submit shows the summary instead of the
+         browser's own required-field bubble. */
+  await page.goto(at('/security'));
+  await form('reset').waitFor({ state: 'visible' });
+  await form('reset').locator('button[type="submit"]').first().click();
+  const lateSummary = form('reset').locator('.az-auth-summary');
+  check('a protected page\'s auth form, rendered late, is wired like any other',
+    await lateSummary.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false));
+  await page.goto(at('/account'));
+  await bar.waitFor({ state: 'visible' });
 
   /* 6. sign out — back to login, and the protected page is closed again. */
   await bar.getByRole('button', { name: 'Sign out' }).click();
