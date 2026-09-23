@@ -10,7 +10,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compile, serialiseSpec, type Diagnostic } from '../../core/src/index.ts';
+import { compile, explain, serialiseSpec, type Diagnostic } from '../../core/src/index.ts';
 import { serve } from '../../mcp/src/server.ts';
 import type { Toolbox, ToolDiagnostic, WordEntry } from '../../mcp/src/tools.ts';
 import { build, wordsFor } from './az.ts';
@@ -71,6 +71,12 @@ export function toolbox(root: string): Toolbox {
         .sort((a, b) => (a.name < b.name ? -1 : 1))
         .map((m): WordEntry => ({
           name: m.name,
+          description: m.description ?? '',
+          descriptions: {
+            variants: { ...m.descriptions?.variants },
+            modifiers: { ...m.descriptions?.modifiers },
+            ...(m.descriptions?.children ? { children: { ...m.descriptions.children } } : {}),
+          },
           variants: m.variants ?? [],
           modifiers: m.modifiers ?? [],
           props: m.props ?? {},
@@ -114,6 +120,9 @@ export function toolbox(root: string): Toolbox {
     },
 
     grammar: () => readFileSync(join(REPO, 'docs/GRAMMAR.md'), 'utf8'),
+
+    // Manifests only (no project code runs), like every read-only tool.
+    explain: (terms) => explain(terms, loadWords(wordsDir(), projectWords, { code: false }).manifests),
   };
 }
 

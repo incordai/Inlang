@@ -14,7 +14,9 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compile, envMessage, formatDiagnostics, scanEnv, serialiseSpec } from '../../core/src/index.ts';
+import {
+  compile, envMessage, explain, formatDiagnostics, formatExplained, scanEnv, serialiseSpec,
+} from '../../core/src/index.ts';
 import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../target-web/src/emit.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
@@ -273,9 +275,10 @@ const USAGE = `az — words to a website
   az eject <word> [--dir project]  take ownership of a word's source — one-way
   az backend init <server-dir>     write the backend's .env with a fresh secret
   az mcp   [--root dir]            serve these tools to an AI agent (MCP, stdio)
+  az explain <term...>             one line per term: az explain hero center
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain']);
 
 /**
  * `az backend init <server-dir>` — write `.env` beside a generated server's
@@ -300,6 +303,21 @@ function runBackend(sub: string, rest: string[]): number {
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 /** `az lint`: findings are errors (exit 1), and a clean run says how much it checked. */
+/**
+ * `az explain <term...>`: one ≤60-character line per term, from the manifests
+ * only — no project code runs. Unknown terms exit 1 with a suggestion.
+ */
+function runExplain(terms: string[]): number {
+  if (terms.length === 0) {
+    process.stderr.write('az: explain needs a term — try: az explain hero center\n');
+    return EXIT.config;
+  }
+  const words = loadWords(process.env.AZ_WORDS ?? BUNDLED_WORDS, resolve('words'), { code: false });
+  const result = explain(terms, words.manifests);
+  process.stdout.write(formatExplained(result) + '\n');
+  return result.unknown.length > 0 ? EXIT.missing : EXIT.ok;
+}
+
 function runLint(wordsDir: string): number {
   if (!existsSync(wordsDir) || !statSync(wordsDir).isDirectory()) {
     process.stderr.write(`az: no words directory at '${wordsDir}' — try: az lint path/to/words\n`);
@@ -428,6 +446,7 @@ export function main(argv: string[]): number {
     return EXIT.config;
   }
   if (cmd === 'lint') return runLint(file ?? process.env.AZ_WORDS ?? 'words');
+  if (cmd === 'explain') return runExplain(argv.slice(1));
   if (cmd === 'mcp') {
     // stdin keeps the process alive; the server ends when the client closes it.
     const rootFlag = argv.indexOf('--root');

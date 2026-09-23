@@ -22,6 +22,13 @@ export interface ToolDiagnostic {
 /** A word in the catalogue: everything an author may write under it. */
 export interface WordEntry {
   readonly name: string;
+  /** ≤60 characters each — what the word, its variants and modifiers mean. */
+  readonly description: string;
+  readonly descriptions: {
+    readonly variants: Record<string, string>;
+    readonly modifiers: Record<string, string>;
+    readonly children?: Record<string, string>;
+  };
   readonly variants: string[];
   readonly modifiers: string[];
   readonly props: Record<string, unknown>;
@@ -48,6 +55,11 @@ export interface Toolbox {
   readonly backendInit: (serverDir: string) =>
     { ok: true; path: string } | { ok: false; message: string };
   readonly grammar: () => string;
+  /** One line per term (`hero center` → hero, center); unknown terms get a suggestion. */
+  readonly explain: (terms: string[]) => {
+    lines: { term: string; kind: string; of: string; text: string }[];
+    unknown: { term: string; suggestion: string | null }[];
+  };
 }
 
 interface Schema {
@@ -136,6 +148,17 @@ export const TOOLS: ToolDef[] = [
     inputSchema: obj({}, []),
     annotations: READ,
     run: (_a, box) => ({ words: box.words() }),
+  },
+  {
+    name: 'az_explain',
+    description: 'The cheapest lookup: one ≤60-character line per .az term, in context — "hero center" explains hero and its center variant; "hero height peek" a prop and its value; "backend database postgres" a keyword. Unknown terms get a did-you-mean. Writes nothing.',
+    inputSchema: obj({ terms: 'Terms as written in .az, space-separated, e.g. "hero center" or "nav sticky mobile drawer".' }, ['terms']),
+    annotations: READ,
+    run: ({ terms }, box) => {
+      const list = terms.split(/\s+/).filter(Boolean);
+      if (list.length === 0) throw new ToolFailure('terms is empty — e.g. "hero center"');
+      return box.explain(list);
+    },
   },
   {
     name: 'az_word_docs',

@@ -23,6 +23,10 @@ import { routePath, runBlockChecks, type Check, type CheckChild } from './checks
 export interface PropSpec {
   readonly type: string;
   readonly required?: boolean;
+  /** ≤60 characters: what this prop does, for `az explain` and AI tools. */
+  readonly description?: string;
+  /** ≤60 characters per enum/list value: what choosing it does. */
+  readonly valueDescriptions?: Readonly<Record<string, string>>;
   /**
    * The allowed values: either the list itself, or the NAME of a value set
    * too large to write out (pricing declares `"values": "iso4217"`).
@@ -66,6 +70,17 @@ export interface PropSpec {
 export interface Manifest {
   readonly name: string;
   readonly kind?: string;
+  /**
+   * ≤60 characters: what the word is. With `descriptions` and each prop's and
+   * slot's `description`, this is the whole of `az explain` — the cheapest way
+   * for an AI to learn what `hero center` means without reading a spec.
+   */
+  readonly description?: string;
+  readonly descriptions?: {
+    readonly variants?: Readonly<Record<string, string>>;
+    readonly modifiers?: Readonly<Record<string, string>>;
+    readonly children?: Readonly<Record<string, string>>;
+  };
   readonly variants?: string[];
   readonly modifiers?: string[];
   readonly props?: Record<string, PropSpec>;

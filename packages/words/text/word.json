@@ -2,6 +2,17 @@
   "name": "text",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Section of written copy from a string or .md file",
+  "descriptions": {
+    "variants": {
+      "prose": "Body text at reading measure (default)",
+      "centered": "One short centred statement",
+      "columns": "Two text columns; one below 1024px"
+    },
+    "modifiers": {
+      "reveal": "Fades in when scrolled into view"
+    }
+  },
   "variants": [
     "prose",
     "centered",
@@ -14,7 +25,8 @@
     "title": {
       "type": "string",
       "required": false,
-      "maxWords": 10
+      "maxWords": 10,
+      "description": "Section heading (h2)"
     },
     "body": {
       "type": "markdown",
@@ -23,15 +35,18 @@
         ".md"
       ],
       "maxBytes": 262144,
-      "maxWords": 800
+      "maxWords": 800,
+      "description": "Text, or a path to a .md file"
     }
   },
   "slots": {
     "cta": {
-      "max": 1
+      "max": 1,
+      "description": "Primary button under the text"
     },
     "alt": {
-      "max": 1
+      "max": 1,
+      "description": "Secondary action beside the primary"
     }
   },
   "requires": {},

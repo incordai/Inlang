@@ -2,6 +2,17 @@
   "name": "footer",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Site footer: links, legal row and copyright",
+  "descriptions": {
+    "variants": {
+      "minimal": "Logo, tagline and legal row only",
+      "columns": "Two to five link groups in columns",
+      "mega": "Many groups; accordions on phones"
+    },
+    "modifiers": {
+      "glass": "Blurred translucent surface"
+    }
+  },
   "variants": [
     "minimal",
     "columns",
@@ -17,20 +28,24 @@
         ".svg",
         ".png"
       ],
-      "maxBytes": 262144
+      "maxBytes": 262144,
+      "description": "Logo image; the link is named by the site"
     },
     "tagline": {
       "type": "string",
-      "maxWords": 14
+      "maxWords": 14,
+      "description": "Short line beside the logo"
     },
     "copyright": {
       "type": "string",
-      "maxWords": 8
+      "maxWords": 8,
+      "description": "Name shown after the copyright sign"
     },
     "since": {
       "type": "int",
       "min": 1990,
-      "max": 2100
+      "max": 2100,
+      "description": "Founding year, used by year since/dynamic"
     },
     "year": {
       "type": "enum",
@@ -39,7 +54,13 @@
         "since",
         "dynamic"
       ],
-      "default": "none"
+      "default": "none",
+      "description": "Which year the copyright line shows",
+      "valueDescriptions": {
+        "none": "No year in the copyright line",
+        "since": "The since year, as written",
+        "dynamic": "Since year, updated to the current year in page"
+      }
     }
   },
   "slots": {
@@ -47,18 +68,23 @@
       "max": 5,
       "slots": {
         "link": {
-          "max": 12
+          "max": 12,
+          "description": "Link inside a group"
         }
-      }
+      },
+      "description": "Titled group of links (a column)"
     },
     "link": {
-      "max": 24
+      "max": 24,
+      "description": "Link outside any group"
     },
     "social": {
-      "max": 6
+      "max": 6,
+      "description": "Link to a social profile, opens a new tab"
     },
     "legal": {
-      "max": 4
+      "max": 4,
+      "description": "Legal link in the copyright row"
     }
   },
   "requires": {

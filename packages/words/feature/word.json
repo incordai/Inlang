@@ -2,6 +2,17 @@
   "name": "feature",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Set of features or benefits",
+  "descriptions": {
+    "variants": {
+      "grid": "Equal-weight items in columns",
+      "rows": "One item per row, media beside text",
+      "bento": "Uneven tiles; the lead item gets the big tile"
+    },
+    "modifiers": {
+      "reveal": "Items fade in when scrolled into view"
+    }
+  },
   "variants": [
     "grid",
     "rows",
@@ -14,18 +25,21 @@
     "title": {
       "type": "string",
       "required": false,
-      "maxWords": 10
+      "maxWords": 10,
+      "description": "Section heading (h2)"
     },
     "sub": {
       "type": "string",
       "required": false,
-      "maxWords": 30
+      "maxWords": 30,
+      "description": "Line of text under the heading"
     },
     "columns": {
       "type": "int",
       "min": 2,
       "max": 4,
-      "default": 3
+      "default": 3,
+      "description": "Grid columns, 2 to 4 (grid variant only)"
     }
   },
   "slots": {
@@ -34,25 +48,29 @@
       "max": 12,
       "slots": {
         "link": {
-          "max": 1
+          "max": 1,
+          "description": "Link from the item to more detail"
         }
       },
       "props": {
         "title": {
           "type": "string",
           "required": true,
-          "maxWords": 6
+          "maxWords": 6,
+          "description": "Item heading"
         },
         "text": {
           "type": "string",
-          "maxWords": 40
+          "maxWords": 40,
+          "description": "Item description"
         },
         "icon": {
           "type": "path",
           "ext": [
             ".svg"
           ],
-          "maxBytes": 16384
+          "maxBytes": 16384,
+          "description": "Decorative SVG icon, inlined and sanitised"
         },
         "media": {
           "type": "path",
@@ -62,18 +80,23 @@
             ".jpg",
             ".png",
             ".avif"
-          ]
+          ],
+          "description": "Screenshot or photo for the item"
         },
         "lead": {
-          "type": "flag"
+          "type": "flag",
+          "description": "Marks the item that outranks the rest (bento)"
         }
-      }
+      },
+      "description": "One feature: a label plus optional details"
     },
     "cta": {
-      "max": 1
+      "max": 1,
+      "description": "Primary button for the section"
     },
     "alt": {
-      "max": 1
+      "max": 1,
+      "description": "Secondary action beside the primary"
     }
   },
   "requires": {},

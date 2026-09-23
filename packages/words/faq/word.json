@@ -2,6 +2,17 @@
   "name": "faq",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Questions with expandable answers, plus FAQ schema",
+  "descriptions": {
+    "variants": {
+      "list": "One column of questions at full measure",
+      "columns": "Two columns of short questions; one on phones"
+    },
+    "modifiers": {
+      "single": "Opening one answer closes the others",
+      "reveal": "Fades in when scrolled into view"
+    }
+  },
   "variants": [
     "list",
     "columns"
@@ -14,11 +25,13 @@
     "title": {
       "type": "string",
       "required": true,
-      "maxWords": 8
+      "maxWords": 8,
+      "description": "Section heading (h2)"
     },
     "sub": {
       "type": "string",
-      "maxWords": 24
+      "maxWords": 24,
+      "description": "Line of text under the heading"
     },
     "schema": {
       "type": "enum",
@@ -26,7 +39,12 @@
         "on",
         "off"
       ],
-      "default": "on"
+      "default": "on",
+      "description": "Emit FAQPage structured data (on by default)",
+      "valueDescriptions": {
+        "on": "Emit FAQPage JSON-LD for search engines",
+        "off": "No structured data (use for a second FAQ)"
+      }
     }
   },
   "slots": {
@@ -37,14 +55,17 @@
         "text": {
           "type": "string",
           "required": true,
-          "maxWords": 120
+          "maxWords": 120,
+          "description": "The answer, shown when the question is open"
         }
       },
       "slots": {
         "more": {
-          "max": 1
+          "max": 1,
+          "description": "Inline link to read more beyond the answer"
         }
-      }
+      },
+      "description": "One question; its label is the question text"
     }
   },
   "requires": {},

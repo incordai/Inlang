@@ -2,6 +2,19 @@
   "name": "gallery",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Set of images in a chosen layout",
+  "descriptions": {
+    "variants": {
+      "grid": "Uniform crops in columns",
+      "masonry": "Uncropped mixed ratios in columns",
+      "carousel": "Horizontal row that snaps slide by slide",
+      "orbit": "3D ring of images; carousel on phones"
+    },
+    "modifiers": {
+      "reveal": "Fades in when scrolled into view",
+      "lightbox": "Images open full size in a viewer"
+    }
+  },
   "variants": [
     "grid",
     "masonry",
@@ -15,17 +28,20 @@
   "props": {
     "title": {
       "type": "string",
-      "maxWords": 10
+      "maxWords": 10,
+      "description": "Section heading (h2)"
     },
     "sub": {
       "type": "string",
-      "maxWords": 30
+      "maxWords": 30,
+      "description": "Line of text under the heading"
     },
     "columns": {
       "type": "int",
       "min": 2,
       "max": 4,
-      "default": 3
+      "default": 3,
+      "description": "Grid columns, 2 to 4 (grid variant only)"
     },
     "ratio": {
       "type": "enum",
@@ -37,7 +53,16 @@
         "16:9",
         "portrait",
         "auto"
-      ]
+      ],
+      "description": "Crop ratio for every image",
+      "valueDescriptions": {
+        "square": "1:1 crop",
+        "4:3": "4:3 crop",
+        "3:2": "3:2 crop (the default)",
+        "16:9": "16:9 crop",
+        "portrait": "4:5 portrait crop",
+        "auto": "No crop; each image keeps its own shape"
+      }
     },
     "poster": {
       "type": "path",
@@ -45,7 +70,8 @@
         ".webp",
         ".jpg"
       ],
-      "maxBytes": 262144
+      "maxBytes": 262144,
+      "description": "Still image for orbit before or without 3D"
     }
   },
   "slots": {
@@ -62,15 +88,18 @@
             ".jpg",
             ".png",
             ".avif"
-          ]
+          ],
+          "description": "Image file path"
         },
         "alt": {
           "type": "string",
-          "required": true
+          "required": true,
+          "description": "What the image shows; \"\" if the caption says it"
         },
         "caption": {
           "type": "string",
-          "maxWords": 12
+          "maxWords": 12,
+          "description": "Visible caption under the image"
         },
         "focus": {
           "type": "enum",
@@ -81,15 +110,26 @@
             "bottom",
             "left",
             "right"
-          ]
+          ],
+          "description": "Which part to keep when cropping",
+          "valueDescriptions": {
+            "center": "Keep the centre (default)",
+            "top": "Keep the top edge",
+            "bottom": "Keep the bottom edge",
+            "left": "Keep the left edge",
+            "right": "Keep the right edge"
+          }
         }
-      }
+      },
+      "description": "One image; its first value is the file path"
     },
     "cta": {
-      "max": 1
+      "max": 1,
+      "description": "Primary button for the section"
     },
     "alt": {
-      "max": 1
+      "max": 1,
+      "description": "Secondary action beside the primary"
     }
   },
   "requires": {

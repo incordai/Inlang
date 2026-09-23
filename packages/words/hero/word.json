@@ -2,6 +2,22 @@
   "name": "hero",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Page opener: the page's only h1, text and actions",
+  "descriptions": {
+    "variants": {
+      "center": "Centred statement; visual behind or below",
+      "split": "Text beside the visual; stacks on phones",
+      "full": "Text over a full-bleed visual with a scrim",
+      "stack": "Text above a full-width visual",
+      "minimal": "Type only, no visual"
+    },
+    "modifiers": {
+      "3d": "Adds a 3D scene (procedural or model)",
+      "scroll": "3D camera follows page scroll; needs 3d",
+      "parallax": "Visual moves slower than the page on scroll",
+      "glass": "Blurred translucent panel behind the text"
+    }
+  },
   "variants": [
     "center",
     "split",
@@ -18,23 +34,27 @@
   "props": {
     "eyebrow": {
       "type": "string",
-      "maxWords": 6
+      "maxWords": 6,
+      "description": "Short label above the title, not a heading"
     },
     "title": {
       "type": "string",
       "required": true,
-      "maxWords": 12
+      "maxWords": 12,
+      "description": "The page h1"
     },
     "sub": {
       "type": "string",
-      "maxWords": 30
+      "maxWords": 30,
+      "description": "Supporting line under the title"
     },
     "model": {
       "type": "path",
       "ext": [
         ".glb"
       ],
-      "maxBytes": 5242880
+      "maxBytes": 5242880,
+      "description": "Draco .glb model for the 3D scene"
     },
     "poster": {
       "type": "path",
@@ -42,11 +62,13 @@
         ".jpg",
         ".png",
         ".webp"
-      ]
+      ],
+      "description": "Still image for the static tier and loading"
     },
     "describe": {
       "type": "string",
-      "maxWords": 20
+      "maxWords": 20,
+      "description": "Alt text for the poster and 3D scene"
     },
     "height": {
       "type": "enum",
@@ -56,15 +78,24 @@
         "tall",
         "full"
       ],
-      "default": "peek"
+      "default": "peek",
+      "description": "How much of the screen the hero fills",
+      "valueDescriptions": {
+        "compact": "70% of the screen; a header, not a statement",
+        "peek": "85% of the screen; next section peeks (default)",
+        "tall": "92% of the screen for one strong asset",
+        "full": "Whole screen; hides the page below it"
+      }
     }
   },
   "slots": {
     "cta": {
-      "max": 2
+      "max": 2,
+      "description": "Primary button, up to two"
     },
     "alt": {
-      "max": 1
+      "max": 1,
+      "description": "Secondary action; a text link on small phones"
     }
   },
   "requires": {

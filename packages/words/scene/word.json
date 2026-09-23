@@ -2,6 +2,20 @@
   "name": "scene",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Standalone 3D scene with a poster fallback",
+  "descriptions": {
+    "variants": {
+      "inline": "Scene beside copy, capped at the text measure",
+      "full": "Full-bleed scene that is the whole section",
+      "backdrop": "Fixed 3D layer behind the page (site or page)",
+      "none": "No backdrop on this page (page level)"
+    },
+    "modifiers": {
+      "3d": "Renders the scene; required for every scene",
+      "scroll": "Camera follows page scroll",
+      "parallax": "Scene moves at half the scroll rate"
+    }
+  },
   "variants": [
     "inline",
     "full",
@@ -19,7 +33,8 @@
       "ext": [
         ".glb"
       ],
-      "maxBytes": 5242880
+      "maxBytes": 5242880,
+      "description": "Draco .glb model; else the procedural scene"
     },
     "poster": {
       "type": "path",
@@ -28,12 +43,14 @@
         ".jpg"
       ],
       "maxBytes": 262144,
-      "required": true
+      "required": true,
+      "description": "Still image for static tier, loading, eviction"
     },
     "alt": {
       "type": "string",
       "required": true,
-      "maxWords": 20
+      "maxWords": 20,
+      "description": "What the scene shows; read by screen readers"
     },
     "ratio": {
       "type": "enum",
@@ -43,11 +60,19 @@
         "3:2",
         "16:9"
       ],
-      "default": "4:3"
+      "default": "4:3",
+      "description": "Aspect ratio of the scene box",
+      "valueDescriptions": {
+        "1:1": "Square box",
+        "4:3": "4:3 box (default)",
+        "3:2": "3:2 box",
+        "16:9": "16:9 box"
+      }
     },
     "caption": {
       "type": "string",
-      "maxWords": 16
+      "maxWords": 16,
+      "description": "Visible caption under the scene"
     },
     "camera": {
       "type": "enum",
@@ -56,7 +81,13 @@
         "orbit",
         "scroll"
       ],
-      "default": "fixed"
+      "default": "fixed",
+      "description": "How the camera moves",
+      "valueDescriptions": {
+        "fixed": "Camera never moves (default)",
+        "orbit": "Drag or arrow keys turn the object",
+        "scroll": "Camera follows page scroll"
+      }
     }
   },
   "slots": {},

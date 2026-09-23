@@ -2,6 +2,30 @@
   "name": "nav",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Site navigation bar with links, groups and a CTA",
+  "descriptions": {
+    "variants": {
+      "bar": "Logo left, links right (default)",
+      "center": "Logo centred between links",
+      "split": "Logo, links and a protected CTA in three zones",
+      "minimal": "Menu button at every screen size",
+      "side": "Vertical column beside the page content",
+      "mega": "Groups open large multi-column panels",
+      "none": "No nav on this page (page level)"
+    },
+    "modifiers": {
+      "sticky": "Stays pinned to the top while scrolling",
+      "hide": "Hides scrolling down, returns scrolling up",
+      "shrink": "Gets shorter after scrolling past the top",
+      "glass": "Blurred background once scrolled",
+      "solid": "Transparent over the hero, solid after scroll"
+    },
+    "children": {
+      "link": "Link: label then destination",
+      "group": "Labelled dropdown of links",
+      "cta": "Button in the nav, kept in the bar on phones"
+    }
+  },
   "variants": [
     "bar",
     "center",
@@ -25,7 +49,8 @@
         ".svg",
         ".png",
         ".webp"
-      ]
+      ],
+      "description": "Logo image; the link is named by the site"
     },
     "inverse": {
       "type": "path",
@@ -33,7 +58,8 @@
         ".svg",
         ".png",
         ".webp"
-      ]
+      ],
+      "description": "Light logo shown while the solid nav is clear"
     },
     "mobile": {
       "type": "enum",
@@ -42,7 +68,13 @@
         "sheet",
         "full"
       ],
-      "default": "drawer"
+      "default": "drawer",
+      "description": "How the menu opens on phones",
+      "valueDescriptions": {
+        "drawer": "Panel slides in from the side (default)",
+        "sheet": "Panel rises from the bottom",
+        "full": "Menu covers the whole screen"
+      }
     }
   },
   "children": [

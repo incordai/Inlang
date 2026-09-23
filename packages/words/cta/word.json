@@ -2,6 +2,18 @@
   "name": "cta",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Closing call-to-action section before the footer",
+  "descriptions": {
+    "variants": {
+      "band": "Full-bleed band in the inverted palette",
+      "card": "Contained inset card on the page background",
+      "split": "Text beside a supporting image"
+    },
+    "modifiers": {
+      "glass": "Blurred translucent surface over an image",
+      "reveal": "Fades in when scrolled into view"
+    }
+  },
   "variants": [
     "band",
     "card",
@@ -15,11 +27,13 @@
     "title": {
       "type": "string",
       "required": true,
-      "maxWords": 12
+      "maxWords": 12,
+      "description": "Section heading (h2) stating the ask"
     },
     "sub": {
       "type": "string",
-      "maxWords": 24
+      "maxWords": 24,
+      "description": "Line of text under the heading"
     },
     "media": {
       "type": "path",
@@ -29,19 +43,23 @@
         ".webp",
         ".avif"
       ],
-      "maxBytes": 512000
+      "maxBytes": 512000,
+      "description": "Image for the split variant"
     },
     "describe": {
       "type": "string",
-      "maxWords": 20
+      "maxWords": 20,
+      "description": "Alt text for media; omit if decorative"
     }
   },
   "slots": {
     "cta": {
-      "max": 1
+      "max": 1,
+      "description": "Primary button: label and destination"
     },
     "alt": {
-      "max": 1
+      "max": 1,
+      "description": "Secondary action beside the primary"
     }
   },
   "requires": {

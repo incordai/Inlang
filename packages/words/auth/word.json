@@ -2,6 +2,17 @@
   "name": "auth",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Sign-in, sign-up or password-reset form on its own page",
+  "descriptions": {
+    "variants": {
+      "login": "Email/password sign-in for returning users",
+      "signup": "Account creation form with a terms link",
+      "reset": "Request a reset link, then set a new password"
+    },
+    "modifiers": {
+      "glass": "Blurred translucent card surface"
+    }
+  },
   "variants": [
     "login",
     "signup",
@@ -20,7 +31,14 @@
         "custom"
       ],
       "required": true,
-      "scope": "site"
+      "scope": "site",
+      "description": "Which auth service handles the form (site level)",
+      "valueDescriptions": {
+        "hosted": "A managed auth provider, public key only",
+        "session": "Same-origin cookie session routes on your server",
+        "azbackend": "The az backend protocol (built-in or your own)",
+        "custom": "Your own adapter module, set with impl"
+      }
     },
     "profile": {
       "type": "enum",
@@ -29,15 +47,22 @@
         "token-endpoint"
       ],
       "default": "standard",
-      "scope": "site"
+      "scope": "site",
+      "description": "Protocol the hosted adapter speaks (site level)",
+      "valueDescriptions": {
+        "standard": "The default hosted protocol",
+        "token-endpoint": "Token-endpoint auth server protocol, with social"
+      }
     },
     "title": {
       "type": "string",
-      "maxWords": 8
+      "maxWords": 8,
+      "description": "Form heading, the page h1; defaults per flow"
     },
     "sub": {
       "type": "string",
-      "maxWords": 20
+      "maxWords": 20,
+      "description": "Line of text under the heading"
     },
     "methods": {
       "type": "list",
@@ -50,13 +75,21 @@
       "max": 3,
       "default": [
         "password"
-      ]
+      ],
+      "description": "Sign-in methods offered: password, link, oauth",
+      "valueDescriptions": {
+        "password": "Email and password fields",
+        "link": "Passwordless emailed sign-in link",
+        "oauth": "Continue-with buttons for social providers"
+      }
     },
     "redirect": {
-      "type": "route"
+      "type": "route",
+      "description": "Page to open after a successful sign-in"
     },
     "terms": {
-      "type": "route"
+      "type": "route",
+      "description": "Terms page linked from the signup form"
     },
     "impl": {
       "type": "path",
@@ -64,17 +97,20 @@
         ".ts",
         ".tsx"
       ],
-      "scope": "site"
+      "scope": "site",
+      "description": "Path to the custom adapter module (site level)"
     },
     "protect": {
       "type": "list",
       "of": "route",
-      "scope": "site"
+      "scope": "site",
+      "description": "Routes that require a signed-in user (site level)"
     }
   },
   "slots": {
     "alt": {
-      "max": 2
+      "max": 2,
+      "description": "Link to a sibling flow, e.g. sign up or reset"
     }
   },
   "requires": {

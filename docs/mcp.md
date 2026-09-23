@@ -28,7 +28,8 @@ and key vary by client; the shape is:
 
 | Tool | Writes? | What it does |
 |---|---|---|
-| `az_words` | no | the catalogue: every word's variants, modifiers, properties (type, values, default, required) and slots |
+| `az_explain {terms}` | no | the cheapest lookup: one ≤60-character line per term, in context — `"hero center"`, `"hero height peek"`, `"backend database postgres"`; unknown terms get a did-you-mean |
+| `az_words` | no | the catalogue: every word's variants, modifiers, properties (type, values, default, required) and slots, each with its ≤60-character description |
 | `az_word_docs {word}` | no | one word's README |
 | `az_grammar` | no | GRAMMAR.md (also the resource `az://grammar`) |
 | `az_check {file}` | no | diagnostics with code, severity, line, column |

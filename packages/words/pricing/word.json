@@ -2,6 +2,16 @@
   "name": "pricing",
   "version": "1.0.0",
   "kind": "block",
+  "description": "Plans and prices with a monthly/annual toggle",
+  "descriptions": {
+    "variants": {
+      "cards": "One card per plan, compared by degree",
+      "table": "Comparison table; per-plan panels on phones"
+    },
+    "modifiers": {
+      "reveal": "Fades in when scrolled into view"
+    }
+  },
   "variants": [
     "cards",
     "table"
@@ -13,19 +23,23 @@
     "title": {
       "type": "string",
       "required": true,
-      "maxWords": 8
+      "maxWords": 8,
+      "description": "Section heading (h2)"
     },
     "sub": {
       "type": "string",
-      "maxWords": 24
+      "maxWords": 24,
+      "description": "Line of text under the heading"
     },
     "currency": {
       "type": "enum",
-      "values": "iso4217"
+      "values": "iso4217",
+      "description": "ISO 4217 currency code for every price"
     },
     "locale": {
       "type": "string",
-      "default": "en-US"
+      "default": "en-US",
+      "description": "Locale used to format prices, e.g. en-US"
     },
     "billing": {
       "type": "enum",
@@ -33,11 +47,17 @@
         "monthly",
         "annual"
       ],
-      "default": "monthly"
+      "default": "monthly",
+      "description": "Billing period shown first",
+      "valueDescriptions": {
+        "monthly": "Show monthly prices first (default)",
+        "annual": "Show annual prices first"
+      }
     },
     "period": {
       "type": "string",
-      "maxWords": 6
+      "maxWords": 6,
+      "description": "Price suffix, e.g. per seat, per month"
     }
   },
   "slots": {
@@ -47,10 +67,12 @@
       "props": {
         "monthly": {
           "type": "string",
-          "required": true
+          "required": true,
+          "description": "Price per month"
         },
         "annual": {
-          "type": "string"
+          "type": "string",
+          "description": "Price per year; set on every plan or none"
         },
         "highlight": {
           "type": "enum",
@@ -58,22 +80,31 @@
             "on",
             "off"
           ],
-          "default": "off"
+          "default": "off",
+          "description": "Mark as the recommended plan",
+          "valueDescriptions": {
+            "on": "Accent border, moved first on phones",
+            "off": "Normal plan (default)"
+          }
         },
         "badge": {
           "type": "string",
-          "maxWords": 4
+          "maxWords": 4,
+          "description": "Short label on the plan, e.g. Most popular"
         }
       },
       "slots": {
         "feature": {
-          "max": 24
+          "max": 24,
+          "description": "Feature line: label and value or yes"
         },
         "cta": {
           "min": 1,
-          "max": 1
+          "max": 1,
+          "description": "The plan's button"
         }
-      }
+      },
+      "description": "One plan; its label is the plan name"
     }
   },
   "requires": {},
