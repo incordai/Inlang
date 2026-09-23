@@ -52,6 +52,8 @@ export function formatPrice(value: string, currency: string, locale: string): st
 /** One plan. `cards` gets an <article>, `table` a column of cells. */
 function plan(p: SpecBlock, ctx: EmitContext, opts: {
   currency: string; locale: string; billing: string; period: string; table: boolean;
+  /** Feature rows every plan shares, shown once in the "in every plan" list. */
+  shared?: ReadonlySet<string>;
   /** §6: a phone panel of a transposed table — rows as label/value pairs. */
   panel?: boolean;
 }): EmittedNode {
@@ -126,7 +128,7 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
     });
   }
 
-  const features = p.children.filter((c) => c.word === 'feature');
+  const features = p.children.filter((c) => c.word === 'feature' && !opts.shared?.has(rowKey(c)));
   if (features.length > 0 && opts.panel) {
     // §6: in a transposed table every row is a `label / value` pair, so the
     // row's label is read with its value rather than lost with the header.
@@ -175,7 +177,12 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
     style: {
       padding: px(t.space[24]),
       background: highlighted ? t.color['surface-alt'] : t.color.surface,
-      border: `1px solid ${highlighted ? t.color['border-strong'] : t.color.border}`,
+      // §7.3: the highlight edge is `color.accent`, never `color.border` (a
+      // decorative hairline with no contrast floor). Weight AND badge text
+      // carry it too, so it survives without colour.
+      border: highlighted
+        ? `${px(t.size['edge-emphasis'])} solid ${t.color.accent}`
+        : `1px solid ${t.color.border}`,
       borderRadius: px(t.radius.md),
     },
     // §7.3: on a phone the highlighted plan moves to the top of the stack by
@@ -184,6 +191,45 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
     // spec's choice, and why it moves only one card.
     below: highlighted ? { sm: { order: -1 } } : undefined,
     children: body,
+  };
+}
+
+/** A feature row's identity: its label and value, as the author wrote them. */
+const rowKey = (f: SpecBlock) => f.args.map((a) => a.value).join('\u0000');
+
+/** Rows every plan declares identically — only meaningful with two or more plans. */
+function sharedRows(plans: SpecBlock[]): Set<string> {
+  if (plans.length < 2) return new Set();
+  const rows = plans.map((p) => new Set(p.children.filter((c) => c.word === 'feature').map(rowKey)));
+  return new Set([...rows[0]].filter((k) => rows.every((r) => r.has(k))));
+}
+
+/** §6: the shared list, once, after the plans — in the first plan's order. */
+function everyPlan(first: SpecBlock, shared: ReadonlySet<string>, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const rows = first.children.filter((c) => c.word === 'feature' && shared.has(rowKey(c)));
+  return {
+    tag: 'div',
+    attrs: { class: 'az-pricing-shared' },
+    style: { marginTop: px(t.space[32]) },
+    children: [
+      {
+        tag: 'h3',
+        attrs: { class: 'az-pricing-shared-title' },
+        style: { margin: `0 0 ${px(t.space[12])}`, fontSize: t.typeSize.lg, fontFamily: t.type.display },
+        children: ['In every plan'],
+      },
+      {
+        tag: 'ul',
+        attrs: { class: 'az-pricing-shared-items' },
+        style: { margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: px(t.space[8]) },
+        children: rows.map((f): EmittedNode => ({
+          tag: 'li',
+          style: { fontSize: t.typeSize.sm, color: t.color.muted },
+          children: [f.args.map((a) => a.value).filter(Boolean).join(' — ')],
+        })),
+      },
+    ],
   };
 }
 
@@ -275,7 +321,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   }
 
   if (plans.length > 0) {
-    const rendered = plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table }));
+    // §6: in `table`, rows identical in every plan collapse into ONE shared
+    // "in every plan" list, at all widths. `cards` keeps each card whole; its
+    // repeats get the validator's warning instead (§11).
+    const shared = table ? sharedRows(plans) : new Set<string>();
+    const rendered = plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table, shared }));
     // §6 below sm: `cards` is one column, full width, in declared order (the
     // highlighted card moves first, §7.3); `table` TRANSPOSES to stacked
     // per-plan panels — no horizontal scroll. The transposition needs a
@@ -292,7 +342,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         ? { sm: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: px(t.space[24]) } }
         : { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } },
       children: table
-        ? plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table: false, panel: true }))
+        ? plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table: false, panel: true, shared }))
         : rendered,
     };
     if (table) {
@@ -308,6 +358,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       });
     }
     children.push(stack);
+    if (shared.size > 0) children.push(everyPlan(plans[0], shared, ctx));
   }
 
   return {

@@ -93,6 +93,7 @@ Full scale and the linter rule: **§7**.
 | `size.measure-body` | `Ch` | body measure | hero-spec §3 (45–65ch) |
 | `size.scrim` | `Px` | height of the nav top-scrim gradient | nav-spec §4 (~120px) |
 | `size.hairline` | `Px` | 1px. A border width is not a spacing step | — |
+| `size.edge-emphasis` | `Px` | 2px. An edge that carries emphasis by weight, not colour alone — pricing-spec §7.3's highlighted plan | — |
 | `size.ring` | `Px` | focus ring width | hero-spec §9 |
 | `size.ring-offset` | `Px` | focus ring offset. **Load-bearing** — see §6.2 | — |
 

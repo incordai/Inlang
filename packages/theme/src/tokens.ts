@@ -122,6 +122,13 @@ export interface SizeTokens {
    */
   readonly 'column-min': number;
   /**
+   * Width of an edge that marks emphasis by WEIGHT, in px — pricing-spec
+   * §7.3's highlighted plan, which must survive without colour. Proposed
+   * rather than written inline (theme-spec §1): `size.hairline` is 1px and
+   * the space scale has no 2.
+   */
+  readonly 'edge-emphasis': number;
+  /**
    * Width of a vertical `side` nav, in px.
    *
    * nav-block-spec §2 says a side nav "eats 240-280px of width"; 256 sits

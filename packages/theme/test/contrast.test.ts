@@ -88,6 +88,9 @@ const PAIRS: Array<[fg: keyof typeof THEMES.midnight.color.light,
   ['focus', 'surface', LARGE],
   ['focus', 'surface-alt', LARGE],
   ['border-strong', 'bg', LARGE],
+  // pricing §7.3/§8: the highlighted plan's edge is accent on its
+  // surface-alt fill — a non-text edge, 3:1 (WCAG 1.4.11).
+  ['accent', 'surface-alt', LARGE],
 ];
 
 const NAMES = Object.keys(THEMES) as ThemeName[];

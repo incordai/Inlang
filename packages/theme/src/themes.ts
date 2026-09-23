@@ -77,6 +77,7 @@ export const midnight: Theme = {
     'measure-body': 62,
     'hero-min': 85,
     'column-min': 240,
+    'edge-emphasis': 2,
     'nav-side': 256,
   },
   type: {
@@ -159,6 +160,7 @@ export const paper: Theme = {
     'measure-body': 62,
     'hero-min': 85,
     'column-min': 240,
+    'edge-emphasis': 2,
     'nav-side': 256,
   },
   type: {
@@ -241,6 +243,7 @@ export const signal: Theme = {
     'measure-body': 62,
     'hero-min': 85,
     'column-min': 240,
+    'edge-emphasis': 2,
     'nav-side': 256,
   },
   type: {
