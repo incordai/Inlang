@@ -97,6 +97,7 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 Known gaps:
 
 - Built and checked in a browser by `pnpm test:visual`: the mobile menu is a drawer (§6 — focus trapped, Escape and outside-click close, focus returns to the toggle, page scroll locked), links collapse into it below sm; every bar `group` is a dropdown (arrow keys, roving tabindex, Escape, Tab leaves it); `solid` turns solid past 80px and back above 40px with the logo swap (§4); the skip link shows on focus (§7)
+- `mobile sheet` is a bottom sheet with a drag handle — drag it down past a quarter of its height (or 96px) to close; `mobile full` is a full-screen menu that fades in. Both are modal like the drawer (focus trapped, Escape closes, focus returns, scroll locked) and checked in three engines on `preview.sheet.az` / `preview.full.az`
 - `hide` retracts the bar on a run of scrolling down and returns it on a run up, never while something in it is open or focused, instantly under reduced motion; `shrink` drops to `size.nav-shrink` past 80px (back above 40px) inside a frame that holds the full height, so nothing below moves (§3). A pinned nav (`sticky`, `hide`, `shrink`) ships §5's `scroll-padding-top` from the `--az-size-nav` variable. Checked in a browser on `preview.bar.az`
 
 ## Tested

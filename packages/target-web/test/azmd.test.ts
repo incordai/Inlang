@@ -78,12 +78,18 @@ test('AZ.md names the runtimes, env keys and server only when the site uses them
   assert.ok(full.includes('`AZ_PUBLIC_BACKEND_URL`'), 'public key');
   assert.ok(full.includes('Protected routes (sign-in required): `/account`.'), 'protected routes');
   assert.ok(full.includes('`server/`'), 'backend');
+  // The server gets its own section: what it is and what each file does.
+  assert.ok(full.includes('\n## Server\n'), 'server section');
+  for (const f of ['server/src/main.ts', 'server/src/app.ts', 'server/.env.example', 'server/README.md']) {
+    assert.ok(full.includes(`\`${f}\``), f);
+  }
 
   const plain = map(PLAIN);
   assert.ok(plain.includes('`src/az/`'), 'the behaviour runtime is always shipped');
   assert.ok(!plain.includes('src/az-auth'), 'no auth runtime without auth');
   assert.ok(!plain.includes('src/az3d'), 'no 3D runtime without 3D');
   assert.ok(!plain.includes('server/'), 'no server without a backend');
+  assert.ok(!plain.includes('## Server'), 'no server section without a backend');
   assert.ok(plain.includes('No public keys are needed.'));
 });
 

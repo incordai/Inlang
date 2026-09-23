@@ -99,5 +99,20 @@ export function azMd(m: MapInput): string {
   out.push('- `npm run build` → `dist/`, every page pre-rendered');
   out.push('- Deploy `dist/` to any static host at a domain root (routes and assets are root-relative)');
   if (m.backend) out.push('- Run `server/` separately, over https on the same site as the pages — `server/README.md`');
+  if (m.backend) {
+    out.push('', '## Server', '');
+    out.push(`The built-in backend (backend-spec): accounts, sessions, password reset, sign-in links and provider`);
+    out.push(`sign-in over ${m.backend.database}, email by ${m.backend.email}. The site reaches it at \`AZ_PUBLIC_BACKEND_URL\``);
+    out.push('with the `azbackend` protocol (auth-block-spec §3.4). Each `src/` file opens with an `@az` header saying what it does.', '');
+    out.push('- `server/README.md` — run, configure and deploy it');
+    out.push('- `server/package.json` — start script, Node engine, exact driver pins; `server/az.config.json` — the .az choices');
+    out.push('- `server/.env.example` — every key and its meaning; `server/.env` holds the real values and is never generated');
+    out.push('- `server/src/main.ts` — start: config, migrations, store, routes, HTTP server');
+    out.push('- `server/src/app.ts` — the routes; `server/src/http.ts` — JSON, cookies, CORS, security headers, rate limits');
+    out.push('- `server/src/store.ts`, `db.ts`, `migrations.ts`, `drivers.ts` — accounts, sessions, tokens over the database');
+    out.push('- `server/src/email.ts` — reset and sign-in emails; `server/src/oidc.ts` — provider sign-in');
+    out.push('- `server/src/env.ts` — every key, validated; `server/src/crypto.ts` — passwords, tokens, PKCE');
+    out.push('- Change the backend\'s database or email in the .az source (`backend` under `site`), then rebuild');
+  }
   return out.join('\n') + '\n';
 }
