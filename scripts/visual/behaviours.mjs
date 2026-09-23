@@ -159,12 +159,30 @@ async function drawerDetails(page) {
 
   // Close from part-way down the page: the page must stay where it was.
   await until(page, () => document.querySelector('#az-nav-panel')?.open === false);
+  // A short page stops short of 300: the baseline is where it actually is.
+  // Focus returns to the toggle; a toggle that scrolled away with a static
+  // bar is brought back into view (as a native dialog's focus return does),
+  // so the page ends where it was only when the toggle was still on screen.
   await page.evaluate(() => window.scrollTo({ top: 300, behavior: 'instant' }));
   await page.waitForTimeout(100);
-  if (await openDrawer(page)) {
+  const from = await page.evaluate(() => window.scrollY);
+  const toggleShown = await page.$eval('.az-nav-toggle', (b) => {
+    const r = b.getBoundingClientRect();
+    return r.bottom > 0 && r.top < window.innerHeight;
+  });
+  if (from > 0 && await openDrawer(page)) {
     const r = await scrollWhileClosing(page, '#az-nav-panel', () => page.keyboard.press('Escape'));
-    if (Math.abs(r.y - 300) > 2 || r.min < 290) {
-      problems.push(`closing the menu moved the page (lowest ${Math.round(r.min)}, ended ${Math.round(r.y)}, was 300)`);
+    const toggleAfter = await page.$eval('.az-nav-toggle', (b) => {
+      const box = b.getBoundingClientRect();
+      return box.bottom > 0 && box.top < window.innerHeight;
+    });
+    // Never a jump to the top on the way: the lowest point is where it ended.
+    if (r.min < r.y - 2) {
+      problems.push(`closing the menu jumped the page (lowest ${Math.round(r.min)}, ended ${Math.round(r.y)}, was ${Math.round(from)})`);
+    } else if (toggleShown && Math.abs(r.y - from) > 2) {
+      problems.push(`closing the menu moved the page (ended ${Math.round(r.y)}, was ${Math.round(from)})`);
+    } else if (!toggleShown && !toggleAfter) {
+      problems.push(`closing the menu left focus on a toggle off screen (ended ${Math.round(r.y)})`);
     }
   }
 

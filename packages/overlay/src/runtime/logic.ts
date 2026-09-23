@@ -203,3 +203,11 @@ export function billingFrom(search: string, fallback: string): Billing {
 /** §7.1: one polite line naming the mode, not the numbers. */
 export const billingAnnouncement = (mode: Billing): string =>
   mode === 'annual' ? 'showing annual pricing, billed yearly' : 'showing monthly pricing, billed monthly';
+
+/**
+ * Whether a box is wholly outside the viewport's height — the only case in
+ * which returning focus to it should scroll the page.
+ */
+export function offScreen(box: { top: number; bottom: number }, viewportHeight: number): boolean {
+  return box.bottom <= 0 || box.top >= viewportHeight;
+}

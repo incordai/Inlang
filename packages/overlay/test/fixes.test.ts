@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  billingAnnouncement, billingFrom, outsideBox, rollingYear, safeDecode, samePageFragment, trapIndex,
+  billingAnnouncement, billingFrom, offScreen, outsideBox, rollingYear, safeDecode, samePageFragment, trapIndex,
 } from '../src/runtime/logic.ts';
 
 test('a malformed fragment is used as written, never thrown', () => {
@@ -58,4 +58,11 @@ test('pricing §7.1: the query string decides the period, the prop is the defaul
   assert.equal(billingFrom('?billing=weekly', 'monthly'), 'monthly', 'an unknown period falls back');
   assert.match(billingAnnouncement('annual'), /annual pricing, billed yearly/);
   assert.doesNotMatch(billingAnnouncement('annual'), /\d/, 'the mode is announced, not the numbers');
+});
+
+test('focus returning to a trigger scrolls only when the trigger is off screen', () => {
+  assert.equal(offScreen({ top: 12, bottom: 56 }, 900), false, 'a sticky toggle in view stays put');
+  assert.equal(offScreen({ top: -300, bottom: -256 }, 900), true, 'a toggle scrolled away above');
+  assert.equal(offScreen({ top: 950, bottom: 990 }, 900), true, 'a trigger below the fold');
+  assert.equal(offScreen({ top: -20, bottom: 24 }, 900), false, 'partly on screen is on screen');
 });

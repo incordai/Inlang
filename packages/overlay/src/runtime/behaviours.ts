@@ -30,7 +30,7 @@
 
 import {
   billingAnnouncement, billingFrom, carouselEnds, copyText, counterText, lightboxIndex, moveIndex, neighbours,
-  outsideBox, retractedAfter, rollingYear, safeDecode, samePageFragment, shrunkAfter, solidAfter, swipeOf,
+  offScreen, outsideBox, retractedAfter, rollingYear, safeDecode, samePageFragment, shrunkAfter, solidAfter, swipeOf,
   transitionMs, trapIndex, type Billing,
 } from './logic.ts';
 import { POLICY, isPreset } from './policy.ts';
@@ -226,7 +226,12 @@ function openModal(
         const back = returnTo();
         back?.focus({ preventScroll: true });
         if (after) after();
-        else back?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+        // Only a trigger that is off screen is brought back: `nearest` counts
+        // the page's scroll-padding, so a sticky bar's toggle — on screen, in
+        // that padding — would otherwise pull the page up by the bar's height.
+        else if (back && win && offScreen(back.getBoundingClientRect(), win.innerHeight)) {
+          back.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+        }
       };
       if (win) win.setTimeout(end, wait);
       else end();
