@@ -34,6 +34,10 @@ export type BreakpointName = (typeof BREAKPOINT_NAMES)[number];
  * `current` the link to the page being viewed. The target decides how each
  * is detected (buttons-and-sections-spec §1: six states per button).
  *
+ * `focusWithin` is focus anywhere inside the element — how a group of
+ * controls hidden on a phone shows itself when one of them is reached by
+ * keyboard (gallery-spec §6's carousel arrows).
+ *
  * Four belong to the behaviour runtime rather than to the pointer: `open` is
  * an overlay that is showing (overlays-spec §3 — it animates in from its
  * base style), `scrolled` is a `solid` nav past its threshold
@@ -42,8 +46,8 @@ export type BreakpointName = (typeof BREAKPOINT_NAMES)[number];
  * (nav-block-spec §3). The runtime sets them; the stylesheet styles them.
  */
 export const INTERACTION_STATES = [
-  'hover', 'focusVisible', 'active', 'disabled', 'loading', 'expanded', 'open', 'scrolled', 'shrunk', 'retracted',
-  'current',
+  'hover', 'focusVisible', 'focusWithin', 'active', 'disabled', 'loading', 'expanded', 'open', 'scrolled', 'shrunk',
+  'retracted', 'current',
 ] as const;
 export type InteractionState = (typeof INTERACTION_STATES)[number];
 

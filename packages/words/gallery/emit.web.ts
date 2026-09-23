@@ -8,7 +8,8 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { closeButton, popup } from '../../overlay/src/index.ts';
 
 /** The track's name when the gallery has no title to lend it. */
 const GALLERY_LABEL = 'Gallery';
@@ -40,6 +41,48 @@ const SM_COLUMNS = 2;
 
 /** §7 rule 2: the first row loads eagerly; `columns` is that row's length. */
 const DEFAULT_COLUMNS = 3;
+
+/** Chevron paths for the previous/next controls (§10: real buttons, real names). */
+const CHEVRON = { '-1': 'M15 6l-6 6 6 6', '1': 'M9 6l6 6-6 6' } as const;
+
+/**
+ * §8: the enlarged image fits the viewport's height with room for the
+ * counter and controls, whatever its shape.
+ */
+const LIGHTBOX_MAX_HEIGHT = '75vh';
+
+/** A stroke icon, decorative: the control carries its own name. */
+const glyph = (d: string): EmittedNode => ({
+  tag: 'svg',
+  attrs: {
+    'aria-hidden': 'true', focusable: 'false', viewBox: '0 0 24 24', fill: 'none',
+    stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round',
+  },
+  style: { width: '1.5em', height: '1.5em' },
+  children: [{ tag: 'path', attrs: { d } }],
+});
+
+/** A previous/next control: a 44px button with a chevron and a real name. */
+function stepButton(ctx: EmitContext, step: '-1' | '1', name: string, atEnd: boolean): EmittedNode {
+  const t = ctx.theme;
+  return {
+    tag: 'button',
+    attrs: { type: 'button', class: 'az-gallery-step', 'data-az-step': step, 'aria-disabled': String(atEnd) },
+    style: {
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      minWidth: px(t.size.tap), minHeight: px(t.size.tap), padding: 0,
+      background: t.color.surface, color: t.color.text,
+      border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.full), cursor: 'pointer',
+    },
+    states: {
+      hover: { background: t.color['surface-alt'] },
+      focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) },
+      // No wrap (§8) and no scrolling past an end: the end control says so.
+      disabled: { color: t.color.muted, cursor: 'default', background: t.color.surface },
+    },
+    children: [glyph(CHEVRON[step]), visuallyHidden(name)],
+  };
+}
 
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
@@ -117,12 +160,18 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // §10: <figure> + <figcaption> when captions exist; a plain list when not.
   const captioned = shown.some((c) => c.props.caption);
   const firstRow = Number(block.props.columns ?? DEFAULT_COLUMNS);
-  const images = shown.map((c, i) => galleryImage(c, i < firstRow, captioned, aspect, variant, ctx));
+  // §8: `lightbox` turns each image into a button that opens it enlarged.
+  // `orbit` opens its own viewer, which the validator warns about (§11).
+  const lightbox = block.modifiers.includes('lightbox') && variant !== 'orbit';
+  const images = shown.map((c, i) => galleryImage(c, i, i < firstRow, captioned, aspect, variant, lightbox, ctx));
+  // §6/§10: a carousel — and orbit's phone fallback — steps with real buttons.
+  const steps = variant === 'carousel' || variant === 'orbit';
   if (images.length > 0) {
-    children.push({
+    const track: EmittedNode = {
       tag: 'ul',
       attrs: {
         class: 'az-gallery-items',
+        ...(steps ? { 'data-az-track': '' } : {}),
         'data-ratio': block.props.ratio ?? DEFAULT_RATIO,
         // `orbit` is the only variant that costs a 3D context. Declaring it
         // here is what lets the runtime load that machinery for this page and
@@ -132,7 +181,6 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         // focused, the arrow keys scroll it. `orbit` becomes this carousel
         // below sm (§6). §10 says role="group"; on the <ul> that would strip
         // the list its <li>s need, so the track stays a list with a name.
-        // The arrow buttons wait for the behaviour runtime.
         ...(variant === 'carousel' || variant === 'orbit'
           ? { 'aria-label': block.props.title ?? GALLERY_LABEL, tabindex: '0' }
           : {}),
@@ -174,7 +222,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
             : undefined,
       },
       children: images,
-    });
+    };
+    children.push(steps ? carousel(track, variant, shown.length, ctx) : track);
+    if (lightbox) children.push(lightboxDialog(shown, block.props.title ?? GALLERY_LABEL, ctx));
   }
 
   // Section actions (spec §5/§6): the button primitive — one primary `cta`,
@@ -194,7 +244,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
 
   return {
     tag: 'section',
-    attrs: { class: `az-gallery az-gallery--${variant}` },
+    attrs: { class: `az-gallery az-gallery--${variant}`, ...(lightbox && shown.length > 0 ? { 'data-az-behaviour': 'lightbox' } : {}) },
     style: {
       paddingBlock: px(t.space[96]),
       paddingInline: px(t.size['gutter-lg']),
@@ -216,8 +266,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
  * the crop's focal point so a `ratio` crop does not behead people (§7).
  */
 function galleryImage(
-  image: SpecBlock, eager: boolean, captioned: boolean, aspect: string | undefined,
-  variant: string, ctx: EmitContext,
+  image: SpecBlock, index: number, eager: boolean, captioned: boolean, aspect: string | undefined,
+  variant: string, lightbox: boolean, ctx: EmitContext,
 ): EmittedNode {
   const t = ctx.theme;
   const img: EmittedNode = {
@@ -241,13 +291,36 @@ function galleryImage(
     },
   };
 
+  // §5/§8: with `lightbox` the image is a real <button> wrapping the <img>,
+  // named by the caption, or the alt when there is none — never an <img>
+  // with a click handler, which no keyboard or screen reader can use.
+  const shownImage: EmittedNode = lightbox
+    ? {
+        tag: 'button',
+        attrs: {
+          type: 'button', class: 'az-gallery-open', 'aria-haspopup': 'dialog',
+          'data-az-index': String(index),
+          'aria-label': image.props.caption || image.props.alt || `Image ${index + 1}`,
+          ...(image.props.caption ? { 'data-az-caption': image.props.caption } : {}),
+        },
+        style: {
+          display: 'block', width: '100%', padding: 0, border: 0, background: 'transparent',
+          borderRadius: px(t.radius.md), cursor: 'zoom-in',
+        },
+        // §10: the ring sits OUTSIDE the image box — inside it vanishes on a
+        // busy photograph.
+        states: { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } },
+        children: [img],
+      }
+    : img;
+
   const content: EmittedNode = captioned
     ? {
         tag: 'figure',
         attrs: { class: 'az-gallery-figure' },
         style: { margin: 0 },
         children: [
-          img,
+          shownImage,
           ...(image.props.caption
             ? [{
                 tag: 'figcaption',
@@ -262,7 +335,7 @@ function galleryImage(
             : []),
         ],
       }
-    : img;
+    : shownImage;
 
   return {
     tag: 'li',
@@ -280,5 +353,102 @@ function galleryImage(
       ? { sm: { flex: `0 0 calc(100% - ${px(t.space[24])})`, scrollSnapAlign: 'start' } }
       : undefined,
     children: [content],
+  };
+}
+
+/**
+ * A carousel: the track, then its previous/next controls (§10: <button>s
+ * with real names). Below sm the controls are "hidden visually but stay in
+ * the DOM and focusable" (§6) — clipped until one is reached by keyboard,
+ * when the row shows: an invisible focused control fails WCAG 2.4.7. On
+ * `orbit` the controls belong to its phone fallback only.
+ */
+function carousel(track: EmittedNode, variant: string, count: number, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const shown = { position: 'static', width: 'auto', height: 'auto', margin: `${px(t.space[16])} 0 0`, overflow: 'visible', clip: 'auto', whiteSpace: 'normal' };
+  const clipped = { position: 'absolute', width: '1px', height: '1px', margin: '-1px', overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' };
+  return {
+    tag: 'div',
+    attrs: { class: 'az-gallery-carousel', 'data-az-behaviour': 'carousel' },
+    children: [
+      track,
+      {
+        tag: 'div',
+        attrs: { class: 'az-gallery-controls' },
+        style: { display: variant === 'orbit' ? 'none' : 'flex', justifyContent: 'flex-end', gap: px(t.space[8]), ...shown },
+        below: { sm: { display: 'flex', ...clipped } },
+        states: { focusWithin: shown },
+        children: [
+          stepButton(ctx, '-1', 'Previous image', true),
+          stepButton(ctx, '1', 'Next image', count <= 1),
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * The lightbox (§8): the `popup` preset from the overlay package, not a new
+ * overlay — modal, focus trapped, scroll locked, Escape and click-outside
+ * close. It holds the enlarged image, its caption, a counter announced
+ * politely ("3 of 18"), and previous/next controls that do not wrap. The
+ * runtime fills it from the thumbnail chosen; the image loads only then.
+ */
+function lightboxDialog(images: SpecBlock[], title: string, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const preset = popup(t, `${title}, enlarged`);
+  const x = closeButton(t, 'Close');
+  const first = images[0];
+  return {
+    tag: 'dialog',
+    attrs: { ...preset.attrs, class: 'az-overlay az-overlay--popup az-gallery-lightbox' },
+    style: preset.style,
+    states: { open: preset.states.open },
+    children: [
+      {
+        tag: 'div',
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: px(t.space[16]) },
+        children: [
+          {
+            tag: 'p',
+            attrs: { class: 'az-gallery-counter', 'data-az-lightbox-counter': '', 'aria-live': 'polite' },
+            style: { margin: 0, fontSize: t.typeSize.sm, color: t.color.muted },
+            children: [`1 of ${images.length}`],
+          },
+          { tag: 'button', attrs: x.attrs, style: x.style, states: x.states, children: [glyph(x.icon.d)] },
+        ],
+      },
+      {
+        tag: 'figure',
+        style: { margin: `${px(t.space[8])} 0` },
+        children: [
+          {
+            tag: 'img',
+            attrs: {
+              src: ctx.asset(first.args[0]?.value ?? ''), alt: first.props.alt ?? '', class: 'az-gallery-lightbox-img',
+              'data-az-lightbox-image': '',
+              // Closed, the dialog is not rendered, so a lazy image waits —
+              // opening the lightbox must not have cost a download (§7).
+              loading: 'lazy', decoding: 'async',
+            },
+            style: { display: 'block', width: '100%', height: 'auto', maxHeight: LIGHTBOX_MAX_HEIGHT, objectFit: 'contain' },
+          },
+          {
+            tag: 'figcaption',
+            attrs: { class: 'az-gallery-lightbox-caption', 'data-az-lightbox-caption': '' },
+            style: { marginTop: px(t.space[8]), fontSize: t.typeSize.sm, color: t.color.muted },
+            children: [first.props.caption ?? ''],
+          },
+        ],
+      },
+      {
+        tag: 'div',
+        style: { display: 'flex', justifyContent: 'flex-end', gap: px(t.space[8]) },
+        children: [
+          stepButton(ctx, '-1', 'Previous image', true),
+          stepButton(ctx, '1', 'Next image', images.length <= 1),
+        ],
+      },
+    ],
   };
 }

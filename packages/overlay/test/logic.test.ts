@@ -5,7 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  HIDE_TRAVEL, SOLID_AT, TRANSPARENT_AT, copyText, moveIndex, retractedAfter, shrunkAfter, solidAfter, transitionMs,
+  HIDE_TRAVEL, SOLID_AT, SWIPE_PX, TRANSPARENT_AT, carouselEnds, copyText, counterText, lightboxIndex, moveIndex,
+  neighbours, retractedAfter, shrunkAfter, solidAfter, swipeOf, transitionMs,
 } from '../src/runtime/logic.ts';
 
 test('nav §4: solid at 80px down, transparent again only at 40px up', () => {
@@ -69,4 +70,34 @@ test('CONTROL: the bar is never hidden while it still sits over its own spot', (
   assert.equal(retractedAfter(0, 72, false, 72), false, 'at bar height, even after travel down');
   assert.equal(retractedAfter(0, 73, false, 72), true, 'just past it, the rule applies');
   assert.equal(retractedAfter(400, 10, true, 72), false, 'near the top it always shows');
+});
+
+test('gallery §8: lightbox keys step, jump, and do NOT wrap at either end', () => {
+  assert.equal(lightboxIndex('ArrowRight', 2, 5), 3);
+  assert.equal(lightboxIndex('ArrowRight', 4, 5), 4, 'at the last image → does nothing');
+  assert.equal(lightboxIndex('ArrowLeft', 0, 5), 0, 'at the first image ← does nothing');
+  assert.equal(lightboxIndex('Home', 3, 5), 0);
+  assert.equal(lightboxIndex('End', 0, 5), 4);
+  assert.equal(lightboxIndex('Tab', 0, 5), null, 'CONTROL: other keys are left alone');
+});
+
+test('gallery §8: the counter is "N of M"; only the neighbours preload', () => {
+  assert.equal(counterText(2, 18), '3 of 18');
+  assert.deepEqual(neighbours(0, 5), [1]);
+  assert.deepEqual(neighbours(2, 5), [1, 3]);
+  assert.deepEqual(neighbours(4, 5), [3]);
+});
+
+test('gallery §8 touch: sideways swipes step, a downward one closes, small moves do nothing', () => {
+  assert.equal(swipeOf(-SWIPE_PX, 0), 'next');
+  assert.equal(swipeOf(SWIPE_PX, 0), 'previous');
+  assert.equal(swipeOf(0, SWIPE_PX), 'close');
+  assert.equal(swipeOf(SWIPE_PX - 1, 0), null);
+  assert.equal(swipeOf(0, -SWIPE_PX), null, 'CONTROL: upward is not a close');
+});
+
+test('a carousel track knows its ends, forgiving a subpixel', () => {
+  assert.deepEqual(carouselEnds(0, 400, 1000), { atStart: true, atEnd: false });
+  assert.deepEqual(carouselEnds(599.5, 400, 1000), { atStart: false, atEnd: true });
+  assert.deepEqual(carouselEnds(0, 400, 400), { atStart: true, atEnd: true }, 'everything fits: nowhere to go');
 });

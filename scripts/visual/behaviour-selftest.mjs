@@ -9,7 +9,9 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { copy, drawer, dropdown, faq, faqDeepLink, hideShrink, navMotion, overlayMotion, play, solid } from './behaviours.mjs';
+import {
+  carousel, copy, drawer, dropdown, faq, faqDeepLink, hideShrink, lightbox, navMotion, overlayMotion, play, solid,
+} from './behaviours.mjs';
 
 const RUNTIME = fileURLToPath(new URL('../../packages/overlay/src/runtime/', import.meta.url));
 
@@ -34,6 +36,9 @@ nav[data-scrolled="true"] { background: rgb(250, 250, 250); }
 .group { position: relative; display: inline-block; }
 .dd { position: absolute; top: 100%; background: white; }
 button { min-width: 44px; min-height: 44px; }
+.track { display: flex; overflow-x: auto; width: 400px; margin: 0; padding: 0; list-style: none; }
+.track li { flex: 0 0 300px; }
+.track img { display: block; width: 300px; height: 100px; }
 ${net ? NET : ''}
 </style></head><body>
 <div class="frame"><nav data-az-behaviour="solid" data-az-hide data-az-shrink aria-label="Main">
@@ -52,6 +57,19 @@ ${net ? NET : ''}
     <li><h3 id="faq-second"><button type="button" id="faq-second-btn" aria-expanded="true" aria-controls="faq-second-panel" data-az-disclosure>Second question?<span data-az-chevron></span></button></h3>
       <div id="faq-second-panel"><p>Returns take thirty days.</p></div></li>
   </ul>
+  <section data-az-behaviour="lightbox" aria-label="Gallery">
+    <div data-az-behaviour="carousel">
+      <ul class="track" data-az-track>
+        ${['#a33', '#3a3', '#33a', '#aa3'].map((c, i) => `<li><button type="button" data-az-index="${i}" aria-haspopup="dialog" aria-label="Photo ${i + 1}"><img alt="Photo ${i + 1}" src="${LOGO(c)}"></button></li>`).join('')}
+      </ul>
+      <div class="az-gallery-controls"><button type="button" data-az-step="-1" aria-disabled="true">Previous image</button><button type="button" data-az-step="1" aria-disabled="false">Next image</button></div>
+    </div>
+    <dialog data-az-behaviour="dialog" data-az-overlay="popup" aria-label="Gallery, enlarged">
+      <p data-az-lightbox-counter aria-live="polite">1 of 4</p><button type="button" data-az-close aria-label="Close">Close</button>
+      <figure><img data-az-lightbox-image alt="Photo 1" src="${LOGO('#a33')}"><figcaption data-az-lightbox-caption></figcaption></figure>
+      <button type="button" data-az-step="-1" aria-disabled="true">Previous image</button><button type="button" data-az-step="1" aria-disabled="false">Next image</button>
+    </dialog>
+  </section>
   <button type="button" data-az-behaviour="copy" data-az-target="copy:hello@example.org">Copy the address</button>
   <button type="button" data-az-behaviour="play" aria-haspopup="dialog" aria-expanded="false" data-az-target="video:film">Watch</button><dialog data-az-behaviour="dialog" data-az-overlay="popup" aria-label="Film">
     <button type="button" data-az-close aria-label="Close video">Close</button><video controls preload="none"></video></dialog>
@@ -94,6 +112,7 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
     ['behaviour: drawer', drawer, 390], ['behaviour: dropdown', dropdown, 1440], ['behaviour: solid', solid, 1440],
     ['behaviour: faq', faq, 1440], ['behaviour: copy', copy, 1440], ['behaviour: play', play, 1440],
     ['behaviour: hide and shrink', hideShrink, 1440],
+    ['behaviour: carousel', carousel, 1440], ['behaviour: lightbox', lightbox, 1440],
   ]) {
     expect(`${label} without the runtime`, await run('none', width, check), false);
     expect(`${label} with the runtime`, await run('good', width, check), true);

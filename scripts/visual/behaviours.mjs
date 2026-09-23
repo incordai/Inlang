@@ -419,3 +419,120 @@ export async function faqDeepLink(page) {
   if (r.filter((q, i) => i !== 1).some((q) => !q.hidden)) problems.push('answers not linked to were left open');
   return { pass: problems.length === 0, detail: problems.join('; ') };
 }
+
+/**
+ * gallery §6/§10: a carousel's previous/next buttons — at the start
+ * "previous" says it cannot go (aria-disabled), "next" scrolls the track by
+ * a slide, and at the end "next" says so and does nothing. Reached by
+ * keyboard, an arrow is on screen even where the row is clipped (phones).
+ */
+export async function carousel(page) {
+  const wrap = '[data-az-behaviour="carousel"]';
+  const shown = await page.evaluate((w) => {
+    const c = document.querySelector(`${w} .az-gallery-controls`) ?? document.querySelector(`${w} button[data-az-step]`)?.parentElement;
+    return !!c && getComputedStyle(c).display !== 'none';
+  }, wrap);
+  if (!shown) return null;
+  const read = () => page.evaluate((w) => {
+    const track = document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`);
+    const b = (s) => document.querySelector(`${w} button[data-az-step="${s}"]`);
+    const r = b('1').getBoundingClientRect();
+    return {
+      left: track.scrollLeft, room: track.scrollWidth - track.clientWidth,
+      prev: b('-1').getAttribute('aria-disabled'), next: b('1').getAttribute('aria-disabled'),
+      nextBox: { w: r.width, h: r.height, onScreen: r.right > 0 && r.left < innerWidth },
+    };
+  }, wrap);
+  const problems = [];
+  const start = await read();
+  // Everything fits: nothing to step through, so neither control may offer to.
+  if (start.room <= 0) {
+    const both = start.prev === 'true' && start.next === 'true';
+    return { pass: both, detail: both ? '' : 'the whole set fits, yet a control is not marked unavailable' };
+  }
+  if (start.prev !== 'true') problems.push('at the start "previous" is not marked unavailable');
+  if (start.next !== 'false') problems.push('at the start "next" is marked unavailable');
+  await page.focus(`${wrap} button[data-az-step="1"]`);
+  const focused = await read();
+  if (focused.nextBox.w < 44 || focused.nextBox.h < 44 || !focused.nextBox.onScreen) {
+    problems.push(`the focused "next" is not a visible 44px control (${Math.round(focused.nextBox.w)}x${Math.round(focused.nextBox.h)})`);
+  }
+  await page.keyboard.press('Enter');
+  const moved = await until(page, (w) => (document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`)).scrollLeft > 0, wrap);
+  if (!moved) problems.push('"next" did not scroll the track');
+  // Step to the end, bounded by the number of slides.
+  const slides = await page.$$eval(`${wrap} li`, (l) => l.length);
+  for (let i = 0; i < slides + 1; i++) {
+    const now = await read();
+    if (now.next === 'true') break;
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(250);
+  }
+  await page.waitForTimeout(400);
+  const end = await read();
+  if (end.next !== 'true') problems.push('at the end "next" is not marked unavailable');
+  if (end.left < end.room - 1) problems.push(`"next" stopped short of the end (${Math.round(end.left)} of ${end.room})`);
+  if (end.prev !== 'false') problems.push('past the start "previous" stayed unavailable');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  if ((await read()).left !== end.left) problems.push('an unavailable "next" still moved the track');
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
+/**
+ * gallery §8: an image opens the lightbox; the counter says "1 of N"; the
+ * arrow keys step without wrapping and without scrolling the page behind;
+ * at the end "next" is unavailable; Escape closes and focus lands on the
+ * thumbnail of the image on show, not the one that opened it.
+ */
+export async function lightbox(page) {
+  const thumbs = '[data-az-behaviour="lightbox"] button[data-az-index]';
+  const count = (await page.$$(thumbs)).length;
+  if (count === 0) return null;
+  if (count < 2) return { pass: false, detail: 'fewer than two images to step through' };
+  const read = () => page.evaluate((t) => {
+    const box = document.querySelector(t).closest('[data-az-behaviour="lightbox"]');
+    const dialog = box.querySelector('dialog');
+    const img = dialog.querySelector('[data-az-lightbox-image]');
+    // By alt, not src: a set may show one file twice; each image's alt says
+    // what it shows, and the lightbox carries the chosen one's.
+    const thumbAlts = [...box.querySelectorAll(`button[data-az-index] img`)].map((i) => i.alt);
+    return {
+      open: dialog.open, focusIn: dialog.contains(document.activeElement),
+      counter: dialog.querySelector('[data-az-lightbox-counter]')?.textContent,
+      live: dialog.querySelector('[data-az-lightbox-counter]')?.getAttribute('aria-live'),
+      shownIndex: thumbAlts.indexOf(img.alt),
+      next: dialog.querySelector('button[data-az-step="1"]')?.getAttribute('aria-disabled'),
+      y: window.scrollY,
+      focusedThumb: [...box.querySelectorAll('button[data-az-index]')].indexOf(document.activeElement),
+    };
+  }, thumbs);
+  const problems = [];
+  await page.focus(thumbs);
+  await page.keyboard.press('Enter');
+  if (!(await until(page, (t) => document.querySelector(t).closest('[data-az-behaviour="lightbox"]').querySelector('dialog').open, thumbs))) {
+    return { pass: false, detail: 'the image did not open the lightbox' };
+  }
+  const opened = await read();
+  if (!opened.focusIn) problems.push('focus did not move into the lightbox');
+  if (opened.counter !== `1 of ${count}` || opened.live !== 'polite') problems.push(`counter "${opened.counter}" (aria-live ${opened.live}), not a polite "1 of ${count}"`);
+  if (opened.shownIndex !== 0) problems.push('the lightbox does not show the image chosen');
+  await page.keyboard.press('ArrowRight');
+  const stepped = await read();
+  if (stepped.counter !== `2 of ${count}` || stepped.shownIndex !== 1) problems.push('→ did not step to the next image');
+  if (stepped.y !== opened.y) problems.push('the arrow keys scrolled the page behind');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  const last = await read();
+  if (last.counter !== `${count} of ${count}` || last.shownIndex !== count - 1) problems.push('→ past the last image wrapped or moved');
+  if (last.next !== 'true') problems.push('at the last image "next" is not marked unavailable');
+  await page.keyboard.press('Escape');
+  const closed = await until(page, (t) => !document.querySelector(t).closest('[data-az-behaviour="lightbox"]').querySelector('dialog').open, thumbs);
+  if (!closed) problems.push('Escape did not close the lightbox');
+  else {
+    await page.waitForTimeout(100);
+    const after = await read();
+    if (after.focusedThumb !== count - 1) problems.push(`focus returned to thumbnail ${after.focusedThumb + 1}, not ${count} — the one on show`);
+  }
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}

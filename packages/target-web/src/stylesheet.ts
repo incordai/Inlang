@@ -43,6 +43,7 @@ const UNITLESS = new Set([
 const STATE_SELECTOR: Record<InteractionState, (cls: string) => string> = {
   hover: (c) => `${c}:hover`,
   focusVisible: (c) => `${c}:focus-visible`,
+  focusWithin: (c) => `${c}:focus-within`,
   active: (c) => `${c}:active`,
   disabled: (c) => `${c}:disabled, ${c}[aria-disabled="true"]`,
   loading: (c) => `${c}[aria-busy="true"]`,

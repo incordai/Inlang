@@ -17,9 +17,14 @@
  *   faq       independent disclosures, hidden="until-found" (faq §7)
  *   copy      clipboard, announced politely (buttons §1.3)
  *   play      opens the video popup next to the button
+ *   carousel  a gallery track's previous/next buttons (gallery §6, §10)
+ *   lightbox  a gallery's images open one popup and step through (§8)
  */
 
-import { copyText, moveIndex, retractedAfter, shrunkAfter, solidAfter, transitionMs } from './logic.ts';
+import {
+  carouselEnds, copyText, counterText, lightboxIndex, moveIndex, neighbours, retractedAfter, shrunkAfter, solidAfter,
+  swipeOf, transitionMs,
+} from './logic.ts';
 import { POLICY, isPreset } from './policy.ts';
 
 type Cleanup = () => void;
@@ -34,7 +39,12 @@ export function attach(doc: Document): Cleanup {
     target.addEventListener(type, fn, { ...opts, signal: ac.signal });
   const undo: Cleanup[] = [];
 
-  wireDialogs(doc, on, undo);
+  // Every modal open right now and the function that closes it — shared, so
+  // the generic dialog wiring (Escape, backdrop, Tab) closes a lightbox too.
+  const modals = new Map<HTMLDialogElement, () => void>();
+  wireDialogs(doc, on, undo, modals);
+  wireLightboxes(doc, on, modals);
+  wireCarousels(doc, on);
   wireDropdowns(doc, on);
   wireSolid(doc, on, undo);
   wireHideShrink(doc, on, undo);
@@ -72,8 +82,15 @@ function lockScroll(doc: Document): Cleanup {
   };
 }
 
-/** Show `dialog` modally from `trigger`, and the function that closes it. */
-function openModal(doc: Document, dialog: HTMLDialogElement, trigger: HTMLElement | null): () => void {
+/**
+ * Show `dialog` modally from `trigger`, and the function that closes it.
+ * Focus returns to `returnTo()` — the trigger, unless the modal has moved
+ * on (a lightbox returns to the thumbnail of the image it shows).
+ */
+function openModal(
+  doc: Document, dialog: HTMLDialogElement, trigger: HTMLElement | null,
+  returnTo: () => HTMLElement | null = () => trigger,
+): () => void {
   const unlock = lockScroll(doc);
   dialog.showModal();
   trigger?.setAttribute('aria-expanded', 'true');
@@ -94,13 +111,14 @@ function openModal(doc: Document, dialog: HTMLDialogElement, trigger: HTMLElemen
       unlock();
       trigger?.setAttribute('aria-expanded', 'false');
       // §6: return focus to the trigger, never to <body>.
-      trigger?.focus();
+      const back = returnTo();
+      back?.focus();
+      back?.scrollIntoView({ block: 'nearest' });
     }, wait);
   };
 }
 
-function wireDialogs(doc: Document, on: On, undo: Cleanup[]): void {
-  const current = new Map<HTMLDialogElement, () => void>();
+function wireDialogs(doc: Document, on: On, undo: Cleanup[], current: Map<HTMLDialogElement, () => void>): void {
   undo.push(() => {
     for (const [dialog] of current) if (dialog.open) dialog.close();
     current.clear();
@@ -149,6 +167,112 @@ function wireDialogs(doc: Document, on: On, undo: Cleanup[]): void {
     // A link inside the menu navigates away; close first so nothing is left
     // locked if the navigation is to an anchor on this page.
     for (const link of dialog.querySelectorAll('a[href]')) on(link, 'click', () => close(dialog));
+  }
+}
+
+/* ---- gallery lightbox ----------------------------------------------------- */
+
+/**
+ * gallery-spec §8. Each image is a <button data-az-index>; the gallery holds
+ * one popup <dialog>. The runtime shows the chosen image, steps with the
+ * arrow keys, Home and End WITHOUT wrapping, says "3 of 18" politely,
+ * preloads the neighbours only, and returns focus to the thumbnail of the
+ * image on show — not the one that opened it.
+ */
+function wireLightboxes(doc: Document, on: On, modals: Map<HTMLDialogElement, () => void>): void {
+  for (const box of doc.querySelectorAll<HTMLElement>('[data-az-behaviour="lightbox"]')) {
+    const dialog = box.querySelector<HTMLDialogElement>('dialog[data-az-behaviour="dialog"]');
+    const thumbs = [...box.querySelectorAll<HTMLButtonElement>('button[data-az-index]')];
+    if (!dialog || thumbs.length === 0) continue;
+    const img = dialog.querySelector<HTMLImageElement>('[data-az-lightbox-image]');
+    const caption = dialog.querySelector<HTMLElement>('[data-az-lightbox-caption]');
+    const counter = dialog.querySelector<HTMLElement>('[data-az-lightbox-counter]');
+    const prev = dialog.querySelector<HTMLButtonElement>('[data-az-step="-1"]');
+    const next = dialog.querySelector<HTMLButtonElement>('[data-az-step="1"]');
+    let index = 0;
+
+    const imageOf = (i: number) => thumbs[i].querySelector('img');
+    const show = (i: number) => {
+      index = i;
+      const source = imageOf(i);
+      if (img && source) { img.src = source.currentSrc || source.src; img.alt = source.alt; }
+      if (caption) caption.textContent = thumbs[i].getAttribute('data-az-caption') ?? '';
+      if (counter) counter.textContent = counterText(i, thumbs.length);
+      // No wrap (§8): the end buttons say so — aria-disabled keeps a focused
+      // button focused, where `disabled` would drop focus to the page.
+      prev?.setAttribute('aria-disabled', String(i === 0));
+      next?.setAttribute('aria-disabled', String(i === thumbs.length - 1));
+      for (const n of neighbours(i, thumbs.length)) {
+        const src = imageOf(n);
+        if (!src) continue;
+        const pre = new Image();
+        pre.fetchPriority = 'low';
+        pre.src = src.currentSrc || src.src;
+      }
+    };
+    const step = (to: number | null) => { if (to !== null && to !== index) show(to); };
+
+    thumbs.forEach((thumb, i) => on(thumb, 'click', () => {
+      if (dialog.open) return;
+      show(i);
+      modals.set(dialog, openModal(doc, dialog, thumb, () => thumbs[index]));
+    }));
+    on(dialog, 'keydown', (e) => {
+      const k = e as KeyboardEvent;
+      const to = lightboxIndex(k.key, index, thumbs.length);
+      if (to === null) return;
+      // Arrows must not scroll the page behind (§8), nor move focus.
+      k.preventDefault();
+      step(to);
+    });
+    if (prev) on(prev, 'click', () => step(lightboxIndex('ArrowLeft', index, thumbs.length)));
+    if (next) on(next, 'click', () => step(lightboxIndex('ArrowRight', index, thumbs.length)));
+    // §8 touch: left/right steps, down closes — as the sheet gesture does.
+    let start: { x: number; y: number } | null = null;
+    on(dialog, 'pointerdown', (e) => { const p = e as PointerEvent; if (p.pointerType !== 'mouse') start = { x: p.clientX, y: p.clientY }; });
+    on(dialog, 'pointerup', (e) => {
+      if (!start) return;
+      const p = e as PointerEvent;
+      const swipe = swipeOf(p.clientX - start.x, p.clientY - start.y);
+      start = null;
+      if (swipe === 'next') step(lightboxIndex('ArrowRight', index, thumbs.length));
+      else if (swipe === 'previous') step(lightboxIndex('ArrowLeft', index, thumbs.length));
+      else if (swipe === 'close') modals.get(dialog)?.();
+    });
+  }
+}
+
+/* ---- gallery carousel ----------------------------------------------------- */
+
+/**
+ * gallery-spec §6/§10: the carousel's previous/next buttons scroll the track
+ * by one slide and say when an end is reached (aria-disabled). Scrolling is
+ * instant under reduced motion (§10: all carousel motion is off there).
+ */
+function wireCarousels(doc: Document, on: On): void {
+  const win = doc.defaultView;
+  if (!win) return;
+  for (const carousel of doc.querySelectorAll<HTMLElement>('[data-az-behaviour="carousel"]')) {
+    const track = carousel.querySelector<HTMLElement>('[data-az-track]');
+    const buttons = [...carousel.querySelectorAll<HTMLButtonElement>('button[data-az-step]')];
+    if (!track || buttons.length === 0) continue;
+    const update = () => {
+      const { atStart, atEnd } = carouselEnds(track.scrollLeft, track.clientWidth, track.scrollWidth);
+      for (const b of buttons) b.setAttribute('aria-disabled', String(b.getAttribute('data-az-step') === '-1' ? atStart : atEnd));
+    };
+    for (const b of buttons) {
+      on(b, 'click', () => {
+        if (b.getAttribute('aria-disabled') === 'true') return;
+        const slide = track.querySelector('li');
+        const gap = parseFloat(win.getComputedStyle(track).columnGap) || 0;
+        const by = (slide?.getBoundingClientRect().width ?? track.clientWidth) + gap;
+        const reduce = win.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        track.scrollBy({ left: Number(b.getAttribute('data-az-step')) * by, behavior: reduce ? 'instant' : 'smooth' });
+      });
+    }
+    on(track, 'scroll', update, { passive: true });
+    on(win, 'resize', update, { passive: true });
+    update();
   }
 }
 

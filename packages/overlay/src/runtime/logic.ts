@@ -85,3 +85,49 @@ export function transitionMs(durations: string, delays: string): number {
   const l = delays.split(',').map(ms);
   return d.reduce((max, v, i) => Math.max(max, v + (l[i % l.length] ?? 0)), 0);
 }
+
+/**
+ * gallery-spec §8: where a lightbox key moves the shown image. It does NOT
+ * wrap — at the last image `→` does nothing, so a viewer can tell they have
+ * seen everything. Null means the key is not the lightbox's.
+ */
+export function lightboxIndex(key: string, index: number, count: number): number | null {
+  if (count <= 0) return null;
+  switch (key) {
+    case 'ArrowRight': return Math.min(index + 1, count - 1);
+    case 'ArrowLeft': return Math.max(index - 1, 0);
+    case 'Home': return 0;
+    case 'End': return count - 1;
+    default: return null;
+  }
+}
+
+/** gallery-spec §8: the counter — the only thing saying the set is finite. */
+export const counterText = (index: number, count: number): string => `${index + 1} of ${count}`;
+
+/**
+ * The lightbox's neighbours to preload (§8: ±1 only — preloading the set
+ * defeats the lazy-loading rules), in order, without the ends' overhang.
+ */
+export function neighbours(index: number, count: number): number[] {
+  return [index - 1, index + 1].filter((i) => i >= 0 && i < count);
+}
+
+/**
+ * How far a swipe must travel to count (§8: left/right is prev/next, down
+ * closes) — well past a tap's wobble, well short of a deliberate drag.
+ */
+export const SWIPE_PX = 48;
+
+export type Swipe = 'next' | 'previous' | 'close' | null;
+
+export function swipeOf(dx: number, dy: number): Swipe {
+  if (Math.abs(dx) >= SWIPE_PX && Math.abs(dx) > Math.abs(dy)) return dx < 0 ? 'next' : 'previous';
+  if (dy >= SWIPE_PX && dy > Math.abs(dx)) return 'close';
+  return null;
+}
+
+/** A carousel track's ends, allowing a pixel of subpixel rounding. */
+export function carouselEnds(scrollLeft: number, clientWidth: number, scrollWidth: number): { atStart: boolean; atEnd: boolean } {
+  return { atStart: scrollLeft <= 1, atEnd: scrollLeft + clientWidth >= scrollWidth - 1 };
+}

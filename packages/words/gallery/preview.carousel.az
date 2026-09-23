@@ -1,0 +1,34 @@
+az 1
+
+site aurora
+
+page /
+  hero center
+    title "Built in the dark"
+  gallery carousel lightbox
+    title "From hide to heel"
+    ratio 4:3
+    image ./preview-assets/assets/bench.webp
+      alt     "An empty workbench under a single lamp"
+      caption "The bench, day one"
+    image ./preview-assets/assets/welt.webp
+      alt     "A welt being stitched by hand"
+      caption "Welting by hand"
+    image ./preview-assets/assets/lasts.webp
+      alt     "Wooden lasts lined up on a shelf"
+      caption "The lasts"
+    image ./preview-assets/assets/sole.webp
+      alt     "A finished sole, edge burnished"
+      caption "The sole"
+    image ./preview-assets/assets/orbit.webp
+      alt     "The finished pair on the bench"
+      caption "Forty pairs a month"
+    image ./preview-assets/assets/welt.webp
+      alt     "The welt, close up"
+      caption "Every stitch by hand"
+    image ./preview-assets/assets/bench.webp
+      alt     "The bench at the end of the day"
+      caption "Day's end"
+    image ./preview-assets/assets/lasts.webp
+      alt     "Lasts waiting for the next order"
+      caption "Next order"
