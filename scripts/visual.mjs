@@ -78,7 +78,11 @@ const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'sch
  * listed here needs a `preview.<variant>.az` beside the word's preview.az.
  */
 const RESTACK = {
-  hero: { split: '.az-hero' },   // hero-spec §10: split restacks to stack
+  hero: { split: '.az-hero' },                 // hero-spec §10: split restacks to stack
+  cta: { split: '.az-cta' },                   // cta-spec §6: text above, media below
+  faq: { columns: '.az-faq-items' },           // faq-spec §6: one column, declared order
+  text: { columns: '.az-text-body' },          // text-spec §7: one column below md
+  feature: { default: '.az-feature-items' },   // feature-spec §6: grid is one column
 };
 
 /**
@@ -189,7 +193,8 @@ async function checkSite(s, browsers, server) {
   const shots = join(OUT, s.word);
   mkdirSync(shots, { recursive: true });
   const tag = (scheme, width) => `${s.label}/${scheme}/${width}`;
-  const restackAt = RESTACK[s.word]?.[s.variant];
+  // A word's preview.az is keyed `default`; preview.<variant>.az by its variant.
+  const restackAt = RESTACK[s.word]?.[s.variant ?? 'default'];
   const tracks = {};
 
   const ctx = await browsers.chromium.newContext();

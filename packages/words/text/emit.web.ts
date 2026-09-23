@@ -48,6 +48,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         columnCount: variant === 'columns' ? COLUMN_COUNT : 1,
         columnGap: px(t.space[48]),
       },
+      // §7: `columns` collapses at breakpoint.md, NOT sm — two 38ch columns
+      // plus the gap need ~900px; below that it is already prose.
+      below: variant === 'columns' ? { md: { columnCount: 1 } } : undefined,
       children: [block.props.body],
     });
   }
@@ -77,6 +80,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       textAlign: variant === 'centered' ? 'center' : 'start',
       marginInline: variant === 'centered' ? 'auto' : undefined,
     },
+    // §7: the gutter sets the width on a phone, and it is the page's.
+    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
   };
 }

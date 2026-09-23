@@ -69,7 +69,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
 
   // §3: on the accent band the buttons invert — contrast is measured against
   // the band, not the page.
-  const actions = ctx.actions(block, ['cta', 'alt'], { tone: inverted ? 'inverted' : 'page' });
+  // §6: on the band, below sm the buttons stack and the primary fills the row.
+  const actions = ctx.actions(block, ['cta', 'alt'], {
+    tone: inverted ? 'inverted' : 'page',
+    fullWidthBelow: inverted ? 'sm' : undefined,
+  });
   if (actions.length > 0) {
     // Slot fills are <li>, so the row is a list — an <li> in a <div> is
     // invalid HTML, and a list also tells a reader how many actions there are.
@@ -82,6 +86,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         'data-palette': inverted ? 'inverted' : 'page',
       },
       style: { display: 'flex', gap: px(t.space[16]), flexWrap: 'wrap', listStyle: 'none', padding: 0, margin: 0 },
+      below: inverted ? { sm: { flexDirection: 'column', alignItems: 'stretch' } } : undefined,
       children: actions,
     });
   }
@@ -117,6 +122,18 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       marginInline: variant === 'card' ? px(t.size['gutter-lg']) : undefined,
       border: variant === 'card' ? `1px solid ${t.color.border}` : undefined,
     },
+    // §6, below sm: every variant takes the mobile gutter (theme-spec §1);
+    // `band` drops its vertical padding a step; `card`'s inset drops to the
+    // gutter; `split` restacks — text above, media below (source order).
+    below: {
+      sm: {
+        paddingInline: px(t.size['gutter-sm']),
+        paddingBlock: variant === 'band' ? px(t.space[64]) : undefined,
+        marginInline: variant === 'card' ? px(t.size['gutter-sm']) : undefined,
+        gridTemplateColumns: variant === 'split' ? 'minmax(0, 1fr)' : undefined,
+        rowGap: variant === 'split' ? px(t.space[32]) : undefined,
+      },
+    },
     children: variant === 'split' ? (media ? [text, media] : [text]) : children,
   };
 }
@@ -138,6 +155,10 @@ function splitMedia(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
       class: 'az-cta-media',
       'data-media': describe ? 'informative' : 'decorative',
     },
+    // §6: decorative media is DROPPED below sm, not shrunk — stacked on a
+    // phone it is a spacer between the visitor and the button. Informative
+    // media (it has a `describe`) stays, below the text.
+    below: describe ? undefined : { sm: { display: 'none' } },
     children: [{
       tag: 'img',
       attrs: {

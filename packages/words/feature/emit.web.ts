@@ -10,6 +10,12 @@
 import type { SpecBlock } from '../../core/src/spec.ts';
 import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
+/** The manifest's `columns` default. */
+const DEFAULT_COLUMNS = 3;
+
+/** §6: "a label of ≤3 words" — the spec-sheet exception to one column. */
+const SPEC_SHEET_MAX_WORDS = 3;
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'grid';
@@ -49,6 +55,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
+  // §6 below sm: one column — except a grid whose every item is an icon and
+  // a label of three words or fewer with no text, which reads as a spec
+  // sheet in two. Between sm and md a grid caps at two columns, or three
+  // tracks at ~800px make 22ch measures. `rows` is one column already.
+  const itemFills = block.children.filter((c) => c.word === 'item');
+  const specSheet = itemFills.length > 0 && itemFills.every((c) =>
+    !!c.props.icon && !c.props.text && (c.args[0]?.value ?? '').trim().split(/\s+/).length <= SPEC_SHEET_MAX_WORDS);
+  const columns = Number(block.props.columns ?? DEFAULT_COLUMNS);
+  const tracks = (n: number) => `repeat(${n}, minmax(0, 1fr))`;
+
   const items = ctx.slot('item');
   if (items.length > 0) {
     children.push({
@@ -59,12 +75,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         // `columns` counts items, so a number is honest here — PRD §6.1a.
         gridTemplateColumns: variant === 'rows'
           ? '1fr'
-          : `repeat(${block.props.columns ?? '3'}, minmax(0, 1fr))`,
+          : tracks(columns),
         // Row gap exceeds column gap, or a grid of items reads as columns of
         // text instead of a set.
         columnGap: px(t.space[32]),
         rowGap: px(t.space[48]),
         listStyle: 'none', padding: 0, margin: 0,
+      },
+      below: variant === 'rows' ? undefined : {
+        md: { gridTemplateColumns: tracks(Math.min(columns, 2)) },
+        sm: { gridTemplateColumns: variant === 'grid' && specSheet ? tracks(2) : tracks(1) },
       },
       children: items,
     });
@@ -94,6 +114,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.bg,
       color: t.color.text,
     },
+    // The mobile gutter below sm (theme-spec §1).
+    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
   };
 }

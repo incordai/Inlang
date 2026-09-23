@@ -1,0 +1,16 @@
+az 1
+
+site aurora
+
+page /
+  hero center
+    title "Built in the dark"
+  faq columns
+    title "Questions"
+    sub   "Everything people ask before they order."
+    item "How long does a pair take?"
+      text "Four to six weeks from order to shipping, cut and finished by one maker."
+    item "Can I return them?"
+      text "Unworn pairs can be returned within thirty days for a full refund."
+    item "Do you resole?"
+      text "Yes. Every pair has a stitched welt, so the sole can be replaced in the studio."

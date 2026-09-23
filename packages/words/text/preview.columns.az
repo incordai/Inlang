@@ -1,0 +1,10 @@
+az 1
+
+site aurora
+
+page /
+  hero center
+    title "Built in the dark"
+  text columns
+    title "How a pair is made"
+    body  "Every pair starts as one hide, chosen by hand and cut on the bench by the maker who will finish it. The panels are skived, folded and stitched, then lasted for three days so the leather takes the shape of the foot rather than the other way round. The welt is stitched, never glued, which is why a sole can be replaced in the studio years later. Nothing leaves the room until the same person who cut it has checked the last seam, and the whole run is forty pairs a month because that is what two people can do well. We keep a ledger of every pair: the hide it came from, the week it was cut, the size of the last and the name of the person who finished it. When a pair comes back for a new sole, that ledger is how we know which leather to match and how the upper was built, so the repair is part of the same work rather than a guess made years later."

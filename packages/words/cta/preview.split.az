@@ -1,0 +1,14 @@
+az 1
+
+site aurora
+
+page /
+  hero center
+    title "Built in the dark"
+  cta split
+    title "Forty pairs a month. One of them could be yours."
+    sub   "Reserve now for the autumn run."
+    media ./preview-assets/assets/bench.webp
+    cta   "Reserve a pair" /reserve
+
+page /reserve

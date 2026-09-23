@@ -122,8 +122,12 @@ export const columnsOf = (page, selector) => page.evaluate((sel) => {
   const el = document.querySelector(sel);
   if (!el) return -1;
   const cs = getComputedStyle(el);
-  if (cs.display !== 'grid' && cs.display !== 'inline-grid') return 0;
-  return cs.gridTemplateColumns.split(/\s+/).filter(Boolean).length;
+  if (cs.display === 'grid' || cs.display === 'inline-grid') {
+    return cs.gridTemplateColumns.split(/\s+/).filter(Boolean).length;
+  }
+  // CSS multi-column (text `columns` flows one body into columns).
+  const count = Number(cs.columnCount);
+  return Number.isFinite(count) && count > 0 ? count : 0;
 }, selector);
 
 /**

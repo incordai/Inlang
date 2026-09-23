@@ -65,6 +65,8 @@ export interface ActionOptions {
    * secondary stays a text link").
    */
   readonly compactBelow?: BreakpointName;
+  /** Below this breakpoint the primary fills the row; secondaries keep their look. */
+  readonly fullWidthBelow?: BreakpointName;
 }
 
 /** A form's submit control — the one action that is not a slot fill. */

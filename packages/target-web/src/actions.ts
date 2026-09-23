@@ -65,6 +65,7 @@ function actionStyle(t: ThemeLike, hierarchy: Hierarchy, options: ActionOptions)
   const inverted = options.tone === 'inverted';
   const { base, hover } = look(t, hierarchy, inverted);
   const compact = options.compactBelow;
+  const full = options.fullWidthBelow;
   return {
     style: {
       display: 'inline-flex',
@@ -104,7 +105,9 @@ function actionStyle(t: ThemeLike, hierarchy: Hierarchy, options: ActionOptions)
       ? { [compact]: hierarchy === 'primary'
           ? { width: '100%' }
           : { background: 'transparent', border: '1px solid transparent', color: inverted ? t.color['accent-contrast'] : t.color.accent, paddingInline: 0 } }
-      : undefined,
+      : full && hierarchy === 'primary'
+        ? { [full]: { width: '100%' } }
+        : undefined,
   };
 }
 

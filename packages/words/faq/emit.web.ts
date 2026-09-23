@@ -108,6 +108,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         columnGap: px(t.space[48]),
         maxWidth: `${t.size['measure-body']}ch`,
       },
+      // §6: `columns` collapses to one column below sm, in declared order —
+      // row-major DOM order, so one column reads 1, 2, 3.
+      below: variant === 'columns' ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } } : undefined,
       children: items,
     });
   }
@@ -124,6 +127,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.bg,
       color: t.color.text,
     },
+    // §6: the container drops to the mobile gutter (theme-spec §1).
+    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
   };
 }
