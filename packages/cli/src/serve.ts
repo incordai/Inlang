@@ -149,45 +149,55 @@ export async function serve(options: ServeOptions): Promise<Served> {
 
   let mailbox: Mailbox | null = null;
   let backend: DevBackend | null = null;
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  if (options.backend) {
-    const backendPort = await freePort(DEFAULT_BACKEND_PORT);
-    const mailboxPort = await freePort(0);
-    mailbox = await startMailbox(mailboxPort, print);
-    backend = await startDevBackend(projectDir, options.backend.siteName,
-      { site: sitePort, backend: backendPort, mailbox: mailboxPort }, mailbox, print);
-    env.AZ_PUBLIC_BACKEND_URL = backend.url;
-  }
-
-  await ensureInstalled(outDir, print);
-  const vite = spawn(process.execPath,
-    [join(outDir, 'node_modules/vite/bin/vite.js'), '--host', LOOPBACK, '--port', String(sitePort), '--strictPort', '--clearScreen', 'false'],
-    { cwd: outDir, env, stdio: ['ignore', 'pipe', 'inherit'] });
-  // Vite's banner prints localhost, which is a different site from 127.0.0.1
-  // for cookies; our own lines below give the address to use.
-  vite.stdout?.resume();
-
+  let vite: ChildProcess | null = null;
+  // Kill the dev server if this process ends any other way (an uncaught
+  // error, a signal we did not handle) — it must never outlive `az dev`.
+  const orphanGuard = () => { vite?.kill(); };
   const close = async () => {
-    await stopChild(vite);
+    process.off('exit', orphanGuard);
+    if (vite) await stopChild(vite);
     await backend?.close();
     await mailbox?.close();
   };
+
+  // Everything started so far is stopped if a later step fails: a bad
+  // .az-dev/backend.env or an offline first install used to leave the
+  // mailbox and backend listening, and the process hung.
   try {
-    await waitFor(siteUrl, vite);
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (options.backend) {
+      const backendPort = await freePort(DEFAULT_BACKEND_PORT);
+      const mailboxPort = await freePort(0);
+      mailbox = await startMailbox(mailboxPort, print);
+      backend = await startDevBackend(projectDir, options.backend.siteName,
+        { site: sitePort, backend: backendPort, mailbox: mailboxPort }, mailbox, print);
+      env.AZ_PUBLIC_BACKEND_URL = backend.url;
+    }
+
+    await ensureInstalled(outDir, print);
+    const child = spawn(process.execPath,
+      [join(outDir, 'node_modules/vite/bin/vite.js'), '--host', LOOPBACK, '--port', String(sitePort), '--strictPort', '--clearScreen', 'false'],
+      { cwd: outDir, env, stdio: ['ignore', 'pipe', 'inherit'] });
+    vite = child;
+    process.on('exit', orphanGuard);
+    // Vite's banner prints localhost, which is a different site from 127.0.0.1
+    // for cookies; our own lines below give the address to use.
+    child.stdout?.resume();
+    await waitFor(siteUrl, child);
+
+    print(`az dev: site     ${siteUrl}`);
+    if (backend && mailbox) {
+      print(`az dev: backend  ${backend.url}  (SQLite in .az-dev/, dev profile)`);
+      print(`az dev: mailbox  ${mailbox.url}  (email is shown here, never sent)`);
+    }
+    print('az dev: watching for changes — Ctrl-C to stop');
+    if (options.open) {
+      const { file, args } = openerFor(process.platform, siteUrl);
+      execFile(file, args, (e) => { if (e) print(`az dev: could not open a browser (${e.message}) — open ${siteUrl}`); });
+    }
+    return { siteUrl, backendUrl: backend?.url ?? null, mailboxUrl: mailbox?.url ?? null, vite: child, close };
   } catch (e) {
     await close();
     throw e;
   }
-
-  print(`az dev: site     ${siteUrl}`);
-  if (backend && mailbox) {
-    print(`az dev: backend  ${backend.url}  (SQLite in .az-dev/, dev profile)`);
-    print(`az dev: mailbox  ${mailbox.url}  (email is shown here, never sent)`);
-  }
-  print('az dev: watching for changes — Ctrl-C to stop');
-  if (options.open) {
-    const { file, args } = openerFor(process.platform, siteUrl);
-    execFile(file, args, (e) => { if (e) print(`az dev: could not open a browser (${e.message}) — open ${siteUrl}`); });
-  }
-  return { siteUrl, backendUrl: backend?.url ?? null, mailboxUrl: mailbox?.url ?? null, vite, close };
 }

@@ -8,7 +8,7 @@
 
 import { lex, parse } from '../../core/src/index.ts';
 
-/** The grammar this compiler reads; the parser rejects any other (AZ1107). */
+/** The grammar this compiler reads; the parser rejects any other (AZ1021). */
 export const GRAMMAR_VERSION = 1;
 
 /** One upgrade: source written for `from` becomes source for `from + 1`. */
@@ -28,7 +28,9 @@ export type MigrateResult =
 function versionOf(source: string): number | null {
   const { tokens, diagnostics } = lex(source);
   const marker = parse(tokens, diagnostics).file.version;
-  return marker !== null && /^\d+$/.test(marker) ? Number(marker) : null;
+  // Canonical integers only: the compiler compares the marker's text, so
+  // `az 01` is not version 1 there, and must not be one here either.
+  return marker !== null && /^(0|[1-9]\d*)$/.test(marker) ? Number(marker) : null;
 }
 
 export function migrate(

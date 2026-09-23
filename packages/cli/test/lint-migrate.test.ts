@@ -76,9 +76,9 @@ const CURRENT = 'az 1\nsite aurora\npage /\n';
 
 test('GRAMMAR_VERSION is the version the compiler accepts', () => {
   assert.ok(compile(`az ${GRAMMAR_VERSION}\nsite a\npage /\n`, { manifests: new Map() }).diagnostics
-    .every((d) => d.code !== 'AZ1107'));
+    .every((d) => d.code !== 'AZ1021'));
   assert.ok(compile(`az ${GRAMMAR_VERSION + 1}\nsite a\npage /\n`, { manifests: new Map() }).diagnostics
-    .some((d) => d.code === 'AZ1107'), 'CONTROL: the next version is rejected');
+    .some((d) => d.code === 'AZ1021'), 'CONTROL: the next version is rejected');
 });
 
 test('az migrate on a current file is a no-op and leaves it untouched', () => {

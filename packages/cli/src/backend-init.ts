@@ -16,6 +16,22 @@ export type BackendInitResult =
   | { readonly ok: true; readonly path: string }
   | { readonly ok: false; readonly kind: 'missing' | 'exists'; readonly message: string };
 
+/** The server's database and email choices, or null when the file is not a valid config. */
+function readSetup(file: string): { database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api' } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+  const o = parsed as { database?: unknown; email?: unknown } | null;
+  const database = o?.database;
+  const email = o?.email;
+  if (database !== 'sqlite' && database !== 'postgres' && database !== 'mysql') return null;
+  if (email !== 'smtp' && email !== 'api') return null;
+  return { database, email };
+}
+
 export function initBackendEnv(dir: string): BackendInitResult {
   const configFile = join(dir, 'az.config.json');
   if (!existsSync(configFile)) {
@@ -25,8 +41,11 @@ export function initBackendEnv(dir: string): BackendInitResult {
   if (existsSync(target)) {
     return { ok: false, kind: 'exists', message: `${target} already exists — not overwritten (a new secret would sign everyone out)` };
   }
-  const setup = JSON.parse(readFileSync(configFile, 'utf8')) as { database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api' };
-  writeFileSync(target, envFile({ database: setup.database, email: setup.email }), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  const setup = readSetup(configFile);
+  if (!setup) {
+    return { ok: false, kind: 'missing', message: `${configFile} is not a config az wrote — rebuild the site to regenerate server/` };
+  }
+  writeFileSync(target, envFile(setup), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   chmodSync(target, 0o600);
   return { ok: true, path: target };
 }

@@ -10,7 +10,10 @@
  * is what keeps `core` ignorant enough for a word to be a folder.
  */
 
-import { ACTION_WORDS, defaultHierarchy, intentOf, isHierarchy } from './actions.ts';
+import {
+  ACTION_WORDS, DESTINATION_SCHEMES, defaultHierarchy, intentOf, isHierarchy, isScriptUrl, schemeOf,
+} from './actions.ts';
+import { quotable as shown } from './secrets.ts';
 import { BACKEND_SETTINGS } from './backend.ts';
 import { HIERARCHIES } from './emit-contract.ts';
 import type { Diagnostic, Pos } from './lex.ts';
@@ -207,6 +210,32 @@ const isProp = (s: Statement, m: Manifest | undefined) =>
  */
 export const LIST_SEPARATOR = ',';
 
+/**
+ * AZ1404 — GRAMMAR §4.3: a destination uses a route, an anchor, a path or one
+ * of the listed schemes, nothing else. Every `scheme:` token in the file is
+ * checked, wherever it sits; so is a quoted value in a destination position
+ * (any argument after a fill's label), which becomes an `href` — there a
+ * scheme that runs code is refused whatever the word. A link that runs script
+ * or opens an unlisted protocol is never compiled.
+ */
+function destinations(body: Statement[], err: (code: string, message: string, pos: Pos) => void): void {
+  const refuse = (word: string, scheme: string, pos: Pos) => err('AZ1404',
+    `${word}: '${scheme}:' is not a supported destination — use a route, an anchor, or `
+    + `${DESTINATION_SCHEMES.filter((k) => !k.startsWith('http')).join('/')}`, pos);
+  const walk = (s: Statement) => {
+    s.args.forEach((a, index) => {
+      if (a.kind === 'pair') {
+        const scheme = a.value.slice(0, a.value.indexOf(':')).toLowerCase();
+        if (!DESTINATION_SCHEMES.includes(scheme)) refuse(s.word, scheme, a.pos);
+      } else if (a.kind === 'string' && index >= 1 && isScriptUrl(a.value)) {
+        refuse(s.word, schemeOf(a.value) ?? '', a.pos);
+      }
+    });
+    s.children.forEach(walk);
+  };
+  body.forEach(walk);
+}
+
 export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult {
   const diagnostics: Diagnostic[] = [];
   const err = (code: string, message: string, pos: Pos) =>
@@ -274,7 +303,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
               arg.pos);
         } else if (!spec.values.includes(arg.value)) {
           err('AZ1208',
-              `${word}: '${arg.value}' is not a ${key} — try: ${available.join(', ')}`,
+              `${word}: '${shown(arg.value)}' is not a ${key} — try: ${available.join(', ')}`,
               arg.pos);
         }
         continue;
@@ -413,7 +442,8 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     }
     const props: Record<string, Arg> = {};
     for (const c of s.children) {
-      const choices = BACKEND_SETTINGS[c.word];
+      // Own keys only: `constructor sqlite` must not find Object's constructor.
+      const choices = Object.hasOwn(BACKEND_SETTINGS, c.word) ? BACKEND_SETTINGS[c.word] : undefined;
       if (!choices) {
         err('AZ1224', `backend: '${c.word}' is not a backend setting — use: ${Object.keys(BACKEND_SETTINGS).join(', ')}`, c.pos);
         continue;
@@ -428,7 +458,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
         err('AZ1412', secretLike
           ? `backend: ${c.word} is a choice, not an address — write ${c.word} ${choices.join('|')}; `
             + 'connection strings and keys go in the backend\'s .env (az backend init)'
-          : `backend: ${c.word} '${value.value}' is not one of: ${choices.join(', ')}`, value.pos);
+          : `backend: ${c.word} '${shown(value.value)}' is not one of: ${choices.join(', ')}`, value.pos);
         continue;
       }
       if (c.word in props) {
@@ -539,7 +569,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
       } else if (m) {
         const known = [...(m.variants ?? []), ...(m.modifiers ?? [])];
         err('AZ1204',
-            `${s.word}: '${a.value}' is not a variant or modifier — try: ${known.slice(0, 6).join(', ')}`,
+            `${s.word}: '${shown(a.value)}' is not a variant or modifier — try: ${known.slice(0, 6).join(', ')}`,
             a.pos);
       }
     }
@@ -618,7 +648,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     for (const [prop, byValue] of Object.entries(m?.requiresWhen ?? {})) {
       const trigger = props[prop];
       if (!trigger) continue;
-      const needed = byValue[trigger.value];
+      const needed = Object.hasOwn(byValue, trigger.value) ? byValue[trigger.value] : undefined;
       if (!needed) continue;
       for (const need of needed) {
         if (need in props) continue;
@@ -728,6 +758,8 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
 
     return { word: s.word, variant, modifiers, args: s.args, props, as: s.as, children, pos: s.pos };
   }
+
+  destinations(file.body, err);
 
   const root: LinkedWord[] = [];
   for (const s of file.body) {

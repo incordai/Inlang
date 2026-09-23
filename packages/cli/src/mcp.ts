@@ -28,8 +28,14 @@ const toDiagnostic = (d: Diagnostic): ToolDiagnostic =>
 /** The words a file in this project compiles with: bundled, overridden by the project's own. */
 const wordsDir = () => process.env.AZ_WORDS ?? BUNDLED_WORDS;
 
+/**
+ * Compile to diagnostics or a Spec — manifests only. A read-only tool never
+ * runs the project's word code: an agent pointed at an untrusted folder can
+ * check and read it without anything in it executing. Only az_build (marked
+ * destructive, so a client asks first) loads the project's emitters.
+ */
 function compileFile(file: string) {
-  const words = wordsFor({ source: file, wordsDir: wordsDir() });
+  const words = wordsFor({ source: file, wordsDir: wordsDir() }, false);
   return compile(readFileSync(file, 'utf8'), { manifests: words.manifests });
 }
 
@@ -59,7 +65,7 @@ export function toolbox(root: string): Toolbox {
     },
 
     words: () => {
-      const { manifests } = loadWords(wordsDir(), projectWords);
+      const { manifests } = loadWords(wordsDir(), projectWords, { code: false });
       return [...manifests.values()]
         .filter((m) => m.kind === undefined || m.kind === 'block')
         .sort((a, b) => (a.name < b.name ? -1 : 1))
@@ -91,7 +97,15 @@ export function toolbox(root: string): Toolbox {
 
     eject: (word, projectDir) => {
       const r = eject(word, projectDir, wordsDir());
-      return r.ok ? { ok: true, files: r.files.map((f) => rel(resolve(projectDir, f))) } : r;
+      return r.ok
+        ? {
+          ok: true,
+          files: r.files.map((f) => rel(resolve(projectDir, f))),
+          // Node cannot unload a module once loaded, so this process keeps
+          // the first copy of an ejected emitter it builds with.
+          note: 'restart the az mcp server after editing the ejected word — az_build keeps the version it first loaded',
+        }
+        : r;
     },
 
     backendInit: (serverDir) => {

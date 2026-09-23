@@ -20,7 +20,12 @@ export interface Sandbox {
 }
 
 export function sandbox(rootDir: string): Sandbox {
-  const root = realpathSync(rootDir);
+  let root: string;
+  try {
+    root = realpathSync(rootDir);
+  } catch {
+    throw new SandboxError(`the project root '${rootDir}' does not exist`);
+  }
   const inside = (p: string) => p === root || p.startsWith(root + sep);
 
   return {

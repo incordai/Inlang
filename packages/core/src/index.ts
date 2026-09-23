@@ -66,15 +66,34 @@ export function compile(source: string, options: CompileOptions): CompileResult 
   const linked = link(parsed.file, options.manifests);
   const built = buildSpec(parsed.file.version, linked.root, options.manifests);
 
-  const diagnostics = [
+  // A fatal version error (GRAMMAR §7.3) leaves an empty body; the missing
+  // site and pages that follow from it are not the author's mistakes.
+  const all = parsed.fatal ? parsed.diagnostics : [
     ...parsed.diagnostics,
     ...linked.diagnostics,
     ...built.diagnostics,
     ...secretLiterals(parsed.file.body),
   ];
-  const ok = !diagnostics.some((d) => d.severity === 'error');
+  const ok = !all.some((d) => d.severity === 'error');
 
-  return { spec: built.spec, diagnostics, ok };
+  return { spec: built.spec, diagnostics: capped(all), ok };
+}
+
+/** GRAMMAR §7.2 rule 6: report at most this many problems. */
+export const DIAGNOSTIC_CEILING = 100;
+
+/** The first DIAGNOSTIC_CEILING diagnostics, then one AZ1099 saying so. */
+function capped(diagnostics: Diagnostic[]): Diagnostic[] {
+  if (diagnostics.length <= DIAGNOSTIC_CEILING) return diagnostics;
+  return [
+    ...diagnostics.slice(0, DIAGNOSTIC_CEILING),
+    {
+      code: 'AZ1099',
+      message: `file: ${DIAGNOSTIC_CEILING} problems, stopped reporting — fix these first`,
+      pos: diagnostics[DIAGNOSTIC_CEILING].pos,
+      severity: 'error',
+    },
+  ];
 }
 
 /**

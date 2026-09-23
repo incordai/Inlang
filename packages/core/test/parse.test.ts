@@ -101,11 +101,11 @@ test('AZ1105 — the version marker takes no body', () => {
 });
 
 test('a missing version marker is reported', () => {
-  assert.ok(codes('site aurora\n').includes('AZ1108'));
+  assert.ok(codes('site aurora\n').includes('AZ1020'));
 });
 
 test('an unsupported version is reported', () => {
-  assert.ok(codes('az 2\nsite aurora\n').includes('AZ1107'));
+  assert.ok(codes('az 2\nsite aurora\n').includes('AZ1021'));
 });
 
 /* ---------------- recovery, §7.2 ---------------- */

@@ -49,11 +49,20 @@ export interface DevHandle {
  */
 function once(options: DevOptions): { outcome: BuildOutcome; ms: number } {
   const t0 = performance.now();
-  const outcome = build({
-    source: options.source,
-    outDir: options.outDir,
-    wordsDir: options.wordsDir,
-  });
+  let outcome: BuildOutcome;
+  try {
+    outcome = build({
+      source: options.source,
+      outDir: options.outDir,
+      wordsDir: options.wordsDir,
+    });
+  } catch (e) {
+    // A rebuild runs from a timer, where a throw is an uncaught exception
+    // that ends the session and orphans the dev server. The source vanishing
+    // mid-session (a branch switch) or any other failure is a failed build,
+    // reported like one; the next save tries again.
+    outcome = { ok: false, files: [], assets: [], report: (e as Error).message, exit: 1 };
+  }
   return { outcome, ms: performance.now() - t0 };
 }
 
@@ -98,8 +107,9 @@ export function dev(options: DevOptions): DevHandle {
       if (name === null || name === file) schedule();
     });
   } catch {
-    // A missing directory is reported by the first build; the reconcile tick
-    // below still notices the file once it can be read.
+    // Unwatchable (a missing directory): the reconcile tick below still
+    // notices the file once it can be read. `az dev` refuses a missing source
+    // before it gets here, so this is only reached if the folder goes away.
   }
 
   run();

@@ -9,7 +9,8 @@
  */
 
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync, copyFileSync } from 'node:fs';
+import { writeProblem } from './output.ts';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Manifest } from '../../core/src/index.ts';
@@ -77,9 +78,13 @@ export interface WordSet {
  * The bundled words, overridden by name by the project's `words/` folder.
  *
  * A project word's emitter is the project's own code and runs in this
- * process, as a build config would — which is what owning a word means.
+ * process, as a build config would — which is what owning a word means. So
+ * it is loaded only when `code` is true: compiling to diagnostics or a Spec
+ * needs the manifests alone (plain JSON), and a caller that must not run the
+ * project's code — the MCP server's read-only tools — asks for exactly that.
  */
-export function loadWords(bundledDir: string, projectDir: string | null): WordSet {
+export function loadWords(bundledDir: string, projectDir: string | null, options: { code?: boolean } = {}): WordSet {
+  const code = options.code ?? true;
   const manifests = loadManifests(bundledDir);
   const emitters: Record<string, WordEmitter> = { ...WEB_EMITTERS };
   if (!projectDir || !existsSync(projectDir) || resolve(projectDir) === resolve(bundledDir)) {
@@ -89,6 +94,7 @@ export function loadWords(bundledDir: string, projectDir: string | null): WordSe
     const dir = join(projectDir, name);
     const m = readManifest(dir, name);
     manifests.set(m.name, m);
+    if (!code) continue;
     const file = join(dir, 'emit.web.ts');
     if (!existsSync(file)) continue;
     const mod = load(file) as Partial<WordEmitter>;
@@ -132,6 +138,12 @@ export function eject(word: string, projectDir: string, bundledDir: string = BUN
   const target = join(words, word);
   if (existsSync(target)) {
     return { ok: false, message: `${relative(projectDir, target)} already exists — eject never overwrites a word you own` };
+  }
+  // No write through a symbolic link: `words/` linked elsewhere would put the
+  // copy outside the project (output.ts applies the same rule to builds).
+  for (const rel of [join('words', word), join('words', SHIM_DIR)]) {
+    const problem = writeProblem(realpathSync(projectDir), rel);
+    if (problem) return { ok: false, message: problem };
   }
 
   // Rewrite first, write after: a word with an import eject cannot carry is

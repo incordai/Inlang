@@ -47,7 +47,6 @@ export function handle(
   msg: unknown, root: string, toolbox: Toolbox, version: string,
   log: (line: string) => void = () => {},
 ): unknown {
-  const sb = sandbox(root);
   if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
     // Batches were removed from the protocol (2025-06-18); refuse them too.
     return { jsonrpc: '2.0', id: null, error: { code: ERR.request, message: 'expected one JSON-RPC request object' } };
@@ -59,7 +58,7 @@ export function handle(
       : { jsonrpc: '2.0', id: req.id ?? null, error: { code: ERR.request, message: 'not a JSON-RPC 2.0 request' } };
   }
   try {
-    const result = dispatch(req, sb, toolbox, version);
+    const result = dispatch(req, root, toolbox, version);
     return isNotification ? null : { jsonrpc: '2.0', id: req.id, result };
   } catch (e) {
     if (!(e instanceof RpcError)) log(`az mcp: ${(e as Error).stack ?? String(e)}`);
@@ -70,7 +69,7 @@ export function handle(
   }
 }
 
-function dispatch(req: Request, sb: ReturnType<typeof sandbox>, toolbox: Toolbox, version: string): unknown {
+function dispatch(req: Request, root: string, toolbox: Toolbox, version: string): unknown {
   const params = req.params ?? {};
   switch (req.method) {
     case 'initialize': {
@@ -82,8 +81,10 @@ function dispatch(req: Request, sb: ReturnType<typeof sandbox>, toolbox: Toolbox
         capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
         serverInfo: { name: 'az', version },
         instructions: 'Tools for the az website compiler. Start with az_words and az_grammar, '
-          + 'write a .az file, then az_check it. Tools marked WRITES FILES change the project; '
-          + 'every path is confined to the project root.',
+          + 'write a .az file, then az_check it. Read-only tools never run code from the project. '
+          + 'az_build runs the project\'s own words (its words/ folder) as a build does — only call '
+          + 'it on a project you trust. Tools marked WRITES FILES change the project; every path is '
+          + 'confined to the project root. After editing an ejected word, restart this server.',
       };
     }
     case 'notifications/initialized':
@@ -100,7 +101,10 @@ function dispatch(req: Request, sb: ReturnType<typeof sandbox>, toolbox: Toolbox
       const tool = TOOLS.find((t) => t.name === params.name);
       if (!tool) throw new RpcError(ERR.params, `unknown tool: ${String(params.name)}`);
       try {
-        const data = tool.run(validate(tool, params.arguments), toolbox, sb);
+        // The sandbox is built per call: a root deleted mid-session is then a
+        // tool error the client reads, not an exception that left the
+        // request unanswered.
+        const data = tool.run(validate(tool, params.arguments), toolbox, sandbox(root));
         return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }], structuredContent: data, isError: false };
       } catch (e) {
         // A failure the client can act on is a tool RESULT with isError, so
@@ -129,10 +133,18 @@ function dispatch(req: Request, sb: ReturnType<typeof sandbox>, toolbox: Toolbox
 /** Serve until stdin closes. */
 export function serve(options: ServerOptions): Promise<void> {
   const input = options.input ?? process.stdin;
-  const output = options.output ?? process.stdout;
   const log = options.log ?? ((line) => process.stderr.write(line + '\n'));
   // Fail at start, not on the first call, when the root itself is unusable.
   sandbox(options.root);
+  // stdout carries the protocol and nothing else. Any other write to it — a
+  // console.log in a project's own word, run by az_build — would corrupt the
+  // stream, so while serving it is redirected to stderr, and replies go
+  // through the original writer captured here.
+  const stdoutWrite = process.stdout.write.bind(process.stdout);
+  const send = options.output
+    ? (text: string) => { options.output?.write(text); }
+    : (text: string) => { stdoutWrite(text); };
+  if (!options.output) process.stdout.write = process.stderr.write.bind(process.stderr);
   const lines = createInterface({ input, crlfDelay: Infinity });
   lines.on('line', (line) => {
     if (line.trim() === '') return;
@@ -140,7 +152,7 @@ export function serve(options: ServerOptions): Promise<void> {
     try {
       msg = JSON.parse(line);
     } catch {
-      output.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: ERR.parse, message: 'parse error' } }) + '\n');
+      send(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: ERR.parse, message: 'parse error' } }) + '\n');
       return;
     }
     let reply: unknown;
@@ -150,9 +162,12 @@ export function serve(options: ServerOptions): Promise<void> {
       log(`az mcp: ${(e as Error).stack ?? String(e)}`);
       return;
     }
-    if (reply !== null) output.write(JSON.stringify(reply) + '\n');
+    if (reply !== null) send(JSON.stringify(reply) + '\n');
   });
-  return new Promise((done) => lines.once('close', () => done()));
+  return new Promise((done) => lines.once('close', () => {
+    if (!options.output) process.stdout.write = stdoutWrite;
+    done();
+  }));
 }
 
 export { ToolFailure };

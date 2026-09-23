@@ -153,6 +153,33 @@ function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteS
   };
 }
 
+/**
+ * Characters a route may hold: the URL-unreserved set, which no browser ever
+ * percent-encodes — so the path a visitor's browser reports is byte-for-byte
+ * the route written, and the page is found (RFC 3986 §2.3).
+ */
+const ROUTE = /^\/(?:[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*)?$/;
+
+/**
+ * Why a `page` argument cannot be served at the address it names, or null.
+ * The runtime matches the visitor's path exactly; a route it can never equal
+ * (a trailing slash, a space, an accent, no leading slash) was a page that
+ * compiled cleanly and always showed "not found".
+ */
+function routeProblem(arg: { readonly kind: string; readonly value: string } | undefined): string | null {
+  if (!arg) return 'page: no route — write: page /';
+  const v = arg.value;
+  if (!v.startsWith('/')) return `page: '${v}' is not a route — write: page /${v.replace(/^\/*/, '')}`;
+  if (v.length > 1 && v.endsWith('/')) return `page: '${v}' ends with '/' — write: page ${v.replace(/\/+$/, '')}`;
+  if (!ROUTE.test(v)) {
+    return `page: '${v}' has characters an address would change — use letters, digits and - . _ ~ between slashes`;
+  }
+  if (v.split('/').some((seg) => seg === '.' || seg === '..')) {
+    return `page: '${v}' uses '.' or '..' as a segment — name the page directly`;
+  }
+  return null;
+}
+
 export function buildSpec(
   version: string | null,
   root: LinkedWord[],
@@ -171,6 +198,27 @@ export function buildSpec(
       severity: 'error',
     });
   }
+  // GRAMMAR §5.4: duplicates are errors, not last-wins. A second `site` was
+  // silently ignored; a second page on one route was silently unreachable.
+  for (const extra of root.filter((w) => w.word === 'site').slice(1)) {
+    diagnostics.push({ code: 'AZ1508', message: 'site: declared twice — keep one', pos: extra.pos, severity: 'error' });
+  }
+  const seenRoutes = new Set<string>();
+  for (const p of pageWords) {
+    const arg = p.args[0];
+    const problem = routeProblem(arg);
+    if (problem) {
+      diagnostics.push({ code: 'AZ1413', message: problem, pos: arg?.pos ?? p.pos, severity: 'error' });
+      continue;
+    }
+    if (seenRoutes.has(arg!.value)) {
+      diagnostics.push({
+        code: 'AZ1509', message: `page: '${arg!.value}' declared twice — keep one`, pos: p.pos, severity: 'error',
+      });
+    }
+    seenRoutes.add(arg!.value);
+  }
+
   if (pageWords.length === 0) {
     diagnostics.push({
       code: 'AZ1302',
@@ -423,7 +471,7 @@ const PLACEMENT: Record<string, 'start' | 'end'> = {
  */
 function placementOf(b: SpecBlock): 'start' | 'end' | undefined {
   if (b.word === 'scene' && b.variant !== 'backdrop' && b.variant !== 'none') return undefined;
-  return PLACEMENT[b.word];
+  return Object.hasOwn(PLACEMENT, b.word) ? PLACEMENT[b.word] : undefined;
 }
 
 /**

@@ -10,7 +10,7 @@
  */
 
 import {
-  readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
+  readFileSync, readdirSync, writeFileSync, existsSync, realpathSync, statSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +28,7 @@ import { lintWords } from './lint.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
 import { initBackendEnv } from './backend-init.ts';
+import { writeOutput } from './output.ts';
 // mcp.ts imports build/wordsFor from here; the cycle is safe for the same
 // reason as dev.ts's — nothing is touched until a command runs.
 import { runMcp } from './mcp.ts';
@@ -110,9 +111,14 @@ function readProjectText(projectDir: string, path: string): string | null {
   throw new PathEscapeError(found.problems[0]);
 }
 
-/** The words one build compiles with: the set, plus the project's own. */
-export const wordsFor = (options: Omit<BuildOptions, 'outDir'>) => loadWords(options.wordsDir,
-  options.projectWordsDir === undefined ? resolve(dirname(options.source), 'words') : options.projectWordsDir);
+/**
+ * The words one build compiles with: the set, plus the project's own. With
+ * `code: false` the project's emitters are not loaded — manifests only, for a
+ * caller that must compile without running the project's code.
+ */
+export const wordsFor = (options: Omit<BuildOptions, 'outDir'>, code = true) => loadWords(options.wordsDir,
+  options.projectWordsDir === undefined ? resolve(dirname(options.source), 'words') : options.projectWordsDir,
+  { code });
 
 export function build(options: BuildOptions): BuildOutcome {
   const src = readFileSync(options.source, 'utf8');
@@ -169,7 +175,9 @@ export function build(options: BuildOptions): BuildOutcome {
   // project's build will inline must hold no service key. The generated
   // build checks again (its own env, then the bundle) — this is the early,
   // loud copy of the same unsuppressible rule.
-  const secrets = scanEnv({ ...dotenv(projectDir), ...process.env }).map(envMessage);
+  // The generated project is Vite's root, so its .env files are the ones in
+  // the OUTPUT folder; a .env beside the source is never read by the build.
+  const secrets = scanEnv({ ...dotenv(resolve(options.outDir)), ...process.env }).map(envMessage);
   const problems = [...located.problems, ...components.problems, ...secrets];
   if (problems.length > 0) {
     return {
@@ -180,32 +188,25 @@ export function build(options: BuildOptions): BuildOutcome {
   }
 
   if (options.write !== false) {
-    for (const f of files) {
-      const target = resolve(options.outDir, f.path);
-      mkdirSync(dirname(target), { recursive: true });
+    // output.ts: nothing outside the folder, nothing through a link, no file
+    // az did not generate overwritten, stale generated files removed. An
+    // unchanged file is not rewritten: `az dev` rebuilds on every save, and
+    // touching an identical vite.config.ts restarts the dev server instead of
+    // hot-updating the one file that changed.
+    const written = writeOutput(options.outDir, [
       // Newline style is fixed, not inherited from the platform — otherwise
       // the same source produces different bytes on Windows and Linux and the
       // determinism claim dies quietly (CONVENTIONS §6).
-      const content = f.content.replace(/\r\n/g, '\n');
-      // An unchanged file is not rewritten: `az dev` rebuilds on every save,
-      // and touching an identical vite.config.ts restarts the dev server
-      // instead of hot-updating the one file that changed.
-      if (existsSync(target) && readFileSync(target, 'utf8') === content) continue;
-      writeFileSync(target, content, 'utf8');
+      ...files.map((f) => ({ path: f.path, content: f.content.replace(/\r\n/g, '\n') })),
+      // Vite serves `public/` at the site root and copies it into the build
+      // untouched, which is what makes the page's `/assets/...` URLs resolve.
+      ...assets.map((a, i) => ({ path: `public/${a}`, copyFrom: located.sources[i] })),
+      // The generated App imports each one from here (target-web USER_DIR).
+      ...modules.map((m, i) => ({ path: `${USER_DIR}/${m}`, copyFrom: components.sources[i] })),
+    ]);
+    if (!written.ok) {
+      return { ok: false, files: [], assets: [], report: [report, ...written.problems].filter(Boolean).join('\n'), exit: EXIT.config };
     }
-    // Vite serves `public/` at the site root and copies it into the build
-    // untouched, which is what makes the page's `/assets/...` URLs resolve.
-    assets.forEach((a, i) => {
-      const target = resolve(options.outDir, 'public', a);
-      mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(located.sources[i], target);
-    });
-    // The generated App imports each one from here (target-web USER_DIR).
-    modules.forEach((m, i) => {
-      const target = resolve(options.outDir, USER_DIR, m);
-      mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(components.sources[i], target);
-    });
   }
 
   // hero-spec §11 / scene-spec §11: a model over the budget is a warning —
@@ -245,10 +246,16 @@ function dotenv(dir: string): Record<string, string> {
   return out;
 }
 
-export function specOf(options: Omit<BuildOptions, 'outDir'>): string | null {
+/**
+ * The Spec as JSON, or null when the file has errors — with the report either
+ * way. A Spec is always BUILT (so later stages can report), but a broken
+ * file's Spec is not the site the author wrote and is never printed.
+ */
+export function specOf(options: Omit<BuildOptions, 'outDir'>): { json: string | null; report: string } {
   const src = readFileSync(options.source, 'utf8');
   const r = compile(src, { manifests: wordsFor(options).manifests });
-  return r.spec ? serialiseSpec(r.spec) : null;
+  const report = r.diagnostics.length ? formatDiagnostics(r.diagnostics, options.source) : '';
+  return { json: r.ok && r.spec ? serialiseSpec(r.spec) : null, report };
 }
 
 /* ------------------------------------------------------------------ */
@@ -294,7 +301,7 @@ const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 /** `az lint`: findings are errors (exit 1), and a clean run says how much it checked. */
 function runLint(wordsDir: string): number {
-  if (!existsSync(wordsDir)) {
+  if (!existsSync(wordsDir) || !statSync(wordsDir).isDirectory()) {
     process.stderr.write(`az: no words directory at '${wordsDir}' — try: az lint path/to/words\n`);
     return EXIT.config;
   }
@@ -337,6 +344,10 @@ function runEject(word: string, projectDir: string | undefined): number {
 
 /** `az migrate`: rewrites the file only when a migration step changed it. */
 function runMigrate(file: string): number {
+  if (!existsSync(file)) {
+    process.stderr.write(`az: ${file} does not exist — try: az migrate site.az\n`);
+    return EXIT.missing;
+  }
   const result = migrate(readFileSync(file, 'utf8'));
   if (!result.ok) {
     process.stderr.write(`az: ${file}: ${result.message}\n`);
@@ -420,7 +431,12 @@ export function main(argv: string[]): number {
   if (cmd === 'mcp') {
     // stdin keeps the process alive; the server ends when the client closes it.
     const rootFlag = argv.indexOf('--root');
-    void runMcp(rootFlag >= 0 && argv[rootFlag + 1] ? argv[rootFlag + 1] : process.cwd());
+    const root = rootFlag >= 0 && argv[rootFlag + 1] ? argv[rootFlag + 1] : process.cwd();
+    if (!existsSync(root) || !statSync(root).isDirectory()) {
+      process.stderr.write(`az: mcp: '${root}' is not a folder — try: az mcp --root path/to/project\n`);
+      return EXIT.config;
+    }
+    void runMcp(root);
     return EXIT.ok;
   }
   if (!file) {
@@ -435,6 +451,10 @@ export function main(argv: string[]): number {
   }
 
   const outFlag = rest.indexOf('--out');
+  if (outFlag >= 0 && !rest[outFlag + 1]) {
+    process.stderr.write(`az: --out needs a folder — try: az ${cmd} ${file} --out site-build\n`);
+    return EXIT.config;
+  }
   const outDir = outFlag >= 0 ? rest[outFlag + 1] : '.az-build';
   // The bundled words (or AZ_WORDS); the project's own `words/` beside the
   // file overrides them by name inside build().
@@ -442,13 +462,22 @@ export function main(argv: string[]): number {
 
   try {
     if (cmd === 'spec') {
-      const json = specOf({ source: file, wordsDir });
-      if (!json) { process.stderr.write('az: nothing to print\n'); return EXIT.missing; }
+      const { json, report } = specOf({ source: file, wordsDir });
+      if (report) process.stderr.write(report + '\n');
+      if (!json) return EXIT.missing;
       process.stdout.write(json);
       return EXIT.ok;
     }
 
-    if (cmd === 'dev') return runDev(file, outDir, wordsDir, rest);
+    if (cmd === 'dev') {
+      // Checked up front: a watcher started on a missing file kept the
+      // process alive after the error, hanging `az dev typo.az`.
+      if (!existsSync(file)) {
+        process.stderr.write(`az: ${file} does not exist — try: az dev site.az\n`);
+        return EXIT.missing;
+      }
+      return runDev(file, outDir, wordsDir, rest);
+    }
 
     const outcome = build({ source: file, outDir, wordsDir, write: cmd === 'build' });
     if (outcome.report) process.stderr.write(outcome.report + '\n');

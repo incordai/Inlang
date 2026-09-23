@@ -18,6 +18,39 @@ const SCHEME_INTENT: Readonly<Record<string, Intent>> = {
   tel: 'call', mailto: 'mail', video: 'play', popup: 'play', copy: 'copy', http: 'external', https: 'external',
 };
 
+/** The schemes a destination may use — GRAMMAR §4.3, and nothing else. */
+export const DESTINATION_SCHEMES: readonly string[] = Object.keys(SCHEME_INTENT);
+
+/**
+ * Schemes that run code when followed. A quoted destination carrying one is
+ * refused even where the value might be text, because every fill's second
+ * argument can become an `href` (AZ1404).
+ */
+const SCRIPT_SCHEMES: ReadonlySet<string> = new Set(['javascript', 'vbscript', 'data']);
+
+/**
+ * The scheme a browser would read from a URL, lower-cased; null for none.
+ * Browsers drop leading C0 controls and spaces and remove every tab and line
+ * break before parsing (WHATWG URL), so ` java\tscript:` is `javascript:` —
+ * the same normalisation happens here before the scheme is taken.
+ */
+export function schemeOf(value: string): string | null {
+  const cleaned = value.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, '');
+  const m = /^([a-z][a-z0-9+.-]*):/i.exec(cleaned);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/** Whether a quoted destination would run code if followed. */
+export const isScriptUrl = (value: string): boolean => {
+  const scheme = schemeOf(value);
+  return scheme !== null && SCRIPT_SCHEMES.has(scheme);
+};
+
+/** The intent a scheme key maps to; null for a key the grammar does not list. */
+function schemeIntent(key: string): Intent | null {
+  return Object.hasOwn(SCHEME_INTENT, key) ? SCHEME_INTENT[key] : null;
+}
+
 /**
  * The intent of a destination, from its kind alone (GRAMMAR §4.3):
  * a route goes, an anchor shows, a path downloads, a scheme by its key.
@@ -30,7 +63,8 @@ export function intentOf(arg: { readonly kind: string; readonly value: string } 
     case 'route': return 'go';
     case 'anchor': return 'show';
     case 'path': return 'download';
-    case 'pair': return SCHEME_INTENT[arg.value.slice(0, arg.value.indexOf(':')).toLowerCase()] ?? null;
+    // Own keys only: `constructor:x` must not find Object's constructor.
+    case 'pair': return schemeIntent(arg.value.slice(0, arg.value.indexOf(':')).toLowerCase());
     default: return null;
   }
 }

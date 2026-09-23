@@ -38,7 +38,12 @@ export interface AzFile {
 export interface ParseResult {
   readonly file: AzFile;
   readonly diagnostics: Diagnostic[];
+  /** A version error stopped parsing (GRAMMAR §7.3); the body is empty. */
+  readonly fatal: boolean;
 }
+
+/** GRAMMAR §1.9: the one version this compiler reads. */
+export const SUPPORTED_VERSION = '1';
 
 const ARG_KINDS: ReadonlySet<string> =
   new Set(['word', 'string', 'number', 'path', 'route', 'anchor', 'pair']);
@@ -46,6 +51,7 @@ const ARG_KINDS: ReadonlySet<string> =
 export function parse(tokens: Token[], lexDiagnostics: Diagnostic[] = []): ParseResult {
   const diagnostics: Diagnostic[] = [...lexDiagnostics];
   let i = 0;
+  let fatal = false;
 
   const peek = () => tokens[i];
   const at = (kind: string) => tokens[i]?.kind === kind;
@@ -79,6 +85,18 @@ export function parse(tokens: Token[], lexDiagnostics: Diagnostic[] = []): Parse
   function parseStatement(): Statement | null {
     const head = peek();
     if (!head || head.kind === 'eof') return null;
+
+    // A line whose only word the lexer refused (AZ1008 `Nav`) leaves just its
+    // NEWLINE — already reported, so consumed silently. A body indented under
+    // that vanished line is skipped with the one summary diagnostic.
+    if (head.kind === 'newline') { i++; return null; }
+    if (head.kind === 'indent') {
+      const skipped = skipBody();
+      err('AZ1106',
+          `syntax: skipped ${skipped} lines nested under the error above — fix the line above first`,
+          head.pos);
+      return null;
+    }
 
     // §7.1 AZ1102 — a statement must start with a word.
     if (head.kind === 'string' || head.kind === 'pair') {
@@ -175,23 +193,33 @@ export function parse(tokens: Token[], lexDiagnostics: Diagnostic[] = []): Parse
           marker.pos);
       skipBody();
     }
-    if (version !== '1') {
-      err('AZ1107',
-          `syntax: version '${version ?? ''}' is not supported — this compiler reads: az 1`,
+    if (version === null) {
+      err('AZ1020', "file: line 1 must be 'az 1' — add the version marker at the top", marker.pos);
+      fatal = true;
+    } else if (version !== SUPPORTED_VERSION) {
+      err('AZ1021',
+          `file: version '${version}' is not supported by this compiler (supports ${SUPPORTED_VERSION}) — run az migrate`,
           marker.pos);
+      fatal = true;
     }
-  } else if (tokens.length > 1) {
-    err('AZ1108',
-        'syntax: no version marker — the first line must be: az 1',
+  } else if (tokens.length <= 1) {
+    // An empty file (AZ1023 from the lexer) is as fatal as a missing marker.
+    fatal = true;
+  } else {
+    err('AZ1020', "file: line 1 must be 'az 1' — add the version marker at the top",
         peek()?.pos ?? { line: 1, col: 1 });
+    fatal = true;
   }
 
+  // GRAMMAR §7.3: both version errors are fatal — a future grammar may lex
+  // differently, so nothing after the marker is read.
   const body: Statement[] = [];
+  if (fatal) return { file: { version, body }, diagnostics, fatal };
   while (i < tokens.length && !at('eof')) {
     if (at('newline') || at('indent') || at('dedent')) { i++; continue; }
     const s = parseStatement();
     if (s) body.push(s);
   }
 
-  return { file: { version, body }, diagnostics };
+  return { file: { version, body }, diagnostics, fatal };
 }

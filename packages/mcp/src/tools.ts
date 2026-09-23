@@ -7,6 +7,7 @@
  * the input schemas, the sandbox, and the shape of what comes back.
  */
 
+import { existsSync } from 'node:fs';
 import { SandboxError, shown, type Sandbox } from './sandbox.ts';
 
 /** One compiler diagnostic, as a client sees it. */
@@ -43,7 +44,7 @@ export interface Toolbox {
   readonly migrate: (file: string) =>
     { ok: true; changed: boolean; from: number; to: number } | { ok: false; message: string };
   readonly eject: (word: string, projectDir: string) =>
-    { ok: true; files: string[] } | { ok: false; message: string };
+    { ok: true; files: string[]; note: string } | { ok: false; message: string };
   readonly backendInit: (serverDir: string) =>
     { ok: true; path: string } | { ok: false; message: string };
   readonly grammar: () => string;
@@ -72,14 +73,30 @@ const obj = (props: Record<string, string>, required: string[]): Schema => ({
   additionalProperties: false,
 });
 
+/** Reads files only, and never runs the project's own code. */
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true };
-/** Writes new files only; refuses to replace anything the user owns. */
+/** Writes only files az generates or creates; refuses to replace one the user owns. */
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false };
+/**
+ * May run the project's own code (its ejected or custom words' emitters, as
+ * a build does) — so a client should ask before calling it on a folder it
+ * does not trust. It also rewrites files it generated before.
+ */
+const RUNS_PROJECT_CODE = { readOnlyHint: false, destructiveHint: true, idempotentHint: true };
+/** Rewrites a file the author owns, in place. */
+const REWRITES_SOURCE = { readOnlyHint: false, destructiveHint: true, idempotentHint: true };
 
 const FILE = 'Path to a .az file, relative to the project root.';
 
 /** A tool reports failure in its result, not as a protocol error (MCP). */
 export class ToolFailure extends Error {}
+
+/** A file argument that must already exist; a clear tool error when it does not. */
+function existing(sb: Sandbox, path: string): string {
+  const abs = sb.resolve(path);
+  if (!existsSync(abs)) throw new ToolFailure(`'${path}' does not exist in the project`);
+  return abs;
+}
 
 export const TOOLS: ToolDef[] = [
   {
@@ -87,22 +104,22 @@ export const TOOLS: ToolDef[] = [
     description: 'Compile a .az file and report its diagnostics (errors and warnings with line and column). Writes nothing.',
     inputSchema: obj({ file: FILE }, ['file']),
     annotations: READ,
-    run: ({ file }, box, sb) => ({ diagnostics: box.check(sb.resolve(file)) }),
+    run: ({ file }, box, sb) => ({ diagnostics: box.check(existing(sb, file)) }),
   },
   {
     name: 'az_spec',
     description: 'Compile a .az file and return its resolved Spec (the target-agnostic JSON the web target renders), or null with diagnostics when it does not compile. Writes nothing.',
     inputSchema: obj({ file: FILE }, ['file']),
     annotations: READ,
-    run: ({ file }, box, sb) => box.spec(sb.resolve(file)),
+    run: ({ file }, box, sb) => box.spec(existing(sb, file)),
   },
   {
     name: 'az_build',
-    description: 'WRITES FILES. Compile a .az file into a runnable project in the output folder (default .az-build), copying referenced assets. Returns the files written. Fails, writing nothing, on any compile error.',
+    description: 'WRITES FILES AND RUNS PROJECT CODE. Compile a .az file into a runnable project in the output folder (default .az-build), copying referenced assets. Words the project owns (its words/ folder) are its own code and run during the build. Refuses to overwrite any file az did not generate, and removes files it generated before but no longer does. Returns the files written. Fails, writing nothing, on any compile error.',
     inputSchema: obj({ file: FILE, out: 'Output folder, relative to the project root. Default: .az-build' }, ['file']),
-    annotations: WRITE,
+    annotations: RUNS_PROJECT_CODE,
     run: ({ file, out }, box, sb) => {
-      const r = box.build(sb.resolve(file), sb.resolve(out ?? '.az-build'));
+      const r = box.build(existing(sb, file), sb.resolve(out ?? '.az-build'));
       return { ...r, out: shown(sb.root, sb.resolve(out ?? '.az-build')) };
     },
   },
@@ -140,11 +157,11 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'az_migrate',
-    description: 'WRITES FILES. Upgrade a .az file to this compiler\'s grammar version, rewriting it only when a migration step changes it.',
+    description: 'REWRITES THE .az FILE IN PLACE. Upgrade a .az file to this compiler\'s grammar version, rewriting it only when a migration step changes it.',
     inputSchema: obj({ file: FILE }, ['file']),
-    annotations: WRITE,
+    annotations: REWRITES_SOURCE,
     run: ({ file }, box, sb) => {
-      const r = box.migrate(sb.resolve(file));
+      const r = box.migrate(existing(sb, file));
       if (!r.ok) throw new ToolFailure(r.message);
       return r;
     },
@@ -157,7 +174,7 @@ export const TOOLS: ToolDef[] = [
     run: ({ word }, box, sb) => {
       const r = box.eject(word, sb.root);
       if (!r.ok) throw new ToolFailure(r.message);
-      return { word, oneWay: true, files: r.files };
+      return { word, oneWay: true, files: r.files, note: r.note };
     },
   },
   {
@@ -179,7 +196,8 @@ export function validate(tool: ToolDef, args: unknown): Record<string, string> {
   if (typeof args !== 'object' || Array.isArray(args)) throw new ToolFailure('arguments must be an object');
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
-    if (!(k in tool.inputSchema.properties)) throw new ToolFailure(`unknown argument '${k}'`);
+    // Own keys only: `constructor` or `toString` is not a declared argument.
+    if (!Object.hasOwn(tool.inputSchema.properties, k)) throw new ToolFailure(`unknown argument '${k}'`);
     if (typeof v !== 'string') throw new ToolFailure(`'${k}' must be a string`);
     out[k] = v;
   }

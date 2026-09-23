@@ -34,25 +34,43 @@ and key vary by client; the shape is:
 | `az_check {file}` | no | diagnostics with code, severity, line, column |
 | `az_spec {file}` | no | the resolved Spec, or null with diagnostics |
 | `az_lint {wordsDir?}` | no | theme-token lint over word packs |
-| `az_build {file, out?}` | **yes** | compile to a runnable project (default `.az-build`) |
-| `az_migrate {file}` | **yes** | upgrade the file's grammar version when a step changes it |
+| `az_build {file, out?}` | **yes, and runs project code** | compile to a runnable project (default `.az-build`); the project's own words run, as in any build |
+| `az_migrate {file}` | **yes, rewrites the file** | upgrade the file's grammar version when a step changes it |
 | `az_eject {word}` | **yes, one-way** | copy a word into the project's `words/`; refuses if already there |
 | `az_backend_init {serverDir}` | **yes** | the backend's `.env` (owner read/write only); returns the path, never the secret; never overwrites |
 
-Tools that write carry `readOnlyHint: false` in their annotations, so a
-client can ask before running them.
+Tools that write carry `readOnlyHint: false`, so a client can ask before
+running them. `az_build` and `az_migrate` also carry `destructiveHint: true`:
+the first runs the project's code, the second rewrites the author's file.
 
 ## Safety model
 
+- **Read-only tools never run the project's code.** A word the project owns
+  (its `words/` folder) is code: its emitter runs when a build loads it. The
+  read-only tools compile from manifests alone — plain JSON — so an agent can
+  check and read a folder it does not trust without anything in it running.
+  Only `az_build` loads the project's emitters, and it is marked destructive
+  so the client asks first. Call it only on a project you trust.
 - **One root.** Every path is resolved against `--root` and must stay inside
   it after symlinks are followed; a path that does not exist yet is judged by
   its nearest existing folder. `../x`, an absolute path elsewhere, and a
-  symlink pointing out are all refused as tool errors.
+  symlink pointing out are all refused as tool errors. A root deleted while
+  the server runs is a tool error too, never an unanswered request.
 - **Same guards as the CLI.** The tools call the functions the commands run:
-  a failed build writes nothing, eject never overwrites, `.env` is never
-  replaced.
+  a failed build writes nothing; a build never overwrites a file az did not
+  generate, never writes through a symbolic link, and removes the files it
+  generated before and no longer does; eject never overwrites; `.env` is
+  never replaced.
+- **A clean stream.** stdout carries protocol only. While the server runs,
+  any other write to stdout — a project word's `console.log` during a build —
+  goes to stderr instead.
+- **Clear errors.** A missing file or a bad argument is a tool result with
+  `isError`, worded for the agent. Internal failures are logged to stderr;
+  the client sees "internal error".
 - **No secrets out.** `az_backend_init` reports where it wrote, not what.
-  Internal failures are logged to stderr; the client sees "internal error".
+- **Edits to an ejected word need a restart.** Node cannot unload a module,
+  so the server keeps the first version of an ejected emitter it built with;
+  `az_eject`'s result says so.
 - **stdio only.** No network listener is opened.
 
 ## Protocol

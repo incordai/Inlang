@@ -85,7 +85,7 @@ test('jumping two levels at once is rejected', () => {
 
 test('nesting deeper than four levels is rejected', () => {
   const src = 'a\n  b\n    c\n      d\n        e\n          f\n';
-  assert.ok(errs(src).includes('AZ1004'), 'depth limit must fire');
+  assert.ok(errs(src).includes('AZ1005'), 'depth limit must fire (GRAMMAR §2.5)');
 });
 
 test('a dedent to a column no block opened is rejected', () => {

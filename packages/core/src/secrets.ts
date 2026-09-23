@@ -172,6 +172,15 @@ export function isSecretLiteral(value: string): boolean {
   return scanText(value).length > 0 || jwtPayload(value) !== null;
 }
 
+/**
+ * A value as a diagnostic may quote it: a credential-shaped value is never
+ * repeated (it would land in terminals, CI logs and tool results), only its
+ * length — the rule AZ1411 follows, applied to every message that echoes.
+ */
+export function quotable(value: string): string {
+  return isSecretLiteral(value) ? `<a secret-looking value, ${value.length} characters>` : value;
+}
+
 /** auth-spec §11's messages, for the two unsuppressible errors. */
 export function envMessage(f: SecretFinding): string {
   return `auth: '${f.where}' is a service key and would be readable in the shipped bundle — `

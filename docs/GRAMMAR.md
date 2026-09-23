@@ -299,11 +299,13 @@ line at column *c*:
 | *c* is greater than the top by exactly 2 | push *c*; emit `INDENT` |
 | *c* is greater than the top by more than 2 | AZ1003 |
 | *c* is less than the top and **is on the stack** | pop until the top equals *c*; emit one `DEDENT` per pop |
-| *c* is less than the top and **is not on the stack** | AZ1004 |
+| *c* is less than the top and **is not on the stack** | AZ1004 — see below |
 
-```
-indent: dedent to column 3 matches no open block — align with an enclosing line   (AZ1004)
-```
+AZ1004 is **reserved and cannot occur**. With a fixed 2-space unit (§2.2) and
+one level per indent (§2.3), the open columns are always `0, 2, 4, …` with no
+gaps, so every even column below the top is on the stack. A column that is not
+a multiple of 2 is AZ1002 first. The row stays so the table is complete and the
+ID is never reused.
 
 At `EOF`, emit one `DEDENT` for every column above 0 still on the stack. An
 unclosed block at end of file is not an error — the file simply ends.
@@ -344,7 +346,7 @@ is what every example in these docs assumes.
 | AZ1001 | `indent: tab character in leading whitespace — use spaces, 2 per level` |
 | AZ1002 | `indent: 3 spaces is not a multiple of 2 — use 2 spaces per level` |
 | AZ1003 | `indent: jumps 2 levels at once — indent one level at a time` |
-| AZ1004 | `indent: dedent to column 3 matches no open block — align with an enclosing line` |
+| AZ1004 | reserved — unreachable under §2.2 and §2.3 (see §2.4) |
 | AZ1005 | `indent: 5 levels of nesting, max is 4 — move this content into a word or flatten it` |
 
 Numbers in AZ1002/AZ1004/AZ1005 are the observed values, substituted per
@@ -473,7 +475,7 @@ variant         = BARE matching word-name ;
 modifier        = BARE matching word-name ;
 positional      = BARE ;
 preset          = "blog" | "docs" | "help" ;
-route           = BARE beginning with "/" ;
+route           = BARE beginning with "/" ;   (* shape: §5.5 *)
 path            = BARE beginning with "./" ;
 value           = STRING | PAIR | BARE ;
 ```
@@ -613,8 +615,17 @@ sub-kinds, distinguished by the first character, all decidable at parse time:
 | scheme | `PAIR` with key in `tel` `mailto` `video` `popup` `copy` | `call` `mail` `play` `play` `copy` |
 | absolute | `PAIR` with key `http` or `https` | `external` |
 
-A `PAIR` whose key is none of those, when a `url` is expected:
+A `PAIR` whose key is none of those — anywhere in the file, since a colon form
+exists only for these schemes (§1.7):
 `nav: 'ftp:' is not a supported destination — use a route, an anchor, or tel/mailto/video/popup/copy` (AZ1404).
+
+A **quoted** value in a destination position (any argument after a fill's
+label) is refused with the same AZ1404 when it names a scheme that runs code —
+`javascript:`, `vbscript:` or `data:` — after the normalisation a browser
+applies (leading spaces and control characters dropped, tabs and line breaks
+removed). Such a value becomes an `href`, and a link that runs script is never
+compiled. Any other quoted text is left alone: a second argument is sometimes a
+value, not a destination (`feature "Projects" "10"`).
 
 A `path`-shaped value in a `url` position is legal and means *download*
 (buttons §1.3, `./deck.pdf` → download); it is then checked as a `path`.
@@ -746,12 +757,29 @@ structural fact, not an authoring choice.*
 | `theme` under a `page` | `theme: declared under a page — move it to site level, one theme per site` (AZ1503) |
 | Two `hero` blocks on one page | `hero: only one per page (it owns the <h1>)` — hero-spec §11 |
 | Same prop twice in one block, no `max` | `hero: 'title' set twice — keep one` (AZ1504) |
+| `site` twice | `site: declared twice — keep one` (AZ1508) |
+| Two `page` declarations on one route | `page: '/' declared twice — keep one` (AZ1509) |
 | Two variants on one block | `hero: 'center' and 'split' are both layouts — pick one` — hero-spec §11 |
 
 *Decision: last-wins silently discards a line the author wrote. A file this
 short has no case where two spellings of the same setting are useful, so the
 error costs nothing and catches copy-paste.* PRD principle 3 ("the theme is
 global and resolved once") makes AZ1503 non-negotiable.
+
+### 5.5 Page routes
+
+A page is served at exactly the path its route names: the generated site
+compares the visitor's path to the route byte for byte. So a route must be a
+path no browser rewrites — `/`, or `/`-separated segments of letters, digits
+and `- . _ ~` (the URL-unreserved set), with no trailing slash and no `.` or
+`..` segment. Anything else can never be reached, and is refused rather than
+compiled into a page that always says "not found" (AZ1413):
+
+| Input | Diagnostic |
+|---|---|
+| `page /about/` | `page: '/about/' ends with '/' — write: page /about` |
+| `page "about"` | `page: 'about' is not a route — write: page /about` |
+| `page "/a b"`, `page "/café"` | `page: '/a b' has characters an address would change — use letters, digits and - . _ ~ between slashes` |
 
 ---
 
