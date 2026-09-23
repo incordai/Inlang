@@ -113,6 +113,8 @@ const GATES: Record<string, {
     ],
   },
   nav: { modifiers: ['solid'], props: { logo: './logo.svg' } },
+  // scene-spec §9: `alt` is carried by the poster (and later the canvas).
+  scene: { props: { poster: './p.webp' } },
 };
 
 const base = (word: string, variant: string | null): SpecBlock => {

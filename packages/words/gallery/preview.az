@@ -3,6 +3,8 @@ az 1
 site aurora
 
 page /
+  hero center
+    title "Built in the dark"
   gallery grid
     title   "The workshop"
     sub     "Eighteen months, one room."

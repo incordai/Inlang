@@ -180,11 +180,17 @@ try {
   }
 
   /* ---- 4. the DOM obeys the specs -------------------------------------- */
-  const h1s = (html.match(/<h1/g) ?? []).length;
   const eyebrow = elementWithClass(html, 'az-hero-eyebrow');
   const title = elementWithClass(html, 'az-hero-title');
 
-  check('exactly one <h1> on the page — hero-spec §4', h1s === 1, `h1=${h1s}`);
+  // One <h1> per PAGE: the hero's on /, the auth form title's on /login
+  // (auth-spec §11 — auth pages have no hero).
+  const h1On = (r) => (rendered[r].match(/<h1/g) ?? []).length;
+  check('exactly one <h1> on the page — hero-spec §4', h1On('/') === 1, `h1=${h1On('/')}`);
+  check('auth §11: the login form title is that page\'s <h1>',
+    h1On('/login') === 1 && /<h1[^>]*class="az-auth-title"/.test(rendered['/login']));
+  check('no page has more than one <h1>', routes.every((r) => h1On(r) <= 1),
+    routes.map((r) => `${r}=${h1On(r)}`).join(' '));
   check('section headings are <h2>', (html.match(/<h2/g) ?? []).length > 0);
   check('the eyebrow is a <p>, not a heading — hero-spec §4',
     !!eyebrow && eyebrow.startsWith('<p'));
@@ -227,6 +233,9 @@ try {
     /<label[^>]*for="[^"]+"/.test(html));
   check('auth §8: autocomplete reaches the inputs',
     /<input[^>]*autocomplete="current-password"/i.test(html));
+  check('nav §7: the skip link lands on an element that exists and takes focus',
+    routes.every((r) => !/href="#az-content"/.test(rendered[r]) ||
+      /<main[^>]*id="az-content"[^>]*tabindex="-1"|<main[^>]*tabindex="-1"[^>]*id="az-content"/i.test(rendered[r])));
   check('nav §7: the main landmark is labelled',
     /<nav[^>]*aria-label="Main"/.test(html));
   check('nav §6: the toggle is a button wired to a panel that exists',

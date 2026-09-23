@@ -3,6 +3,8 @@ az 1
 site aurora
 
 page /
+  hero center
+    title "Built in the dark"
   text prose
     title "Why we stopped taking commissions"
     body  "Forty pairs a month is not a strategy. It is the size of the room, and the room decides what we can do well."

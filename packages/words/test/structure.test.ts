@@ -27,7 +27,9 @@ const kid = (word: string, ...values: string[]): SpecBlock => ({
 
 const CHILDREN = [
   kid('link', 'Work', '/work'), kid('cta', 'Reserve', '/reserve'), kid('alt', 'Call', 'tel:+1'),
-  kid('item', 'Hand-cut leather'), kid('plan', 'Studio'), kid('image', './a.webp'),
+  // An item with its own child: a fill's children are rendered inside it.
+  { ...kid('item', 'Hand-cut leather'), children: [kid('link', 'How we do it', '/process')] },
+  kid('plan', 'Studio'), kid('image', './a.webp'),
   kid('group', 'Shop'), kid('legal', 'Privacy', '/privacy'), kid('social', 'Notes', '/notes'),
 ];
 

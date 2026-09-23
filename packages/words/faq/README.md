@@ -14,6 +14,8 @@ az 1
 site aurora
 
 page /
+  hero center
+    title "Built in the dark"
   faq list
     title "Questions"
     sub   "Everything people ask before they order."

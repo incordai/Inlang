@@ -3,6 +3,8 @@ az 1
 site aurora
 
 page /
+  hero center
+    title "Built in the dark"
   feature grid
     title   "Made properly, or not at all"
     sub     "Three things we refuse to compromise on."

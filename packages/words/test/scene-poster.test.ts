@@ -33,11 +33,12 @@ test('the poster goes through the asset sandbox, so the build ships it', () => {
   assert.equal(img?.attrs?.src, '/sandboxed/./assets/shoe.webp');
 });
 
-test('§8 static tier: the poster is shown, decorative inside the labelled figure', () => {
+test('§8/§9 static tier: the poster is shown and carries the scene alt', () => {
   const out = emit(scene('inline', { poster: './assets/shoe.webp' }), context());
-  assert.equal(figure(out).attrs?.role, 'img');
-  assert.equal(figure(out).attrs?.['aria-label'], 'A shoe turning on a plinth');
-  assert.equal(walk(out).find((x) => x.tag === 'img')?.attrs?.alt, '', 'named once, by the figure');
+  assert.equal(walk(out).find((x) => x.tag === 'img')?.attrs?.alt, 'A shoe turning on a plinth');
+  // axe aria-allowed-role: a <figure> may not be role="img".
+  assert.equal(figure(out).attrs?.role, undefined);
+  assert.equal(figure(out).attrs?.['aria-label'], undefined, 'named once, by the image');
 });
 
 test('CONTROL: without a poster there is no image', () => {

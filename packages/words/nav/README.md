@@ -18,6 +18,8 @@ site aurora
     cta    "Reserve" /reserve
 
 page /
+  hero center
+    title "Built in the dark"
 
 page /work
 

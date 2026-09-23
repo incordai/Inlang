@@ -20,6 +20,8 @@ site aurora
     copyright "Aurora Studio"
 
 page /
+  hero center
+    title "Built in the dark"
 
 page /about
 

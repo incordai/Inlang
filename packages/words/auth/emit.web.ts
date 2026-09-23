@@ -86,6 +86,16 @@ function field(f: Field, ctx: EmitContext): EmittedNode {
 }
 
 /** The submit label matches what the button DOES, never "Submit". */
+/**
+ * The page heading when the author writes no `title`. §11: the form title
+ * IS the page's <h1>, so an untitled form would leave the page without one.
+ */
+const HEADING: Record<string, string> = {
+  login: 'Sign in',
+  signup: 'Create account',
+  reset: 'Reset password',
+};
+
 const SUBMIT: Record<string, string> = {
   login: 'Sign in',
   signup: 'Create account',
@@ -116,21 +126,21 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const variant = block.variant ?? 'login';
   const children: EmittedNode[] = [];
 
-  if (block.props.title) {
-    children.push({
-      tag: 'h2',
-      attrs: { class: 'az-auth-title' },
-      style: {
-        fontSize: t.typeSize['2xl'],
-        lineHeight: t.type['leading-tight'],
-        fontFamily: t.type.display,
-        fontWeight: t.type['weight-display'],
-        maxWidth: `${t.size['measure-display']}ch`,
-        margin: `0 0 ${px(t.space[16])}`,
-      },
-      children: [block.props.title],
-    });
-  }
+  // §11: the form title is the page's <h1> — auth pages have no hero, and
+  // the form is the page's subject (open question 1's recommendation).
+  children.push({
+    tag: 'h1',
+    attrs: { class: 'az-auth-title' },
+    style: {
+      fontSize: t.typeSize['2xl'],
+      lineHeight: t.type['leading-tight'],
+      fontFamily: t.type.display,
+      fontWeight: t.type['weight-display'],
+      maxWidth: `${t.size['measure-display']}ch`,
+      margin: `0 0 ${px(t.space[16])}`,
+    },
+    children: [block.props.title ?? HEADING[variant] ?? HEADING.login],
+  });
 
   if (block.props.sub) {
     children.push({

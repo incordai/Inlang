@@ -51,13 +51,21 @@ export async function keyboard(page) {
   const total = await page.evaluate(() => {
     const sel = 'a[href], button, input, select, textarea, [tabindex]';
     let n = 0;
+    // A radio group is ONE tab stop — Tab enters it, arrow keys move within
+    // it (HTML and the ARIA radio-group pattern). Every radio of a named
+    // group shares the group's id, so reaching any one of them reaches it.
+    const groups = new Map();
     for (const el of document.querySelectorAll(sel)) {
       const ti = el.getAttribute('tabindex');
       if (ti !== null && Number(ti) < 0) continue;
       if (el.disabled || el.closest('[inert]')) continue;
       if (el.getClientRects().length === 0) continue;       // not rendered
       if (getComputedStyle(el).visibility === 'hidden') continue;
-      el.setAttribute('data-az-kb', String(n++));
+      const group = el.type === 'radio' && el.name ? `${el.form?.id ?? ''}|${el.name}` : null;
+      if (group && groups.has(group)) { el.setAttribute('data-az-kb', groups.get(group)); continue; }
+      const id = String(n++);
+      if (group) groups.set(group, id);
+      el.setAttribute('data-az-kb', id);
     }
     document.activeElement?.blur?.();
     return n;

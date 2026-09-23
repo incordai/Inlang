@@ -44,8 +44,6 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       class: 'az-scene-viewport',
       'data-variant': variant,
       'data-poster': poster ?? '',
-      role: 'img',
-      'aria-label': block.props.alt ?? '',
     },
     style: {
       margin: 0,
@@ -71,12 +69,13 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     },
     children: [
       // §8: `static` is posters only, and until the 3D runtime lands every
-      // scene is static. The figure carries the name (role="img" + alt), so
-      // the image itself is decorative and is not announced twice.
+      // scene is static. §9: the poster carries the same `alt` the canvas
+      // will (<canvas role="img" aria-label>); a <figure> may not take
+      // role="img" itself.
       ...(poster
         ? [{
             tag: 'img',
-            attrs: { src: poster, alt: '', class: 'az-scene-poster', decoding: 'async' },
+            attrs: { src: poster, alt: block.props.alt ?? '', class: 'az-scene-poster', decoding: 'async' },
             style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
           } satisfies EmittedNode]
         : []),

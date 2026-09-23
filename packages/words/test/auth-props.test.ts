@@ -157,3 +157,24 @@ test('CONTROL: reset always requests a link, whatever the methods', () => {
   assert.deepEqual(inputs(f), ['email']);
   assert.deepEqual(buttons(f).map((b) => b.children), [['Email me a link']]);
 });
+
+/* ---- §11: the form title is the page's <h1> ------------------------------ */
+
+/** The auth section's heading, whatever the variant. */
+function heading(lines: string, variant = 'login') {
+  const r = compileFile(file(lines, undefined, variant));
+  assert.ok(r.ok, r.diagnostics.map((d) => `${d.code} ${d.message}`).join('\n'));
+  const block = r.spec!.pages[0].blocks.find((b) => b.word === 'auth')!;
+  const h = kids(emitAuth(block, context())).filter((n) => /^h[1-6]$/.test(n.tag));
+  assert.equal(h.length, 1, 'exactly one heading');
+  return { tag: h[0].tag, text: String(h[0].children?.[0] ?? '') };
+}
+
+test('§11: the written title is the page <h1>', () => {
+  assert.deepEqual(heading('    title "Welcome back"\n'), { tag: 'h1', text: 'Welcome back' });
+});
+
+test('§11: an untitled form still gives its page an <h1>, named for the flow', () => {
+  assert.deepEqual(heading(''), { tag: 'h1', text: 'Sign in' });
+  assert.deepEqual(heading('', 'reset'), { tag: 'h1', text: 'Reset password' });
+});

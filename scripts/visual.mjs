@@ -227,6 +227,10 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   <main><h1>Good</h1>
   <p class="fade">Fits.</p>
   <a href="#x">A link</a> <button>A button</button>
+  <fieldset><legend>Billing</legend>
+    <label><input type="radio" name="billing" checked> Monthly</label>
+    <label><input type="radio" name="billing"> Annual</label>
+  </fieldset>
   </main></body></html>`;
 
 async function selfTest() {
