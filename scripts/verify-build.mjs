@@ -170,6 +170,34 @@ try {
         readFileSync(join(proj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8')),
       shipped.join(' '));
   }
+  // The 3D runtime ships only with a 3D site — this fixture is one — verbatim.
+  {
+    const threeDir = join(ROOT, 'packages/scene-runtime/src/runtime');
+    const shipped = readdirSync(threeDir).filter((f) => f.endsWith('.ts'));
+    check('3D runtime shipped verbatim into src/az3d/',
+      shipped.length > 0 && shipped.every((f) =>
+        readFileSync(join(proj, 'src/az3d', f), 'utf8') === readFileSync(join(threeDir, f), 'utf8')),
+      shipped.join(' '));
+    const pkg = JSON.parse(readFileSync(join(proj, 'package.json'), 'utf8'));
+    check('a 3D site depends on three, at the verified pin', pkg.dependencies.three === '0.186.0', pkg.dependencies.three);
+  }
+  // hero-spec §8 / scene-spec §5: the server renders the VIEW — its box, its
+  // seed, its sandboxed model — never a renderer. The runtime starts later,
+  // in the browser, and only if the page view is allowed one.
+  {
+    const view = elementWithClass(rendered['/'], 'az-hero-visual') ?? '';
+    check('hero 3d: the server renders the view the renderer will draw into',
+      /data-az-3d="hero"/.test(view) && /data-az-camera="scroll"/.test(view) && /data-az-seed="\d+"/.test(view),
+      view.slice(0, 160));
+    check('hero 3d: the model goes through the asset sandbox and ships',
+      /data-az-model="\/assets\/shoe\.glb"/.test(view) && existsSync(join(proj, 'dist/assets/shoe.glb')));
+    check('no <canvas> in the server render — the canvas is the runtime\'s, never the page\'s',
+      routes.every((r) => !/<canvas/.test(rendered[r])));
+    const orbit = elementWithClass(rendered['/'], 'az-gallery-orbit') ?? '';
+    check('gallery orbit: the ring view carries its aspect, and the list keeps every image (§9)',
+      /data-az-3d="orbit"/.test(orbit) && /data-az-aspect="[\d.]+"/.test(orbit) &&
+        (rendered['/'].match(/data-az-ring=""/g) ?? []).length === 4);
+  }
   check('nav §6: the menu is a <dialog> drawer its toggle controls',
     /<button[^>]*aria-controls="az-nav-panel"/.test(rendered['/']) &&
     /<dialog[^>]*id="az-nav-panel"[^>]*>|<dialog[^>]*data-az-overlay="drawer"[^>]*id="az-nav-panel"/.test(rendered['/']));
@@ -246,14 +274,23 @@ try {
 
   /* ---- gate item 9: the bundle is inside the PRD §9 budget ------------ */
   // Non-3D pages ship under 150KB gzipped (PRD §9), so 3D never taxes a page
-  // that does not use it. No generated site carries the 3D runtime yet, so the
-  // whole fixture is a non-3D page. Measured as the browser receives it.
+  // that does not use it. What a page costs is what its HTML makes the
+  // browser fetch at load: the entry and its stylesheet. The 3D chunk and its
+  // decoder are fetched later, and only by a page view the gate lets through,
+  // so they are measured apart and reported (the PRD sets no 3D budget).
   {
     const assetsDir = join(proj, 'dist/assets');
-    const code = readdirSync(assetsDir).filter((f) => /\.(js|css)$/.test(f));
-    const gz = code.reduce((n, f) => n + gzipSync(readFileSync(join(assetsDir, f))).length, 0);
-    check('gate 9 / PRD §9: non-3D bundle under 150KB gzipped', gz < NON_3D_BUDGET_BYTES,
-      `${(gz / 1024).toFixed(1)}KB gz across ${code.length} files`);
+    const gz = (f) => gzipSync(readFileSync(join(assetsDir, f))).length;
+    const kb = (n) => `${(n / 1024).toFixed(1)}KB gz`;
+    const html = readFileSync(join(proj, 'dist/legal/index.html'), 'utf8');
+    const initial = [...html.matchAll(/(?:src|href)="[^"]*?assets\/([^"]+\.(?:js|css))"/g)].map((m) => m[1]);
+    const initialGz = initial.reduce((n, f) => n + gz(f), 0);
+    check('gate 9 / PRD §9: a non-3D page loads under 150KB gzipped', initialGz < NON_3D_BUDGET_BYTES,
+      `${kb(initialGz)} across ${initial.length} files (${initial.join(', ')})`);
+    const lazy = readdirSync(assetsDir).filter((f) => /\.(js|wasm)$/.test(f) && !initial.includes(f));
+    check('3D ships as a separate lazy chunk, never in a page\'s initial load',
+      lazy.some((f) => /^az3d-.*\.js$/.test(f)) && !initial.some((f) => /^az3d/.test(f)),
+      `lazy: ${lazy.map((f) => `${f} ${kb(gz(f))}`).join(', ')}`);
   }
 
   /* ---- the images the page names are in the build ---------------------- */

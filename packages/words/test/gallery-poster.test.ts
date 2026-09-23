@@ -62,6 +62,8 @@ function find(node: EmittedNode | string, match: (n: EmittedNode) => boolean): E
 }
 
 const posters = (n: EmittedNode) => find(n, (x) => x.attrs?.class === 'az-gallery-poster');
+/** The ring's box: what the renderer draws into, and what the poster fills. */
+const ring = (n: EmittedNode) => find(n, (x) => x.attrs?.class === 'az-gallery-orbit')[0];
 
 test('orbit emits the poster as an <img> resolved through ctx.asset', () => {
   const [img, ...rest] = posters(emit(block('orbit', { poster: POSTER }), context()));
@@ -78,9 +80,11 @@ test('the poster is decorative, lazy, and never claims fetch priority (§7, §9)
   assert.equal(img.attrs?.fetchpriority, undefined);
 });
 
-test('the poster reserves the canvas box at the gallery ratio', () => {
-  const [byDefault] = posters(emit(block('orbit', { poster: POSTER }), context()));
-  const [custom] = posters(emit(block('orbit', { poster: POSTER, ratio: 'square' }), context()));
+test('the ring reserves the canvas box at the gallery ratio, and the poster fills it', () => {
+  const byDefault = ring(emit(block('orbit', { poster: POSTER }), context()));
+  const custom = ring(emit(block('orbit', { poster: POSTER, ratio: 'square' }), context()));
+  const [img] = posters(emit(block('orbit', { poster: POSTER }), context()));
+  assert.equal(img.style?.height, '100%');
   // The manifest's words, as valid CSS: `3:2` itself is dropped by browsers.
   assert.equal(byDefault.style?.aspectRatio, '3 / 2');
   assert.equal(custom.style?.aspectRatio, '1 / 1');

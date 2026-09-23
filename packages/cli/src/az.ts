@@ -12,12 +12,13 @@
 import {
   readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
 } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile, envMessage, formatDiagnostics, scanEnv, serialiseSpec } from '../../core/src/index.ts';
 import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../target-web/src/emit.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
+import { THREE_DIR } from '../../target-web/src/three.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
@@ -25,6 +26,10 @@ import { lintWords } from './lint.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
 import { formatFindings } from '../../theme/src/lint.ts';
+
+const MB = 1024 * 1024;
+/** A8 and the hero/scene manifests' `maxBytes`: a 3D model's budget. */
+const MODEL_BUDGET_BYTES = 5 * MB;
 
 /** Exit codes are meaningful — word-quality-gate §5.2. */
 export const EXIT = { ok: 0, missing: 1, config: 2 } as const;
@@ -140,6 +145,8 @@ export function build(options: BuildOptions): BuildOutcome {
     ...copied('../../overlay/src/runtime/', RUNTIME_DIR),
     ...copied('../../core/src/', GUARD_DIR, (f) => f === 'secrets.ts'),
     ...(project.auth ? copied('../../auth-runtime/src/runtime/', AUTH_DIR) : []),
+    // The 3D runtime only with a site whose pages declare a 3D view (scene-spec §5).
+    ...(project.three ? copied('../../scene-runtime/src/runtime/', THREE_DIR) : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
 
   // The author's components go through the same sandbox as assets: they must
@@ -185,7 +192,13 @@ export function build(options: BuildOptions): BuildOutcome {
     });
   }
 
-  return { ok: true, files, assets, report, exit: EXIT.ok };
+  // hero-spec §11 / scene-spec §11: a model over the budget is a warning —
+  // the build still stands, but the page will stall on a phone. Only the CLI
+  // has the file's bytes, so the check lives here.
+  const heavy = located.sources
+    .filter((source) => source.toLowerCase().endsWith('.glb') && statSync(source).size > MODEL_BUDGET_BYTES)
+    .map((source) => `warning: model '${basename(source)}' is ${(statSync(source).size / MB).toFixed(1)}MB — Draco-compress it or the page will stall on mobile (budget ${MODEL_BUDGET_BYTES / MB}MB)`);
+  return { ok: true, files, assets, report: [report, ...heavy].filter(Boolean).join('\n'), exit: EXIT.ok };
 }
 
 /** A package directory's modules, copied verbatim into the generated project at `to`. */

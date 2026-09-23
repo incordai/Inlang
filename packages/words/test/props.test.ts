@@ -116,7 +116,7 @@ const GATES: Record<string, {
   },
   nav: { modifiers: ['solid'], props: { logo: './logo.svg' } },
   // scene-spec §9: `alt` is carried by the poster (and later the canvas).
-  scene: { props: { poster: './p.webp' } },
+  scene: { modifiers: ['3d'], props: { poster: './p.webp' } },
 };
 
 const base = (word: string, variant: string | null): SpecBlock => {
@@ -191,8 +191,6 @@ const KNOWN_INERT: Record<string, string[]> = {
   // Site configuration the TARGET consumes, not the form's markup: `impl` is
   // the custom adapter module the app imports, `protect` the pages it wraps.
   auth: ['impl', 'protect'],
-  hero: ['model'],
-  scene: ['camera', 'model'],
 };
 
 test('CONTROL: a prop KNOWN to work is detected as working', () => {

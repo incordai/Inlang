@@ -112,21 +112,51 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  // §8 — every 3D hero ships a poster: the static tier, the loading state and
-  // reduced motion all show it. `describe` is its alt text (§9); `alt` is the
-  // secondary button, never an image description. Not lazy — it is in the
-  // first viewport — and no fetchpriority, because the TEXT is the LCP
-  // element (§8), not the media.
-  if (block.modifiers.includes('3d') && block.props.poster) {
+  // §8 — `3d` draws into the page's one renderer (scene-spec §5). The hero
+  // never creates it: it emits the view the renderer draws into — its box,
+  // how it moves, its model if any — and the runtime does the rest. Inside
+  // it, the poster: the static tier, the loading state and reduced motion
+  // all show it. `describe` is its alt text (§9); `alt` is the secondary
+  // button, never an image description. Not lazy — it is in the first
+  // viewport — and no fetchpriority: the TEXT is the LCP element (§8).
+  const threeD = block.modifiers.includes('3d');
+  const behind = variant === 'full';
+  if (threeD) {
+    const poster: EmittedNode[] = block.props.poster
+      ? [{
+          tag: 'img',
+          attrs: {
+            src: ctx.asset(block.props.poster),
+            alt: block.props.describe ?? '',
+            class: 'az-hero-poster',
+            decoding: 'async',
+            'data-az-live-part': '',
+          },
+          style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+          // The canvas draws here now; the poster steps aside, not away.
+          states: { live: { visibility: 'hidden' } },
+        }]
+      : [];
     children.push({
-      tag: 'img',
+      tag: 'div',
       attrs: {
-        src: ctx.asset(block.props.poster),
-        alt: block.props.describe ?? '',
-        class: 'az-hero-poster',
-        decoding: 'async',
+        class: 'az-hero-visual',
+        'data-az-3d': 'hero',
+        'data-az-camera': block.modifiers.includes('scroll') ? 'scroll'
+          : block.modifiers.includes('parallax') ? 'parallax' : 'fixed',
+        ...(block.props.model ? { 'data-az-model': ctx.asset(block.props.model) } : {}),
+        // §9: named by `describe` when the author gave one; without it the
+        // headline carries the meaning and the visual is decorative.
+        ...(block.props.describe
+          ? { role: 'img', 'aria-label': block.props.describe }
+          : { 'aria-hidden': 'true' }),
       },
-      style: { display: 'block', width: '100%', height: 'auto', objectFit: 'cover' },
+      // `full` puts the visual behind the type (under its scrim); every other
+      // layout gives it its own rectangle in the flow (§8's table, row 1).
+      style: behind
+        ? { position: 'absolute', inset: '0', zIndex: t.layer.behind }
+        : { position: 'relative', width: '100%', aspectRatio: variant === 'split' ? '4 / 3' : '16 / 9', marginTop: variant === 'split' ? undefined : px(t.space[48]) },
+      children: poster,
     });
   }
 
@@ -141,13 +171,13 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
           tag: 'div',
           attrs: { class: 'az-hero-text' },
           style: { minWidth: 0 },
-          children: children.filter((c) => c.attrs?.class !== 'az-hero-poster'),
+          children: children.filter((c) => c.attrs?.class !== 'az-hero-visual'),
         },
         {
           tag: 'div',
           attrs: { class: 'az-hero-media' },
           style: { minWidth: 0 },
-          children: children.filter((c) => c.attrs?.class === 'az-hero-poster'),
+          children: children.filter((c) => c.attrs?.class === 'az-hero-visual'),
         },
       ]
     : children;
@@ -157,6 +187,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     attrs: {
       class: `az-hero az-hero--${variant}`,
       'data-height': heightWord,
+      ...(threeD ? { 'data-az-3d-host': '' } : {}),
     },
     style: {
       // §6 — svh, not vh. Browser chrome makes 100vh taller than the visible
@@ -182,7 +213,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // over a colour, never a flat opacity layer that dims the whole image.
       background: variant === 'full' ? t.color.scrim : 'transparent',
       color: variant === 'full' ? t.color['on-scrim'] : t.color.text,
+      // A 3D `full` hero is the positioning context for its visual, and its
+      // own stacking context, so the visual sits under the type, not over it.
+      position: threeD && behind ? 'relative' : undefined,
+      isolation: threeD && behind ? 'isolate' : undefined,
     },
+    // §8: while the canvas draws behind a `full` hero, the flat scrim becomes
+    // a gradient over the scene — never a flat layer that dims it whole.
+    states: threeD && behind
+      ? { live: { background: `linear-gradient(to top, color-mix(in srgb, ${t.color.scrim} 88%, transparent), color-mix(in srgb, ${t.color.scrim} 55%, transparent))` } }
+      : undefined,
     // §10: under 768px `split` restacks to `stack` — text above, media
     // below, which is already the source order. center, stack and minimal
     // are unchanged; full's crop and scrim wait for the 3D runtime.

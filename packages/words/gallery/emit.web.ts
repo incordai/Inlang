@@ -14,6 +14,15 @@ import { closeButton, popup } from '../../overlay/src/index.ts';
 /** The track's name when the gallery has no title to lend it. */
 const GALLERY_LABEL = 'Gallery';
 
+/** An `auto` ratio has no single box; the ring's canvas takes a square one. */
+const ORBIT_FALLBACK_RATIO = '1 / 1';
+
+/** A CSS aspect ratio (`3 / 2`) as the number the ring's planes are cut to. */
+function ratioNumber(css: string | undefined): number {
+  const [w, h] = (css ?? ORBIT_FALLBACK_RATIO).split('/').map((n) => Number(n.trim()));
+  return w > 0 && h > 0 ? w / h : 1;
+}
+
 /** §2 — orbit "caps at 16 images". Past that it is a cost, not a gallery. */
 const ORBIT_MAX = 16;
 
@@ -124,34 +133,49 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  // §9 — `orbit`'s poster is what the static tier, reduced motion and the
-  // loading state show in place of the ring. It occupies the canvas box, so
-  // the box is reserved at the same ratio before either one loads. The
-  // poster's alt is empty: it is a composite of the images below, which stay
-  // in the DOM as the real, labelled content — naming it again would make a
-  // screen reader announce the set twice. Lazy and without a priority hint,
-  // per §7: fetchpriority belongs to the hero's LCP element, never a gallery.
-  if (variant === 'orbit' && block.props.poster) {
+  // §9 — `orbit` is a ring of the section's own images, drawn by the page's
+  // one renderer (scene-spec §5) into this view. The view reserves the
+  // canvas box at the gallery ratio before anything loads; inside it, the
+  // poster is what the static tier, reduced motion and the loading state
+  // show. The view is aria-hidden and the poster's alt empty: the images
+  // below stay in the DOM as the real, labelled content, and naming the
+  // ring again would make a screen reader announce the set twice. Lazy and
+  // without a priority hint, per §7: fetchpriority belongs to the hero.
+  if (variant === 'orbit') {
     children.push({
-      tag: 'img',
+      tag: 'div',
       attrs: {
-        src: ctx.asset(block.props.poster),
-        alt: '',
-        class: 'az-gallery-poster',
-        loading: 'lazy',
-        decoding: 'async',
+        class: 'az-gallery-orbit',
+        'data-az-3d': 'orbit',
+        'data-az-aspect': String(ratioNumber(aspect)),
+        'aria-hidden': 'true',
       },
       style: {
-        display: 'block',
+        position: 'relative',
         width: '100%',
-        aspectRatio: aspect,
-        objectFit: 'cover',
+        aspectRatio: aspect ?? ORBIT_FALLBACK_RATIO,
+        overflow: 'hidden',
         borderRadius: px(t.radius.md),
         margin: `0 0 ${px(t.space[16])}`,
       },
       // §6: below sm the ring is not mounted — the carousel replaces it —
-      // so the ring's poster goes with it.
+      // so its box goes too, and the renderer skips an empty rectangle.
       below: { sm: { display: 'none' } },
+      children: block.props.poster
+        ? [{
+            tag: 'img',
+            attrs: {
+              src: ctx.asset(block.props.poster),
+              alt: '',
+              class: 'az-gallery-poster',
+              loading: 'lazy',
+              decoding: 'async',
+              'data-az-live-part': '',
+            },
+            style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+            states: { live: { visibility: 'hidden' } },
+          }]
+        : [],
     });
   }
 
@@ -173,10 +197,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         class: 'az-gallery-items',
         ...(steps ? { 'data-az-track': '' } : {}),
         'data-ratio': block.props.ratio ?? DEFAULT_RATIO,
-        // `orbit` is the only variant that costs a 3D context. Declaring it
-        // here is what lets the runtime load that machinery for this page and
-        // nowhere else — scene-spec §5, one renderer per page.
-        ...(variant === 'orbit' ? { 'data-az-runtime': '3d' } : {}),
+        // §9: while the ring draws, the list stays in the DOM for search
+        // engines and screen readers — visually hidden, never removed.
+        ...(variant === 'orbit' ? { 'data-az-live-part': '' } : {}),
         // §10: a scrolling track is named and the keyboard can reach it —
         // focused, the arrow keys scroll it. `orbit` becomes this carousel
         // below sm (§6). §10 says role="group"; on the <ul> that would strip
@@ -221,6 +244,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
             ? { display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory' }
             : undefined,
       },
+      states: variant === 'orbit'
+        ? { live: { position: 'absolute', width: '1px', height: '1px', margin: '-1px', overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } }
+        : undefined,
       children: images,
     };
     children.push(steps ? carousel(track, variant, shown.length, ctx) : track);
@@ -244,13 +270,20 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
 
   return {
     tag: 'section',
-    attrs: { class: `az-gallery az-gallery--${variant}`, ...(lightbox && shown.length > 0 ? { 'data-az-behaviour': 'lightbox' } : {}) },
+    attrs: {
+      class: `az-gallery az-gallery--${variant}`,
+      ...(lightbox && shown.length > 0 ? { 'data-az-behaviour': 'lightbox' } : {}),
+      ...(variant === 'orbit' ? { 'data-az-3d-host': '' } : {}),
+    },
     style: {
       paddingBlock: px(t.space[96]),
       paddingInline: px(t.size['gutter-lg']),
       background: t.color.bg,
       color: t.color.text,
     },
+    // The section clears while the ring draws: the page's canvas sits under
+    // every block (scene-spec §6.1), so an opaque band would hide it.
+    states: variant === 'orbit' ? { live: { background: 'transparent' } } : undefined,
     // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
@@ -276,6 +309,8 @@ function galleryImage(
       src: ctx.asset(image.args[0]?.value ?? ''),
       alt: image.props.alt ?? '',
       class: 'az-gallery-img',
+      // The textures of `orbit`'s ring are the list's own images (§9).
+      ...(variant === 'orbit' ? { 'data-az-ring': '' } : {}),
       // §7 rule 2: eager first row, lazy after, and never fetchpriority.
       loading: eager ? 'eager' : 'lazy',
       decoding: 'async',

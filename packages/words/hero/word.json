@@ -93,8 +93,7 @@
     "size.ring"
   ],
   "deps": {
-    "three": "0.170.0",
-    "@react-three/fiber": "8.17.10"
+    "three": "0.186.0"
   },
   "targets": [
     "web"

@@ -28,10 +28,12 @@ const scene = (variant: string, props: Record<string, string>): SpecBlock => ({
 const walk = (n: EmittedNode | string): EmittedNode[] =>
   typeof n === 'string' ? [] : [n, ...(n.children ?? []).flatMap(walk)];
 const figure = (n: EmittedNode) => walk(n).find((x) => x.tag === 'figure')!;
+/** The box the poster — and, live, the canvas — fills. */
+const view = (n: EmittedNode) => walk(n).find((x) => String(x.attrs?.class ?? '').split(' ').includes('az-scene-view'))!;
 
 test('the poster goes through the asset sandbox, so the build ships it', () => {
   const out = emit(scene('inline', { poster: './assets/shoe.webp' }), context());
-  assert.equal(figure(out).attrs?.['data-poster'], '/sandboxed/./assets/shoe.webp');
+  assert.doesNotMatch(JSON.stringify(out), /"\.\/assets\/shoe\.webp"/, 'no unsandboxed path reaches the page');
   const img = walk(out).find((x) => x.tag === 'img');
   assert.equal(img?.attrs?.src, '/sandboxed/./assets/shoe.webp');
 });
@@ -50,7 +52,7 @@ test('CONTROL: without a poster there is no image', () => {
 
 test('ratio words become valid CSS aspect-ratio values', () => {
   for (const [ratio, css] of [['4:3', '4 / 3'], ['16:9', '16 / 9'], ['1:1', '1 / 1']]) {
-    assert.equal(figure(emit(scene('full', { ratio }), context())).style?.aspectRatio, css);
+    assert.equal(view(emit(scene('full', { ratio }), context())).style?.aspectRatio, css);
   }
-  assert.equal(figure(emit(scene('full', {}), context())).style?.aspectRatio, '4 / 3', 'manifest default');
+  assert.equal(view(emit(scene('full', {}), context())).style?.aspectRatio, '4 / 3', 'manifest default');
 });

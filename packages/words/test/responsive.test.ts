@@ -138,7 +138,7 @@ test('gallery §6 grid and masonry: two columns below sm (not one), at most thre
 test('gallery §6 orbit: falls back to a carousel below sm, and the ring poster goes', () => {
   const out = GALLERY('orbit', '    poster ./ring.webp');
   assert.deepEqual(byClass(out, 'az-gallery-items')?.below?.sm, { display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory' });
-  assert.deepEqual(byClass(out, 'az-gallery-poster')?.below?.sm, { display: 'none' });
+  assert.deepEqual(byClass(out, 'az-gallery-orbit')?.below?.sm, { display: 'none' });
   assert.equal(byClass(out, 'az-gallery-item')?.below?.sm?.scrollSnapAlign, 'start');
 });
 
@@ -196,7 +196,7 @@ test('scene §10 inline: full content width below sm', () => {
 });
 
 test('scene §10 full: ratio clamped to at most 4:3 — 1:1 becomes 4:3, wider ratios stay', () => {
-  assert.deepEqual(byClass(SCENE('full', '1:1'), 'az-scene-viewport')?.below?.sm, { aspectRatio: '4 / 3' });
+  assert.deepEqual(byClass(SCENE('full', '1:1'), 'az-scene-view')?.below?.sm, { aspectRatio: '4 / 3' });
   assert.equal(byClass(SCENE('full', '16:9'), 'az-scene-viewport')?.below, undefined);
 });
 

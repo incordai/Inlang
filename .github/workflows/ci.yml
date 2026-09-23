@@ -74,4 +74,9 @@ jobs:
       # M4: auth forms, <Protected> and the reset flow against a local mock
       # provider (the real-provider exit criterion needs an account; open).
       - run: pnpm test:auth
+      # The 3D runtime: one renderer per page, static never loads it, the
+      # model is self-hosted, orbit answers the keyboard, context loss falls
+      # back to the posters (scene-spec §5–§9). Software WebGL, so no frame
+      # time from here is device evidence.
+      - run: pnpm test:3d
       - run: pnpm thumbnails --verify

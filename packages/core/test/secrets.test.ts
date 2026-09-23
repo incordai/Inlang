@@ -85,3 +85,30 @@ test('CONTROL: an ordinary site has no AZ1411', () => {
   const src = readFileSync(new URL('./fixture-site.az', import.meta.url), 'utf8');
   assert.ok(!codes(src).includes('AZ1411'));
 });
+
+/* ---- graphics code is not a leak -------------------------------------------- */
+
+test('WebGL names in a 3D bundle are not secrets: property accesses and extension names', () => {
+  const graphics = [
+    'ext.framebufferTexture2DMultisampleEXT(gl.FRAMEBUFFER)',
+    'return e.COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR',
+    "extensions.get('WEBGL_compressed_texture_s3tc_srgb')",
+    'const name = "KHR_materials_emissive_strength"',
+  ].join(';\n');
+  assert.deepEqual(scanText(graphics), []);
+});
+
+test('SECURITY: the exemptions do not open a hole for real keys', () => {
+  const key = 'Xk9vQ2mZr7Lp4sBw8TnC3yHd6JfA1gKe';
+  // As a value: a string literal, an assignment, a URL path (a webhook token).
+  for (const text of [
+    `const k = "${key}"`,
+    `token=${key}`,
+    `fetch("https://hooks.example.com/${key}")`,
+    `fetch("https://hooks.example.com/services/T00/${key}")`,
+    // A registry-looking prefix does not launder a mixed-case random tail.
+    `const k = "WEBGL_${key}"`,
+  ]) {
+    assert.equal(scanText(text).length, 1, text);
+  }
+});

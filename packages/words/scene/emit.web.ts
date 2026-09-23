@@ -38,79 +38,127 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // declaration silently otherwise. The enum admits only `a:b` forms.
   const aspect = (block.props.ratio ?? DEFAULT_RATIO).replace(':', ' / ');
 
-  children.push({
-    tag: 'figure',
+  // §5: the scene never creates a renderer. With `3d` it emits the view the
+  // page's one renderer draws into — its box, its camera, its model — and
+  // the runtime does the rest. Without `3d` it is the poster alone.
+  const threeD = block.modifiers.includes('3d');
+  const camera = block.props.camera && block.props.camera !== 'fixed'
+    ? block.props.camera
+    : block.modifiers.includes('scroll') ? 'scroll'
+      : block.modifiers.includes('parallax') ? 'parallax' : 'fixed';
+  const orbit = threeD && camera === 'orbit';
+
+  // §2/§6, three different relationships to the page:
+  //   inline    sits next to the copy describing it, capped at the content
+  //             measure or it fights the text column
+  //   full      the object IS the section: full-bleed, square corners,
+  //             its own breathing room
+  //   backdrop  behind the whole document, not in the flow at all — the
+  //             content scrolls over it (§6.1: the bottom of the stack)
+  const view: EmittedNode = {
+    tag: 'div',
     attrs: {
-      class: 'az-scene-viewport',
-      'data-variant': variant,
-      'data-poster': poster ?? '',
+      class: 'az-scene-view',
+      ...(threeD ? {
+        'data-az-3d': 'scene',
+        'data-az-variant': variant,
+        'data-az-camera': camera,
+        ...(block.props.model ? { 'data-az-model': ctx.asset(block.props.model) } : {}),
+      } : {}),
+      // §9: the scene is named by its required `alt`. The shared canvas is
+      // not content, so the name sits on the view the canvas draws into.
+      role: 'img',
+      'aria-label': block.props.alt ?? '',
+      // `camera orbit` turns with the arrow keys (§9), so it takes focus.
+      ...(orbit ? { tabindex: '0' } : {}),
     },
     style: {
-      margin: 0,
-      // Reserve the box before anything loads, or arrival shifts the page.
-      aspectRatio: aspect,
-      background: t.color['surface-alt'],
-
-      // §2/§6, three different relationships to the page:
-      //   inline    sits next to the copy describing it, capped at the content
-      //             measure or it fights the text column
-      //   full      the object IS the section: full-bleed, square corners,
-      //             its own breathing room
-      //   backdrop  behind the whole document, not in the flow at all — the
-      //             content scrolls over it
-      maxWidth: variant === 'inline' ? `${t.size['measure-body']}ch` : undefined,
-      borderRadius: variant === 'inline' ? px(t.radius.md) : undefined,
-      position: variant === 'backdrop' ? 'fixed' : undefined,
+      position: variant === 'backdrop' ? 'fixed' : 'relative',
       inset: variant === 'backdrop' ? '0' : undefined,
-      zIndex: variant === 'backdrop' ? t.layer.backdrop : undefined,
+      zIndex: variant === 'backdrop' ? t.layer.behind : undefined,
       // A backdrop must never intercept clicks meant for the content above it.
       pointerEvents: variant === 'backdrop' ? 'none' : undefined,
       height: variant === 'backdrop' ? '100svh' : undefined,
+      // Reserve the box before anything loads, or arrival shifts the page.
+      aspectRatio: variant === 'backdrop' ? undefined : aspect,
+      background: t.color['surface-alt'],
+      borderRadius: variant === 'inline' ? px(t.radius.md) : undefined,
+      overflow: 'hidden',
+      // Horizontal drag turns an orbit; vertical drag still scrolls the page.
+      touchAction: orbit ? 'pan-y' : undefined,
+    },
+    states: {
+      ...(threeD ? { live: { background: 'transparent' } } : {}),
+      ...(orbit ? {
+        focusVisible: {
+          outline: `${px(t.size.ring)} solid ${t.color.focus}`,
+          outlineOffset: px(t.size['ring-offset']),
+        },
+      } : {}),
+    },
+    // §10 below sm: `full` stays full-bleed with its ratio clamped to at most
+    // 4:3, so 1:1 becomes 4:3.
+    below: variant === 'full' && block.props.ratio === '1:1'
+      ? { sm: { aspectRatio: '4 / 3' } }
+      : undefined,
+    // §8: `static` is posters only. §9: the poster carries the same `alt`;
+    // role="img" makes its children presentational, so it is named once.
+    children: poster
+      ? [{
+          tag: 'img',
+          attrs: {
+            src: poster, alt: block.props.alt ?? '', class: 'az-scene-poster', decoding: 'async',
+            ...(threeD ? { 'data-az-live-part': '' } : {}),
+          },
+          style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+          states: threeD ? { live: { visibility: 'hidden' } } : undefined,
+        }]
+      : [],
+  };
+
+  children.push({
+    tag: 'figure',
+    attrs: { class: 'az-scene-viewport', 'data-variant': variant },
+    style: {
+      margin: 0,
+      maxWidth: variant === 'inline' ? `${t.size['measure-body']}ch` : undefined,
     },
     // §10 below sm: `inline` takes the full content width. Its ratio clamp
     // ("at most 1:1") changes nothing, because every allowed ratio is
-    // already at most square. `full` stays full-bleed with its ratio clamped
-    // to at most 4:3, so 1:1 becomes 4:3.
-    below: variant === 'inline'
-      ? { sm: { maxWidth: 'none' } }
-      : variant === 'full' && block.props.ratio === '1:1'
-        ? { sm: { aspectRatio: '4 / 3' } }
-        : undefined,
+    // already at most square.
+    below: variant === 'inline' ? { sm: { maxWidth: 'none' } } : undefined,
     children: [
-      // §8: `static` is posters only, and until the 3D runtime lands every
-      // scene is static. §9: the poster carries the same `alt` the canvas
-      // will (<canvas role="img" aria-label>); a <figure> may not take
-      // role="img" itself.
-      ...(poster
-        ? [{
-            tag: 'img',
-            attrs: { src: poster, alt: block.props.alt ?? '', class: 'az-scene-poster', decoding: 'async' },
-            style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
-          } satisfies EmittedNode]
-        : []),
+      view,
       ...(block.props.caption
-      ? [{
-          tag: 'figcaption',
-          style: {
-            fontSize: t.typeSize.xs,
-            color: t.color.muted,
-            marginTop: px(t.space[12]),
-          },
-          children: [block.props.caption],
-        }]
-      : []),
+        ? [{
+            tag: 'figcaption',
+            style: {
+              fontSize: t.typeSize.xs,
+              color: t.color.muted,
+              marginTop: px(t.space[12]),
+            },
+            children: [block.props.caption],
+          }]
+        : []),
     ],
   });
 
   return {
     tag: 'section',
-    attrs: { class: `az-scene az-scene--${variant}` },
+    attrs: {
+      class: `az-scene az-scene--${variant}`,
+      ...(threeD ? { 'data-az-3d-host': '' } : {}),
+    },
     style: {
-      paddingBlock: px(t.space[64]),
+      // A backdrop is a layer, not a band: it takes no room in the flow.
+      paddingBlock: variant === 'backdrop' ? 0 : px(t.space[64]),
       paddingInline: px(t.size['gutter-lg']),
       background: t.color.bg,
       color: t.color.text,
     },
+    // The section clears while the canvas draws in its box: the canvas sits
+    // under every block (§6.1), so an opaque band would hide it.
+    states: threeD ? { live: { background: 'transparent' } } : undefined,
     // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,

@@ -85,6 +85,16 @@ const SECRET_PREFIX = /\b(?:sk|rk)_(?:live|test)?_?[A-Za-z0-9]{16,}/g;
 const SERVICE_ROLE = /\bservice_role\b/g;
 const HIGH_ENTROPY = /[A-Za-z0-9+/_=-]{32,}/g;
 
+/** A whole JS identifier — a name in code, which can never carry a value. */
+const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * A graphics-API extension name as the Khronos registry spells it:
+ * `WEBGL_compressed_texture_s3tc_srgb`, `KHR_materials_clearcoat`. A registry
+ * prefix, then lowercase words — the shape of a public name, not of a key.
+ */
+const EXTENSION_NAME = /^(?:WEBGL|EXT|OES|KHR|ANGLE|OVR|ARB|NV|AMD|MOZ|WEBKIT)_[a-z0-9]+(?:_[a-z0-9]+)*$/;
+
 /**
  * Secrets in a piece of text — a bundle, a source file, a value.
  *
@@ -117,6 +127,11 @@ export function scanText(text: string, allow: ReadonlySet<string> = new Set()): 
     // Inlined assets are base64 by design (a small image in a data: URL).
     if (/(?:data:[^,]{0,64},|base64,)$/.test(text.slice(Math.max(0, at - 72), at))) continue;
     if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) continue;
+    // A property access (`gl.framebufferTexture2DMultisampleEXT`) is a name in
+    // code, not a value. Identifier characters only, so a token inside a URL
+    // path — which has a `/` — is still judged.
+    if (text[at - 1] === '.' && IDENTIFIER.test(value)) continue;
+    if (EXTENSION_NAME.test(value)) continue;
     if (value.length >= ENTROPY_MIN_LENGTH && entropy(value) >= ENTROPY_MIN_BITS) add('entropy', at, value);
   }
   return found;

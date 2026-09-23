@@ -225,24 +225,25 @@ async function buildAll(words, work, everyVariant) {
   console.log(`compiled ${built.length}/${sites.length} sites`);
   if (built.length === 0) return [];
 
-  // One install serves every site: the emitted pins are identical by design,
-  // and this checks that rather than assuming it.
-  const pkg = readFileSync(join(built[0].dir, 'proj/package.json'), 'utf8');
-  const depsOf = (text) => JSON.stringify({ ...JSON.parse(text), name: '' });
+  // One install per distinct dependency set: a 3D site adds `three`, every
+  // other site emits the same set — so one or two installs, never one per site.
+  const depsOf = (dir) => JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'proj/package.json'), 'utf8')), name: '' });
+  const installs = new Map();
   for (const s of built) {
-    if (depsOf(readFileSync(join(s.dir, 'proj/package.json'), 'utf8')) !== depsOf(pkg)) {
-      throw new Error(`visual: ${s.word}/${s.theme} emits different dependencies — one install cannot serve it`);
-    }
+    const key = depsOf(s.dir);
+    if (!installs.has(key)) installs.set(key, { dir: join(work, `shared-${installs.size}`), from: s.dir });
+    s.install = installs.get(key).dir;
   }
-  const shared = join(work, 'shared');
-  mkdirSync(shared);
-  writeFileSync(join(shared, 'package.json'), pkg);
-  await node(NPM_CLI, ['install', '--no-audit', '--no-fund'], shared);
-  console.log('installed shared node_modules');
+  for (const { dir, from } of installs.values()) {
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'package.json'), readFileSync(join(from, 'proj/package.json')));
+    await node(NPM_CLI, ['install', '--no-audit', '--no-fund'], dir);
+  }
+  console.log(`installed ${installs.size} shared node_modules`);
 
   await pool(built, BUILD_CONCURRENCY, async (s) => {
     const proj = join(s.dir, 'proj');
-    symlinkSync(join(shared, 'node_modules'), join(proj, 'node_modules'), 'dir');
+    symlinkSync(join(s.install, 'node_modules'), join(proj, 'node_modules'), 'dir');
     await node(join(proj, 'node_modules/vite/bin/vite.js'), ['build', '--logLevel', 'error'], proj);
     s.dist = join(proj, 'dist');
   });

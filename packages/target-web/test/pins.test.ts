@@ -34,7 +34,9 @@ function verifiedVersion(pkg: string): string | null {
     const cells = line.split('|').map((c) => c.trim());
     // cells[0] is the empty string before the leading pipe.
     if (cells[1] !== '`' + pkg + '`') continue;
-    if (!cells.slice(2).some((c) => c.includes('VERIFIED'))) return null;
+    // A package can appear in several tables (a decision record, the
+    // verified list); only its VERIFIED row is a pin.
+    if (!cells.slice(2).some((c) => c.includes('VERIFIED'))) continue;
     const version = cells[2];
     return version.startsWith('`') && version.endsWith('`')
       ? version.slice(1, -1)
@@ -54,6 +56,16 @@ test('CONTROL: the table is readable and marks versions VERIFIED', () => {
 test('every emitted pin matches its VERIFIED row', () => {
   assert.equal(PINS.react, verifiedVersion('react'));
   assert.equal(PINS.vite, verifiedVersion('vite'));
+  assert.equal(PINS.three, verifiedVersion('three'));
+});
+
+test('scene-spec: every 3D word pins the three a site is built with — no drift', () => {
+  // hero, scene and gallery (orbit) draw into one renderer; a page that
+  // mixed two three versions would ship two copies of the library.
+  const words = join(ROOT, 'packages/words');
+  const pinned = ['hero', 'scene', 'gallery'].map((w) =>
+    (JSON.parse(readFileSync(join(words, w, 'word.json'), 'utf8')) as { deps?: Record<string, string> }).deps ?? {});
+  for (const deps of pinned) assert.deepEqual(deps, { three: PINS.three });
 });
 
 test('typescript is pinned to the version this repo actually uses', () => {

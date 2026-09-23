@@ -55,6 +55,14 @@ post-fx adoption (§8) still holds. Per this document's own recommendation that
 **moving window**: three advances only to a minor the pinned `postprocessing`
 admits, checked at each pin review — never by a routine bump alone.
 
+**What a generated site takes (2026-09-23, the compiler's 3D runtime).**
+Only `three`. The page's one renderer (scene-spec §5) is DOM-driven — it
+draws every view into its element's rectangle from one fixed canvas, the way
+the behaviour runtime attaches by data attributes — so it needs no React
+binding: `@react-three/fiber` and `@react-three/drei` stay the spike's, and
+the words' manifests pin `three` alone. drei's `Environment`/`Lightformer`
+became three's own `PMREMGenerator` over emissive planes.
+
 **Draco decoder hosting.** Self-hosted, and from `three` itself. In `0.186.0`,
 `DRACOLoader` references its decoder files with `new URL(…, import.meta.url)`
 and exports `DRACO_GLTF_CONFIG`, the glTF-only decoder (192 KB wasm). The
@@ -660,8 +668,8 @@ before pinning if this document is more than a few weeks old.**
 
 | Package | Version | Licence | Status |
 |---|---|---|---|
-| `three` | `0.185.1` | — | **VERIFIED** [↗](https://registry.npmjs.org/three/latest) |
-| `@react-three/fiber` | `9.7.0` | — | **VERIFIED** [↗](https://registry.npmjs.org/@react-three/fiber/latest) |
+| `three` | `0.186.0` | MIT | **VERIFIED** 2026-09-23 — the only 3D dependency a generated site takes (§0) [↗](https://registry.npmjs.org/three/latest) |
+| `@react-three/fiber` | `9.8.0` | MIT | **VERIFIED** 2026-09-23 — the spike's; generated sites do not use it (§0) [↗](https://registry.npmjs.org/@react-three/fiber/latest) |
 | `@react-three/drei` | `10.7.8` | — | **VERIFIED** [↗](https://registry.npmjs.org/@react-three/drei/latest) |
 | `@react-three/postprocessing` | `3.0.5` | — | **VERIFIED** [↗](https://registry.npmjs.org/@react-three/postprocessing/latest) |
 | `postprocessing` | `6.39.4` | Zlib | **VERIFIED** — required peer, must be pinned explicitly [↗](https://registry.npmjs.org/postprocessing/latest) |

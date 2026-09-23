@@ -15,7 +15,8 @@
  *    7  light and dark                test:visual
  *    8  combined with nav + footer    the preview with a site nav and footer,
  *                                     built and server-rendered here
- *    9  bundle within budget          that build's shipped JS + CSS, gzipped
+ *    9  bundle within budget          the JS + CSS the page loads, gzipped
+ *                                     (a 3D word's lazy chunk reported apart)
  *   10  deps pinned exactly           word.json
  *   11  docs page + preview           README links the spec; every preview
  *                                     compiles (az check)
@@ -182,10 +183,18 @@ async function integration(words, work) {
     if (mains !== 1) problems.push(`${mains} <main> elements`);
     put(s.word, 8, problems.length === 0, problems.join('; '));
 
+    // PRD §9 budgets what a page loads: the JS and CSS its HTML references.
+    // A 3D word's chunk and decoder load later, lazily, and only for a page
+    // view the gate lets through — reported beside the budget, never in it.
     const assets = join(s.dist, 'assets');
-    const files = readdirSync(assets).filter((f) => /\.(js|css)$/.test(f));
-    const gz = files.reduce((n, f) => n + gzipSync(readFileSync(join(assets, f))).length, 0);
-    put(s.word, 9, gz < NON_3D_BUDGET_BYTES, `${(gz / 1024).toFixed(1)}KB gz`);
+    const page = readFileSync(join(s.dist, s.route === '/' ? 'index.html' : `${s.route.slice(1)}index.html`), 'utf8');
+    const initial = [...page.matchAll(/(?:src|href)="[^"]*?assets\/([^"]+\.(?:js|css))"/g)].map((m) => m[1]);
+    const gz = (f) => gzipSync(readFileSync(join(assets, f))).length;
+    const loaded = initial.reduce((n, f) => n + gz(f), 0);
+    const lazy = readdirSync(assets).filter((f) => /\.js$/.test(f) && !initial.includes(f))
+      .reduce((n, f) => n + gz(f), 0);
+    put(s.word, 9, initial.length > 0 && loaded < NON_3D_BUDGET_BYTES,
+      `${(loaded / 1024).toFixed(1)}KB gz at load${lazy ? `, ${(lazy / 1024).toFixed(1)}KB gz lazy 3D` : ''}`);
   }
 }
 

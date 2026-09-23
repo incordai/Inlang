@@ -80,18 +80,24 @@ export async function buildSites(sites, work, { ssr } = {}) {
   const built = sites.filter((s) => s.compiled);
   if (built.length === 0) return;
 
+  // One install per distinct dependency set: a 3D site adds `three`, every
+  // other site emits the same set, so this is one or two installs, not one
+  // per site. Sites are grouped by their package.json minus the name.
   const depsOf = (p) => JSON.stringify({ ...JSON.parse(readFileSync(join(p, 'package.json'), 'utf8')), name: '' });
-  const pkg = depsOf(built[0].proj);
+  const installs = new Map();
   for (const s of built) {
-    if (depsOf(s.proj) !== pkg) throw new Error(`pipeline: ${s.dir} emits different dependencies — one install cannot serve it`);
+    const key = depsOf(s.proj);
+    if (!installs.has(key)) installs.set(key, { dir: join(work, `shared-${installs.size}`), from: s.proj });
+    s.install = installs.get(key).dir;
   }
-  const shared = join(work, 'shared');
-  mkdirSync(shared, { recursive: true });
-  writeFileSync(join(shared, 'package.json'), readFileSync(join(built[0].proj, 'package.json')));
-  await node(NPM_CLI, ['install', '--no-audit', '--no-fund'], shared);
+  for (const { dir, from } of installs.values()) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'package.json'), readFileSync(join(from, 'package.json')));
+    await node(NPM_CLI, ['install', '--no-audit', '--no-fund'], dir);
+  }
 
   await pool(built, BUILD_CONCURRENCY, async (s) => {
-    symlinkSync(join(shared, 'node_modules'), join(s.proj, 'node_modules'), 'dir');
+    symlinkSync(join(s.install, 'node_modules'), join(s.proj, 'node_modules'), 'dir');
     const vite = join(s.proj, 'node_modules/vite/bin/vite.js');
     await node(vite, ['build', '--logLevel', 'error'], s.proj);
     s.dist = join(s.proj, 'dist');

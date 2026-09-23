@@ -23,6 +23,7 @@ import { PUBLIC_ENV_PREFIX } from '../../core/src/index.ts';
 import {
   AUTH_DIR, GUARD_DIR, HOSTED_ENV, authConfig, authCss, authPlan, authReact, guardTs, type AuthPlan,
 } from './auth.ts';
+import { seedViews, threeCss, threeMain } from './three.ts';
 
 /**
  * Where the author's `raw` / `slot` modules go in the generated project.
@@ -54,6 +55,8 @@ export const PINS = {
   react: '19.2.8',
   vite: '8.2.2',
   typescript: '7.0.2',
+  /** Only a site that uses 3D depends on it (scene-spec §5). */
+  three: '0.186.0',
 } as const;
 
 /** ARCHITECTURE §7 — every emitted file says it is generated. */
@@ -556,6 +559,8 @@ export interface EmittedProject {
   readonly modules: string[];
   /** The site uses auth: the caller copies the auth runtime into AUTH_DIR (M4). */
   readonly auth: boolean;
+  /** The site uses 3D: the caller copies the 3D runtime into THREE_DIR (scene-spec §5). */
+  readonly three: boolean;
 }
 
 export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
@@ -591,10 +596,12 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
         return sanitizeSvg(source, raw);
       }
     : undefined;
+  // Each 3D view gets its seed, and the site learns whether it uses 3D at all.
+  const seeded = seedViews(emitPages(spec, theme, options.emitters ?? {}, asset, component, inline), spec.site.name);
   // Every page's styles into one generated sheet (az.css): classes replace
   // inline styles, which is what lets `below` and `states` exist at all.
   const styled = compileStyles(
-    emitPages(spec, theme, options.emitters ?? {}, asset, component, inline),
+    seeded.pages,
     (ps, rewrite) => ps.map((p) => ({ ...p, nodes: p.nodes.map(rewrite) })),
     theme.breakpoint,
   );
@@ -615,7 +622,7 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     { path: 'src/runtime.tsx', content: runtimeTsx() },
     {
       path: 'src/main.tsx',
-      content: `${HEADER}import { StrictMode } from "react";
+      content: seeded.used ? threeMain(HEADER) : `${HEADER}import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./theme.css";
@@ -673,7 +680,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${schemeCss(named)}${pinnedNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}`,
+${schemeCss(named)}${pinnedNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
     },
     {
       /**
@@ -699,6 +706,7 @@ ${schemeCss(named)}${pinnedNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${pl
           react: PINS.react,
           // react-dom ships in lockstep with react and must match it exactly.
           'react-dom': PINS.react,
+          ...(seeded.used ? { three: PINS.three } : {}),
         },
         devDependencies: { vite: PINS.vite, typescript: PINS.typescript },
       }, null, 2) + '\n',
@@ -749,5 +757,6 @@ export default defineConfig({
     assets: [...used].sort(byPath),
     modules: moduleList,
     auth: plan !== null,
+    three: seeded.used,
   };
 }
