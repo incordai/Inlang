@@ -88,7 +88,7 @@ Known gaps:
 
 - `model` and the 3D scene itself: `3d` renders the poster only until the runtime is ported from the M0 spike
 - Buttons render as plain links until the button primitive exists
-- Phone and tablet layouts from the spec's responsive table are not implemented for any word yet: the web target emits inline styles only, with no media queries.
+- Responsive (§10): `split` restacks to one column below 768px, and the actions stack full-width below 480px — both checked in a browser by `test:visual` (hero preview.split.az). `full`'s focal-point crop and stronger scrim wait for the 3D runtime; the primary does not yet look like a button (the button primitive is still to come).
 
 ## Tested
 

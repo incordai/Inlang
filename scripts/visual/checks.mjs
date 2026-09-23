@@ -116,3 +116,43 @@ export async function reducedMotion(page) {
 /** The body's painted background — item 7 compares it across schemes. */
 export const bodyBackground = (page) =>
   page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+/** How many column tracks a grid has at the current width (0 when not a grid). */
+export const columnsOf = (page, selector) => page.evaluate((sel) => {
+  const el = document.querySelector(sel);
+  if (!el) return -1;
+  const cs = getComputedStyle(el);
+  if (cs.display !== 'grid' && cs.display !== 'inline-grid') return 0;
+  return cs.gridTemplateColumns.split(/\s+/).filter(Boolean).length;
+}, selector);
+
+/**
+ * A responsive-table row: a multi-column layout restacks to one column
+ * below breakpoint.sm. Measured at 390 (a phone) against 1440 (the control:
+ * the layout really is multi-column on a desktop, or "one column" proves
+ * nothing).
+ */
+export function restacks(narrow, wide) {
+  const pass = narrow === 1 && wide > 1;
+  return { pass, detail: pass ? '' : `${wide} columns at 1440, ${narrow} at 390 — expected >1 then 1` };
+}
+
+/**
+ * nav-spec §7: the skip link is the first thing Tab reaches, and it is
+ * VISIBLE when focused — a link hidden off-screen forever is focusable but
+ * useless to a sighted keyboard user.
+ */
+export async function skipLink(page) {
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('Tab');
+  const r = await page.evaluate(() => {
+    const el = document.activeElement;
+    if (!el || el.tagName !== 'A' || !(el.getAttribute('href') ?? '').startsWith('#')) {
+      return { first: el?.tagName.toLowerCase() ?? 'nothing' };
+    }
+    const box = el.getBoundingClientRect();
+    return { first: 'skip', visible: box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight };
+  });
+  if (r.first !== 'skip') return { pass: false, detail: `first Tab reached ${r.first}, not a skip link` };
+  return { pass: r.visible, detail: r.visible ? '' : 'the focused skip link is off-screen' };
+}

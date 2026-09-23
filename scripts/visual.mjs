@@ -30,7 +30,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground } from './visual/checks.mjs';
+import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, skipLink } from './visual/checks.mjs';
 import { startServer } from './visual/serve.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -70,7 +70,16 @@ async function pool(items, limit, fn) {
 
 /* ---- results ------------------------------------------------------------ */
 
-const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'firefox', 'webkit'];
+const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'skip-link', 'firefox', 'webkit'];
+
+/**
+ * Responsive-table rows the gate measures, per word and variant: the
+ * element that must restack to one column below breakpoint.sm. A variant
+ * listed here needs a `preview.<variant>.az` beside the word's preview.az.
+ */
+const RESTACK = {
+  hero: { split: '.az-hero' },   // hero-spec §10: split restacks to stack
+};
 const results = {};   // word -> check -> { pass, fail, failures: [] }
 function record(word, check, where, r) {
   const cell = ((results[word] ??= {})[check] ??= { pass: 0, fail: 0, failures: [] });
@@ -89,13 +98,27 @@ function themed(source, theme) {
   return lines.join('\n');
 }
 
+/**
+ * A word's previews: preview.az (its default variant) plus any
+ * preview.<variant>.az, for variants whose layout differs enough to check.
+ */
+function previewsOf(word) {
+  return readdirSync(join(WORDS, word))
+    .map((f) => /^preview(?:\.([a-z]+))?\.az$/.exec(f))
+    .filter(Boolean)
+    .map((m) => ({ file: m[0], variant: m[1] ?? null }))
+    .sort((a, b) => a.file.localeCompare(b.file));
+}
+
 async function buildAll(words, work) {
-  const sites = words.flatMap((word) => THEMES.map((theme) => ({ word, theme })));
+  const sites = words.flatMap((word) => previewsOf(word).flatMap((p) =>
+    THEMES.map((theme) => ({ word, theme, variant: p.variant, file: p.file,
+      label: p.variant ? `${theme}:${p.variant}` : theme }))));
   for (const s of sites) {
-    s.dir = join(work, `${s.word}-${s.theme}`);
+    s.dir = join(work, `${s.word}-${s.variant ?? 'default'}-${s.theme}`);
     mkdirSync(s.dir, { recursive: true });
     const src = join(WORDS, s.word);
-    const preview = readFileSync(join(src, 'preview.az'), 'utf8');
+    const preview = readFileSync(join(src, s.file), 'utf8');
     writeFileSync(join(s.dir, 'site.az'), themed(preview, s.theme));
     // Each page is its own HTML file, and a preview's extra pages exist only
     // so its links resolve. The word under test is on the FIRST page declared.
@@ -108,11 +131,11 @@ async function buildAll(words, work) {
     try {
       await node(CLI, ['build', join(s.dir, 'site.az'), '--out', join(s.dir, 'proj')], s.dir);
       s.compiled = true;
-      record(s.word, 'compile', s.theme, { pass: true });
+      record(s.word, 'compile', s.label, { pass: true });
     } catch (e) {
       const errors = String(e.stderr ?? e.message).split('\n').filter((l) => / error /.test(l))
         .map((l) => l.replace(/^.*?error /, ''));
-      record(s.word, 'compile', s.theme, { pass: false, detail: errors.join(' | ') || 'az build failed' });
+      record(s.word, 'compile', s.label, { pass: false, detail: errors.join(' | ') || 'az build failed' });
     }
   });
   const built = sites.filter((s) => s.compiled);
@@ -157,7 +180,9 @@ async function checkSite(s, browsers, server) {
   server.serve(s.dist);
   const shots = join(OUT, s.word);
   mkdirSync(shots, { recursive: true });
-  const tag = (scheme, width) => `${s.theme}/${scheme}/${width}`;
+  const tag = (scheme, width) => `${s.label}/${scheme}/${width}`;
+  const restackAt = RESTACK[s.word]?.[s.variant];
+  const tracks = {};
 
   const ctx = await browsers.chromium.newContext();
   const page = await ctx.newPage();
@@ -169,7 +194,11 @@ async function checkSite(s, browsers, server) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
       record(s.word, 'overflow', tag(scheme, width), await overflow(page));
-      await page.screenshot({ path: join(shots, `${s.theme}-${scheme}-${width}.png`), fullPage: true });
+      await page.screenshot({ path: join(shots, `${s.label.replace(':', '-')}-${scheme}-${width}.png`), fullPage: true });
+      if (restackAt && scheme === 'light') tracks[width] = await columnsOf(page, restackAt);
+      if (width === 390 && scheme === 'light' && await page.$('.az-skip-link')) {
+        record(s.word, 'skip-link', tag(scheme, width), await skipLink(page));
+      }
       if (width !== 768) record(s.word, 'axe', tag(scheme, width), await axe(page));
       if (width === 1440) {
         bg[scheme] = await bodyBackground(page);
@@ -177,7 +206,8 @@ async function checkSite(s, browsers, server) {
       }
     }
   }
-  record(s.word, 'schemes', s.theme, {
+  if (restackAt) record(s.word, 'restack', `${s.label}/light`, restacks(tracks[390], tracks[1440]));
+  record(s.word, 'schemes', s.label, {
     pass: bg.light !== bg.dark,
     detail: `light and dark paint the same body background (${bg.light})`,
   });
@@ -185,7 +215,7 @@ async function checkSite(s, browsers, server) {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
-  record(s.word, 'reduced-motion', `${s.theme}/light/1440`, await reducedMotion(page));
+  record(s.word, 'reduced-motion', `${s.label}/light/1440`, await reducedMotion(page));
   await ctx.close();
 
   // The smaller pass: another engine at one width, overflow and page errors.
@@ -195,7 +225,7 @@ async function checkSite(s, browsers, server) {
     other.on('pageerror', (e) => errors.push(e.message));
     await other.goto(new URL(s.path, server.url).href, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
     const o = await overflow(other);
-    record(s.word, name, `${s.theme}/light/${width}`, {
+    record(s.word, name, `${s.label}/light/${width}`, {
       pass: o.pass && errors.length === 0,
       detail: [o.detail, ...errors.map((e) => `page error: ${e}`)].filter(Boolean).join('; '),
     });
@@ -210,7 +240,9 @@ const BAD = `<!doctype html><html lang="en"><head><title>bad</title><style>
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { animation: spin 1s infinite; }
 </style></head><body>
-  <main><h1>Bad</h1>
+  <a href="#m" style="position:absolute;top:0;transform:translateY(-200%)">Skip to content</a>
+  <main id="m"><h1>Bad</h1>
+  <div class="g" style="display:grid;grid-template-columns:1fr 1fr"><span>a</span><span>b</span></div>
   <div style="width:800px;height:10px"></div>
   <button></button>
   <button class="spin">Spin</button>
@@ -223,8 +255,14 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   @media (prefers-reduced-motion: no-preference) {
     @keyframes fade { from { opacity: .5; } } .fade { animation: fade 1s infinite; }
   }
+  .skip { position: absolute; top: 0; transform: translateY(-200%); }
+  .skip:focus-visible { transform: none; }
+  .g { display: grid; grid-template-columns: 1fr 1fr; }
+  @media (width < 768px) { .g { grid-template-columns: 1fr; } }
 </style></head><body>
-  <main><h1>Good</h1>
+  <header><a class="skip" href="#m">Skip to content</a></header>
+  <main id="m"><h1>Good</h1>
+  <div class="g"><span>a</span><span>b</span></div>
   <p class="fade">Fits.</p>
   <a href="#x">A link</a> <button>A button</button>
   <fieldset><legend>Billing</legend>
@@ -254,9 +292,19 @@ async function selfTest() {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
     const page = await ctx.newPage();
     await page.goto(server.url);
+    // First, on a fresh load — as the real run does — before any other walk
+    // has moved focus.
+    expect('nav §7 skip link visible on focus', await skipLink(page), shouldPass);
+    // Reload: blur does not reset where the next Tab starts from, and the
+    // keyboard walk below must begin at the top as it does in the real run.
+    await page.reload();
     expect('item 3 overflow at 390', await overflow(page), shouldPass);
     expect('item 4 axe', await axe(page), shouldPass);
     expect('item 5 keyboard', await keyboard(page), shouldPass);
+    const narrow = await columnsOf(page, '.g');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    expect('responsive table: restacks below sm', restacks(narrow, await columnsOf(page, '.g')), shouldPass);
+    await page.setViewportSize({ width: 390, height: 900 });
     const bg = {};
     for (const scheme of SCHEMES) {
       await page.emulateMedia({ colorScheme: scheme });
@@ -297,7 +345,7 @@ async function main(argv) {
   try {
     for (const s of sites) {
       await checkSite(s, browsers, server);
-      process.stdout.write(`checked ${s.word}/${s.theme}\n`);
+      process.stdout.write(`checked ${s.word}/${s.label}\n`);
     }
   } finally {
     await server.close();

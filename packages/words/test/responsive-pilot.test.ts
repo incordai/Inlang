@@ -1,0 +1,49 @@
+/**
+ * The responsive and state pilot — hero-spec §5/§10, nav-spec §7.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { resolve, THEMES } from '../../theme/src/index.ts';
+import type { SpecBlock } from '../../core/src/spec.ts';
+import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { emit as hero } from '../hero/emit.web.ts';
+import { emit as nav } from '../nav/emit.web.ts';
+
+const context = (): EmitContext => ({
+  theme: resolve(THEMES.midnight, 'dark') as unknown as EmitContext['theme'],
+  target: 'web',
+  site: { name: 'aurora' },
+  slot: (name) => [{ tag: 'li', children: [name] }],
+  asset: (p) => p,
+});
+const block = (word: string, variant: string, props: Record<string, string> = {}): SpecBlock => ({
+  word, variant, modifiers: [], args: [], as: null, children: [], props: { title: 'Built in the dark', ...props },
+});
+const walk = (n: EmittedNode | string): EmittedNode[] =>
+  typeof n === 'string' ? [] : [n, ...(n.children ?? []).flatMap(walk)];
+const byClass = (n: EmittedNode, c: string) => walk(n).find((x) => x.attrs?.class?.split(' ').includes(c));
+
+test('hero-spec §10: split restacks to one column below sm', () => {
+  const out = hero(block('hero', 'split'), context());
+  assert.equal(out.style?.gridTemplateColumns, 'minmax(0, 1fr) minmax(0, 1fr)', 'CONTROL: two columns on a desktop');
+  assert.equal(out.below?.sm?.gridTemplateColumns, 'minmax(0, 1fr)');
+});
+
+test('hero-spec §10: center, stack and minimal are unchanged below sm', () => {
+  for (const v of ['center', 'stack', 'minimal']) {
+    assert.equal(hero(block('hero', v), context()).below, undefined, v);
+  }
+});
+
+test('hero-spec §5: under xs the actions stack full-width', () => {
+  const actions = byClass(hero(block('hero', 'center'), context()), 'az-hero-actions');
+  assert.equal(actions?.style?.flexDirection, undefined, 'CONTROL: a row on wider screens');
+  assert.deepEqual(actions?.below?.xs, { flexDirection: 'column', alignItems: 'stretch' });
+});
+
+test('nav-spec §7: the skip link is off-screen until focused, and shown when focused', () => {
+  const skip = byClass(nav(block('nav', 'bar'), context()), 'az-skip-link');
+  assert.equal(skip?.style?.transform, 'translateY(-200%)', 'CONTROL: hidden at rest');
+  assert.deepEqual(skip?.states?.focusVisible, { transform: 'none' });
+});

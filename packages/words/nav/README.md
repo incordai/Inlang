@@ -88,7 +88,7 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 Known gaps:
 
 - The scroll behaviours (`sticky` offset, `hide`, `shrink`, the `solid` logo swap) and dropdown/mobile menu interaction need the motion/overlay runtime, which is not built; the markup hooks are emitted
-- Phone and tablet layouts from the spec's responsive table are not implemented for any word yet: the web target emits inline styles only, with no media queries.
+- The skip link is shown when it receives keyboard focus (§7), checked in a browser by `test:visual`. The rest of the responsive table — the mobile menu — waits for the overlay engine; hiding the links first would leave the menu unreachable.
 
 ## Tested
 

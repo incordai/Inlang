@@ -229,6 +229,14 @@ try {
   check('the CONTAINER carries no measure — hero-spec §3',
     !!hero && ruleOf(hero) !== '' && !/max-width/.test(ruleOf(hero)));
   check('hero uses svh, not vh — hero-spec §6', /min-height: \d+svh/.test(ruleOf(hero)));
+  // The pilot of the style contract: a responsive row and a state, as CSS.
+  const classOf = (element) => /\baz-s-[0-9a-z]+/.exec(element ?? '')?.[0] ?? 'none';
+  const sm = azCss.slice(azCss.indexOf('@media (width < 768px) {'));
+  check('hero-spec §10: split restacks to one column below sm',
+    azCss.includes('@media (width < 768px) {') &&
+      new RegExp(`^  \\.${classOf(hero)} \\{ [^}]*grid-template-columns: minmax\\(0, 1fr\\);`, 'm').test(sm.slice(0, sm.indexOf('\n}'))));
+  check('nav-spec §7: the skip link is shown when focused',
+    azCss.includes(`.${classOf(elementWithClass(html, 'az-skip-link'))}:focus-visible { transform: none; }`));
   // Word markup carries no inline style; only the author's own components
   // (the fixture's, class fixture-…) style themselves.
   check('word markup has no inline style — every style is a generated class',

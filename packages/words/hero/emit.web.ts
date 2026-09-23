@@ -99,6 +99,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         display: 'flex', gap: px(t.space[16]), marginTop: px(t.space[48]),
         marginBottom: 0, listStyle: 'none', padding: 0,
       },
+      // §5: under 480px the primary goes full-width; the secondary stays a
+      // text link, which a full-width row does not change.
+      below: { xs: { flexDirection: 'column', alignItems: 'stretch' } },
       children: actions,
     });
   }
@@ -152,6 +155,12 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: variant === 'full' ? t.color.scrim : 'transparent',
       color: variant === 'full' ? t.color['on-scrim'] : t.color.text,
     },
+    // §10: under 768px `split` restacks to `stack` — text above, media
+    // below, which is already the source order. center, stack and minimal
+    // are unchanged; full's crop and scrim wait for the 3D runtime.
+    below: variant === 'split'
+      ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)', columnGap: 0 } }
+      : undefined,
     children,
   };
 }

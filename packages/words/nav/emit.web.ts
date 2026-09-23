@@ -273,6 +273,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
           color: t.color.text,
           transform: 'translateY(-200%)',
         },
+        // §7: visually hidden until focused — and SHOWN when focused. Without
+        // this state the link was reachable but stayed off-screen for good.
+        states: { focusVisible: { transform: 'none' } },
         children: ['Skip to content'],
       },
       ...bar,

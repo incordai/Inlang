@@ -38,3 +38,17 @@ for (const w of words) {
       `the preview must actually use ${w}`);
   });
 }
+
+/* Extra previews (preview.<variant>.az, used by test:visual) compile too. */
+for (const w of words) {
+  for (const f of readdirSync(join(WORDS, w)).filter((f) => /^preview\.[a-z]+\.az$/.test(f))) {
+    test(`${w}/${f}: compiles without errors and uses its variant`, () => {
+      const variant = f.split('.')[1];
+      const r = compile(readFileSync(join(WORDS, w, f), 'utf8'), { manifests });
+      assert.ok(r.ok, formatDiagnostics(r.diagnostics, `${w}/${f}`));
+      const spec = r.spec;
+      assert.ok(spec?.pages.some((p) => blocksFor(spec, p).some((b) => b.word === w && b.variant === variant)),
+        `${f} must render ${w} ${variant}`);
+    });
+  }
+}
