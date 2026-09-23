@@ -54,7 +54,7 @@ jobs:
       - run: pnpm verify:build
 
   visual:
-    name: word gate in real browsers (items 3-7)
+    name: 12-point word gate and thumbnails
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -66,5 +66,9 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       # Browser builds for the pinned Playwright, plus the OS libraries they need.
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
-      - run: node scripts/visual.mjs --self-test
-      - run: pnpm test:visual
+      - run: pnpm lint
+      - run: pnpm test:visual --self-test
+      - run: pnpm gate --self-test
+      # All 12 gate items for every word; runs the browser checks itself.
+      - run: pnpm gate
+      - run: pnpm thumbnails --verify

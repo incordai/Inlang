@@ -104,7 +104,7 @@ free while snapshots exist — authoring-experience §2).
 - [ ] all 5 structure keywords implemented and covered by fixtures
 - [ ] `az lint` fails a deliberately non-compliant word (tests A7)
 - [ ] 3 themes, all blocks rendering correctly in each, light and dark
-- [ ] thumbnails generated for every block and every variant
+- [x] thumbnails generated for every block and every variant
 - [ ] mobile motion vocabulary **designed and written down** (PRD §6.4)
 
 ⛔ **Do not add block #12.** Not for any reason. Log requests in a backlog file.
@@ -240,11 +240,21 @@ All of this is checked by `pnpm test:visual` in CI (axe, keyboard, overflow,
 reduced motion, schemes, restack, column, skip link; Chromium, plus Firefox
 and WebKit for overflow and page errors). Block validation tables are
 manifest `checks`; `az lint` exists.
-Not built: nav's mobile drawer and footer `mega` accordions (both need the
-overlay engine or a second DOM form), pricing's "in every plan" row
-collapse, thumbnails, and the 12-point gate as one command. The
-play/copy/video/popup behaviours emit buttons with a compile warning
-(AZ1222) until their runtime exists.
+`pnpm gate [words/<name>]` runs the 12-point word gate as one command and
+passes for all eleven words: it aggregates typecheck, `az lint`, the
+browser checks, each preview with a site nav and footer built and
+server-rendered, the bundle budget, exact pins, docs and previews, and the
+`tested` field (`pnpm gate --self-test` proves each non-browser item can
+fail). The browser items cover each word's previews — preview.az and any
+preview.<variant>.az — not yet every variant, so that box stays open.
+`pnpm thumbnails` renders one PNG per word × variant (37; `none` renders
+nothing) into the gitignored .thumbnails/ — no doc says where thumbnails
+ship, so they are build output; `--verify` renders twice and requires
+identical bytes. CI runs the gate and the thumbnail check.
+Footer `mega` accordions (cabe922) and pricing's "in every plan" list
+(4c4a61f) have landed. Not built: nav's mobile drawer, which needs the
+overlay engine. The play/copy/video/popup behaviours emit buttons with a
+compile warning (AZ1222) until their runtime exists.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape

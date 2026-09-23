@@ -8,17 +8,24 @@ make publicly.**
 ## 1. Commands
 
 ```bash
-pnpm gate                    # everything below; what CI runs
+pnpm gate                    # the 12-point word gate (§3), every word
 pnpm gate words/hero         # the 12-point gate for one word
+pnpm gate --self-test        # proves each non-browser item can fail
 
 pnpm typecheck               # tsc --noEmit, all packages
-pnpm lint                    # eslint + prettier + az-lint + dependency rules
-pnpm test                    # vitest unit
-pnpm test:visual             # playwright snapshots
-pnpm test:a11y               # axe over every word preview
-pnpm test:determinism        # build twice, diff
-pnpm test:offline            # build with network disabled
-pnpm size                    # bundle budgets
+pnpm lint                    # az lint over every word pack (theme tokens, A7)
+pnpm test                    # unit: node --test; includes the dependency
+                             #   rules, determinism (two builds, identical
+                             #   bytes) and the offline build (M1 exit)
+pnpm verify                  # typecheck + test
+pnpm verify:build            # install, vite build and SSR the GRAMMAR §8
+                             #   fixture; DOM rules, security, bundle budget
+pnpm test:visual             # Playwright + axe over every preview: overflow,
+                             #   a11y, keyboard, reduced motion, schemes
+pnpm test:visual --self-test # proves each browser check can fail
+pnpm thumbnails              # one PNG per word × variant, .thumbnails/
+pnpm thumbnails --verify     # render twice; every variant, identical bytes
+pnpm coverage                # variants and props each emitter implements
 ```
 
 Every check must be runnable locally with the same command CI uses. **A check
@@ -159,16 +166,25 @@ than guess.
 
 ## 7. CI
 
-Runs on every PR: `pnpm gate` on Node 22, Ubuntu. Visual and a11y jobs run in
-parallel with unit tests. Nightly: full matrix (macOS, Windows, Node 22 + 24)
-plus `npm audit` — **block on high/critical**.
+`.github/workflows/ci.yml`, on every push and PR, as parallel jobs on Node 22,
+Ubuntu — each step a command from §1, so CI and a local run cannot differ:
+
+- **verify** — `pnpm verify` (typecheck + unit: dependency rules,
+  determinism, offline build)
+- **build** — `pnpm verify:build`
+- **word gate** — `pnpm lint`, `pnpm test:visual --self-test`,
+  `pnpm gate --self-test`, `pnpm gate` (all 12 items for every word; it runs
+  the browser checks itself), `pnpm thumbnails --verify`
+
+Nightly: the verify job across macOS, Windows and Ubuntu on Node 22 and 24.
+`npm audit` is **not yet configured** in CI.
 
 **Windows is in the nightly matrix for a reason** — it is the primary
 development platform for this project, and path length, line endings and
 symlink permissions all bite a JS build tool there (word-quality-gate §5.3).
 A Windows failure found nightly is cheap; found by a contributor is not.
 
-Required to merge: typecheck, lint, unit, determinism, dependency rules.
+Required to merge: every job above.
 Visual snapshots may be updated in a PR **only with a written explanation of
 what changed and why** (CONVENTIONS §9).
 
