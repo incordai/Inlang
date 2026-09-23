@@ -309,6 +309,31 @@ content with JS disabled.
 **If FAILED:** switch the web target to Astro + React islands. This is why
 `core` must not know the framework — the swap should touch only `target-web`.
 
+### Progress (2026-09-23): the HTML half, without `vite-react-ssg`
+
+The pre-render is the target's own, not the dependency: a generated project's
+`npm run build` is `node az-vite/build.mjs` — Vite's client build, then an SSR
+build of `src/entry-server.tsx` (`renderToString`), then every route's
+`index.html` gets its page's markup inside `#root`. The client hydrates
+(`hydrateRoot`) a root that has markup and renders one that does not (the dev
+server). The build fails on any `console.error` during the pre-render, which
+is where React reports a server-side problem. No new dependency: `react-dom`
+and `vite` already are.
+
+Measured, on what ships (`dist/`), not on a render in the test process:
+
+- `pnpm verify:build`: every route's `dist/…/index.html` carries its page
+  inside `#root`; the build and its pre-render print nothing.
+- `pnpm test:visual` / `pnpm gate`, per word preview: `no-js` loads the page
+  with JavaScript disabled — `<main>` has content, every FAQ answer is open
+  and readable, an auth form has a field and a submit, a dynamic footer year
+  shows its fallback; `hydration` loads it with JavaScript on and fails on
+  any console or page error until the runtime marks it ready. Both are
+  self-tested against an empty-root page and a half-rendered one.
+
+Still open: the Lighthouse SEO score (M5). Status stays `UNVERIFIED` until it
+is measured.
+
 ---
 
 ## A7 — Theme compliance is mechanically enforceable

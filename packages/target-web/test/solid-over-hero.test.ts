@@ -6,7 +6,9 @@
  * bar showed the page background, and its light `inverse` logo sat on that —
  * the contrast problem §4 exists to prevent. On a page with a solid nav, a
  * `full` or 3D hero opening <main> is now pulled up under the nav by the
- * nav's height, and reserves that height inside itself.
+ * nav's height, and reserves that height inside itself. A backdrop opening
+ * <main> is fixed behind the page, so the hero after it is the one pulled
+ * up — never the backdrop itself.
  */
 
 import { test } from 'node:test';
@@ -30,7 +32,7 @@ const css = (nav: string) => {
   return emit(r.spec, { emitters: WEB_EMITTERS }).find((f) => f.path === 'src/theme.css')!.content;
 };
 
-const RULE = /\.az-page:has\(\[data-az-behaviour="solid"\]\) > \.az-main > :first-child:is\(\.az-hero--full, \[data-az-3d-host\]\) \{\s*margin-top: calc\(-1 \* var\(--az-size-nav\)\);\s*border-top: var\(--az-size-nav\) solid transparent;/;
+const RULE = /\.az-page:has\(\[data-az-behaviour="solid"\]\) > \.az-main > :is\(:first-child, \.az-scene--backdrop:first-child \+ \*\):is\(\.az-hero--full, \[data-az-3d-host\]\):not\(\.az-scene--backdrop\) \{\s*margin-top: calc\(-1 \* var\(--az-size-nav\)\);\s*border-top: var\(--az-size-nav\) solid transparent;/;
 
 test('a solid nav pulls a full or 3D hero up under itself', () => {
   const sheet = css('bar solid');

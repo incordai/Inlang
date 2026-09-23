@@ -58,7 +58,7 @@ export function seedViews(
 export function threeMain(header: string): string {
   return `${header}import { StrictMode } from "react";
 import { flushSync } from "react-dom";
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import App from "./App.tsx";
 import { decide3d } from "./az3d/gate.ts";
 import "./theme.css";
@@ -66,8 +66,13 @@ import "./az.css";
 
 const el = document.getElementById("root");
 if (!el) throw new Error("root element missing");
-const root = createRoot(el);
-flushSync(() => root.render(<StrictMode><App route={window.location.pathname} /></StrictMode>));
+const app = <StrictMode><App route={window.location.pathname} /></StrictMode>;
+// A built page arrives pre-rendered (az-vite/build.mjs): its markup is already
+// in the DOM for the gate to read, and is hydrated. The dev server serves an
+// empty root, rendered synchronously so the gate below sees the views.
+el.firstElementChild
+  ? hydrateRoot(el, app)
+  : flushSync(() => createRoot(el).render(app));
 const start = decide3d(window);
 if (start) {
   import("./az3d/index.ts").then(

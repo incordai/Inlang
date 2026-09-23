@@ -42,17 +42,13 @@ const EXACT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const RAN = /^(chromium|firefox|webkit)-\d+(\.\d+)?$/;
 /** Items 3–7: which test:visual checks each gate item is made of. */
 const VISUAL = {
-  3: ['compile', 'overflow', 'restack', 'column', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'firefox', 'webkit'],
+  3: ['compile', 'overflow', 'no-js', 'hydration', 'restack', 'column', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'firefox', 'webkit'],
   4: ['axe', 'copy'],
   5: ['keyboard', 'skip-link', 'drawer', 'dropdown', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'play'],
   6: ['reduced-motion', 'overlay-motion', 'nav-motion'],
   7: ['schemes'],
 };
 const ITEMS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-
-const SSR = 'import { renderToStaticMarkup } from "react-dom/server";\n' +
-  'import App from "./src/App.tsx";\n' +
-  'process.stdout.write(renderToStaticMarkup(<App route={process.argv[2]} />));\n';
 
 /* ---- which words -------------------------------------------------------- */
 
@@ -144,7 +140,9 @@ function visual(words) {
 
 /**
  * Items 8 and 9: the word's preview with a site-level nav and footer added
- * (unless it declares its own), built, served by SSR, and measured.
+ * (unless it declares its own), built by the project's own build — which
+ * pre-renders every page and fails on a React warning — and the page it
+ * SHIPS measured.
  */
 async function integration(words, work) {
   const sites = words.map((word) => {
@@ -160,7 +158,7 @@ async function integration(words, work) {
     return { word, route, dir: join(work, word), source: lines.join('\n'),
       assetsFrom: join(WORDS, word, 'preview-assets') };
   });
-  await buildSites(sites, work, { ssr: SSR });
+  await buildSites(sites, work);
 
   for (const s of sites) {
     if (!s.compiled) {
@@ -168,15 +166,14 @@ async function integration(words, work) {
       put(s.word, 9, false, 'not built');
       continue;
     }
-    const r = spawnSync(process.execPath, [join(s.proj, 'ssr-out/ssr.js'), s.route.replace(/(.)\/$/, '$1')],
-      { cwd: s.proj, encoding: 'utf8' });
-    const html = r.stdout;
+    // The page as shipped: its pre-rendered #root in dist/.
+    const shipped = readFileSync(join(s.dist, s.route === '/' ? 'index.html' : `${s.route.slice(1)}index.html`), 'utf8');
+    const html = shipped.slice(shipped.indexOf('<div id="root">'), shipped.lastIndexOf('</body>'));
     // A whole class token: `az-nav` must not match `az-nav-logo`.
     const at = (cls) => html.search(new RegExp(`class="(?:[^"]*\\s)?${cls}(?:\\s|")`));
     const [nav, own, footer] = [at('az-nav'), at(`az-${s.word}`), at('az-footer')];
     const problems = [];
-    if (r.status !== 0) problems.push(`render failed: ${lastLines(r.stderr, 2)}`);
-    if (r.stderr.trim()) problems.push(`React: ${r.stderr.trim().split('\n')[0]}`);
+    if (!/<main\b/.test(html)) problems.push('the page ships an empty root — not pre-rendered');
     if (nav < 0 || footer < 0 || own < 0) problems.push(`missing: ${[['nav', nav], [s.word, own], ['footer', footer]].filter(([, i]) => i < 0).map(([n]) => n).join(', ')}`);
     else if (!(nav <= own && own <= footer)) problems.push('nav does not open the page or footer does not close it');
     const mains = (html.match(/<main\b/g) ?? []).length;

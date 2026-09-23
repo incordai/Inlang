@@ -40,7 +40,8 @@ test('a 3D site depends on three at the verified pin, and knows it is 3D', () =>
 
 test('the entry paints the page first, then loads 3D only through the gate', () => {
   const main = file(project(THREE_D()), 'src/main.tsx');
-  assert.match(main, /flushSync\(\(\) => root\.render/);
+  // Pre-rendered markup is already painted; without it, a synchronous render.
+  assert.match(main, /el\.firstElementChild\s*\? hydrateRoot\(el, app\)\s*: flushSync\(\(\) => createRoot\(el\)\.render\(app\)\)/);
   assert.match(main, /const start = decide3d\(window\);\nif \(start\) \{\n  import\("\.\/az3d\/index\.ts"\)/);
   assert.doesNotMatch(main, /import .* from "\.\/az3d\/index\.ts"/, 'the 3D chunk is never a static import');
 });

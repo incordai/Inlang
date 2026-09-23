@@ -10,13 +10,15 @@
  *
  * It does four things the unit suite cannot:
  *   1. compiles the GRAMMAR §8 fixture through the real CLI entry point
- *   2. installs the emitted package.json and runs `vite build`
- *   3. EXECUTES the generated app (react-dom/server) to get real DOM
- *   4. asserts that DOM against the rules the specs state
+ *   2. installs the emitted package.json and runs the project's OWN build,
+ *      which bundles the client and pre-renders every page (ASSUMPTIONS A6)
+ *   3. reads the pages the build SHIPS — each route's HTML in dist/
+ *   4. asserts that markup against the rules the specs state
  *
- * Step 3 is the point. A green `vite build` proves the code COMPILED; only
- * rendering it proves the hero has one <h1>, that the eyebrow is not a
- * heading, and that a title containing </script> is inert.
+ * Step 3 is the point. A green build proves the code COMPILED; only the
+ * shipped markup proves the hero has one <h1>, that the eyebrow is not a
+ * heading, and that a title containing </script> is inert — as a crawler
+ * and a visitor with JavaScript off receive it.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -82,6 +84,42 @@ const failing = (file, args, cwd, env = {}) => {
   }
 };
 
+/**
+ * A generated project's own build: `npm run build` (az-vite/build.mjs).
+ * Returns its stderr — with logging at `error`, anything there is a problem
+ * (a React warning while pre-rendering fails the build outright).
+ */
+function shippedBuild(proj, env = {}) {
+  const r = spawnSync(process.execPath, [join(proj, 'az-vite/build.mjs')], {
+    cwd: proj, encoding: 'utf8',
+    env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH, AZ_BUILD_LOG: 'error', ...env },
+  });
+  if (r.status !== 0) throw new Error(`the project build failed:\n${r.stderr}`);
+  return r.stderr;
+}
+
+/** The markup a built page ships: the contents of its #root, as written into dist/. */
+function shippedRoot(proj, route) {
+  const file = join(proj, 'dist', route === '/' ? '' : route.slice(1), 'index.html');
+  const page = readFileSync(file, 'utf8');
+  const open = '<div id="root">';
+  const start = page.indexOf(open) + open.length;
+  return page.slice(start, page.lastIndexOf('</div>', page.indexOf('</body>')));
+}
+
+/**
+ * One route drawn by the App on its own — for the not-found page, which no
+ * static file holds. Bundled like the build's server entry.
+ */
+function renderRoute(proj, route) {
+  writeFileSync(join(proj, 'ssr.tsx'),
+    'import { renderToString } from "react-dom/server";\n' +
+    'import App from "./src/App.tsx";\n' +
+    'process.stdout.write(renderToString(<App route={process.argv[2]} />));\n');
+  vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], proj);
+  return node(join(proj, 'ssr-out/ssr.js'), [route], proj);
+}
+
 /** base64url, for building test tokens with a chosen role claim. */
 const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 
@@ -123,23 +161,17 @@ try {
   node(CLI, ['build', site, '--out', proj], work);
   console.log('compiled the GRAMMAR §8 fixture\n');
 
-  /* ---- 2. install and build -------------------------------------------- */
+  /* ---- 2. install and build — the project's OWN build --------------------- */
+  // `npm run build` is az-vite/build.mjs: the client bundle, then every page
+  // pre-rendered into its HTML file (ASSUMPTIONS A6). It runs the render in
+  // Node, where no `window` exists, and fails on any React warning — so a
+  // page that renders differently from what the browser hydrates, or touches
+  // the DOM while rendering, fails here.
   npm(['install', '--no-audit', '--no-fund'], proj);
-  vite(['build'], proj);
-  console.log('npm install + vite build succeeded\n');
+  const buildLog = shippedBuild(proj);
+  console.log('npm install + the project build (client + pre-render) succeeded\n');
 
-  /* ---- 3. execute it --------------------------------------------------- */
-  writeFileSync(join(proj, 'ssr.tsx'),
-    'import { renderToStaticMarkup } from "react-dom/server";\n' +
-    'import App from "./src/App.tsx";\n' +
-    '// The behaviour runtime must never be reached during a server render.\n' +
-    'if (typeof window !== "undefined") throw new Error("window exists during SSR");\n' +
-    '// Each route renders on its own, as a browser loading that page would.\n' +
-    'const routes = JSON.parse(process.argv[2]);\n' +
-    'process.stdout.write(JSON.stringify(Object.fromEntries(\n' +
-    '  routes.map((r) => [r, renderToStaticMarkup(<App route={r} />)]))));\n');
-  vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], proj);
-
+  /* ---- 3. the SHIPPED pages -------------------------------------------- */
   // The routes are whatever pages the BUILD produced as HTML files, so this
   // also proves every page got one: `/` is index.html, `/work` work/index.html.
   const htmlFiles = (dir, prefix = '') => readdirSync(join(proj, 'dist', dir), { withFileTypes: true })
@@ -147,15 +179,14 @@ try {
       ? htmlFiles(join(dir, e.name), `${prefix}/${e.name}`)
       : e.name === 'index.html' ? [prefix || '/'] : []);
   const routes = htmlFiles('.');
-  // stderr is kept: React reports a misspelt DOM attribute there as a
-  // warning, and the page still renders — so only stderr shows it.
-  const ssr = spawnSync(process.execPath,
-    [join(proj, 'ssr-out/ssr.js'), JSON.stringify([...routes, '/no-such-page'])],
-    { cwd: proj, encoding: 'utf8' });
-  if (ssr.status !== 0) throw new Error(`ssr failed: ${ssr.stderr}`);
-  const rendered = JSON.parse(ssr.stdout);
-  const notFound = rendered['/no-such-page'];
-  delete rendered['/no-such-page'];
+  // Every check below reads the markup the site SHIPS: each page's #root, as
+  // written into dist/ by the build — what a crawler and a no-JS visitor get.
+  const rendered = Object.fromEntries(routes.map((r) => [r, shippedRoot(proj, r)]));
+  check('A6: every page ships its markup pre-rendered, not an empty root',
+    routes.every((r) => rendered[r].includes('<main')), routes.join(' '));
+  // An unknown path has no file on a static host: its not-found page is the
+  // App's, drawn in the browser. That one render is checked on its own.
+  const notFound = renderRoute(proj, '/no-such-page');
   // Every page in route order, so the page-level checks below still see /
   // first and can find each page by its data-route.
   const html = routes.map((r) => rendered[r]).join('');
@@ -208,7 +239,7 @@ try {
     routes.every((r) => (rendered[r].match(/<main/g) ?? []).length === 1 && rendered[r].includes(`data-route="${r}"`)));
   check('an unknown path renders not-found, not a site page',
     /az-not-found/.test(notFound) && !/data-route="\/"/.test(notFound));
-  check('React renders without warnings', ssr.stderr.trim() === '', ssr.stderr.trim().split('\n')[0]);
+  check('the build and its pre-render report nothing (React warnings fail it)', buildLog.trim() === '', buildLog.trim().split('\n')[0]);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
 
   /* ---- M3: the escape hatch mounts author components with the theme --- */
@@ -477,9 +508,9 @@ try {
   const evilProj = join(work, 'evil');
   node(CLI, ['build', evil, '--out', evilProj], work);
   cpSync(join(proj, 'node_modules'), join(evilProj, 'node_modules'), { recursive: true });
-  cpSync(join(proj, 'ssr.tsx'), join(evilProj, 'ssr.tsx'));
-  vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], evilProj);
-  const evilHtml = JSON.parse(node(join(evilProj, 'ssr-out/ssr.js'), [JSON.stringify(['/'])], evilProj))['/'];
+  // As shipped: the project's own build, pre-rendered into dist/index.html.
+  shippedBuild(evilProj);
+  const evilHtml = shippedRoot(evilProj, '/');
 
   // M4: auth code is emitted only for a site that uses auth — this one does not.
   check('M4: a site without auth ships no auth runtime or wiring',

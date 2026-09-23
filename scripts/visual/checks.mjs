@@ -213,3 +213,65 @@ export async function skipLink(page) {
   }
   return { pass: true, detail: '' };
 }
+
+/**
+ * ASSUMPTIONS A6: the page as shipped reads with JavaScript OFF — the
+ * pre-rendered HTML carries the content, and every "works without JS"
+ * claim holds: FAQ answers open and readable (faq-spec §8), an auth form
+ * that can be filled in (auth-spec §5), and a dynamic footer year showing
+ * its fallback (footer-spec §5). Opens its own context: JS is a context
+ * setting, not a page one.
+ */
+export async function noJs(browser, url) {
+  const ctx = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 1440, height: 900 } });
+  try {
+    const page = await ctx.newPage();
+    await page.goto(url, { waitUntil: 'load' });
+    const problems = await page.evaluate(() => {
+      const shown = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden]');
+      const text = (el) => (el.textContent ?? '').trim();
+      const out = [];
+      const main = document.querySelector('main');
+      if (!main || !text(main)) out.push('<main> is empty — the page is not pre-rendered');
+      for (const a of document.querySelectorAll('.az-faq-answer')) {
+        if (!shown(a) || !text(a)) out.push(`FAQ answer #${a.id || '?'} is not readable`);
+      }
+      for (const f of document.querySelectorAll('form.az-auth-form')) {
+        // reset's set-password state ships hidden: the runtime shows it (§5).
+        if (f.closest('[hidden]')) continue;
+        const input = [...f.querySelectorAll('input')].find(shown);
+        const submit = [...f.querySelectorAll('button[type="submit"], button:not([type])')].find(shown);
+        if (!input || !submit) out.push(`auth form "${f.dataset.flow ?? '?'}" has no ${input ? 'submit button' : 'field'} to use`);
+      }
+      for (const y of document.querySelectorAll('[data-year]')) {
+        if (!/^\d{4}$/.test(text(y))) out.push(`footer year shows "${text(y)}", not a year`);
+      }
+      return out;
+    });
+    return { pass: problems.length === 0, detail: problems.join('; ') };
+  } finally {
+    await ctx.close();
+  }
+}
+
+/**
+ * A pre-rendered page must hydrate cleanly: React reports a mismatch as a
+ * console error (an uncaught error in production builds) and throws the
+ * server markup away. Any console or page error from the first load until
+ * the page is marked ready (`readySelector`) fails it.
+ */
+export async function hydration(browser, url, readySelector) {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForSelector(readySelector, { state: 'attached' });
+    await page.waitForTimeout(SCROLL_SETTLE_MS);
+    return { pass: errors.length === 0, detail: errors.map((e) => e.split('\n')[0]).join('; ') };
+  } finally {
+    await ctx.close();
+  }
+}

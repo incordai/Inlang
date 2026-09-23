@@ -31,7 +31,9 @@ const execFileP = promisify(execFile);
 
 /** node <script> …, with the bundled words; rejects with stdout/stderr attached. */
 export const node = (script, args, cwd) => execFileP(process.execPath, [script, ...args], {
-  cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, AZ_WORDS: WORDS },
+  cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  // AZ_BUILD_LOG quiets a project's own build (az-vite/build.mjs) to errors.
+  env: { AZ_BUILD_LOG: 'error', ...process.env, AZ_WORDS: WORDS },
 });
 
 /** Run `fn` over `items`, at most `limit` at a time, results in input order. */
@@ -54,10 +56,9 @@ export function firstRoute(source) {
 /**
  * Build every site: `{ dir, source, assetsFrom? }` in, and on return each
  * site carries `compiled`, `error` (compiler errors, when it did not
- * compile), `proj` and `dist`. With `ssr`, `ssr.tsx` is written into each
- * project and built to `ssr-out/ssr.js` as well.
+ * compile), `proj` and `dist` — the site as it ships, every page pre-rendered.
  */
-export async function buildSites(sites, work, { ssr } = {}) {
+export async function buildSites(sites, work) {
   if (!NPM_CLI) throw new Error(`pipeline: npm-cli.js not found in the node install at ${NODE_DIR}`);
   for (const s of sites) {
     mkdirSync(s.dir, { recursive: true });
@@ -98,12 +99,9 @@ export async function buildSites(sites, work, { ssr } = {}) {
 
   await pool(built, BUILD_CONCURRENCY, async (s) => {
     symlinkSync(join(s.install, 'node_modules'), join(s.proj, 'node_modules'), 'dir');
-    const vite = join(s.proj, 'node_modules/vite/bin/vite.js');
-    await node(vite, ['build', '--logLevel', 'error'], s.proj);
+    // The project's OWN build (`npm run build`): the client bundle, then every
+    // page pre-rendered into its HTML — so every check sees what ships.
+    await node(join(s.proj, 'az-vite/build.mjs'), [], s.proj);
     s.dist = join(s.proj, 'dist');
-    if (ssr) {
-      writeFileSync(join(s.proj, 'ssr.tsx'), ssr);
-      await node(vite, ['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out', '--logLevel', 'error'], s.proj);
-    }
   });
 }

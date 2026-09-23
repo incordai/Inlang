@@ -165,16 +165,24 @@ function stableJson(value: unknown): string {
 /** A node carries one of the given word classes. */
 const isWord = (node: EmittedNode | undefined, cls: RegExp) => cls.test(node?.attrs?.class ?? '');
 
+// `az-nav-frame` is the pinned frame a shrinking nav sits in.
+const NAV = /(^| )(az-nav|az-nav-frame)( |$)/;
+const BACKDROP = /(^| )az-scene--backdrop( |$)/;
+
 /**
- * The run of a page's leading nodes that sit BEFORE <main>: its nav, and a
- * `scene backdrop` placed with it. The skip link targets <main>, so the nav
- * must precede it — inside, the skip link skipped nothing (nav-spec §7).
+ * A page's nodes with its leading nav moved BEFORE <main>. The skip link
+ * targets <main>, so the nav must precede it — inside, the skip link skipped
+ * nothing (nav-spec §7). A `scene backdrop` the author placed among the
+ * leading nodes is named content (scene-spec §9: role="img", its `alt`), so
+ * it opens <main> instead of sitting outside every landmark; it is fixed
+ * behind the page, so where it sits in the DOM does not move it on screen.
  */
-function leadOf(nodes: readonly EmittedNode[]): number {
-  let n = 0;
-  // `az-nav-frame` is the pinned frame a shrinking nav sits in.
-  while (n < nodes.length && isWord(nodes[n], /(^| )(az-nav|az-nav-frame|az-scene--backdrop)( |$)/)) n++;
-  return n;
+function leadOf(nodes: readonly EmittedNode[]): { lead: number; nodes: EmittedNode[] } {
+  let run = 0;
+  while (run < nodes.length && (isWord(nodes[run], NAV) || isWord(nodes[run], BACKDROP))) run++;
+  const navs = nodes.slice(0, run).filter((n) => isWord(n, NAV));
+  const backdrops = nodes.slice(0, run).filter((n) => !isWord(n, NAV));
+  return { lead: navs.length, nodes: [...navs, ...backdrops, ...nodes.slice(run)] };
 }
 
 /** The run of trailing nodes that sit AFTER </main>: the footer, a landmark only outside <main>. */
@@ -188,9 +196,9 @@ function tailOf(nodes: readonly EmittedNode[], lead: number): number {
 interface LaidOut { route: string; lead: number; tail: number; layout?: 'side'; nodes: EmittedNode[] }
 
 function layOut(page: { route: string; nodes: EmittedNode[] }): LaidOut {
-  const lead = leadOf(page.nodes);
-  const side = page.nodes.slice(0, lead).some((n) => isWord(n, /(^| )az-nav--side( |$)/));
-  return { route: page.route, lead, tail: tailOf(page.nodes, lead), ...(side ? { layout: 'side' as const } : {}), nodes: page.nodes };
+  const { lead, nodes } = leadOf(page.nodes);
+  const side = nodes.slice(0, lead).some((n) => isWord(n, /(^| )az-nav--side( |$)/));
+  return { route: page.route, lead, tail: tailOf(nodes, lead), ...(side ? { layout: 'side' as const } : {}), nodes };
 }
 
 function appTsx(
@@ -429,7 +437,14 @@ export function Site(
   // A layout effect, so a deep-linked FAQ answer opens before first paint
   // (faq §7.4); it never runs in a server render, so nothing there reaches
   // window. attach returns its own cleanup, so StrictMode's double run is safe.
-  useLayoutEffect(() => attach(document), []);
+  // \`data-az-ready\` marks the page hydrated and wired: a pre-rendered page
+  // shows its markup before either, and a script or a test that acts on it
+  // earlier meets a page whose behaviours are not attached yet.
+  useLayoutEffect(() => {
+    const detach = attach(document);
+    document.documentElement.setAttribute("data-az-ready", "");
+    return () => { document.documentElement.removeAttribute("data-az-ready"); detach(); };
+  }, []);
   return (
     <div className="az-site" data-site={name} data-width={width}
          data-theme={theme} data-accent={accent} data-pattern={pattern}>
@@ -502,7 +517,7 @@ function solidNavCss(spec: Spec, theme: ThemeLike): string {
   return `
 /* nav-block-spec §4: a solid nav is transparent over a full or 3D hero. */
 :root { --az-size-nav: ${theme.size.nav}px; }
-.az-page:has([data-az-behaviour="solid"]) > .az-main > :first-child:is(.az-hero--full, [data-az-3d-host]) {
+.az-page:has([data-az-behaviour="solid"]) > .az-main > :is(:first-child, .az-scene--backdrop:first-child + *):is(.az-hero--full, [data-az-3d-host]):not(.az-scene--backdrop) {
   margin-top: calc(-1 * var(--az-size-nav));
   border-top: var(--az-size-nav) solid transparent;
 }
@@ -586,6 +601,9 @@ function htmlEntries(spec: Spec): Record<string, string> {
   return out;
 }
 
+// `lang` is "en": the grammar has no site locale to take it from — `site`
+// declares none, and pricing's `locale` formats money, not the page. When
+// the site gains one, this is where it lands.
 function indexHtml(spec: Spec): string {
   return `<!doctype html>
 <html lang="en">
@@ -600,6 +618,79 @@ function indexHtml(spec: Spec): string {
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
+`;
+}
+
+/**
+ * src/entry-server.tsx — one route's markup, for the build to write into its
+ * page (ASSUMPTIONS A6). The same tree main.tsx hydrates, so the browser
+ * adopts the markup instead of replacing it.
+ */
+function entryServer(): string {
+  return `${HEADER}import { StrictMode } from "react";
+import { renderToString } from "react-dom/server";
+import App from "./App.tsx";
+
+export function render(route: string): string {
+  return renderToString(<StrictMode><App route={route} /></StrictMode>);
+}
+`;
+}
+
+/**
+ * az-vite/build.mjs — the project's build: the client bundle, then a server
+ * build of entry-server.tsx, then every page's HTML filled with its route's
+ * markup. A page then reads with JavaScript off, and a crawler that does not
+ * run it sees the content (ASSUMPTIONS A6). Plain JS, so Node runs it as is.
+ *
+ * Any React warning while rendering fails the build: a warning here is a
+ * page that renders differently from what the browser will hydrate.
+ */
+function buildScript(): string {
+  return `${HEADER}import { build } from "vite";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const root = fileURLToPath(new URL("..", import.meta.url));
+const dist = join(root, "dist");
+const server = join(root, ".az-ssr");
+const logLevel = process.env.AZ_BUILD_LOG ?? "info";
+
+// 1. The client: what the browser loads (vite.config.ts, the build guard).
+await build({ root, logLevel });
+
+// 2. The server entry, bundled for Node. Its own minimal config: it is never
+//    shipped, so it needs neither the page inputs nor the bundle guard — but
+//    it reads the same public environment the page does.
+await build({
+  root, logLevel, configFile: false, envPrefix: ${JSON.stringify(PUBLIC_ENV_PREFIX)},
+  build: { ssr: "src/entry-server.tsx", outDir: server, emptyOutDir: true },
+});
+
+// 3. Every page's HTML, filled with its route's markup.
+const { render } = await import(pathToFileURL(join(server, "entry-server.js")).href);
+const pages = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+  e.isDirectory() ? (e.name === "assets" ? [] : pages(join(dir, e.name)))
+    : e.name === "index.html" ? [join(dir, e.name)] : []);
+const warnings = [];
+const report = console.error;
+console.error = (...args) => { warnings.push(args.map(String).join(" ")); };
+try {
+  for (const file of pages(dist)) {
+    const at = relative(dist, file).split(sep).slice(0, -1).join("/");
+    const route = at === "" ? "/" : "/" + at;
+    const html = readFileSync(file, "utf8");
+    if (!html.includes('<div id="root"></div>')) throw new Error("prerender: " + route + " has no empty root to fill");
+    writeFileSync(file, html.replace('<div id="root"></div>', '<div id="root">' + render(route) + "</div>"));
+  }
+} finally {
+  console.error = report;
+  rmSync(server, { recursive: true, force: true });
+}
+if (warnings.length > 0) {
+  throw new Error("prerender: React reported while rendering — the page would not match what the browser hydrates:\\n" + warnings.join("\\n"));
+}
 `;
 }
 
@@ -686,17 +777,24 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
       { path: `${AUTH_DIR}/react.tsx`, content: authReact() },
     ] : []),
     { path: 'src/runtime.tsx', content: runtimeTsx() },
+    { path: 'src/entry-server.tsx', content: entryServer() },
+    { path: 'az-vite/build.mjs', content: buildScript() },
     {
       path: 'src/main.tsx',
       content: seeded.used ? threeMain(HEADER) : `${HEADER}import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./theme.css";
 import "./az.css";
 
 const el = document.getElementById("root");
 if (!el) throw new Error("root element missing");
-createRoot(el).render(<StrictMode><App route={window.location.pathname} /></StrictMode>);
+const app = <StrictMode><App route={window.location.pathname} /></StrictMode>;
+// A built page arrives pre-rendered (az-vite/build.mjs) and is hydrated; the
+// dev server serves an empty root, which is rendered from scratch.
+el.firstElementChild
+  ? hydrateRoot(el, app)
+  : createRoot(el).render(app);
 `,
     },
     {
@@ -767,7 +865,8 @@ ${schemeCss(named)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${side
         name: packageName(spec.site.name),
         private: true,
         type: 'module',
-        scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+        // `build` pre-renders every page (az-vite/build.mjs); `dev` serves from Vite.
+        scripts: { dev: 'vite', build: 'node az-vite/build.mjs', preview: 'vite preview' },
         dependencies: {
           react: PINS.react,
           // react-dom ships in lockstep with react and must match it exactly.
@@ -783,7 +882,9 @@ ${schemeCss(named)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${side
 import { secretGuard } from "./${GUARD_DIR}/guard.ts";
 
 export default defineConfig({
-  // Relative, so the built site works from a subdirectory as well as a root.
+  // A site is served from a domain root: its routes (/work), asset URLs
+  // (/assets/…) and auth redirects are root-relative, so a subdirectory
+  // deploy does not work. The bundle's own references stay relative.
   base: "./",
   // Only this prefix reaches the browser (auth-spec §4), and the guard
   // refuses the build if a service key would be among it.

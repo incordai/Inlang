@@ -34,7 +34,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink } from './visual/checks.mjs';
+import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration } from './visual/checks.mjs';
 import { startServer } from './visual/serve.mjs';
 import {
   carousel, copy, drawer, dropdown, faq, faqDeepLink, hideShrink, lightbox, navMotion, overlayMotion, play, scrollPadding, solid,
@@ -64,7 +64,9 @@ if (!NPM_CLI) throw new Error(`visual: npm-cli.js not found in the node install 
 
 const execFileP = promisify(execFile);
 const node = (script, args, cwd) => execFileP(process.execPath, [script, ...args], {
-  cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, AZ_WORDS: WORDS },
+  cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  // AZ_BUILD_LOG quiets a project's own build (az-vite/build.mjs) to errors.
+  env: { AZ_BUILD_LOG: 'error', ...process.env, AZ_WORDS: WORDS },
 });
 
 /** Run `fn` over `items`, at most `limit` at a time. */
@@ -80,6 +82,7 @@ async function pool(items, limit, fn) {
 /* ---- results ------------------------------------------------------------ */
 
 const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'disclosure', 'skip-link',
+  'no-js', 'hydration',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'firefox', 'webkit'];
 
@@ -244,10 +247,12 @@ async function buildAll(words, work, everyVariant) {
   await pool(built, BUILD_CONCURRENCY, async (s) => {
     const proj = join(s.dir, 'proj');
     symlinkSync(join(s.install, 'node_modules'), join(proj, 'node_modules'), 'dir');
-    await node(join(proj, 'node_modules/vite/bin/vite.js'), ['build', '--logLevel', 'error'], proj);
+    // The project's OWN build: the client bundle, then every page
+    // pre-rendered — so every check below sees the pages that ship.
+    await node(join(proj, 'az-vite/build.mjs'), [], proj);
     s.dist = join(proj, 'dist');
   });
-  console.log(`built ${built.length} sites with vite\n`);
+  console.log(`built ${built.length} sites (client + pre-render)\n`);
   return built;
 }
 
@@ -258,14 +263,18 @@ function firstRoute(source) {
   return m[1] === '/' ? '/' : `${m[1]}/`;
 }
 
+/** The runtime's mark on <html> once the page is hydrated and wired. */
+const READY = 'html[data-az-ready]';
+
 /**
- * Load a site page and wait until the app has rendered into it. `load`
- * fires before React's asynchronous root commits, and a check that met an
- * empty page reported "nothing to test" and was silently skipped.
+ * Load a site page and wait until it is hydrated and its behaviours wired.
+ * A pre-rendered page shows its markup at once — before React has adopted
+ * it and before the runtime has attached — so waiting for markup is not
+ * enough: the runtime marks <html data-az-ready> when it is done.
  */
 async function open(page, path, server) {
   await page.goto(new URL(path, server.url).href, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
-  await page.waitForSelector('#root > *', { state: 'attached', timeout: NAV_TIMEOUT_MS });
+  await page.waitForSelector(READY, { state: 'attached', timeout: NAV_TIMEOUT_MS });
 }
 
 /* ---- check one site ----------------------------------------------------- */
@@ -327,6 +336,12 @@ async function checkSite(s, browsers, server) {
   const barStill = await navMotion(page);
   if (barStill) record(s.word, 'nav-motion', `${s.label}/light/390`, barStill);
   await ctx.close();
+
+  // A6: the page as shipped, read with JavaScript off; then hydrated with
+  // nothing reported — a mismatch throws the pre-rendered markup away.
+  const url = new URL(s.path, server.url).href;
+  record(s.word, 'no-js', `${s.label}/chromium/1440`, await noJs(browsers.chromium, url));
+  record(s.word, 'hydration', `${s.label}/chromium/1440`, await hydration(browsers.chromium, url, READY));
 
   // The behaviour runtime, in a fresh context per width: the drawer is the
   // phone menu, the dropdown the desktop one; faq, copy, play and solid are
@@ -425,6 +440,32 @@ const SIDE = (beside) => `<!doctype html><html lang="en"><head><title>side</titl
 </style></head><body><div class="az-page"><nav aria-label="Main"><a href="/">Home</a></nav>
 <main><h1>Docs</h1></main></div></body></html>`;
 
+/**
+ * ASSUMPTIONS A6: a page as a build ships it. `full` is pre-rendered — an
+ * open FAQ answer, a usable auth form, a year fallback — and marks itself
+ * ready. `empty` ships an empty root that a script fills and reports a
+ * hydration mismatch the way React does. `partial` is pre-rendered but its
+ * FAQ answer ships hidden, its form has no field and its year is blank.
+ */
+const SHIPPED = (kind) => {
+  const body = kind === 'partial'
+    ? `<main><h1>Help</h1><div class="az-faq-answer" id="q1-panel" hidden>Yes.</div>
+      <form class="az-auth-form" data-flow="login"><button type="submit">Sign in</button></form></main>
+      <footer><p>© <span data-year="dynamic"></span> Site</p></footer>`
+    : `<main><h1>Help</h1><div class="az-faq-answer" id="q1-panel">Yes.</div>
+      <form class="az-auth-form" data-flow="login"><label>Email <input type="email" name="email"></label>
+      <button type="submit">Sign in</button></form></main>
+      <footer><p>© <span data-year="dynamic">2024</span> Site</p></footer>`;
+  const root = kind === 'empty' ? '' : body;
+  const fill = kind === 'empty'
+    ? `document.getElementById('root').innerHTML = ${JSON.stringify(body)};
+       console.error('Minified React error #418; visit https://react.dev/errors/418 for the full message');`
+    : '';
+  return `<!doctype html><html lang="en"><head><title>shipped</title></head><body>
+  <div id="root">${root}</div>
+  <script>${fill} document.documentElement.setAttribute('data-az-ready', '');</script></body></html>`;
+};
+
 async function selfTest() {
   const dir = mkdtempSync(join(tmpdir(), 'az-visual-self-'));
   for (const [name, html] of [['bad', BAD], ['good', GOOD]]) {
@@ -492,6 +533,16 @@ async function selfTest() {
     await page.goto(server.url);
     expect(`nav §10 side column (${beside ? 'beside the content' : 'over the content'})`, await scrollPadding(page), beside);
     await ctx.close();
+  }
+  for (const [name, shipped, shouldPass] of [
+    ['shipped-empty', 'empty', false], ['shipped-partial', 'partial', false], ['shipped-full', 'full', true],
+  ]) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'), SHIPPED(shipped));
+    server.serve(join(dir, name));
+    expect(`A6 reads with JS off (${shipped} page)`, await noJs(browser, server.url), shouldPass);
+    // The partial page's markup is all there; only its hydration is clean.
+    expect(`A6 hydrates cleanly (${shipped} page)`, await hydration(browser, server.url, READY), shipped !== 'empty');
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');
   await behaviourSelfTest(browser, server, dir, expect);
