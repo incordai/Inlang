@@ -9,7 +9,10 @@
     "verify": "pnpm typecheck && pnpm test",
     "verify:build": "node scripts/verify-build.mjs",
     "coverage": "node scripts/word-coverage.mjs",
-    "test:visual": "node scripts/visual.mjs"
+    "test:visual": "node scripts/visual.mjs",
+    "gate": "node scripts/gate.mjs",
+    "thumbnails": "node scripts/thumbnails.mjs",
+    "lint": "node packages/cli/bin/az.js lint packages/words"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

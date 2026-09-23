@@ -9,3 +9,4 @@ dist-shots/
 .env
 .env.*
 .visual-out/
+.thumbnails/

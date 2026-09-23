@@ -1,0 +1,19 @@
+az 1
+
+site aurora
+  auth
+    adapter session
+
+page /signup
+  auth signup
+    title    "Join the list"
+    sub      "One email when a new run opens."
+    terms    /terms
+    redirect /account
+    alt      "Already have an account? Sign in" /login
+
+page /account
+
+page /terms
+
+page /login

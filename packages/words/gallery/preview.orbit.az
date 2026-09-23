@@ -1,0 +1,18 @@
+az 1
+
+site aurora
+
+page /
+  hero center
+    title "Built in the dark"
+  gallery orbit
+    title  "The workshop"
+    poster ./preview-assets/assets/orbit.webp
+    image ./preview-assets/assets/bench.webp
+      alt "An empty workbench under a single lamp"
+    image ./preview-assets/assets/welt.webp
+      alt "A welt being stitched by hand"
+    image ./preview-assets/assets/lasts.webp
+      alt "Wooden lasts lined up on a shelf"
+    image ./preview-assets/assets/sole.webp
+      alt "A finished sole drying on a rack"

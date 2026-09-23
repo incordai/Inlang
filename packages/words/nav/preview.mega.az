@@ -1,0 +1,25 @@
+az 1
+
+site aurora
+  nav mega
+    group "Shoes"
+      link "Boots"   /boots
+      link "Loafers" /loafers
+    group "Leather goods"
+      link "Bags"    /bags
+      link "Belts"   /belts
+    cta    "Reserve" /reserve
+
+page /
+  hero center
+    title "Built in the dark"
+
+page /boots
+
+page /loafers
+
+page /bags
+
+page /belts
+
+page /reserve
