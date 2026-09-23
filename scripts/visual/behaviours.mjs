@@ -371,3 +371,31 @@ export async function scrollPadding(page) {
   const pass = r.target >= r.bar;
   return { pass, detail: pass ? '' : `the anchor target landed at ${Math.round(r.target)}px, under the bar ending at ${Math.round(r.bar)}px` };
 }
+
+/**
+ * faq §7.3/§7.4 on arrival: a text-fragment link (`#:~:text=`) into an answer
+ * the runtime collapsed on load must still land on it — the browser reveals
+ * hidden="until-found" and fires `beforematch`, and the question follows.
+ * A fresh load, as when the link is followed from elsewhere.
+ */
+export async function faqDeepLink(page) {
+  if (!(await page.$('[data-az-behaviour="faq"]'))) return null;
+  const words = await page.evaluate(() => {
+    const b = document.querySelectorAll('[data-az-disclosure]')[1];
+    const panel = b && document.getElementById(b.getAttribute('aria-controls'));
+    return panel ? (panel.textContent ?? '').trim().split(/\s+/).slice(0, 3).join(' ') : null;
+  });
+  if (!words) return { pass: false, detail: 'fewer than two questions to test with' };
+  const url = new URL(page.url());
+  url.hash = '';
+  await page.goto(`${url.href}#:~:text=${encodeURIComponent(words)}`, { waitUntil: 'load' });
+  await page.waitForTimeout(500);
+  const r = await page.evaluate(() => [...document.querySelectorAll('[data-az-disclosure]')].map((b) => ({
+    expanded: b.getAttribute('aria-expanded'),
+    hidden: document.getElementById(b.getAttribute('aria-controls')).hasAttribute('hidden'),
+  })));
+  const problems = [];
+  if (r[1].hidden || r[1].expanded !== 'true') problems.push('the linked answer stayed collapsed');
+  if (r.filter((q, i) => i !== 1).some((q) => !q.hidden)) problems.push('answers not linked to were left open');
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}

@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { copy, drawer, dropdown, faq, hideShrink, navMotion, overlayMotion, play, solid } from './behaviours.mjs';
+import { copy, drawer, dropdown, faq, faqDeepLink, hideShrink, navMotion, overlayMotion, play, solid } from './behaviours.mjs';
 
 const RUNTIME = fileURLToPath(new URL('../../packages/overlay/src/runtime/', import.meta.url));
 
@@ -60,21 +60,26 @@ ${runtime ? SCRIPT : ''}
 </body></html>`;
 
 /** The runtime's modules as browser JavaScript, imports pointed at .js. */
-function writeRuntime(dir) {
+function writeRuntime(dir, { withoutBeforematch = false } = {}) {
   mkdirSync(join(dir, 'az'), { recursive: true });
   for (const f of readdirSync(RUNTIME).filter((n) => n.endsWith('.ts'))) {
     const js = stripTypeScriptTypes(readFileSync(join(RUNTIME, f), 'utf8'))
-      .replace(/from '\.\/([a-z-]+)\.ts'/g, "from './$1.js'");
+      .replace(/from '\.\/([a-z-]+)\.ts'/g, "from './$1.js'")
+      // The regression faqDeepLink guards against: the reveal handler gone.
+      .replace(withoutBeforematch ? /^.*'beforematch'.*$/m : /(?!)/, '');
     writeFileSync(join(dir, 'az', f.replace(/\.ts$/, '.js')), js);
   }
 }
 
 export async function behaviourSelfTest(browser, server, dir, expect) {
-  const forms = { good: { runtime: true, net: true }, none: { runtime: false, net: true }, nonet: { runtime: true, net: false } };
+  const forms = {
+    good: { runtime: true, net: true }, none: { runtime: false, net: true }, nonet: { runtime: true, net: false },
+    nomatch: { runtime: true, net: true, withoutBeforematch: true },
+  };
   for (const [name, form] of Object.entries(forms)) {
     mkdirSync(join(dir, `b-${name}`), { recursive: true });
     writeFileSync(join(dir, `b-${name}`, 'index.html'), page(form));
-    writeRuntime(join(dir, `b-${name}`));
+    writeRuntime(join(dir, `b-${name}`), form);
   }
   const run = async (name, width, check, reducedMotion = 'no-preference') => {
     server.serve(join(dir, `b-${name}`));
@@ -95,6 +100,9 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
   }
   expect('behaviour: overlay motion without the reduced-motion net', await run('nonet', 390, overlayMotion, 'reduce'), false);
   expect('behaviour: overlay motion with it', await run('good', 390, overlayMotion, 'reduce'), true);
+  expect('behaviour: faq deep link without the runtime', await run('none', 1440, faqDeepLink), false);
+  expect('behaviour: faq deep link without the beforematch reveal', await run('nomatch', 1440, faqDeepLink), false);
+  expect('behaviour: faq deep link with the runtime', await run('good', 1440, faqDeepLink), true);
   expect('behaviour: nav motion without the reduced-motion net', await run('nonet', 1440, navMotion, 'reduce'), false);
   expect('behaviour: nav motion with it', await run('good', 1440, navMotion, 'reduce'), true);
 }
