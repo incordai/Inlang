@@ -31,3 +31,24 @@ for (const w of readdirSync(WORDS).filter((d) => existsSync(join(WORDS, d, 'word
     }
   });
 }
+
+/* ---- gate item 12: `tested` states what ran, never a target ------------ */
+
+/** A browser the gate runs, at the version it ran: `chromium-153`. */
+const RAN = /^(chromium|firefox|webkit)-\d+(\.\d+)?$/;
+
+test('CONTROL: claims no run can back are refused', () => {
+  for (const bad of ['chrome-latest', 'safari-latest', 'ios-17', 'firefox', 'edge-120']) {
+    assert.ok(!RAN.test(bad), bad);
+  }
+});
+
+for (const w of readdirSync(WORDS).filter((d) => existsSync(join(WORDS, d, 'word.json')))) {
+  test(`${w}: tested lists only browser runs, each with its version`, () => {
+    const m = JSON.parse(readFileSync(join(WORDS, w, 'word.json'), 'utf8')) as
+      { tested?: { browsers?: string[] } };
+    const browsers = m.tested?.browsers ?? [];
+    assert.ok(browsers.length > 0, 'gate item 12: the field is populated');
+    for (const b of browsers) assert.match(b, RAN, `${w} claims '${b}', which no gate run produces`);
+  });
+}

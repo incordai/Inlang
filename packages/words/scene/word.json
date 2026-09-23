@@ -82,14 +82,11 @@
   ],
   "tested": {
     "browsers": [
-      "chrome-latest",
-      "safari-latest",
-      "firefox-latest",
-      "ios-17"
+      "chromium-153",
+      "firefox-155",
+      "webkit-26.6"
     ],
     "with": [
-      "nav",
-      "footer",
       "hero"
     ]
   },
