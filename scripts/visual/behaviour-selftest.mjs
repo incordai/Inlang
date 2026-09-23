@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   billing, carousel, copy, detach, drawer, dropdown, faq, faqDeepLink, hideShrink, lateContent, lightbox, navMotion,
-  overlayMotion, play, reveal, revealReduced, solid, year,
+  overlayMotion, play, reveal, revealReduced, sheetDrag, solid, year,
 } from './behaviours.mjs';
 
 const RUNTIME = fileURLToPath(new URL('../../packages/overlay/src/runtime/', import.meta.url));
@@ -69,6 +69,10 @@ ${net ? NET : ''}
 </nav></div>
 <main>
   <section data-az-reveal="8" id="reveal-top"><p>On screen from the start.</p></section>
+  <button type="button" aria-controls="sheet-1" aria-expanded="false">Open the sheet</button>
+  <dialog id="sheet-1" data-az-behaviour="dialog" data-az-overlay="sheet" aria-label="Sheet" style="position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: 100%; height: 300px; border: 0">
+    <div data-az-drag aria-hidden="true" style="height: 44px; touch-action: none">grip</div><button type="button" data-az-close>Close</button>
+  </dialog>
   <ul data-az-behaviour="faq" data-single="false">
     <li><h3 id="faq-first"><button type="button" id="faq-first-btn" aria-expanded="true" aria-controls="faq-first-panel" data-az-disclosure>First question?<span data-az-chevron></span></button></h3>
       <div id="faq-first-panel"><p>The first answer lives here.</p></div></li>
@@ -107,7 +111,7 @@ ${runtime ? SCRIPT : ''}
 </body></html>`;
 
 /** The runtime's modules as browser JavaScript, imports pointed at .js. */
-function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = false } = {}) {
+function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = false, withoutDrag = false } = {}) {
   mkdirSync(join(dir, 'az'), { recursive: true });
   for (const f of readdirSync(RUNTIME).filter((n) => n.endsWith('.ts'))) {
     const js = stripTypeScriptTypes(readFileSync(join(RUNTIME, f), 'utf8'))
@@ -115,7 +119,9 @@ function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = f
       // The regression faqDeepLink guards against: the reveal handler gone.
       .replace(withoutBeforematch ? /^.*'beforematch'.*$/m : /(?!)/, '')
       // The regression revealReduced guards against: reveal ignoring reduced motion.
-      .replace(withoutReducedGuard ? /^.*prefers-reduced-motion: reduce\)'\)\.matches\) return;.*$/m : /(?!)/, '');
+      .replace(withoutReducedGuard ? /^.*prefers-reduced-motion: reduce\)'\)\.matches\) return;.*$/m : /(?!)/, '')
+      // The regression sheetDrag guards against: the sheet's drag unwired.
+      .replace(withoutDrag ? /^.*wireSheetDrag\(ctx, dialog, close\);.*$/m : /(?!)/, '');
     writeFileSync(join(dir, 'az', f.replace(/\.ts$/, '.js')), js);
   }
 }
@@ -125,6 +131,7 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
     good: { runtime: true, net: true }, none: { runtime: false, net: true }, nonet: { runtime: true, net: false },
     nomatch: { runtime: true, net: true, withoutBeforematch: true },
     noguard: { runtime: true, net: true, withoutReducedGuard: true },
+    nodrag: { runtime: true, net: true, withoutDrag: true },
   };
   for (const [name, form] of Object.entries(forms)) {
     mkdirSync(join(dir, `b-${name}`), { recursive: true });
@@ -147,7 +154,7 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
     ['behaviour: carousel', carousel, 1440], ['behaviour: lightbox', lightbox, 1440],
     ['behaviour: billing', billing, 1440], ['behaviour: year', year, 1440],
     ['behaviour: late content', lateContent, 1440], ['behaviour: cleanup with a modal open', detach, 390],
-    ['behaviour: reveal', reveal, 1440],
+    ['behaviour: reveal', reveal, 1440], ['behaviour: sheet drag', sheetDrag, 390],
   ]) {
     expect(`${label} without the runtime`, await run('none', width, check), false);
     expect(`${label} with the runtime`, await run('good', width, check), true);
@@ -159,6 +166,7 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
   expect('behaviour: faq deep link with the runtime', await run('good', 1440, faqDeepLink), true);
   expect('behaviour: nav motion without the reduced-motion net', await run('nonet', 1440, navMotion, 'reduce'), false);
   expect('behaviour: nav motion with it', await run('good', 1440, navMotion, 'reduce'), true);
+  expect('behaviour: sheet drag with the drag unwired', await run('nodrag', 390, sheetDrag), false);
   expect('behaviour: reveal ignoring reduced motion', await run('noguard', 1440, revealReduced, 'reduce'), false);
   expect('behaviour: reveal under reduced motion', await run('good', 1440, revealReduced, 'reduce'), true);
 }

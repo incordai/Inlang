@@ -40,7 +40,7 @@
 
 import {
   billingAnnouncement, billingFrom, carouselEnds, copyText, counterText, lightboxIndex, moveIndex, neighbours,
-  offScreen, outsideBox, retractedAfter, revealDelay, revealsLater, rollingYear, safeDecode, samePageFragment,
+  offScreen, outsideBox, retractedAfter, revealDelay, revealsLater, rollingYear, safeDecode, samePageFragment, sheetDismissed,
   shrunkAfter, solidAfter, swipeOf, transitionMs, trapIndex, type Billing,
 } from './logic.ts';
 import { POLICY, isPreset } from './policy.ts';
@@ -314,6 +314,7 @@ function wireDialogs(ctx: Ctx, root: ParentNode): void {
       if (outsideBox(m.clientX, m.clientY, dialog.getBoundingClientRect())) close(dialog);
     });
     for (const x of dialog.querySelectorAll('[data-az-close]')) on(x, 'click', () => close(dialog));
+    if (dialog.getAttribute('data-az-overlay') === 'sheet') wireSheetDrag(ctx, dialog, close);
     // nav §6 / overlays §2: Tab cycles INSIDE the modal. showModal makes the
     // page inert, but Tab can still leave for the browser's own UI — past
     // the last control everywhere, and in WebKit from ANY control, because
@@ -342,6 +343,45 @@ function wireDialogs(ctx: Ctx, root: ParentNode): void {
       });
     }
   }
+}
+
+/**
+ * overlays-spec §2 `sheet`: drag the handle down to dismiss. The sheet follows
+ * the pointer with no transition; released past the threshold it closes (the
+ * exit continues from where it is), otherwise it springs back. Esc and the
+ * close button remain for everyone who does not drag.
+ */
+function wireSheetDrag(
+  ctx: Ctx, dialog: HTMLDialogElement, close: (d: HTMLDialogElement) => void,
+): void {
+  const handle = dialog.querySelector<HTMLElement>('[data-az-drag]');
+  if (!handle) return;
+  let start: number | null = null;
+  let dy = 0;
+  const release = () => {
+    if (start === null) return;
+    start = null;
+    dialog.style.transition = '';
+    dialog.style.transform = '';
+    if (sheetDismissed(dy, dialog.getBoundingClientRect().height)) close(dialog);
+    dy = 0;
+  };
+  ctx.on(handle, 'pointerdown', (e) => {
+    const p = e as PointerEvent;
+    start = p.clientY;
+    dy = 0;
+    handle.setPointerCapture?.(p.pointerId);
+    dialog.style.transition = 'none';
+  });
+  ctx.on(handle, 'pointermove', (e) => {
+    if (start === null) return;
+    dy = Math.max(0, (e as PointerEvent).clientY - start);
+    dialog.style.transform = `translateY(${dy}px)`;
+  });
+  ctx.on(handle, 'pointerup', release);
+  ctx.on(handle, 'pointercancel', release);
+  ctx.on(handle, 'lostpointercapture', release);
+  ctx.undo.push(() => { dialog.style.transition = ''; dialog.style.transform = ''; });
 }
 
 /* ---- gallery lightbox ----------------------------------------------------- */

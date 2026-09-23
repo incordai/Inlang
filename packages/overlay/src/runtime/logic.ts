@@ -222,6 +222,16 @@ export function offScreen(box: { top: number; bottom: number }, viewportHeight: 
 }
 
 
+/** The shortest drag down, in px, that dismisses a sheet (overlays-spec §2). */
+export const SHEET_DRAG_MIN = 96;
+/** …or this share of the sheet's height, whichever is larger. */
+export const SHEET_DRAG_SHARE = 0.25;
+
+/** Whether a drag of `dy` px down a sheet `height` px tall dismisses it. */
+export function sheetDismissed(dy: number, height: number): boolean {
+  return dy >= Math.max(SHEET_DRAG_MIN, height * SHEET_DRAG_SHARE);
+}
+
 /** feature-spec §9: the stagger between revealed items, in ms. */
 export const REVEAL_STEP_MS = 60;
 /** …and where it stops accumulating: "capped at 6 steps". */

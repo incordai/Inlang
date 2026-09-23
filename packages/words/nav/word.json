@@ -72,8 +72,8 @@
       "description": "How the menu opens on phones",
       "valueDescriptions": {
         "drawer": "Panel slides in from the side (default)",
-        "sheet": "Panel rises from the bottom (not rendered yet)",
-        "full": "Menu covers the whole screen (not rendered yet)"
+        "sheet": "Menu rises from the bottom; drag down to close",
+        "full": "Menu covers the whole screen and fades in"
       }
     }
   },

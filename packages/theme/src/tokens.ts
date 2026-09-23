@@ -55,6 +55,10 @@ export const MOTION = {
   emphasis: 200,
   slow: 240,
   spring: 280,
+  /** theme-spec §1.7 `motion.spring.sheet` = { stiffness 300, damping 30,
+   *  mass 1 }, flattened like `reduced`: the sheet's enter curve (§9.2). */
+  springStiffness: 300,
+  springDamping: 30,
   ease: 'cubic-bezier(0.16, 1, 0.3, 1)',
   easeIn: 'cubic-bezier(0.4, 0, 1, 1)',
   /** overlays-spec §3 — the dropdown's enter offset, in px. A distance the

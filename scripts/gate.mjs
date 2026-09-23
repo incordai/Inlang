@@ -44,7 +44,7 @@ const RAN = /^(chromium|firefox|webkit)-\d+(\.\d+)?$/;
 const VISUAL = {
   3: ['compile', 'overflow', 'no-js', 'hydration', 'restack', 'column', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'firefox', 'webkit'],
   4: ['axe', 'copy'],
-  5: ['keyboard', 'skip-link', 'drawer', 'dropdown', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'play', 'billing'],
+  5: ['keyboard', 'skip-link', 'drawer', 'sheet-drag', 'dropdown', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'play', 'billing'],
   6: ['reduced-motion', 'overlay-motion', 'nav-motion', 'reveal', 'reveal-reduced'],
   7: ['schemes'],
 };

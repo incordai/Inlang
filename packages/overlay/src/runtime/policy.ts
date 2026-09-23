@@ -16,8 +16,8 @@
  * project, so it imports nothing.
  */
 
-/** The presets Phase 1 ships: nav groups, the mobile menu, and the video popup. */
-export const PRESETS = ['dropdown', 'drawer', 'popup'] as const;
+/** The presets Phase 1 ships: nav groups, the three mobile menus, and the video popup. */
+export const PRESETS = ['dropdown', 'drawer', 'sheet', 'full', 'popup'] as const;
 export type Preset = (typeof PRESETS)[number];
 
 export interface Policy {
@@ -33,6 +33,10 @@ export const POLICY: Readonly<Record<Preset, Policy>> = {
   // §2: a dropdown must NOT trap — Tab leaves it and carries on down the page.
   dropdown: { focus: 'return', scroll: 'close', modal: false },
   drawer: { focus: 'trap', scroll: 'lock', modal: true },
+  // §2: bottom, draggable — Esc, drag down or outside dismiss it.
+  sheet: { focus: 'trap', scroll: 'lock', modal: true },
+  // nav-spec §6 `full`: a modal like the drawer, covering the screen.
+  full: { focus: 'trap', scroll: 'lock', modal: true },
   popup: { focus: 'trap', scroll: 'lock', modal: true },
 };
 

@@ -90,13 +90,27 @@ export async function drawer(page) {
     if (closed.expanded !== 'false') problems.push('aria-expanded stayed true');
     if (!closed.unlocked) problems.push('the scroll lock was left on');
   }
-  // Outside click: the backdrop, at the far edge of the viewport.
+  // Outside click: the backdrop, at the far edge of the viewport. A menu
+  // that covers the whole screen (nav §6 `full`) has no outside — there the
+  // close button must dismiss it instead (overlays §2: Esc, X).
   await page.click('.az-nav-toggle');
   if (await until(page, () => document.querySelector('#az-nav-panel')?.open === true)) {
+    await page.waitForTimeout(400);
     const size = page.viewportSize();
-    await page.mouse.click(size.width - 4, size.height / 2);
-    if (!(await until(page, () => document.querySelector('#az-nav-panel')?.open === false))) {
-      problems.push('a click outside did not close the menu');
+    const covers = await page.$eval('#az-nav-panel', (d, v) => {
+      const r = d.getBoundingClientRect();
+      return r.left <= 0 && r.top <= 0 && r.right >= v.width && r.bottom >= v.height;
+    }, size);
+    if (covers) {
+      await page.click('#az-nav-panel [data-az-close]');
+      if (!(await until(page, () => document.querySelector('#az-nav-panel')?.open === false))) {
+        problems.push('the close button did not close a full-screen menu');
+      }
+    } else {
+      await page.mouse.click(size.width - 4, size.height / 2);
+      if (!(await until(page, () => document.querySelector('#az-nav-panel')?.open === false))) {
+        problems.push('a click outside did not close the menu');
+      }
     }
   }
   problems.push(...await drawerDetails(page));
@@ -940,4 +954,34 @@ export async function revealReduced(page) {
   const hidden = await page.evaluate(() => [...document.querySelectorAll('[data-az-reveal], [data-az-reveal-item]')]
     .filter((t) => getComputedStyle(t).opacity !== '1').length);
   return { pass: hidden === 0, detail: hidden ? `${hidden} element(s) hidden for a reveal under reduced motion` : '' };
+}
+
+/**
+ * overlays-spec §2 `sheet`: dragging its handle down past the threshold
+ * closes it; a short drag springs back and leaves it open.
+ */
+export async function sheetDrag(page) {
+  const id = await page.evaluate(() => document.querySelector('dialog[data-az-overlay="sheet"]')?.id ?? null);
+  if (!id) return null;
+  const openIt = async () => {
+    await page.evaluate((d) => document.querySelector(`[aria-controls="${d}"]`)?.click(), id);
+    return until(page, (d) => document.getElementById(d)?.open === true, id);
+  };
+  const drag = async (dy) => {
+    const box = await page.$eval(`#${id} [data-az-drag]`, (h) => { const r = h.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    await page.mouse.move(box.x, box.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(box.x, box.y + (dy * i) / 8);
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+  };
+  const problems = [];
+  if (!(await openIt())) return { pass: false, detail: 'the sheet did not open from its trigger' };
+  await page.waitForTimeout(400);
+  await drag(20);
+  if (!(await page.evaluate((d) => document.getElementById(d).open, id))) problems.push('a 20px drag closed the sheet');
+  await drag(300);
+  const closed = await until(page, (d) => document.getElementById(d)?.open === false, id);
+  if (!closed) problems.push('a long drag down did not close the sheet');
+  return { pass: problems.length === 0, detail: problems.join('; ') };
 }

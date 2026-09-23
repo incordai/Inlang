@@ -39,16 +39,21 @@ for (const w of words) {
   });
 }
 
-/* Extra previews (preview.<variant>.az, used by test:visual) compile too. */
+/*
+ * Extra previews (preview.<name>.az, used by test:visual) compile too. The
+ * name is what the preview exists to show: a variant, a modifier, or an enum
+ * value the block sets (nav `mobile sheet`) — and the block must really use it.
+ */
 for (const w of words) {
   for (const f of readdirSync(join(WORDS, w)).filter((f) => /^preview\.[a-z]+\.az$/.test(f))) {
-    test(`${w}/${f}: compiles without errors and uses its variant`, () => {
-      const variant = f.split('.')[1];
+    test(`${w}/${f}: compiles without errors and shows what it is named for`, () => {
+      const name = f.split('.')[1];
       const r = compile(readFileSync(join(WORDS, w, f), 'utf8'), { manifests });
       assert.ok(r.ok, formatDiagnostics(r.diagnostics, `${w}/${f}`));
       const spec = r.spec;
-      assert.ok(spec?.pages.some((p) => blocksFor(spec, p).some((b) => b.word === w && b.variant === variant)),
-        `${f} must render ${w} ${variant}`);
+      assert.ok(spec?.pages.some((p) => blocksFor(spec, p).some((b) => b.word === w
+        && (b.variant === name || b.modifiers.includes(name) || Object.values(b.props).includes(name)))),
+        `${f} must render ${w} with ${name}`);
     });
   }
 }

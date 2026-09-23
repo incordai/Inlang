@@ -37,7 +37,7 @@ import { chromium, firefox, webkit } from 'playwright';
 import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration } from './visual/checks.mjs';
 import { startServer } from './visual/serve.mjs';
 import {
-  billing, carousel, copy, drawer, dropdown, faq, faqDeepLink, hideShrink, lightbox, navMotion, overlayMotion, play, reveal, revealReduced, scrollPadding, solid, year,
+  billing, carousel, copy, drawer, dropdown, faq, faqDeepLink, hideShrink, lightbox, navMotion, overlayMotion, play, reveal, revealReduced, scrollPadding, sheetDrag, solid, year,
 } from './visual/behaviours.mjs';
 import { behaviourSelfTest } from './visual/behaviour-selftest.mjs';
 import { withVariant } from './thumbnails.mjs';
@@ -84,7 +84,7 @@ async function pool(items, limit, fn) {
 const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'disclosure', 'skip-link',
   'no-js', 'hydration',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
-  'reveal', 'reveal-reduced',
+  'reveal', 'reveal-reduced', 'sheet-drag',
   'firefox', 'webkit'];
 
 /**
@@ -357,7 +357,7 @@ async function checkSite(s, browsers, server) {
       const bctx = await browsers[engine].newContext({ viewport: { width, height: 900 } });
       const bpage = await bctx.newPage();
       bpage.setDefaultTimeout(NAV_TIMEOUT_MS);
-      const checks = width === 390 ? { drawer, carousel } : { dropdown, solid, 'hide-shrink': hideShrink, 'scroll-padding': scrollPadding, faq, 'faq-deep-link': faqDeepLink, carousel, lightbox, copy, play, billing, year, reveal };
+      const checks = width === 390 ? { drawer, carousel, 'sheet-drag': sheetDrag } : { dropdown, solid, 'hide-shrink': hideShrink, 'scroll-padding': scrollPadding, faq, 'faq-deep-link': faqDeepLink, carousel, lightbox, copy, play, billing, year, reveal };
       for (const [name, fn] of Object.entries(checks)) {
         await open(bpage, s.path, server);
         const r = await fn(bpage).catch((e) => ({ pass: false, detail: `threw: ${String(e.message).split('\n')[0]}` }));

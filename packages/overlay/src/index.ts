@@ -159,6 +159,97 @@ export function popup(t: OverlayTheme, label: string): OverlayStyle {
 }
 
 /**
+ * A damped spring as a CSS `linear()` easing, sampled over its duration.
+ * theme-spec §9.2: stiffness 300, damping 30, mass 1 is ζ ≈ 0.87 — within 2%
+ * by ≈267ms, inside the sheet's 280ms (overlays §3). Its 0.43% overshoot
+ * would peak near 363ms, after the budget, so the sampled curve reaches
+ * ≈99.4% and lands on 1: a settle, not a bounce. Pure and rounded, so every
+ * build writes the same curve.
+ */
+export function springEasing(stiffness: number, damping: number, mass: number, durationMs: number, samples = 24): string {
+  const w0 = Math.sqrt(stiffness / mass);
+  const zeta = damping / (2 * Math.sqrt(stiffness * mass));
+  const points: string[] = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = ((i / samples) * durationMs) / 1000;
+    let x: number;
+    if (zeta < 1) {
+      const wd = w0 * Math.sqrt(1 - zeta * zeta);
+      x = 1 - Math.exp(-zeta * w0 * t) * (Math.cos(wd * t) + ((zeta * w0) / wd) * Math.sin(wd * t));
+    } else {
+      x = 1 - Math.exp(-w0 * t) * (1 + w0 * t);
+    }
+    points.push(i === samples ? '1' : String(Math.round(x * 1000) / 1000));
+  }
+  return `linear(${points.join(', ')})`;
+}
+
+/**
+ * `sheet` — rises from the bottom edge; 280ms spring in, fast ease-in out
+ * (overlays-spec §2, §3). Draggable: the runtime closes it on a drag down
+ * past its threshold. Its top corners are rounded; its bottom meets the edge.
+ */
+export function sheet(t: OverlayTheme, label: string): OverlayStyle {
+  const spring = springEasing(Number(t.motion.springStiffness), Number(t.motion.springDamping), 1, Number(t.motion.spring));
+  return {
+    attrs: attrsFor('sheet', label),
+    style: {
+      position: 'fixed',
+      insetInline: 0,
+      insetBlockEnd: 0,
+      insetBlockStart: 'auto',
+      margin: 0,
+      width: '100%',
+      maxWidth: '100%',
+      maxHeight: '85svh',
+      overflowY: 'auto',
+      padding: px(t.space[24]),
+      paddingBlockStart: px(t.space[8]),
+      border: 0,
+      borderStartStartRadius: px(t.radius.lg),
+      borderStartEndRadius: px(t.radius.lg),
+      background: t.color.surface,
+      color: t.color.text,
+      boxShadow: t.shadow.lg,
+      transform: 'translateY(100%)',
+      transition: transition(t, 'fast', 'easeIn', ['transform']),
+    },
+    states: {
+      open: { transform: 'none', transition: `transform ${ms(t, 'spring')} ${spring}` },
+    },
+  };
+}
+
+/**
+ * `full` — the whole screen (nav-spec §6: "few links, dramatic brands"). A
+ * modal like the drawer; it fades rather than slides, since there is no edge
+ * for it to come from.
+ */
+export function full(t: OverlayTheme, label: string): OverlayStyle {
+  return {
+    attrs: attrsFor('full', label),
+    style: {
+      position: 'fixed',
+      inset: 0,
+      margin: 0,
+      width: '100%',
+      height: '100%',
+      maxWidth: '100%',
+      maxHeight: '100%',
+      padding: px(t.space[24]),
+      border: 0,
+      background: t.color.bg,
+      color: t.color.text,
+      opacity: 0,
+      transition: transition(t, 'fast', 'easeIn', ['opacity']),
+    },
+    states: {
+      open: { opacity: 1, transition: transition(t, 'emphasis', 'ease', ['opacity']) },
+    },
+  };
+}
+
+/**
  * The close control every modal preset carries (§2 dismiss: "X"), 44px
  * (nav §7), labelled for a screen reader. The glyph is two strokes.
  */

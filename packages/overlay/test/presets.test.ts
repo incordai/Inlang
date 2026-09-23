@@ -8,14 +8,16 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolve, THEMES } from '../../theme/src/index.ts';
-import { POLICY, PRESETS, closeButton, drawer, dropdown, popup, type OverlayTheme } from '../src/index.ts';
+import { POLICY, PRESETS, closeButton, drawer, dropdown, full, popup, sheet, type OverlayTheme } from '../src/index.ts';
 
 const t = resolve(THEMES.midnight, 'dark') as unknown as OverlayTheme;
-const styles = { dropdown: dropdown(t), drawer: drawer(t, 'Menu'), popup: popup(t, 'Video') };
+const styles = {
+  dropdown: dropdown(t), drawer: drawer(t, 'Menu'), sheet: sheet(t, 'Menu'), full: full(t, 'Menu'), popup: popup(t, 'Video'),
+};
 
-test('§2: a dropdown does not trap; drawer and popup trap and lock', () => {
+test('§2: a dropdown does not trap; the modal presets trap and lock', () => {
   assert.deepEqual(POLICY.dropdown, { focus: 'return', scroll: 'close', modal: false });
-  for (const p of ['drawer', 'popup'] as const) assert.deepEqual(POLICY[p], { focus: 'trap', scroll: 'lock', modal: true });
+  for (const p of ['drawer', 'sheet', 'full', 'popup'] as const) assert.deepEqual(POLICY[p], { focus: 'trap', scroll: 'lock', modal: true });
   assert.deepEqual([...PRESETS], Object.keys(styles), 'every preset has a style');
 });
 
@@ -34,7 +36,9 @@ test('§3: only transform and opacity animate, and the open state carries the en
         assert.match(part.trim(), /^(opacity|transform) /, `${name}: '${part.trim()}' animates something else`);
       }
     }
-    assert.equal(s.states.open.transform, 'none', `${name} ends in place`);
+    // A preset that moves ends in place; one that only fades (`full`) never moved.
+    if (s.style.transform !== undefined) assert.equal(s.states.open.transform, 'none', `${name} ends in place`);
+    else assert.equal(s.states.open.transform, undefined, `${name} fades only`);
   }
 });
 

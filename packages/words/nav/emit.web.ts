@@ -7,13 +7,14 @@
  *     a.az-nav-logo? > img.az-nav-logo-img (×2 with solid + inverse) + visually hidden site name ·
  *     ul.az-nav-items > li > a.az-nav-link | li.az-nav-group > button.az-nav-group-label + ul.az-nav-group-items ·
  *     the cta action · button.az-nav-toggle[aria-controls] ·
- *     dialog.az-nav-panel.az-overlay (drawer) > close button + ul.az-nav-drawer-items
+ *     dialog.az-nav-panel.az-overlay (drawer | sheet | full, from `mobile`) >
+ *       div.az-nav-sheet-handle[data-az-drag]? (sheet only) · close button + ul.az-nav-drawer-items
  * Variants: bar · center · split · mega (links in the bar, group panels full width) · minimal (menu button at
  *   every size) · side (vertical column; the page lays out beside it) · none (renders nothing).
  * Modifiers: sticky — pinned to the top · hide — data-az-hide, retracts on scroll down · shrink — data-az-shrink,
  *   shorter past the top · solid — clear over the hero, solid after scroll · glass — blurred veil (translucent; solid nav: once scrolled).
  * Props: logo → img.az-nav-logo-img · inverse → the light logo while solid is clear ·
- *   mobile → data-mobile (drawer is the one built) · link / group / cta children → the items above.
+ *   mobile → data-mobile + the menu preset (drawer · sheet with a drag handle · full) · link / group / cta children → the items above.
  * Styling: theme tokens only; LAYOUT table per variant; below.sm links collapse into the drawer;
  *   states: scrolled, shrunk, retracted, focusVisible.
  * Behaviour: packages/overlay runtime — drawer dialog, dropdowns, solid/hide/shrink on scroll.
@@ -36,7 +37,8 @@
  *   - 44×44 touch targets, including the toggle (`size.tap`)
  *   - the CTA stays in the collapsed bar, never buried in the drawer
  *
- * The mobile menu is a `drawer` overlay (overlays-spec §2) on a <dialog>:
+ * The mobile menu is a `drawer`, `sheet` or `full` overlay (overlays-spec §2,
+ * nav-spec §6 — chosen by `mobile`) on a <dialog>:
  * the behaviour runtime shows it modally, which traps focus, makes the page
  * inert and closes on Escape; it adds scroll lock, outside-click and the
  * return of focus to the toggle (§6). `group "…" as dropdown` is the
@@ -46,7 +48,7 @@
 
 import type { SpecBlock } from '../../core/src/spec.ts';
 import { glassSurface, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
-import { closeButton, drawer, dropdown } from '../../overlay/src/index.ts';
+import { closeButton, drawer, dropdown, full, sheet } from '../../overlay/src/index.ts';
 
 /** The drawer's id — the toggle's aria-controls points here (§6). */
 const PANEL_ID = 'az-nav-panel';
@@ -319,7 +321,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   };
   if (links.length > 0) bar.push(toggle);
 
-  const panel = drawer(t, 'Menu');
+  // §6: the mobile menu's pattern — drawer (default), sheet or full.
+  const mobile = block.props.mobile ?? 'drawer';
+  const panel = mobile === 'sheet' ? sheet(t, 'Menu') : mobile === 'full' ? full(t, 'Menu') : drawer(t, 'Menu');
   const x = closeButton(t, 'Close menu');
 
   const solid = block.modifiers.includes('solid');
@@ -330,7 +334,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       class: `az-nav az-nav--${variant}`,
       // §7: a page has more than one nav landmark — this one and the footer's.
       'aria-label': 'Main',
-      'data-mobile': block.props.mobile ?? 'drawer',
+      'data-mobile': mobile,
       ...(solid ? { 'data-az-behaviour': 'solid' } : {}),
       ...(hides ? { 'data-az-hide': '' } : {}),
       ...(shrinks ? { 'data-az-shrink': '' } : {}),
@@ -434,6 +438,17 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         style: panel.style,
         states: panel.states,
         children: [
+          // A sheet's drag handle: a visible grip for the pointer; the close
+          // button and Esc are the ways in for everyone else.
+          ...(mobile === 'sheet' ? [{
+            tag: 'div',
+            attrs: { 'data-az-drag': '', 'aria-hidden': 'true', class: 'az-nav-sheet-handle' },
+            style: { display: 'flex', justifyContent: 'center', paddingBlock: px(t.space[8]), cursor: 'grab', touchAction: 'none' },
+            children: [{
+              tag: 'span',
+              style: { display: 'block', width: px(t.space[32]), height: px(t.space[4]), borderRadius: px(t.radius.full), background: t.color['border-strong'] },
+            } satisfies EmittedNode],
+          } satisfies EmittedNode] : []),
           {
             tag: 'div',
             style: { display: 'flex', justifyContent: 'flex-end', marginBottom: px(t.space[16]) },

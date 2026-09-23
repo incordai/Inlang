@@ -56,6 +56,7 @@ solved. Hand-rolling `getBoundingClientRect` math is a week you don't get back.
 | `popup` | centered | **trap** | **lock body** | Esc, outside, X | `role="dialog" aria-modal` |
 | `drawer` | edge slide-in | **trap** | **lock body** | Esc, outside, X | `role="dialog" aria-modal` |
 | `sheet` | bottom, draggable | **trap** | **lock body** | Esc, drag down, outside | `role="dialog" aria-modal` |
+| `full` | the whole screen (nav-spec §6) | **trap** | **lock body** | Esc, X | `role="dialog" aria-modal` |
 | `tooltip` | anchored, small | **none** | reposition | blur, Esc | `role="tooltip"` |
 | `toast` | corner, stacked | **none — never steal** | ignore | timeout, X | `role="status" aria-live="polite"` |
 
