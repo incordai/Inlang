@@ -132,17 +132,19 @@ function wireDialogs(doc: Document, on: On, undo: Cleanup[]): void {
     on(dialog, 'click', (e) => { if (e.target === dialog) close(dialog); });
     for (const x of dialog.querySelectorAll('[data-az-close]')) on(x, 'click', () => close(dialog));
     // nav §6 / overlays §2: Tab cycles INSIDE the modal. showModal makes the
-    // page inert, but Tab past the last control still leaves for the
-    // browser's own UI — so the ends wrap round.
+    // page inert, but Tab can still leave for the browser's own UI — past
+    // the last control everywhere, and in WebKit from ANY control, because
+    // it leaves links out of the Tab order by default. So every Tab in the
+    // modal is placed here, through the modal's own stops, wrapping round.
     on(dialog, 'keydown', (e) => {
       const k = e as KeyboardEvent;
       if (k.key !== 'Tab') return;
       const stops = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.getClientRects().length > 0);
       if (stops.length === 0) return;
-      const first = stops[0];
-      const last = stops[stops.length - 1];
-      if (k.shiftKey && doc.activeElement === first) { k.preventDefault(); last.focus(); }
-      else if (!k.shiftKey && doc.activeElement === last) { k.preventDefault(); first.focus(); }
+      k.preventDefault();
+      const at = stops.indexOf(doc.activeElement as HTMLElement);
+      const step = k.shiftKey ? -1 : 1;
+      stops[(at + step + stops.length) % stops.length].focus();
     });
     // A link inside the menu navigates away; close first so nothing is left
     // locked if the navigation is to an anchor on this page.
@@ -208,9 +210,12 @@ function wireDropdowns(doc: Document, on: On): void {
       items[next].focus();
     });
     // Focus leaving the group — Tab onward, or a click elsewhere — closes it.
+    // Leaving for nowhere counts: when Tab runs off the page (WebKit skips
+    // the links that follow), focus goes to the browser and `relatedTarget`
+    // is null.
     on(p.group, 'focusout', (e) => {
       const to = (e as FocusEvent).relatedTarget as Node | null;
-      if (to && !p.group.contains(to)) close(p);
+      if (!to || !p.group.contains(to)) close(p);
     });
   }
   on(doc, 'pointerdown', (e) => {

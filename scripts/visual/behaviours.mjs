@@ -10,6 +10,12 @@
 
 /** The longest a behaviour may take to show — an exit transition plus slack. */
 const WAIT_MS = 2000;
+
+/*
+ * Every scroll here is `behavior: 'instant'`: sites smooth-scroll for readers
+ * who have not asked for reduced motion, and these checks test what the bar
+ * does at a position, not how long the page takes to glide there.
+ */
 /** Tab presses inside an open modal: more than it has controls, so a leak shows. */
 const TRAP_TABS = 12;
 
@@ -134,7 +140,7 @@ export async function solid(page) {
     return { scrolled: nav.getAttribute('data-scrolled'), bg: getComputedStyle(nav).backgroundColor, logos: shown.map((i) => i.getAttribute('data-az-logo')) };
   });
   const at = async (y) => {
-    await page.evaluate((v) => window.scrollTo(0, v), y);
+    await page.evaluate((v) => window.scrollTo({ top: v, behavior: 'instant' }), y);
     await page.waitForTimeout(50);
     return state();
   };
@@ -170,6 +176,9 @@ export async function faq(page) {
     problems.push('answers were not collapsed to hidden="until-found" on load');
   }
   await page.click('[data-az-disclosure]');
+  // Arrow keys are for keyboard users, who reach a question with Tab. A
+  // mouse click does not focus a button in WebKit (as in Safari).
+  await page.focus('[data-az-disclosure]');
   const clicked = await page.evaluate(() => {
     const b = document.querySelector('[data-az-disclosure]');
     const panel = document.getElementById(b.getAttribute('aria-controls'));
@@ -205,11 +214,20 @@ export async function faq(page) {
 export async function copy(page) {
   const button = '[data-az-behaviour="copy"]';
   if (!(await visible(page, button))) return null;
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   const expected = await page.$eval(button, (b) => b.getAttribute('data-az-target').replace(/^copy:/i, ''));
+  // Chromium lets a test read the clipboard back. Firefox and WebKit have no
+  // clipboard permission a test can grant, so there the check records what
+  // the runtime hands the real writeText — still calling it through.
+  const readable = await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).then(() => true, () => false);
+  if (!readable) {
+    await page.evaluate(() => {
+      const real = navigator.clipboard.writeText.bind(navigator.clipboard);
+      navigator.clipboard.writeText = (text) => { window.__azCopied = text; return real(text); };
+    });
+  }
   await page.click(button);
   const said = await until(page, () => document.querySelector('[role="status"][aria-live="polite"]')?.textContent === 'Copied');
-  const clipboard = await page.evaluate(() => navigator.clipboard.readText().catch(() => null));
+  const clipboard = await page.evaluate((r) => (r ? navigator.clipboard.readText().catch(() => null) : window.__azCopied ?? null), readable);
   const problems = [];
   if (!said) problems.push('no polite "Copied" announcement');
   if (clipboard !== expected) problems.push(`clipboard holds ${JSON.stringify(clipboard)}, not ${JSON.stringify(expected)}`);
@@ -260,7 +278,7 @@ export async function overlayMotion(page) {
 
 /** Scroll to `y` and let scroll handlers and a transition settle. */
 const settleAt = async (page, y, ms = 400) => {
-  await page.evaluate((v) => window.scrollTo(0, v), y);
+  await page.evaluate((v) => window.scrollTo({ top: v, behavior: 'instant' }), y);
   await page.waitForTimeout(ms);
 };
 
@@ -334,7 +352,7 @@ export async function navMotion(page) {
   await page.evaluate(() => { document.body.style.minHeight = '4000px'; });
   let moving = 0;
   for (const y of [150, 300, 450, 600]) {
-    await page.evaluate((v) => window.scrollTo(0, v), y);
+    await page.evaluate((v) => window.scrollTo({ top: v, behavior: 'instant' }), y);
     await page.waitForTimeout(30);
     moving += await page.evaluate((s) => document.getAnimations()
       .filter((a) => document.querySelector(s).contains(a.effect?.target ?? null)).length, sel);
@@ -389,6 +407,8 @@ export async function faqDeepLink(page) {
   const url = new URL(page.url());
   url.hash = '';
   await page.goto(`${url.href}#:~:text=${encodeURIComponent(words)}`, { waitUntil: 'load' });
+  // A site renders after `load`; the self-test pages are static (no #root).
+  if (await page.$('#root')) await page.waitForSelector('#root > *', { state: 'attached' });
   await page.waitForTimeout(500);
   const r = await page.evaluate(() => [...document.querySelectorAll('[data-az-disclosure]')].map((b) => ({
     expanded: b.getAttribute('aria-expanded'),

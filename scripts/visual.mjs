@@ -225,6 +225,16 @@ function firstRoute(source) {
   return m[1] === '/' ? '/' : `${m[1]}/`;
 }
 
+/**
+ * Load a site page and wait until the app has rendered into it. `load`
+ * fires before React's asynchronous root commits, and a check that met an
+ * empty page reported "nothing to test" and was silently skipped.
+ */
+async function open(page, path, server) {
+  await page.goto(new URL(path, server.url).href, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+  await page.waitForSelector('#root > *', { state: 'attached', timeout: NAV_TIMEOUT_MS });
+}
+
 /* ---- check one site ----------------------------------------------------- */
 
 async function checkSite(s, browsers, server) {
@@ -246,7 +256,7 @@ async function checkSite(s, browsers, server) {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'no-preference' });
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
+      await open(page, s.path, server);
       record(s.word, 'overflow', tag(scheme, width), await overflow(page));
       await page.screenshot({ path: join(shots, `${s.label.replace(':', '-')}-${scheme}-${width}.png`), fullPage: true });
       if (restackAt && scheme === 'light') tracks[width] = await columnsOf(page, restackAt);
@@ -274,31 +284,34 @@ async function checkSite(s, browsers, server) {
 
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
+  await open(page, s.path, server);
   record(s.word, 'reduced-motion', `${s.label}/light/1440`, await reducedMotion(page));
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
+  await open(page, s.path, server);
   const still = await overlayMotion(page);
   if (still) record(s.word, 'overlay-motion', `${s.label}/light/390`, still);
-  await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
+  await open(page, s.path, server);
   const barStill = await navMotion(page);
   if (barStill) record(s.word, 'nav-motion', `${s.label}/light/390`, barStill);
   await ctx.close();
 
   // The behaviour runtime, in a fresh context per width: the drawer is the
   // phone menu, the dropdown the desktop one; faq, copy, play and solid are
-  // width-independent and checked on the desktop page.
-  for (const width of [390, 1440]) {
-    const bctx = await browsers.chromium.newContext({ viewport: { width, height: 900 } });
-    const bpage = await bctx.newPage();
-    bpage.setDefaultTimeout(NAV_TIMEOUT_MS);
-    const checks = width === 390 ? { drawer } : { dropdown, solid, 'hide-shrink': hideShrink, 'scroll-padding': scrollPadding, faq, 'faq-deep-link': faqDeepLink, copy, play };
-    for (const [name, fn] of Object.entries(checks)) {
-      await bpage.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
-      const r = await fn(bpage);
-      if (r) record(s.word, name, `${s.label}/light/${width}`, r);
+  // width-independent and checked on the desktop page. Every engine runs
+  // them — a behaviour that works only in Chromium is not built.
+  for (const engine of ['chromium', 'firefox', 'webkit']) {
+    for (const width of [390, 1440]) {
+      const bctx = await browsers[engine].newContext({ viewport: { width, height: 900 } });
+      const bpage = await bctx.newPage();
+      bpage.setDefaultTimeout(NAV_TIMEOUT_MS);
+      const checks = width === 390 ? { drawer } : { dropdown, solid, 'hide-shrink': hideShrink, 'scroll-padding': scrollPadding, faq, 'faq-deep-link': faqDeepLink, copy, play };
+      for (const [name, fn] of Object.entries(checks)) {
+        await open(bpage, s.path, server);
+        const r = await fn(bpage).catch((e) => ({ pass: false, detail: `threw: ${String(e.message).split('\n')[0]}` }));
+        if (r) record(s.word, name, `${s.label}/${engine}/light/${width}`, r);
+      }
+      await bctx.close();
     }
-    await bctx.close();
   }
 
   // The smaller pass: another engine at one width, overflow and page errors.
@@ -306,7 +319,7 @@ async function checkSite(s, browsers, server) {
     const other = await browsers[name].newPage({ viewport: { width, height: 900 } });
     const errors = [];
     other.on('pageerror', (e) => errors.push(e.message));
-    await other.goto(new URL(s.path, server.url).href, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+    await open(other, s.path, server);
     const o = await overflow(other);
     record(s.word, name, `${s.label}/light/${width}`, {
       pass: o.pass && errors.length === 0,
