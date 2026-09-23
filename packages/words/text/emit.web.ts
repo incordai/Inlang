@@ -6,7 +6,7 @@
  *   ul.az-text-actions? > li > a|button
  * Variants: prose — body at the reading measure · centered — centred statement ·
  *   columns — two text columns, one below md.
- * Modifiers: reveal — declared, not rendered yet.
+ * Modifiers: reveal — data-az-reveal on the block (revealed as one unit); the overlay runtime hides by script, once.
  * Props: title → h2.az-text-title · body → div.az-text-body as text (a .md path is not rendered yet).
  * Styling: theme tokens only; below.sm mobile gutter; below.md single column; states.overBackdrop veil.
  * Behaviour: none; buttons by target-web/src/actions.ts.
@@ -24,7 +24,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** Columns are a count, so a number is honest here — PRD §6.1a. */
 const COLUMN_COUNT = 2;
@@ -88,7 +88,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  return {
+  return revealed(block, t, {
     tag: 'section',
     attrs: { class: `az-text az-text--${variant}` },
     style: {
@@ -103,5 +103,5 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // backdrop it takes the veil — contrast then holds on any frame.
     states: { overBackdrop: { background: t.color.veil } },
     children,
-  };
+  });
 }

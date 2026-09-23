@@ -896,3 +896,48 @@ export async function detach(page) {
   if (r.expanded !== 'false') problems.push('the toggle still says expanded');
   return { pass: problems.length === 0, detail: problems.join('; ') };
 }
+
+/**
+ * `reveal` (feature-spec §9): a block below the first viewport is hidden BY
+ * SCRIPT and rises into view when scrolled to; a block already on screen is
+ * never hidden. Without the runtime nothing is hidden, so this fails.
+ */
+export async function reveal(page) {
+  if (!(await page.$('[data-az-reveal]'))) return null;
+  await page.waitForTimeout(80);
+  const state = await page.evaluate(() => {
+    const vh = window.innerHeight;
+    const targets = (b) => { const i = [...b.querySelectorAll('[data-az-reveal-item]')]; return i.length ? i : [b]; };
+    const blocks = [...document.querySelectorAll('[data-az-reveal]')];
+    const onScreen = blocks.filter((b) => b.getBoundingClientRect().top < vh);
+    const below = blocks.find((b) => b.getBoundingClientRect().top >= vh) ?? null;
+    return {
+      onScreenHidden: onScreen.flatMap(targets).filter((t) => getComputedStyle(t).opacity !== '1').length,
+      below: below ? (below.id || (below.id = 'az-reveal-probe')) : null,
+      belowHidden: below ? targets(below).every((t) => getComputedStyle(t).opacity === '0') : null,
+    };
+  });
+  const problems = [];
+  if (state.onScreenHidden) problems.push(`${state.onScreenHidden} item(s) already on screen were hidden`);
+  if (state.below === null) {
+    return { pass: problems.length === 0, detail: problems.join('; ') || 'no block below the first viewport' };
+  }
+  if (!state.belowHidden) problems.push('a block below the fold was not hidden for its reveal');
+  await page.evaluate((id) => document.getElementById(id).scrollIntoView({ block: 'center', behavior: 'instant' }), state.below);
+  const shown = await until(page, (id) => {
+    const b = document.getElementById(id);
+    const i = [...b.querySelectorAll('[data-az-reveal-item]')];
+    return (i.length ? i : [b]).every((t) => getComputedStyle(t).opacity === '1' && getComputedStyle(t).transform === 'none');
+  }, state.below);
+  if (!shown) problems.push('the block never became visible after scrolling to it');
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
+/** Under reduced motion there is no reveal at all: nothing is ever hidden. */
+export async function revealReduced(page) {
+  if (!(await page.$('[data-az-reveal]'))) return null;
+  await page.waitForTimeout(80);
+  const hidden = await page.evaluate(() => [...document.querySelectorAll('[data-az-reveal], [data-az-reveal-item]')]
+    .filter((t) => getComputedStyle(t).opacity !== '1').length);
+  return { pass: hidden === 0, detail: hidden ? `${hidden} element(s) hidden for a reveal under reduced motion` : '' };
+}

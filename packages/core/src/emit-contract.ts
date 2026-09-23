@@ -258,6 +258,39 @@ export const glassSurface = (theme: ThemeLike): StyleMap => {
   return { background: theme.color.veil, backdropFilter: blur, WebkitBackdropFilter: blur };
 };
 
+/**
+ * `reveal` — feature-spec §9, the engine every word with the modifier uses
+ * (text-spec §9, cta-spec §8, faq, gallery, pricing). The word only marks:
+ * the block gets `data-az-reveal` (the rise distance, `space.8`), and each
+ * staggered item `data-az-reveal-item` — or the block itself when it reveals
+ * as one unit. The behaviour runtime applies the hidden state BY SCRIPT, only
+ * below the first viewport, once, and not at all under reduced motion, so
+ * nothing is ever hidden by CSS and the page reads with JS off.
+ */
+export function revealed(
+  block: { readonly modifiers: readonly string[] }, theme: ThemeLike, root: EmittedNode, itemClass?: string,
+): EmittedNode {
+  if (!block.modifiers.includes('reveal')) return root;
+  const motion = theme.motion as Readonly<Record<string, string | number>>;
+  const transition = `opacity ${motion.slow}ms ${motion.ease}, transform ${motion.slow}ms ${motion.ease}`;
+  const animate = (node: EmittedNode, item: boolean): EmittedNode => ({
+    ...node,
+    attrs: { ...node.attrs, ...(item ? { 'data-az-reveal-item': '' } : {}) },
+    style: { ...node.style, transition: node.style?.transition ? `${node.style.transition}, ${transition}` : transition },
+    reducedMotion: { ...node.reducedMotion, transition: 'none' },
+  });
+  const hasClass = (node: EmittedNode) => String(node.attrs?.class ?? '').split(/\s+/).includes(itemClass ?? '');
+  let items = 0;
+  const walk = (node: EmittedNode): EmittedNode => {
+    if (itemClass && hasClass(node)) { items++; return animate(node, true); }
+    return { ...node, ...(node.children ? { children: node.children.map((c) => (typeof c === 'string' ? c : walk(c))) } : {}) };
+  };
+  const marked: EmittedNode = { ...root, attrs: { ...root.attrs, 'data-az-reveal': String(theme.space[8]) } };
+  const walked = itemClass ? walk(marked) : marked;
+  // No items to stagger (pricing `table`): the block reveals as one unit.
+  return items > 0 ? walked : animate(walked, false);
+}
+
 export const visuallyHidden = (text: string): EmittedNode => ({
   tag: 'span',
   attrs: { class: 'az-visually-hidden' },

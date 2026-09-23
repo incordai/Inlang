@@ -7,7 +7,7 @@
  *   (split) div.az-cta-text > (the same three) + div.az-cta-media[data-media]? > img.az-cta-media-img
  * Variants: band — full-bleed accent surface, inverted ink and buttons · card — inset surface card with a border ·
  *   split — two-column grid text|media, one column below sm.
- * Modifiers: glass — blurred veil on card/split (translucent) · reveal — declared, not rendered yet.
+ * Modifiers: glass — blurred veil on card/split (translucent) · reveal — data-az-reveal on the block (revealed as one unit); the overlay runtime hides by script, once.
  * Props: title → h2.az-cta-title · sub → p.az-cta-sub · media → img.az-cta-media-img (split only) ·
  *   describe → the image's alt; without it the image is decorative and hidden below sm.
  * Styling: theme tokens only; band paints accent with accent-contrast ink; below.sm mobile gutter,
@@ -39,7 +39,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { glassSurface, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
@@ -120,7 +120,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // `split` is the only variant with a media column (§2, §10 `requires`).
   const media = variant === 'split' ? splitMedia(block, ctx) : null;
 
-  return {
+  return revealed(block, t, {
     tag: 'section',
     attrs: { class: `az-cta az-cta--${variant}` },
     style: {
@@ -159,7 +159,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       },
     },
     children: variant === 'split' ? (media ? [text, media] : [text]) : children,
-  };
+  });
 }
 
 /**

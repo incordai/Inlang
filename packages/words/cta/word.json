@@ -11,7 +11,7 @@
     },
     "modifiers": {
       "glass": "Card blurs what is behind it; band stays solid",
-      "reveal": "Fades in when scrolled into view (not rendered yet)"
+      "reveal": "Rises into view once when scrolled to"
     }
   },
   "variants": [

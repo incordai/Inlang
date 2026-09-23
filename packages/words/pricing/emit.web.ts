@@ -10,7 +10,7 @@
  *     div.az-pricing-shared > h3|h2.az-pricing-shared-title + ul.az-pricing-shared-items ; panels use dl.az-plan-rows
  * Variants: cards — one card per plan, one column below sm, highlighted first · table — comparison table,
  *   transposed to per-plan panels below sm; rows equal in every plan collapse into the shared list.
- * Modifiers: reveal — declared, not rendered yet.
+ * Modifiers: reveal — data-az-reveal on the block, data-az-reveal-item on plan cards; the overlay runtime hides by script, once.
  * Props: title → h2 · sub → p · currency / locale → formatPrice() · billing → which price shows first ·
  *   period → p.az-plan-period · plan monthly/annual → data prices · highlight → accent border ·
  *   badge → p.az-plan-badge · feature children → the feature rows · cta → div.az-plan-action.
@@ -49,7 +49,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /**
  * Format a declared price.
@@ -390,7 +390,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     if (shared.size > 0) children.push(everyPlan(plans[0], shared, ctx, heading));
   }
 
-  return {
+  return revealed(block, t, {
     tag: 'section',
     attrs: {
       class: `az-pricing az-pricing--${variant}`,
@@ -406,5 +406,5 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
-  };
+  }, 'az-plan');
 }

@@ -45,7 +45,7 @@ const VISUAL = {
   3: ['compile', 'overflow', 'no-js', 'hydration', 'restack', 'column', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'firefox', 'webkit'],
   4: ['axe', 'copy'],
   5: ['keyboard', 'skip-link', 'drawer', 'dropdown', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'play', 'billing'],
-  6: ['reduced-motion', 'overlay-motion', 'nav-motion'],
+  6: ['reduced-motion', 'overlay-motion', 'nav-motion', 'reveal', 'reveal-reduced'],
   7: ['schemes'],
 };
 const ITEMS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];

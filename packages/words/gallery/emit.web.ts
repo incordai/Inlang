@@ -12,7 +12,7 @@
  *     figcaption.az-gallery-lightbox-caption · ul.az-gallery-actions? > li > a|button
  * Variants: grid — uniform crops in columns · masonry — uncropped, column-major · carousel — snapping row
  *   with step buttons · orbit — 3D ring of the images (poster first), carousel below sm.
- * Modifiers: lightbox — images become buttons opening the dialog · reveal — declared, not rendered yet.
+ * Modifiers: lightbox — images become buttons opening the dialog · reveal — data-az-reveal on the block, data-az-reveal-item on images; the overlay runtime hides by script, once.
  * Props: title → h2 · sub → p · columns → grid tracks · ratio → aspect-ratio (ASPECT table) ·
  *   poster → orbit's still image · image src/alt/caption/focus → img, alt, figcaption, object-position.
  * Styling: theme tokens only; responsive tracks via below; focus rings via states; lazy images after row one.
@@ -32,7 +32,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { px, revealed, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 import { closeButton, popup } from '../../overlay/src/index.ts';
 
 /** The track's name when the gallery has no title to lend it. */
@@ -292,7 +292,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  return {
+  return revealed(block, t, {
     tag: 'section',
     attrs: {
       class: `az-gallery az-gallery--${variant}`,
@@ -311,7 +311,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
-  };
+  }, 'az-gallery-item');
 }
 
 /**

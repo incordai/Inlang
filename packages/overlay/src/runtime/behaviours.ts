@@ -1,6 +1,6 @@
 /**
  * @az runtime behaviours
- * Purpose: what makes the emitted markup interactive: dialogs, dropdowns, nav scroll, faq, copy, billing, year, lightbox, carousel.
+ * Purpose: what makes the emitted markup interactive: dialogs, dropdowns, nav scroll, faq, copy, billing, year, lightbox, carousel, reveal.
  * Spec: docs/overlays-spec.md · docs/nav-block-spec.md · docs/faq-block-spec.md
  * Exports: attach
  * Edit guide: wire by data-az-behaviour; each element once (late content via MutationObserver); attach() returns full cleanup.
@@ -35,12 +35,13 @@
  *   lightbox  a gallery's images open one popup and step through (§8)
  *   billing   pricing's Monthly/Annual toggle (pricing §7.1)
  *   year      footer `year dynamic`: the rolling copyright year (footer §4)
+ *   reveal    `reveal` blocks rise into view once (feature §9); hidden by script only
  */
 
 import {
   billingAnnouncement, billingFrom, carouselEnds, copyText, counterText, lightboxIndex, moveIndex, neighbours,
-  offScreen, outsideBox, retractedAfter, rollingYear, safeDecode, samePageFragment, shrunkAfter, solidAfter, swipeOf,
-  transitionMs, trapIndex, type Billing,
+  offScreen, outsideBox, retractedAfter, revealDelay, revealsLater, rollingYear, safeDecode, samePageFragment,
+  shrunkAfter, solidAfter, swipeOf, transitionMs, trapIndex, type Billing,
 } from './logic.ts';
 import { POLICY, isPreset } from './policy.ts';
 
@@ -139,6 +140,7 @@ export function attach(doc: Document): Cleanup {
     wireCopy(ctx, root);
     wireBilling(ctx, root);
     wireYear(ctx, root);
+    wireReveal(ctx, root);
   };
   scan(doc);
 
@@ -750,6 +752,59 @@ function wireBilling(ctx: Ctx, root: ParentNode): void {
  * must not depend on the date, CONVENTIONS §6); the client writes the range
  * to this year once it has moved on.
  */
+/**
+ * `reveal` (feature-spec §9). The hidden state is applied here, by script,
+ * never by the stylesheet: with JS off, or before this runs, everything is
+ * visible. Only a block that starts below the first viewport is hidden; it
+ * rises into place once, when it enters view, and the observer disconnects.
+ * Under reduced motion there is no observer at all — nothing is hidden.
+ */
+function wireReveal(ctx: Ctx, root: ParentNode): void {
+  // The document's view, typed with its globals (IntersectionObserver).
+  const win = ctx.doc.defaultView;
+  if (!win || typeof win.IntersectionObserver !== 'function') return;
+  if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (const block of find<HTMLElement>(root, '[data-az-reveal]')) {
+    if (!ctx.fresh(block, 'reveal')) continue;
+    if (!revealsLater(block.getBoundingClientRect(), win.innerHeight)) continue;
+    const items = [...block.querySelectorAll<HTMLElement>('[data-az-reveal-item]')];
+    const targets = items.length > 0 ? items : [block];
+    const distance = Number(block.dataset.azReveal) || 0;
+    const show = () => {
+      for (const el of targets) {
+        // Back to the word's own transition, so the rise animates.
+        el.style.transition = '';
+        el.style.opacity = '';
+        el.style.transform = '';
+      }
+    };
+    // Hidden at once: the word's transition would otherwise play the hide
+    // itself as a fade-out. The layout read flushes the instant style before
+    // the transition returns.
+    targets.forEach((el, i) => {
+      el.style.transition = 'none';
+      el.style.opacity = '0';
+      el.style.transform = `translateY(${distance}px)`;
+      el.style.transitionDelay = `${revealDelay(i)}ms`;
+    });
+    void block.offsetHeight;
+    block.setAttribute('data-az-revealed', 'false');
+    const io = new win.IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      show();
+      block.setAttribute('data-az-revealed', 'true');
+    });
+    io.observe(block);
+    ctx.undo.push(() => {
+      io.disconnect();
+      show();
+      for (const el of targets) el.style.transitionDelay = '';
+      block.removeAttribute('data-az-revealed');
+    });
+  }
+}
+
 function wireYear(ctx: Ctx, root: ParentNode): void {
   const now = new Date().getFullYear();
   for (const span of find<HTMLElement>(root, '[data-year="dynamic"]')) {

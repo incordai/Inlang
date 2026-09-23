@@ -10,7 +10,7 @@
     },
     "modifiers": {
       "single": "Opening one answer closes the others",
-      "reveal": "Fades in when scrolled into view (not rendered yet)"
+      "reveal": "Rises into view once when scrolled to"
     }
   },
   "variants": [

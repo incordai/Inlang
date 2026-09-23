@@ -11,7 +11,7 @@
       "orbit": "3D ring of images; carousel on phones"
     },
     "modifiers": {
-      "reveal": "Fades in when scrolled into view (not rendered yet)",
+      "reveal": "Rises into view once, images staggered",
       "lightbox": "Images open full size in a viewer"
     }
   },

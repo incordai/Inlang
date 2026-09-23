@@ -220,3 +220,23 @@ export const billingAnnouncement = (mode: Billing): string =>
 export function offScreen(box: { top: number; bottom: number }, viewportHeight: number): boolean {
   return box.bottom <= 0 || box.top >= viewportHeight;
 }
+
+
+/** feature-spec §9: the stagger between revealed items, in ms. */
+export const REVEAL_STEP_MS = 60;
+/** …and where it stops accumulating: "capped at 6 steps". */
+export const REVEAL_MAX_STEPS = 6;
+
+/** The delay of the `index`th item of one reveal — past step 6 it holds. */
+export function revealDelay(index: number): number {
+  return Math.min(Math.max(0, index), REVEAL_MAX_STEPS) * REVEAL_STEP_MS;
+}
+
+/**
+ * Whether a block should be hidden for its reveal: only when it starts below
+ * the first viewport. §9: "items already inside the first viewport render
+ * visible, unanimated" — animating what the reader already sees is a flash.
+ */
+export function revealsLater(box: { top: number }, viewportHeight: number): boolean {
+  return box.top >= viewportHeight;
+}

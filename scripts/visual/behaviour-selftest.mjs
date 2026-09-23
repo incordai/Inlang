@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   billing, carousel, copy, detach, drawer, dropdown, faq, faqDeepLink, hideShrink, lateContent, lightbox, navMotion,
-  overlayMotion, play, solid, year,
+  overlayMotion, play, reveal, revealReduced, solid, year,
 } from './behaviours.mjs';
 
 const RUNTIME = fileURLToPath(new URL('../../packages/overlay/src/runtime/', import.meta.url));
@@ -68,6 +68,7 @@ ${net ? NET : ''}
   </dialog>
 </nav></div>
 <main>
+  <section data-az-reveal="8" id="reveal-top"><p>On screen from the start.</p></section>
   <ul data-az-behaviour="faq" data-single="false">
     <li><h3 id="faq-first"><button type="button" id="faq-first-btn" aria-expanded="true" aria-controls="faq-first-panel" data-az-disclosure>First question?<span data-az-chevron></span></button></h3>
       <div id="faq-first-panel"><p>The first answer lives here.</p></div></li>
@@ -98,6 +99,7 @@ ${net ? NET : ''}
   </section>
   <h2 class="target" id="one">One</h2>
   <h2 class="target" id="two">Two</h2>
+  <section data-az-reveal="8" id="reveal-low"><ul><li data-az-reveal-item style="transition: opacity 240ms, transform 240ms">One</li><li data-az-reveal-item style="transition: opacity 240ms, transform 240ms">Two</li></ul></section>
 </main>
 <footer><p>© <span data-year="dynamic">2019</span> Aurora</p></footer>
 ${LATER}
@@ -105,13 +107,15 @@ ${runtime ? SCRIPT : ''}
 </body></html>`;
 
 /** The runtime's modules as browser JavaScript, imports pointed at .js. */
-function writeRuntime(dir, { withoutBeforematch = false } = {}) {
+function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = false } = {}) {
   mkdirSync(join(dir, 'az'), { recursive: true });
   for (const f of readdirSync(RUNTIME).filter((n) => n.endsWith('.ts'))) {
     const js = stripTypeScriptTypes(readFileSync(join(RUNTIME, f), 'utf8'))
       .replace(/from '\.\/([a-z-]+)\.ts'/g, "from './$1.js'")
       // The regression faqDeepLink guards against: the reveal handler gone.
-      .replace(withoutBeforematch ? /^.*'beforematch'.*$/m : /(?!)/, '');
+      .replace(withoutBeforematch ? /^.*'beforematch'.*$/m : /(?!)/, '')
+      // The regression revealReduced guards against: reveal ignoring reduced motion.
+      .replace(withoutReducedGuard ? /^.*prefers-reduced-motion: reduce\)'\)\.matches\) return;.*$/m : /(?!)/, '');
     writeFileSync(join(dir, 'az', f.replace(/\.ts$/, '.js')), js);
   }
 }
@@ -120,6 +124,7 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
   const forms = {
     good: { runtime: true, net: true }, none: { runtime: false, net: true }, nonet: { runtime: true, net: false },
     nomatch: { runtime: true, net: true, withoutBeforematch: true },
+    noguard: { runtime: true, net: true, withoutReducedGuard: true },
   };
   for (const [name, form] of Object.entries(forms)) {
     mkdirSync(join(dir, `b-${name}`), { recursive: true });
@@ -142,6 +147,7 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
     ['behaviour: carousel', carousel, 1440], ['behaviour: lightbox', lightbox, 1440],
     ['behaviour: billing', billing, 1440], ['behaviour: year', year, 1440],
     ['behaviour: late content', lateContent, 1440], ['behaviour: cleanup with a modal open', detach, 390],
+    ['behaviour: reveal', reveal, 1440],
   ]) {
     expect(`${label} without the runtime`, await run('none', width, check), false);
     expect(`${label} with the runtime`, await run('good', width, check), true);
@@ -153,4 +159,6 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
   expect('behaviour: faq deep link with the runtime', await run('good', 1440, faqDeepLink), true);
   expect('behaviour: nav motion without the reduced-motion net', await run('nonet', 1440, navMotion, 'reduce'), false);
   expect('behaviour: nav motion with it', await run('good', 1440, navMotion, 'reduce'), true);
+  expect('behaviour: reveal ignoring reduced motion', await run('noguard', 1440, revealReduced, 'reduce'), false);
+  expect('behaviour: reveal under reduced motion', await run('good', 1440, revealReduced, 'reduce'), true);
 }

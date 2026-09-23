@@ -10,7 +10,7 @@
       "bento": "Uneven tiles; the lead item gets the big tile"
     },
     "modifiers": {
-      "reveal": "Fades in when scrolled into view (not rendered yet)"
+      "reveal": "Rises into view once, items staggered"
     }
   },
   "variants": [

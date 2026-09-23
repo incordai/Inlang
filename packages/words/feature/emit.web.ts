@@ -10,7 +10,7 @@
  * Variants: grid — columns tracks (default 3), two below md, one below sm (two for a spec sheet) ·
  *   rows — one per row, media alternates sides on desktop, above text below sm ·
  *   bento — uneven tiles; the lead item gets the larger tile.
- * Modifiers: reveal — declared, not rendered yet.
+ * Modifiers: reveal — data-az-reveal on the block, data-az-reveal-item on items; the overlay runtime hides by script, once.
  * Props: title → h2.az-feature-title · sub → p.az-feature-sub · columns → grid tracks ·
  *   item title/text/icon/media/lead → the item parts above; item link → div.az-feature-item-link.
  * Styling: theme tokens only; row gap larger than column gap; below.md / below.sm track counts;
@@ -31,7 +31,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** The manifest's `columns` default. */
 const DEFAULT_COLUMNS = 3;
@@ -244,7 +244,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  return {
+  return revealed(block, t, {
     tag: 'section',
     attrs: { class: `az-feature az-feature--${variant}` },
     style: {
@@ -256,5 +256,5 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
-  };
+  }, 'az-feature-item');
 }

@@ -16,7 +16,7 @@ site aurora
 page /
   hero center
     title "Built in the dark"
-  feature grid
+  feature grid reveal
     title   "Made properly, or not at all"
     sub     "Three things we refuse to compromise on."
     columns 3

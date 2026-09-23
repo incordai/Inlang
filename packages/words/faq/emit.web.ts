@@ -8,7 +8,7 @@
  *     div.az-faq-answer#faq-{slug}-panel[role=region ≤6 items] > p (the answer) + more links ·
  *   script[type=application/ld+json]? (≥3 answered questions, schema on)
  * Variants: list — one column at the body measure · columns — two-column grid, one column below sm.
- * Modifiers: single — data-single=true, the runtime keeps one answer open · reveal — declared, not rendered yet.
+ * Modifiers: single — data-single=true, the runtime keeps one answer open · reveal — data-az-reveal on the block (revealed as one unit); the overlay runtime hides by script, once.
  * Props: title → h2.az-faq-title · sub → p.az-faq-sub · schema → FAQPage JSON-LD on/off ·
  *   item "question" → the question button; its text → the answer paragraph; more → link-hierarchy action.
  * Styling: theme tokens only; hairline dividers between rows; row padding grows below sm (tap target);
@@ -30,7 +30,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** faq-block-spec §7.5 — a two-question FAQPage is noise, so none is emitted. */
 const SCHEMA_MIN_ITEMS = 3;
@@ -248,7 +248,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const schema = faqSchema(block);
   if (schema) children.push(schema);
 
-  return {
+  return revealed(block, t, {
     tag: 'section',
     attrs: { class: `az-faq az-faq--${variant}` },
     style: {
@@ -260,5 +260,5 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // §6: the container drops to the mobile gutter (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
-  };
+  });
 }
