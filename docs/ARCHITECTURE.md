@@ -69,7 +69,15 @@ target-* → core, theme, overlay
 overlay  → theme
 words/*  → core, theme, overlay        (never a target directly)
 cli      → everything
+auth-runtime → (nothing)                 (copied whole into a site that uses auth)
 ```
+
+`auth-runtime` (M4) is the adapter layer a generated site runs: the §3
+contract, the `hosted` and `session` adapters and the form behaviour. It
+imports only its own files because the CLI copies it verbatim into
+`src/az-auth/`, exactly as it copies `overlay`'s runtime; the target emits
+only the wiring (`target-web/src/auth.ts`). `core/src/secrets.ts` is copied
+the same way, into every site's build guard, and so imports nothing.
 
 `target-* → overlay` was added with the behaviour runtime: the button
 primitive lives in the target (buttons-and-sections §1), and a `play` action's

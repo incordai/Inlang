@@ -98,6 +98,71 @@ resolved through the same union-and-install-once path as everything else (PRD
 §6.7). Provider names stay out of the core word, and an adapter can be versioned
 without republishing `auth`.
 
+### 3.1 As built (M4) — additions, and which key goes where
+
+The implementation (`packages/auth-runtime`, copied into a site that uses
+`auth`) adds three calls to the interface above, each for something the block
+already emits:
+
+```ts
+  requestLink(email: string): Promise<AuthResult>;   // `methods link`
+  signOut(): Promise<void>;                           // the signed-in bar's button
+  ready?(): Promise<void>;                            // adapters whose first read is a request
+```
+
+`AuthSession` is `{ user: { id, email }, expiresAt? }` — the block never sees a
+token. A `custom` adapter's `impl` module **default-exports** an object
+implementing the whole interface; it is copied into the site through the same
+sandbox as `raw` components.
+
+**Which key goes where — the sentence that prevents the worst outcome:**
+
+| Key | Where it lives | Reaches the browser? |
+|---|---|---|
+| provider **public / anon** key | `AZ_PUBLIC_AUTH_KEY` | **yes** — by design; row-level security is what protects the data (§4.1) |
+| provider **service** key | your server's own secret store | **never** — the build refuses any `AZ_PUBLIC_` variable named `*SERVICE*`, `*SECRET*`, `*PRIVATE*`, or holding a token whose role is `service_role`/`service`/`admin` |
+| session-signing secret | your server only | **never** |
+
+Only variables prefixed `AZ_PUBLIC_` are inlined into a generated site — the
+emitted Vite config sets `envPrefix` to exactly that, so a `VITE_…` variable is
+not exposed at all.
+
+`azbackend` is **not available**: it depends on PRD §11 question 2 (does the
+backend project continue). Until that is decided the compiler refuses it —
+`auth: adapter 'azbackend' is not available yet — use: hosted, session, custom`
+(AZ1214, the manifest's `deferred`).
+
+### 3.2 The `hosted` protocol
+
+Provider-neutral request/response shapes. Configuration is two public
+variables: `AZ_PUBLIC_AUTH_URL` (base URL) and `AZ_PUBLIC_AUTH_KEY` (the public
+key); the site's build fails if either is missing. Every call is
+`POST <base><path>`, JSON, with the header `x-public-key: <public key>`:
+
+| Path | Body | Success |
+|---|---|---|
+| `/sign-in` | `{ email, password }` | `200 { session }` |
+| `/sign-up` | `{ email, password, name? }` | `200 { session }`, or `200 {}` when the address must be confirmed first |
+| `/link` | `{ email }` | `200 {}` — **always**, whether or not the address has an account |
+| `/reset` | `{ email }` | `200 {}` — **always**, same reason |
+| `/password` | `{ token, password }` | `200 { session }` |
+| `/sign-out` | `{}` + `authorization: Bearer <token>` | `204` |
+
+`session` is `{ user: { id, email }, token, expiresAt? }` (`expiresAt` in epoch
+milliseconds). A failure is any non-2xx with `{ error: <AuthErrorCode>, field? }`;
+`429` is `rate_limited` whatever its body, an unreachable provider is
+`network`, and any code outside the closed set becomes `unknown`. The adapter
+keeps the session in `sessionStorage` (one tab, cleared when it closes) —
+readable by any script on the page, which is why §4.1 is the protection.
+
+### 3.3 The `session` routes
+
+The site's own server, same origin, cookie-based: `POST /api/auth/sign-in`,
+`/sign-up`, `/link`, `/reset`, `/password`, `/sign-out`, with the same bodies
+and error shape as §3.2, and `GET /api/auth/session` → `200 { session: { user } }`
+or `200 { session: null }`. The server sets an httpOnly session cookie; the
+browser never holds a token.
+
 ## 4. Secret leakage — a hard build error
 
 word-quality-gate §4 governs, and it bites here because **a static bundler
@@ -156,6 +221,15 @@ defence, captcha · email sending, templates, delivery · OAuth redirect handlin
 beyond calling the adapter · server middleware or route protection (**a static
 site has no server**) · row-level security policies, roles, backend config ·
 account deletion, data export, consent records.
+
+**Which pages are protected** is site configuration, beside the adapter:
+`protect /account /orders` under the site-level `auth` (a list of routes, each
+checked to be a page — AZ1215). A protected page shows its nav and "Checking
+that you are signed in…" while the adapter answers, then the page with a
+signed-in bar and a sign-out button — or sends the visitor to the `auth login`
+page with `?next=<the page>`. After signing in, `next` is followed **only** if
+it is a path on the same origin; anything else falls back to the form's
+`redirect`. With no `auth login` page the compiler warns (AZ2004).
 
 **The protected-route wrapper is UX, not security.** It stops a signed-out user
 seeing a broken empty dashboard; it does not stop anyone reading the data behind
@@ -283,14 +357,15 @@ CONVENTIONS §5.
   "modifiers": ["glass"],
   "props": {
     "adapter":  { "type": "enum", "values": ["hosted", "session", "azbackend", "custom"],
-                  "required": true, "scope": "site" },
+                  "required": true, "scope": "site", "deferred": ["azbackend"] },
     "title":    { "type": "string", "maxWords": 8 },
     "sub":      { "type": "string", "maxWords": 20 },
     "methods":  { "type": "list", "of": "enum", "values": ["password", "link", "oauth"],
                   "max": 3, "default": ["password"], "deferred": ["oauth"] },
     "redirect": { "type": "route" },
     "terms":    { "type": "route" },
-    "impl":     { "type": "path", "ext": [".ts", ".tsx"], "scope": "site" }
+    "impl":     { "type": "path", "ext": [".ts", ".tsx"], "scope": "site" },
+    "protect":  { "type": "list", "of": "route", "scope": "site" }
   },
   "slots": { "alt": { "max": 2 } },
   "requires": { "signup": ["terms"] },
@@ -317,7 +392,7 @@ CONVENTIONS §5.
 |---|---|---|
 | service key would be inlined | **error, unsuppressible** | `auth: 'VITE_SERVICE_KEY' is a service key and would be readable in the shipped bundle — use the public key here and keep the service key on your server` |
 | key pattern in the built bundle | **error, unsuppressible** | `auth: a service-key pattern was found in the built bundle — remove it from source and rebuild` |
-| key literal in the `.az` file | error | `auth: a key literal in 'key' would be committed to source control — move it to an environment variable` |
+| key literal in the `.az` file (AZ1411, any word) | error | `auth: a key literal in 'key' would be committed to source control — move it to an environment variable` |
 | no variant | error | `auth: no form named — pick one of 'login', 'signup', 'reset'` |
 | two variants | error | `auth: 'login' and 'signup' are both forms — pick one` |
 | no adapter declared | error | `auth: no adapter — add to 'site': auth adapter hosted` |
@@ -331,7 +406,18 @@ CONVENTIONS §5.
 | `signup` with >4 fields | warning | `auth: 'signup' asks for 6 fields — every extra field costs sign-ups, ask for them later` |
 | `glass` on an auth page | warning | `auth: 'glass' reduces contrast on credential fields — use the plain surface` |
 | submit label in the denylist | warning | `auth: 'Submit' is not what the button does — name the action, e.g. "Sign in"` |
-| `<Protected>` with no `login` page | warning | `auth: a protected route has nowhere to send signed-out users — add a page with 'auth login'` |
+| `<Protected>` with no `login` page (AZ2004) | warning | `auth: a protected route has nowhere to send signed-out users — add a page with 'auth login'` |
+
+**Where the two unsuppressible errors run.** Rule 1 runs twice: `az build`
+scans the environment and the project's `.env` files before it writes
+anything, and the generated project's own build scans the environment it
+actually loads (`az-vite/guard.ts`). Rule 2 runs in that build, over every
+chunk and asset it emits. The patterns are shapes, never a provider's name:
+private-key blocks, `sk_`/`rk_` prefixes, `service_role`, tokens whose role
+claim is `service_role`/`service`/`admin`, and high-entropy strings (32+
+characters, ≥4.0 bits per character, letters and digits) other than inlined
+`data:` assets and the site's own public values. A finding names the variable
+or the file offset and the value's length — never any character of the value.
 
 The two unsuppressible errors are the only ones in the product. Everything else
 in AZ is a judgement call with an escape hatch; shipping a database key is not.

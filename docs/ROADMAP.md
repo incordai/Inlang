@@ -138,9 +138,14 @@ Adapters only. **We never implement auth** (PRD §6.5).
 - adapter docs stating anon-key vs service-key explicitly
 
 **Exit criteria**
-- [ ] working login against a real hosted-provider project
-- [ ] build **fails** when a service key is present in env
-- [ ] bundle scan finds no high-entropy secrets
+- [ ] working login against a real hosted-provider project — **open**: needs a
+      provider account; the same flows pass against a local mock provider
+      speaking the §3.2 protocol (`pnpm test:auth`, in CI)
+- [x] build **fails** when a service key is present in env (verify-build, by
+      name and by token role; `az build` refuses first — cli/test/secrets)
+- [x] bundle scan finds no high-entropy secrets (every generated build scans
+      its output; verify-build proves a planted key fails it and the clean
+      fixture, public key included, passes)
 
 ---
 
@@ -220,7 +225,8 @@ props are implemented (`pnpm coverage`). Three themes exist; theme lint (A7)
 holds. The remaining four props are blocked:
 `hero.model`, `scene.model` and `scene.camera` need the 3D runtime ported
 from the spike (after M0, and after the pin, renderer-placement and Draco
-decoder decisions); `auth.impl` needs M4.
+decoder decisions). `auth.impl` is consumed by the target's auth wiring
+(M4) rather than the word's markup, so `pnpm coverage` still lists it.
 Styling: words describe `style` plus named variants — `below.<breakpoint>`,
 `states.<state>`, `reducedMotion` (ARCHITECTURE §4.3) — and the target
 compiles every styled node into one generated class in `src/az.css`; lint
@@ -276,7 +282,22 @@ and the `az migrate` skeleton exist. Known limits: a component is copied as a
 single file (its own relative imports are not carried), and `az dev` must be
 restarted to pick up edits to an ejected emitter.
 
-**M4–M5 — not started.**
+**M4 — built; one exit criterion open.** Adapters only (PRD §6.5):
+`packages/auth-runtime` holds the contract (auth-spec §3.1), the `hosted`
+adapter (a provider-neutral protocol over `AZ_PUBLIC_AUTH_URL` and the public
+`AZ_PUBLIC_AUTH_KEY`, §3.2), the `session` adapter (same-origin cookie routes,
+§3.3) and the form behaviour; `custom` imports the author's `impl` through the
+module sandbox. It is copied only into sites that use `auth` — a site without
+it is byte-identical to before. Protected pages are a site-level
+`protect /route …` list; `<Protected>` shows the nav while checking, then the
+page with a signed-in bar, or sends the visitor to login with a same-origin
+`?next`. Secret leakage is refused three ways, none suppressible: AZ1411 for a
+key in the `.az` file, `az build`'s scan of the env and `.env` files, and a
+guard inside every generated build (env again, then every emitted file).
+`azbackend` is refused (AZ1214) until PRD §11 Q2 is decided. Open: the
+real-provider login.
+
+**M5 — not started.**
 
 Still outstanding and not answerable by writing code — PRD §11: open-source
 vs internal, the fate of the backend project (decides `auth azbackend`), a
