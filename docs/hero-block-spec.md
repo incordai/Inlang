@@ -173,6 +173,15 @@ rectangle it gets depends on what else the page declares:
 | no `scene backdrop` | its own rectangle in the flow, sized by the hero's layout box |
 | a `scene backdrop` (scene-spec §6) | **it does not take a rectangle at all** — the hero's 3D *is* the backdrop's first scroll segment, and the hero's text layers over it |
 
+**Where the rectangle sits, per layout (implemented).** `split`: the media
+column, 4:3. `full`: behind the type, filling the hero — the only layout with
+a scrim, and while the canvas draws the flat scrim becomes a gradient over the
+scene (never a flat layer). `center`, `stack`, `minimal`: a 16:9 rectangle
+in the flow below the copy, because none of them has a scrim and text over
+media without one is what this section forbids. The view is named by
+`describe` (`role="img"`); without it the headline carries the meaning and the
+view is `aria-hidden`.
+
 The second row is the one to get right. A hero canvas stacked on top of a
 full-viewport backdrop is two draws of the same idea, a doubled cost, and a
 visible seam where the two scenes meet. When a backdrop exists the hero

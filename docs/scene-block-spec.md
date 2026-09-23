@@ -135,6 +135,12 @@ models at the 5MB cap `hero` sets is 20MB, worse than the front-page-of-Reddit
 case distribution-and-hosting §5.2 warns about. Warn at 4, error at 8, and name
 the total byte weight rather than the count, because the count is not what hurts.
 
+**Implemented** (`packages/scene-runtime`, 2026-09-23): one fixed canvas at
+the bottom of the stack, each view drawn into its element's rectangle by
+scissor, one loop that stops when no view is in the warm margin, views paused
+(not unmounted) offscreen, one `webglcontextlost` handler that returns every
+view to its poster, and models cached by URL. Browser checks: `pnpm test:3d`.
+
 ## 6. `backdrop` — motion across the whole site, not one section
 
 Every other block in AZ is a **section**: it occupies a rectangle in the

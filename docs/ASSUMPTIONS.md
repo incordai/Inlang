@@ -173,6 +173,17 @@ emitter fits in ~250 lines.
 shipping runtime React components that words merely configure, rather than
 emitting JSX.
 
+### 2026-09-23 — the `If FAILED` remedy, taken
+
+The compiler's 3D runtime took the remedy this assumption names: words emit
+data and a tested runtime renders it. A 3D view in `hero`, `scene` or
+`gallery` is one element with `data-az-*` attributes (about 30 lines of each
+emitter, no JSX, no shader text); `packages/scene-runtime` owns the renderer,
+the generator and the shaders. The runtime is DOM-driven rather than R3F —
+one shared renderer drawing every view by scissor (scene-spec §5) needs no
+React binding — so generated sites depend on `three` alone. The measurements
+below stay the spike's record.
+
 ### Measured result
 
 | What was counted | Lines | vs ~250 threshold |

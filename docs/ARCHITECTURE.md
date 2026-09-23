@@ -70,6 +70,7 @@ overlay  → theme
 words/*  → core, theme, overlay        (never a target directly)
 cli      → everything
 auth-runtime → (nothing)                 (copied whole into a site that uses auth)
+scene-runtime → three                   (copied whole into a site that uses 3D)
 ```
 
 `auth-runtime` (M4) is the adapter layer a generated site runs: the §3
@@ -78,6 +79,15 @@ imports only its own files because the CLI copies it verbatim into
 `src/az-auth/`, exactly as it copies `overlay`'s runtime; the target emits
 only the wiring (`target-web/src/auth.ts`). `core/src/secrets.ts` is copied
 the same way, into every site's build guard, and so imports nothing.
+
+`scene-runtime` is the 3D runtime a generated site runs (scene-spec §5): the
+page's one WebGL renderer (`stage.ts`), the tier ladder and probe ported from
+the M0 spike (`tiers.ts`), the seeded procedural scene, the Draco model path
+and gallery `orbit`'s ring. It imports only its own files and `three`, and the
+CLI copies it into `src/az3d/` only for a site whose pages declare a 3D view;
+the target emits the wiring (`target-web/src/three.ts`). A site's entry
+imports just `gate.ts` statically — the §2 decision — and fetches the rest
+lazily, so a page at `static`, or without a view, never loads three.
 
 `target-* → overlay` was added with the behaviour runtime: the button
 primitive lives in the target (buttons-and-sections §1), and a `play` action's
@@ -217,6 +227,28 @@ begin an HTML tag, so one is never mistaken for markup. The web target imports
 each module into the generated App and renders it with a `theme` prop: the
 same token object words read, colours as `var(--az-…)` references.
 
+A **3D view** is an ordinary element carrying data, never a canvas: a word
+marks the box the page's one renderer draws into with `data-az-3d` (`hero`,
+`scene`, `orbit`), plus `data-az-camera` (`fixed`, `scroll`, `parallax`,
+`orbit`), `data-az-model` (through `ctx.asset`, so the sandbox and the copy
+apply), and `data-az-variant` for a backdrop. The target adds `data-az-seed`
+— FNV-1a of site name, route and the view's position (scene-spec §11.1) — so
+the same site grows the same scene on every build and engine. The view's
+section carries `data-az-3d-host`, and parts that change while the canvas
+draws carry `data-az-live-part`; the runtime sets `data-live="true"` on all
+three, which the `live` state styles (the section clears, the poster hides).
+The poster stays in the DOM throughout: it is the static tier, the loading
+state and the fallback after a lost context.
+
+**WebGL colours** (theme-spec §3.4). A material cannot read a custom
+property, so the 3D runtime reads a token's literal for the ACTIVE scheme at
+runtime — `value(doc, token)` / `hex(doc, token)` in
+`scene-runtime/src/runtime/colours.ts`, from the site's own `--az-color-*`
+declarations — and repaints when the scheme changes (`onSchemeChange`: the
+OS preference and `data-scheme`). A compile-time literal would be wrong the
+moment the visitor switched scheme. Lint rule `webgl-colour-outside-scene`
+refuses that API in any file that does not import three.
+
 **Style is data, with variants** (`emit-contract.ts`):
 
 ```ts
@@ -225,7 +257,8 @@ interface EmittedNode {
   style?: StyleMap;                                          // base declarations
   below?: Partial<Record<BreakpointName, StyleMap>>;         // "<768px" is below.sm
   states?: Partial<Record<InteractionState, StyleMap>>;      // hover, focusVisible, active,
-                                                             // disabled, loading, expanded, current
+                                                             // disabled, loading, expanded, current,
+                                                             // live (3D drawing in this box)
   reducedMotion?: StyleMap;                                  // opacity-only or instant
 }
 type BreakpointName = 'xs' | 'sm' | 'md' | 'lg';             // = keys of theme BREAKPOINT

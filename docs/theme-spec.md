@@ -161,6 +161,7 @@ floors it manages.
 
 | Path | Value | Occupant |
 |---|---|---|
+| `layer.behind` | -1 | the page's one 3D canvas (scene-spec §5, §6.1): fixed at the bottom of the stack, every block drawn over it |
 | `layer.base` | 0 | page content |
 | `layer.raised` | 10 | cards, hover lift |
 | `layer.scrim` | 20 | hero and nav scrim gradients |
@@ -342,6 +343,10 @@ should be recorded there in the same commit. Constraints on its use:
 
 - CSS-capable properties must **not** use it. Lint rule: `theme.value()` is
   legal only in a file that imports from `three` or `@react-three/fiber`.
+- **Implemented** in the 3D runtime (`scene-runtime/src/runtime/colours.ts`),
+  resolved at runtime from the site's custom properties rather than at
+  compile time — the one moment the active scheme is known. The lint rule is
+  `webgl-colour-outside-scene`. ARCHITECTURE §4.3 records it.
 - A scene using it must subscribe to scheme changes
   (`matchMedia('(prefers-color-scheme: dark)')` plus the `data-scheme`
   attribute) and update the material, or the 3D object stays light on a dark

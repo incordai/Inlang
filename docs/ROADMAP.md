@@ -221,13 +221,22 @@ were not checked when this was written.
 The offline build (every network path poisoned) and the <1s cold compile of
 the reference fixture are automated in `packages/cli/test/m1-exit.test.ts`.
 
-**M2 — words mostly built.** All 11 blocks emit; 39/39 variants and 47/51
-props are implemented (`pnpm coverage`). Three themes exist; theme lint (A7)
-holds. The remaining four props are blocked:
-`hero.model`, `scene.model` and `scene.camera` need the 3D runtime ported
-from the spike (after M0, and after the pin, renderer-placement and Draco
-decoder decisions). `auth.impl` is consumed by the target's auth wiring
-(M4) rather than the word's markup, so `pnpm coverage` still lists it.
+**M2 — words built.** All 11 blocks emit; 39/39 variants and 50/52 props
+(`pnpm coverage`). Three themes exist; theme lint (A7) holds. The two props
+coverage still lists — `auth.impl` and `auth.protect` — are consumed by the
+target's auth wiring (M4) rather than the word's markup, which is all the
+script reads.
+3D (2026-09-23): the spike's runtime is ported into generated sites
+(`packages/scene-runtime`): one WebGL renderer per page drawing every view
+by scissor (scene-spec §5), the 8-rung ladder and probe, the seeded
+procedural scene (the ported generator reproduces the spike's cross-engine
+hash `cc723c2a1b107de4`), Draco models with the decoder self-hosted, camera
+`fixed`/`scroll`/`parallax`/`orbit`, and gallery `orbit`'s image ring. Only
+a site that declares a 3D view gets `three` (0.186.0) and the runtime; its
+entry loads the 3D chunk lazily after paint, and never at `static` or under
+reduced motion. `pnpm test:3d` checks it in Chromium (and smoke-tests
+Firefox and WebKit). Headless WebGL is software, so none of it is device
+evidence — M0's real-device checks remain open.
 Styling: words describe `style` plus named variants — `below.<breakpoint>`,
 `states.<state>`, `reducedMotion` (ARCHITECTURE §4.3) — and the target
 compiles every styled node into one generated class in `src/az.css`; lint
