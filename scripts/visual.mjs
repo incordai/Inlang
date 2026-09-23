@@ -84,6 +84,7 @@ const RESTACK = {
   text: { columns: '.az-text-body' },          // text-spec §7: one column below md
   feature: { default: '.az-feature-items' },   // feature-spec §6: grid is one column
   footer: { columns: '.az-footer-columns' },   // footer-spec §8: groups in one column
+  pricing: { default: '.az-pricing-plans' },  // pricing-spec §6: cards, one column
   // gallery-spec §6: grid is TWO columns on a phone, not one.
   gallery: { default: { at: '.az-gallery-items', narrow: 2 } },
 };

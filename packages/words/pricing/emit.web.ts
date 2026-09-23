@@ -52,6 +52,8 @@ export function formatPrice(value: string, currency: string, locale: string): st
 /** One plan. `cards` gets an <article>, `table` a column of cells. */
 function plan(p: SpecBlock, ctx: EmitContext, opts: {
   currency: string; locale: string; billing: string; period: string; table: boolean;
+  /** §6: a phone panel of a transposed table — rows as label/value pairs. */
+  panel?: boolean;
 }): EmittedNode {
   const t = ctx.theme;
   const name = p.args[0]?.value ?? '';
@@ -125,7 +127,19 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
   }
 
   const features = p.children.filter((c) => c.word === 'feature');
-  if (features.length > 0) {
+  if (features.length > 0 && opts.panel) {
+    // §6: in a transposed table every row is a `label / value` pair, so the
+    // row's label is read with its value rather than lost with the header.
+    body.push({
+      tag: 'dl',
+      attrs: { class: 'az-plan-rows' },
+      style: { margin: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: `${px(t.space[8])} ${px(t.space[16])}` },
+      children: features.flatMap((f): EmittedNode[] => [
+        { tag: 'dt', style: { fontSize: t.typeSize.sm, color: t.color.muted }, children: [f.args[0]?.value ?? ''] },
+        { tag: 'dd', style: { margin: 0, fontSize: t.typeSize.sm }, children: [f.args[1]?.value ?? ''] },
+      ]),
+    });
+  } else if (features.length > 0) {
     body.push({
       tag: 'ul',
       attrs: { class: 'az-plan-features' },
@@ -164,6 +178,11 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
       border: `1px solid ${highlighted ? t.color['border-strong'] : t.color.border}`,
       borderRadius: px(t.radius.md),
     },
+    // §7.3: on a phone the highlighted plan moves to the top of the stack by
+    // grid `order`, so DOM, tab and screen-reader order still agree with each
+    // other. Visual order then differs from focus order (WCAG 2.4.3) — the
+    // spec's choice, and why it moves only one card.
+    below: highlighted ? { sm: { order: -1 } } : undefined,
     children: body,
   };
 }
@@ -257,26 +276,38 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
 
   if (plans.length > 0) {
     const rendered = plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table }));
-    children.push(table
-      ? {
-          tag: 'table',
-          attrs: { class: 'az-pricing-plans' },
-          style: { width: '100%', borderCollapse: 'collapse' },
-          children: [
-            { tag: 'caption', children: [block.props.title ?? 'Pricing'] },
-            { tag: 'tbody', children: [{ tag: 'tr', children: rendered }] },
-          ],
-        }
-      : {
-          tag: 'div',
-          attrs: { class: 'az-pricing-plans' },
-          style: {
-            display: 'grid',
-            gridTemplateColumns: `repeat(${plans.length}, minmax(0, 1fr))`,
-            gap: px(t.space[24]),
-          },
-          children: rendered,
-        });
+    // §6 below sm: `cards` is one column, full width, in declared order (the
+    // highlighted card moves first, §7.3); `table` TRANSPOSES to stacked
+    // per-plan panels — no horizontal scroll. The transposition needs a
+    // second DOM form, so both are emitted and one is display:none at each
+    // width (decision D5); display:none also takes the hidden form out of
+    // the accessibility tree, so nothing is announced twice.
+    const stack: EmittedNode = {
+      tag: 'div',
+      attrs: { class: table ? 'az-pricing-panels' : 'az-pricing-plans' },
+      style: table
+        ? { display: 'none' }
+        : { display: 'grid', gridTemplateColumns: `repeat(${plans.length}, minmax(0, 1fr))`, gap: px(t.space[24]) },
+      below: table
+        ? { sm: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: px(t.space[24]) } }
+        : { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } },
+      children: table
+        ? plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table: false, panel: true }))
+        : rendered,
+    };
+    if (table) {
+      children.push({
+        tag: 'table',
+        attrs: { class: 'az-pricing-plans' },
+        style: { width: '100%', borderCollapse: 'collapse' },
+        below: { sm: { display: 'none' } },
+        children: [
+          { tag: 'caption', children: [block.props.title ?? 'Pricing'] },
+          { tag: 'tbody', children: [{ tag: 'tr', children: rendered }] },
+        ],
+      });
+    }
+    children.push(stack);
   }
 
   return {
@@ -292,6 +323,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.bg,
       color: t.color.text,
     },
+    // The mobile gutter below sm (theme-spec §1).
+    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
   };
 }

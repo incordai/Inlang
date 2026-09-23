@@ -183,9 +183,13 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // §10: under 768px `split` restacks to `stack` — text above, media
     // below, which is already the source order. center, stack and minimal
     // are unchanged; full's crop and scrim wait for the 3D runtime.
-    below: variant === 'split'
-      ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)', columnGap: 0 } }
-      : undefined,
+    // Every variant takes the mobile gutter below sm (§3, theme-spec §1).
+    below: {
+      sm: {
+        paddingInline: px(t.size['gutter-sm']),
+        ...(variant === 'split' ? { gridTemplateColumns: 'minmax(0, 1fr)', columnGap: 0 } : {}),
+      },
+    },
     children: content,
   };
 }

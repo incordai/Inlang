@@ -241,6 +241,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       top: 0,
       zIndex: t.layer.sticky,
     },
+    // The mobile gutter below sm (theme-spec §1). The links stay: hiding
+    // them before the drawer exists would leave the menu unreachable.
+    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children: [
       {
         // FIRST focusable element on the page. Visually hidden until focused —

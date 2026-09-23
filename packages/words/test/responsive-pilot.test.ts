@@ -37,9 +37,9 @@ test('hero-spec §10: split restacks to one column below sm', () => {
   assert.equal(out.below?.sm?.gridTemplateColumns, 'minmax(0, 1fr)');
 });
 
-test('hero-spec §10: center, stack and minimal are unchanged below sm', () => {
+test('hero-spec §10: center, stack and minimal keep their layout below sm — only the gutter changes', () => {
   for (const v of ['center', 'stack', 'minimal']) {
-    assert.equal(hero(block('hero', v), context()).below, undefined, v);
+    assert.deepEqual(hero(block('hero', v), context()).below, { sm: { paddingInline: `${THEME.size['gutter-sm']}px` } }, v);
   }
 });
 

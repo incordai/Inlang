@@ -196,3 +196,46 @@ test('theme-spec §1: gallery, footer and scene take gutter-sm below sm', () => 
   assert.equal(FOOTER('columns', ...GROUPS).below?.sm?.paddingInline, GUTTER);
   assert.equal(SCENE('inline', '4:3').below?.sm?.paddingInline, GUTTER);
 });
+
+/* ---- pricing §6 / §7.3 -------------------------------------------------- */
+
+const PLANS = ['    currency usd', '    plan "Studio"', '      monthly 29', '      feature "Projects" "10"', '      cta "Start" /a',
+  '    plan "Practice"', '      highlight on', '      badge "Most popular"', '      monthly 79', '      feature "Projects" "Unlimited"',
+  '      cta "Start" /b'];
+const PRICING = (variant: string) => render([`pricing ${variant}`, '    title "Pricing"', ...PLANS], 'pricing');
+
+test('pricing §6 cards: one column below sm, the highlighted plan moved first by `order` (§7.3)', () => {
+  const out = PRICING('cards');
+  assert.equal(byClass(out, 'az-pricing-plans')?.below?.sm?.gridTemplateColumns, ONE);
+  assert.deepEqual(byClass(out, 'az-plan--highlight')?.below?.sm, { order: -1 });
+  const plain = walk(out).find((x) => x.tag === 'article' && !x.attrs?.class?.includes('highlight'));
+  assert.equal(plain?.below, undefined, 'CONTROL: only the highlighted card moves');
+  assert.equal(walk(out).filter((x) => x.tag === 'article')[0]?.attrs?.['aria-label'], 'Studio',
+    'DOM order stays the declared order — only the visual order changes');
+});
+
+test('pricing §6 table: transposes to per-plan panels below sm — both forms, one shown', () => {
+  const out = PRICING('table');
+  const table = walk(out).find((x) => x.tag === 'table');
+  assert.deepEqual(table?.below?.sm, { display: 'none' }, 'the table is not shown on a phone');
+  const panels = byClass(out, 'az-pricing-panels');
+  assert.equal(panels?.style?.display, 'none', 'the panels are not shown on a desktop');
+  assert.equal(panels?.below?.sm?.display, 'grid');
+  const articles = walk(panels!).filter((x) => x.tag === 'article');
+  assert.equal(articles.length, 2, 'one panel per plan');
+  const rows = walk(articles[1]).find((x) => x.tag === 'dl');
+  assert.deepEqual((rows?.children ?? []).map((c) => (typeof c === 'string' ? c : c.children?.[0])),
+    ['Projects', 'Unlimited'], 'each row is a label / value pair');
+  assert.ok(walk(articles[0]).some((x) => x.tag === 'h3'), 'each panel is headed by its plan name');
+  assert.equal(byClass(PRICING('cards'), 'az-pricing-panels'), undefined, 'CONTROL: cards has no second form');
+});
+
+/* ---- theme-spec §1 everywhere ------------------------------------------- */
+
+test('theme-spec §1: pricing, hero and nav take gutter-sm below sm too', () => {
+  assert.equal(PRICING('cards').below?.sm?.paddingInline, GUTTER);
+  assert.equal(render(['hero center', '    title "x"'], 'hero').below?.sm?.paddingInline, GUTTER);
+  const nav = render([], 'nav', ['  nav bar', '    link "Work" /a']);
+  assert.equal(nav.below?.sm?.paddingInline, GUTTER);
+  assert.ok(walk(nav).some((x) => x.tag === 'a' && x.attrs?.href === '/a'), 'CONTROL: the links stay on a phone');
+});
