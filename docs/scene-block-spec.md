@@ -307,7 +307,7 @@ need, because `hero` is singular:
 | Tier | Trigger | `scene` behaviour |
 |---|---|---|
 | `full` | desktop, WebGL2, >4 cores | all scenes live; `scroll` and `parallax` active |
-| `lite` | mobile browser, or ≤4 cores | reduced poly and DPR, no post-fx, **and only the scene nearest the viewport centre animates** — the rest hold a static frame |
+| `lite` | mobile browser, or ≤4 cores | reduced poly and DPR, no post-fx, **and a static camera for every scene** — motion-tiers-spec §5 owns the ladder. *(Resolved 2026-09-23: this row once said only the scene nearest the viewport centre animates, which contradicted the ladder's static-camera `lite` rungs; the tier spec wins.)* |
 | `static` | `prefers-reduced-motion`, no WebGL, Save-Data | **posters only. No renderer is ever created** |
 
 The `lite` rule is the `scene`-specific one: two simultaneously animating scenes

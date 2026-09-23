@@ -14,7 +14,7 @@
  */
 
 import * as THREE from 'three';
-import { LADDER, STATIC_RUNG, tierOf, TierProbe, type Rung, type Start } from './tiers.ts';
+import { LADDER, STATIC_RUNG, TierProbe, type Rung, type Start } from './tiers.ts';
 import { studioEnvironment } from './env.ts';
 import { hex, onSchemeChange } from './colours.ts';
 import { ModelCache, model, ring, strands, type Content, type Framing } from './views.ts';
@@ -346,9 +346,6 @@ export class Stage {
     this.renderer.clear();
     this.renderer.setScissorTest(true);
 
-    // scene-spec §8: at `lite`, only the view nearest the viewport centre moves.
-    const lite = tierOf(this.rung) === 'lite';
-    const centre = lite ? this.nearestCentre(h) : null;
     const scrollMax = Math.max(1, this.doc.documentElement.scrollHeight - h);
 
     let arrived = false;
@@ -360,8 +357,9 @@ export class Stage {
       const r = v.backdrop ? { left: 0, top: 0, width: w, height: h, bottom: h } : v.el.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0 || r.bottom < 0 || r.top > h) continue;
 
-      const moves = rung.scrollLinkedCamera && (!lite || v === centre);
-      if (moves) {
+      // motion-tiers-spec §5: `lite` rungs hold a static camera for every
+      // view, so only rungs with a scroll-linked camera move (scene-spec §8).
+      if (rung.scrollLinkedCamera) {
         // §6.3 / §8: a backdrop follows the page; a view follows its own box.
         if (v.motion === 'scroll' || v.motion === 'parallax' || v.kind === 'orbit') {
           v.target = v.backdrop
@@ -383,18 +381,6 @@ export class Stage {
     }
     // New content has arrived on the GPU: it now counts toward the budget.
     if (arrived) this.enforceBudget();
-  }
-
-  private nearestCentre(h: number): View | null {
-    let best: View | null = null;
-    let distance = Infinity;
-    for (const v of this.views) {
-      if (!v.visible) continue;
-      const r = v.el.getBoundingClientRect();
-      const d = Math.abs(r.top + r.height / 2 - h / 2);
-      if (d < distance) { distance = d; best = v; }
-    }
-    return best;
   }
 
   /** Release everything and return every view to its poster (§7 released, §8 static). */
