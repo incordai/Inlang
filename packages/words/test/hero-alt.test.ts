@@ -73,10 +73,14 @@ test('§5: the secondary follows the primary in the same actions row', () => {
   const actions = find(render(hero!), (e) => e.attrs?.class === 'az-hero-actions');
   assert.ok(actions, 'the hero rendered an actions row');
   const classes = kids(actions).map((c) => c.attrs?.class);
-  assert.deepEqual(classes, ['az-child az-child--cta', 'az-child az-child--alt']);
+  assert.deepEqual(classes, ['az-action-item az-action-item--cta', 'az-action-item az-action-item--alt']);
   const link = find(kids(actions)[1], (e) => e.tag === 'a');
   assert.equal(link?.attrs?.href, 'tel:+50412345678', 'the destination is kept as written');
-  assert.deepEqual(link?.children, ['Call the studio']);
+  const text = (link?.children ?? []).filter((c) => typeof c === 'string');
+  assert.deepEqual(text, ['Call the studio']);
+  // buttons §1.6: a call is a TYPE, so its icon leads the label.
+  const first = link?.children?.[0];
+  assert.ok(typeof first !== 'string' && first?.tag === 'svg', 'the call icon leads');
 });
 
 test('CONTROL: a hero with only a primary renders one action', () => {

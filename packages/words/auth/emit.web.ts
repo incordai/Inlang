@@ -188,31 +188,19 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  const button = (method: string, label: string, primary: boolean): EmittedNode => ({
-    tag: 'button',
-    attrs: {
-      type: 'submit',
-      class: primary ? 'az-auth-submit' : 'az-auth-submit az-auth-submit--alt',
-      // Which method this press chose, for the adapter call (§3).
+  // The button primitive's submit (buttons-and-sections §1): primary for the
+  // flow's own action, secondary for the alternative. `method` tells the
+  // adapter which press it was (§3). §6/§7: one real form, so Enter submits
+  // the FIRST button and a manager sees one credential form; the link
+  // alternative must not demand the password it replaces, so it skips
+  // validation.
+  const button = (method: string, label: string, primary: boolean): EmittedNode =>
+    ctx.submit(label, {
+      hierarchy: primary ? 'primary' : 'secondary',
       name: 'method',
       value: method,
-      // §6/§7: one real form, so Enter submits the FIRST button and a manager
-      // sees one credential form. The link button must not demand the
-      // password it is the alternative to, so it skips validation.
-      ...(primary ? {} : { formnovalidate: 'formnovalidate' }),
-    },
-    style: {
-      minHeight: px(t.size.tap),
-      paddingInline: px(t.space[16]),
-      background: primary ? t.color.accent : 'transparent',
-      color: primary ? t.color['accent-contrast'] : t.color.text,
-      border: primary ? '0' : `1px solid ${t.color.border}`,
-      borderRadius: px(t.radius.sm),
-      fontSize: t.typeSize.base,
-      fontFamily: t.type.body,
-    },
-    children: [label],
-  });
+      noValidate: !primary,
+    });
 
   if (variant === 'reset') {
     formChildren.push(button('link', SUBMIT.reset, true));
@@ -251,7 +239,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // §2: "a login with no path to signup or reset is a dead end". The routes
   // are the author's to name; what is emitted here is the slot they fill, and
   // its absence on a login is a hole worth seeing.
-  const alt = ctx.slot('alt');
+  // The alternatives ("Create an account") are text links — the `link`
+  // hierarchy — so the form's own submit stays the one primary.
+  const alt = ctx.actions(block, ['alt'], { hierarchy: 'link' });
   if (alt.length > 0) {
     // Slot fills are <li>; a <p> cannot hold one, so this is a list.
     children.push({

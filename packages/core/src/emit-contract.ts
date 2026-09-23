@@ -39,6 +39,43 @@ export const INTERACTION_STATES = [
 ] as const;
 export type InteractionState = (typeof INTERACTION_STATES)[number];
 
+/**
+ * How much visual weight an action carries — buttons-and-sections-spec §1.2.
+ * `primary` is filled and at most one per section; `secondary` is outlined;
+ * `ghost` has no border until hovered; `link` is text. An author picks one
+ * with `as` (`cta "Reserve" /reserve as ghost`); otherwise the first `cta` is
+ * primary and everything else secondary.
+ */
+export const HIERARCHIES = ['primary', 'secondary', 'ghost', 'link'] as const;
+export type Hierarchy = (typeof HIERARCHIES)[number];
+
+/** How a word asks for its actions; the target decides the markup. */
+export interface ActionOptions {
+  /** Overrides the default hierarchy (and an author's `as`). */
+  readonly hierarchy?: Hierarchy;
+  /** `inverted` for an action sitting on an accent surface (cta `band`). */
+  readonly tone?: 'page' | 'inverted';
+  /** `sm` for dense bars (nav). The 44px tap target holds at every size. */
+  readonly size?: 'md' | 'sm';
+  /** Fill the container's width — a card's action (pricing). */
+  readonly fill?: boolean;
+  /**
+   * Below this breakpoint the primary fills the row and a secondary becomes
+   * a text link — hero-spec §5 ("on <480px, primary goes full-width;
+   * secondary stays a text link").
+   */
+  readonly compactBelow?: BreakpointName;
+}
+
+/** A form's submit control — the one action that is not a slot fill. */
+export interface SubmitOptions extends ActionOptions {
+  /** Posted with the form, so the handler knows which submit was pressed. */
+  readonly name?: string;
+  readonly value?: string;
+  /** Skip the form's own validation — an alternative that needs fewer fields. */
+  readonly noValidate?: boolean;
+}
+
 /** A node in the emitted tree. Deliberately close to HTML, but not HTML. */
 export interface EmittedNode {
   readonly tag: string;
@@ -92,6 +129,20 @@ export interface EmitContext {
    * the only one — a word may construct a path the author never typed.
    */
   readonly asset: (path: string) => string;
+  /**
+   * One slot fill (`cta "Reserve a pair" /reserve`) rendered as an action —
+   * a link or a button, chosen by its destination (buttons §1.3–1.4), with
+   * all six states (§1.5). The target owns the markup; a word asks.
+   */
+  readonly action: (fill: SpecBlock, options?: ActionOptions) => EmittedNode;
+  /**
+   * A block's actions from the named slots, in that order, each in an <li>
+   * for the word's <ul>. Default hierarchy: the first `cta` is primary,
+   * every other fill secondary; an author's `as` overrides it.
+   */
+  readonly actions: (block: SpecBlock, slots: readonly string[], options?: ActionOptions) => EmittedNode[];
+  /** A form submit button styled as an action of the given hierarchy. */
+  readonly submit: (label: string, options?: SubmitOptions) => EmittedNode;
 }
 
 /**

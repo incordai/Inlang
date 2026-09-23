@@ -89,7 +89,10 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // §5 — one primary, one secondary. `alt` is the secondary (§1): it follows
   // the primary in the same row and is rendered by the same slot path, so its
   // destination is handled exactly as a `cta`'s is.
-  const actions = [...ctx.slot('cta'), ...ctx.slot('alt')];
+  // Buttons through the primitive (buttons-and-sections §1): the first `cta`
+  // primary, `alt` secondary; below xs the primary fills the row and the
+  // secondary becomes a text link (§5).
+  const actions = ctx.actions(block, ['cta', 'alt'], { compactBelow: 'xs' });
   if (actions.length > 0) {
     // Slot fills are <li>; an <li> in a <div> is invalid HTML.
     children.push({

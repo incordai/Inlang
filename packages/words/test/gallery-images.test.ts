@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 import { emit } from '../gallery/emit.web.ts';
 
 function context(): EmitContext {
@@ -33,6 +34,7 @@ function context(): EmitContext {
     // The slot path is what printed paths as headings; images must not use it.
     slot: () => [{ tag: 'h3', children: ['from the slot path'] }],
     asset: (p) => `/resolved/${p}`,
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
 }
 

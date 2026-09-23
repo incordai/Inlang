@@ -7,10 +7,13 @@ import assert from 'node:assert/strict';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 import { emit } from '../scene/emit.web.ts';
 
+const THEME = resolve(THEMES.midnight, 'dark') as unknown as EmitContext['theme'];
 const context = (): EmitContext => ({
-  theme: resolve(THEMES.midnight, 'dark') as unknown as EmitContext['theme'],
+  theme: THEME,
+  ...actionsFor(THEME),
   target: 'web',
   site: { name: 'aurora' },
   slot: () => [],

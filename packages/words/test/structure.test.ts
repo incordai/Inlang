@@ -17,6 +17,7 @@ import { WEB_EMITTERS } from '../registry.ts';
 import { defaultChild } from '../../target-web/src/tree.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 
 const WORDS = join(fileURLToPath(new URL('../../../', import.meta.url)), 'packages/words');
 
@@ -42,6 +43,7 @@ function context(block: SpecBlock): EmitContext {
     // The real slot renderer, so the <li> it produces is what is checked.
     slot: (name) => block.children.filter((c) => c.word === name).map((c) => defaultChild(c, ctx)),
     asset: (p) => p,
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
   return ctx;
 }

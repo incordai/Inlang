@@ -7,18 +7,25 @@ import assert from 'node:assert/strict';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 import { emit as hero } from '../hero/emit.web.ts';
 import { emit as nav } from '../nav/emit.web.ts';
 
+const THEME = resolve(THEMES.midnight, 'dark') as unknown as EmitContext['theme'];
 const context = (): EmitContext => ({
-  theme: resolve(THEMES.midnight, 'dark') as unknown as EmitContext['theme'],
+  theme: THEME,
+  ...actionsFor(THEME),
   target: 'web',
   site: { name: 'aurora' },
   slot: (name) => [{ tag: 'li', children: [name] }],
   asset: (p) => p,
 });
+const cta: SpecBlock = {
+  word: 'cta', variant: null, modifiers: [], as: null, children: [], props: {},
+  args: [{ kind: 'string', value: 'Reserve a pair' }, { kind: 'route', value: '/reserve' }],
+};
 const block = (word: string, variant: string, props: Record<string, string> = {}): SpecBlock => ({
-  word, variant, modifiers: [], args: [], as: null, children: [], props: { title: 'Built in the dark', ...props },
+  word, variant, modifiers: [], args: [], as: null, children: [cta], props: { title: 'Built in the dark', ...props },
 });
 const walk = (n: EmittedNode | string): EmittedNode[] =>
   typeof n === 'string' ? [] : [n, ...(n.children ?? []).flatMap(walk)];

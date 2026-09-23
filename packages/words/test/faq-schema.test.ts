@@ -17,6 +17,7 @@ import { compile, type Manifest } from '../../core/src/index.ts';
 import { emit } from '../faq/emit.web.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 
 const WORDS = join(fileURLToPath(new URL('../../../', import.meta.url)), 'packages/words');
 
@@ -39,6 +40,7 @@ function context(): EmitContext {
     site: { name: 'aurora' },
     slot: () => [],
     asset: (p) => p,
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
 }
 

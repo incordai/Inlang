@@ -16,6 +16,7 @@ import { lintSource, formatFindings } from '../../theme/src/lint.ts';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
@@ -69,6 +70,7 @@ function context(): EmitContext {
     site: { name: 'aurora' },
     slot: () => [],
     asset: (p) => p,
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
 }
 

@@ -9,6 +9,7 @@
  * what lets a test run one word in isolation.
  */
 
+import { actionsFor } from './actions.ts';
 import { blocksFor, type Spec, type SpecBlock } from '../../core/src/index.ts';
 import type { EmitContext, EmittedNode, ThemeLike, WordEmitter }
   from '../../core/src/emit-contract.ts';
@@ -172,6 +173,7 @@ function contextFor(
       return [];
     }),
     asset,
+    ...actionsFor(theme, (c) => custom(c, component)),
   };
 }
 

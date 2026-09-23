@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolve, THEMES } from '../packages/theme/src/index.ts';
 import { WEB_EMITTERS } from '../packages/words/registry.ts';
+import { actionsFor } from '../packages/target-web/src/actions.ts';
 
 const W = join(fileURLToPath(new URL('../', import.meta.url)), 'packages/words');
 const uses = (s, re) => new Set([...s.matchAll(re)].map((m) => m[1]));
@@ -40,6 +41,7 @@ function context() {
       { tag: 'li', attrs: { class: `az-child--${name}` }, children: ['two'] },
     ],
     asset: (p) => p,
+    ...actionsFor(t),
   };
 }
 

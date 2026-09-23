@@ -10,6 +10,8 @@
  * is what keeps `core` ignorant enough for a word to be a folder.
  */
 
+import { ACTION_WORDS, defaultHierarchy, intentOf, isHierarchy } from './actions.ts';
+import { HIERARCHIES } from './emit-contract.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { Arg, Statement, AzFile } from './parse.ts';
 import { routePath, runBlockChecks, type Check, type CheckChild } from './checks.ts';
@@ -664,5 +666,39 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     const linked = resolve(s, undefined, null);
     if (linked) root.push(linked);
   }
+  checkActions(root, err, warn);
   return { root, diagnostics };
+}
+
+/**
+ * Actions — buttons-and-sections-spec §1. A block's `cta`/`alt` fills are
+ * its actions; a page's `cta` is a BLOCK, not an action, so structure words
+ * are never treated as sections here.
+ */
+function checkActions(
+  words: readonly LinkedWord[],
+  err: (code: string, message: string, pos: Pos) => void,
+  warn: (code: string, message: string, pos: Pos) => void,
+): void {
+  for (const w of words) {
+    const fills = STRUCTURE.has(w.word) ? [] : w.children.filter((c) => ACTION_WORDS.has(c.word));
+    let ctaIndex = 0;
+    const primaries: LinkedWord[] = [];
+    for (const f of fills) {
+      if (f.as !== null && !isHierarchy(f.as)) {
+        err('AZ1220', `${f.word}: 'as ${f.as}' is not a button weight — use: ${HIERARCHIES.join(', ')}`, f.pos);
+      }
+      if (defaultHierarchy(f, f.word === 'cta' ? ctaIndex++ : -1) === 'primary') primaries.push(f);
+      const intent = intentOf(f.args[1]);
+      if (intent === 'play' || intent === 'copy') {
+        warn('AZ1222', `${f.word}: '${f.args[1].value}' needs the ${intent} behaviour, which is not built yet — `
+          + 'it renders as a button that does nothing', f.args[1].pos);
+      }
+    }
+    if (primaries.length > 1) {
+      warn('AZ1221', `${w.word}: ${primaries.length} primary buttons in one section — buttons §1.2 allows one; `
+        + "make the rest 'as secondary'", primaries[1].pos);
+    }
+    checkActions(w.children, err, warn);
+  }
 }

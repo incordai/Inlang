@@ -24,6 +24,7 @@ import { resolve, THEMES } from '../../theme/src/index.ts';
 import { WEB_EMITTERS } from '../registry.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 
 const WORDS = join(fileURLToPath(new URL('../../../', import.meta.url)), 'packages/words');
 
@@ -53,6 +54,7 @@ function context(): EmitContext {
       { tag: 'li', attrs: { class: `az-child--${name}` }, children: ['two'] },
     ],
     asset: (p) => p,
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
 }
 

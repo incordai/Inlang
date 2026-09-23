@@ -12,6 +12,7 @@ import { resolve, THEMES } from '../../theme/src/index.ts';
 import { emit } from '../gallery/emit.web.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 
 const POSTER = './ring.webp';
 const RESOLVED = '/assets/ring.webp';
@@ -40,6 +41,7 @@ function context(): EmitContext {
     // Resolve visibly, so the test proves the path went THROUGH ctx.asset
     // (the sandboxed gate) rather than being echoed raw.
     asset: (p) => (p === POSTER ? RESOLVED : p),
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
 }
 

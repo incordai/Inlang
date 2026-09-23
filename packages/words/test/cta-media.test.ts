@@ -12,6 +12,7 @@ import { resolve, THEMES } from '../../theme/src/index.ts';
 import { WEB_EMITTERS } from '../registry.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 
 function context(): EmitContext {
   const t = resolve(THEMES.midnight, 'dark');
@@ -33,6 +34,7 @@ function context(): EmitContext {
     slot: () => [],
     // Marks the path as resolved, so a test can tell it went through the resolver.
     asset: (p) => `resolved:${p}`,
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
 }
 

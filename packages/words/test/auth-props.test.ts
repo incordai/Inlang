@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { compile } from '../../core/src/index.ts';
 import type { Manifest } from '../../core/src/link.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import { emit as emitAuth } from '../auth/emit.web.ts';
 
@@ -45,6 +46,7 @@ function context(): EmitContext {
     site: { name: 'aurora' },
     slot: () => [],
     asset: (p) => p,
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
 }
 

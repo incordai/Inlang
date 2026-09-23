@@ -263,6 +263,9 @@ const REACT_NAME: Record<string, string> = {
   playsinline: "playsInline", readonly: "readOnly", referrerpolicy: "referrerPolicy",
   rowspan: "rowSpan", spellcheck: "spellCheck", srcdoc: "srcDoc", srclang: "srcLang",
   srcset: "srcSet", tabindex: "tabIndex", usemap: "useMap",
+  // SVG presentation attributes (the action icons): React camel-cases them.
+  "clip-rule": "clipRule", "fill-rule": "fillRule", "stroke-linecap": "strokeLinecap",
+  "stroke-linejoin": "strokeLinejoin", "stroke-width": "strokeWidth", viewbox: "viewBox",
 };
 
 /**

@@ -138,25 +138,14 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
     });
   }
 
+  // §4: only the highlighted plan's CTA is primary; the rest are secondary,
+  // or every card shouts at once. The button primitive draws both.
   for (const c of p.children.filter((c) => c.word === 'cta')) {
     body.push({
-      tag: 'a',
-      attrs: { class: 'az-plan-cta', href: c.args[1]?.value ?? '#' },
-      style: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        minHeight: px(t.size.tap),
-        marginTop: px(t.space[16]),
-        paddingInline: px(t.space[16]),
-        borderRadius: px(t.radius.sm),
-        textDecoration: 'none',
-        // §4: only the highlighted plan's CTA is primary; the rest are
-        // secondary, or every card shouts at once.
-        background: highlighted ? t.color.accent : 'transparent',
-        color: highlighted ? t.color['accent-contrast'] : t.color.text,
-        border: highlighted ? '0' : `1px solid ${t.color.border}`,
-      },
-      children: [c.args[0]?.value ?? ''],
+      tag: 'div',
+      attrs: { class: 'az-plan-action' },
+      style: { marginTop: px(t.space[16]) },
+      children: [ctx.action(c, { hierarchy: highlighted ? 'primary' : 'secondary', fill: true })],
     });
   }
 

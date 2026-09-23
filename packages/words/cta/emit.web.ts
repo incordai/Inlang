@@ -67,7 +67,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  const actions = [...ctx.slot('cta'), ...ctx.slot('alt')];
+  // §3: on the accent band the buttons invert — contrast is measured against
+  // the band, not the page.
+  const actions = ctx.actions(block, ['cta', 'alt'], { tone: inverted ? 'inverted' : 'page' });
   if (actions.length > 0) {
     // Slot fills are <li>, so the row is a list — an <li> in a <div> is
     // invalid HTML, and a list also tells a reader how many actions there are.

@@ -76,6 +76,10 @@ const PAIRS: Array<[fg: keyof typeof THEMES.midnight.color.light,
   ['accent-hover', 'bg', BODY],
   ['accent-contrast', 'accent', BODY],
   ['accent-contrast', 'accent-hover', BODY],
+  // buttons on the cta band (cta-spec §3): the inverted primary is accent ink
+  // on an accent-contrast fill; its focus ring is accent-contrast on the
+  // accent band — the pair above — because `focus` is an accent shade.
+  ['accent', 'accent-contrast', BODY],
   ['danger', 'bg', BODY],
   ['danger', 'surface', BODY],
   ['danger-contrast', 'danger', BODY],

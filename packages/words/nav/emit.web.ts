@@ -186,24 +186,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
 
   // §6: the CTA stays visible in the collapsed bar. If it is worth a nav CTA,
   // it is worth reaching without a tap — so it sits here, not in the panel.
-  for (const c of ctas) {
-    bar.push({
-      tag: 'a',
-      attrs: { class: 'az-nav-cta', href: c.args[1]?.value ?? '#' },
-      style: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        minHeight: px(t.size.tap),
-        paddingInline: px(t.space[16]),
-        background: t.color.accent,
-        color: t.color['accent-contrast'],
-        borderRadius: px(t.radius.sm),
-        fontSize: t.typeSize.sm,
-        textDecoration: 'none',
-      },
-      children: [c.args[0]?.value ?? ''],
-    });
-  }
+  // The button primitive (buttons-and-sections §1), sized for a dense bar;
+  // the 44px tap target holds at `sm`.
+  for (const c of ctas) bar.push(ctx.action(c, { size: 'sm' }));
 
   // The toggle is a <button>, never a div with an onclick (§6).
   bar.push({

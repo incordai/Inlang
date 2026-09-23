@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { EmitContext, EmittedNode } from '../../core/src/emit-contract.ts';
+import { actionsFor } from '../../target-web/src/actions.ts';
 import { emit as emitNav } from '../nav/emit.web.ts';
 import { emit as emitFooter } from '../footer/emit.web.ts';
 
@@ -34,6 +35,7 @@ function context(): EmitContext {
     site: { name: 'aurora' },
     slot: () => [],
     asset: (p) => p,
+    ...actionsFor(t as unknown as EmitContext['theme']),
   };
 }
 
@@ -101,8 +103,9 @@ test('nav-spec §6: the toggle is a <button> with aria-expanded and aria-control
 test('nav-spec §6: the CTA stays in the bar, not inside the mobile panel', () => {
   const node = emitNav(NAV, context());
   const panel = walk(node).find((n) => n.attrs?.id === 'az-nav-panel')!;
-  assert.equal(walk(panel).filter((n) => cls(n) === 'az-nav-cta').length, 0);
-  assert.equal(walk(node).filter((n) => cls(n) === 'az-nav-cta').length, 1,
+  const isCta = (n: EmittedNode) => cls(n).split(' ').includes('az-action');
+  assert.equal(walk(panel).filter(isCta).length, 0);
+  assert.equal(walk(node).filter(isCta).length, 1,
     'it is in the bar itself');
 });
 

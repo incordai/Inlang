@@ -175,8 +175,26 @@ export interface EmitContext {
   target: string;
   slot(name: string): EmittedNode[];
   asset(path: string): string;  // sandboxed; throws outside project root
+  // The action primitive — buttons-and-sections-spec §1:
+  action(fill: SpecBlock, options?: ActionOptions): EmittedNode;
+  actions(block: SpecBlock, slots: string[], options?: ActionOptions): EmittedNode[];  // <li>s
+  submit(label: string, options?: SubmitOptions): EmittedNode;
 }
 ```
+
+**Buttons are a primitive, not markup a word writes** (buttons-and-sections
+§1.1). A word hands its `cta`/`alt` fills to `ctx.actions` (or one fill to
+`ctx.action`) and gets back list items holding a link or a button. Core
+decides what an action DOES from its destination (`intentOf`, GRAMMAR §4.3 —
+route go, anchor show, path download, tel/mailto/video/popup/copy/http(s))
+and its weight (`primary`/`secondary`/`ghost`/`link`: the first `cta`
+primary, every other fill secondary, an author's `as` wins). The target
+decides the element (navigates → `<a>`, acts → `<button>`), icons, and all
+six states through the style contract below. Options: `tone: 'inverted'` for
+an accent band, `size: 'sm'` for dense bars, `fill` for a card, and
+`compactBelow` (the primary fills the row, a secondary becomes a text link).
+The link stage checks `as` (AZ1220), warns on two primaries in a section
+(AZ1221) and on play/copy until their behaviour runtime exists (AZ1222).
 
 A **component node** — `{ tag: '#component', attrs: { src } }` (`COMPONENT_TAG`
 in `emit-contract.ts`) — stands for an author component named by `raw` or

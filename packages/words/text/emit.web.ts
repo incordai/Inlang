@@ -52,6 +52,22 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
+  // Section actions (spec §5/§6): the button primitive — one primary `cta`,
+  // one `alt` — after the section's content, never inside an item.
+  const actions = ctx.actions(block, ['cta', 'alt']);
+  if (actions.length > 0) {
+    children.push({
+      tag: 'ul',
+      attrs: { class: 'az-text-actions' },
+      style: {
+        display: 'flex', flexWrap: 'wrap', gap: px(t.space[16]),
+        listStyle: 'none', padding: 0, margin: `${px(t.space[48])} 0 0`,
+        justifyContent: variant === 'centered' ? 'center' : undefined,
+      },
+      children: actions,
+    });
+  }
+
   return {
     tag: 'section',
     attrs: { class: `az-text az-text--${variant}` },
