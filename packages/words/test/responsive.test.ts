@@ -9,7 +9,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { blocksFor, compile, formatDiagnostics, type Manifest, type SpecBlock } from '../../core/src/index.ts';
-import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
+import { framed, type EmittedNode, type ThemeLike } from '../../core/src/emit-contract.ts';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import { emitBlock } from '../../target-web/src/tree.ts';
 import { WEB_EMITTERS } from '../registry.ts';
@@ -54,7 +54,7 @@ test('cta §6 band: below sm the padding drops a step, the buttons stack, the pr
 
 test('cta §6 card: the inset drops to the mobile gutter', () => {
   assert.equal(CTA('card').below?.sm?.marginInline, GUTTER);
-  assert.equal(CTA('card').style?.marginInline, `${T.size['gutter-lg']}px`, 'CONTROL: the desktop inset');
+  assert.equal(CTA('card').style?.marginInline, framed(T), 'CONTROL: the desktop inset is the site frame');
 });
 
 test('cta §6 split: restacks, and decorative media is dropped, informative kept', () => {
@@ -117,7 +117,9 @@ test('theme-spec §1: sections take gutter-sm below sm', () => {
   assert.equal(FAQ('list').below?.sm?.paddingInline, GUTTER);
   assert.equal(render(['text prose', '    title "x"', '    body "y"'], 'text').below?.sm?.paddingInline, GUTTER);
   assert.equal(FEATURE('grid', PROSE_ITEMS).below?.sm?.paddingInline, GUTTER);
-  assert.equal(FEATURE('grid', PROSE_ITEMS).style?.paddingInline, `${T.size['gutter-lg']}px`, 'CONTROL: gutter-lg on a desktop');
+  // PRD §6.1a: on a desktop the inset is gutter-lg, widened to the site frame.
+  assert.equal(FEATURE('grid', PROSE_ITEMS).style?.paddingInline, framed(T), 'CONTROL: the frame on a desktop');
+  assert.match(framed(T), new RegExp(`^max\\(${T.size['gutter-lg']}px, `), 'never narrower than gutter-lg');
 });
 
 /* ---- gallery §6 --------------------------------------------------------- */

@@ -32,7 +32,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, revealed, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, px, revealed, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 import { closeButton, popup } from '../../overlay/src/index.ts';
 
 /** The track's name when the gallery has no title to lend it. */
@@ -301,7 +301,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     },
     style: {
       paddingBlock: px(t.space[96]),
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: framed(t),
       background: t.color.bg,
       color: t.color.text,
     },

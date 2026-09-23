@@ -1,7 +1,7 @@
 az 1
 
 site aurora
-  width center
+  width default
   theme midnight
     accent violet
     pattern glow

@@ -44,7 +44,7 @@
 
 import type { SpecBlock } from '../../core/src/spec.ts';
 import { COUNTRIES } from './countries.ts';
-import { glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 interface Field {
   readonly name: string;
@@ -452,7 +452,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     attrs: { class: `az-auth az-auth--${variant}` },
     style: {
       paddingBlock: px(t.space[96]),
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: framed(t),
       background: t.color.bg,
       color: t.color.text,
     },

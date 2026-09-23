@@ -38,7 +38,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { glassSurface, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, glassSurface, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** `link "Shoes" /shoes` — one list item. */
 function footerLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
@@ -278,7 +278,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     attrs: { class: `az-footer az-footer--${variant}` },
     style: {
       paddingBlock: px(t.space[48]),
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: framed(t),
       background: t.color.surface,
       color: t.color.text,
     },

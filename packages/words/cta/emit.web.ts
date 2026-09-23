@@ -39,7 +39,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { glassSurface, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, glassSurface, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
@@ -132,14 +132,15 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       columnGap: variant === 'split' ? px(t.space[48]) : undefined,
 
       paddingBlock: px(t.space[96]),
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: variant === 'card' ? px(t.size['gutter-lg']) : framed(t),
 
       // `card` is INSET on the page background and reads as a contained
       // aside; `band` is full-bleed with its own surface and a hard edge.
       background: variant === 'card' ? t.color.surface : surface,
       color: ink,
       borderRadius: variant === 'card' ? px(t.radius.lg) : undefined,
-      marginInline: variant === 'card' ? px(t.size['gutter-lg']) : undefined,
+      // The inset card sits in the frame; the full-bleed variants frame their content.
+      marginInline: variant === 'card' ? framed(t) : undefined,
       border: variant === 'card' ? `1px solid ${t.color.border}` : undefined,
     },
     // §5 `glass`: worth it on `card` over something behind the page (a 3D

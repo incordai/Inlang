@@ -163,6 +163,51 @@ export async function sharedColumn(page, selectors) {
   return { pass, detail: pass ? '' : selectors.map((sel, i) => `${sel}@${lefts[i]}`).join(' ') };
 }
 
+/** A viewport wider than every frame, where the frame must bind. */
+export const FRAME_WIDTH = 1920;
+
+/**
+ * PRD §6.1a `site width`: on a screen wider than the frame, every block's
+ * content box sits inside the frame, centred — backgrounds may run edge to
+ * edge, content may not. Read from the page: the frame is the site's
+ * `--az-frame`, resolved to px by a probe element. A side-nav column is not
+ * a section and is skipped.
+ */
+export async function frame(page) {
+  return page.evaluate(() => {
+    const site = document.querySelector('.az-site');
+    if (!site) return { pass: false, detail: 'no .az-site' };
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:absolute;visibility:hidden;width:var(--az-frame, 100%)';
+    site.appendChild(probe);
+    const frameWidth = probe.getBoundingClientRect().width;
+    probe.remove();
+    const vw = document.documentElement.clientWidth;
+    const left = Math.max(0, (vw - frameWidth) / 2);
+    const blocks = [...document.querySelectorAll('.az-page > :not(main), main > *')]
+      // Blocks are block boxes; an inline run has no inset of its own.
+      .filter((el) => el.getClientRects().length > 0 && !getComputedStyle(el).display.startsWith('inline')
+        && !el.matches('[data-layout="side"] > :first-child'));
+    if (!blocks.length) return { pass: false, detail: 'no blocks' };
+    // A wrapper with no inset of its own (nav's shrink frame) is measured
+    // through its one child, where the block's content actually starts.
+    const inner = (el) => {
+      const cs = getComputedStyle(el);
+      const bare = parseFloat(cs.paddingLeft) === 0 && parseFloat(cs.paddingRight) === 0;
+      return bare && el.children.length === 1 ? inner(el.firstElementChild) : el;
+    };
+    const bad = blocks.map(inner).flatMap((el) => {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const start = r.left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth);
+      const end = r.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
+      // 2px of slack: sub-pixel layout, and a block mid-way through a small transform.
+      return start >= left - 2 && end <= vw - left + 2 ? [] : [`${el.className.split(' ')[0] || el.tagName}: ${Math.round(start)}–${Math.round(end)}`];
+    });
+    return { pass: bad.length === 0, detail: bad.length ? `frame ${Math.round(left)}–${Math.round(vw - left)}; ${bad.join(', ')}` : '' };
+  });
+}
+
 /**
  * nav-spec §7: the skip link is the first thing Tab reaches, and it is
  * VISIBLE when focused — a link hidden off-screen forever is focusable but

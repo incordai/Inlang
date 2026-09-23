@@ -155,6 +155,18 @@ export const INJECTION_POINTS: readonly string[] = ['before', 'after'];
 /** File types an escape-hatch component may be (PRD §6.6). */
 export const COMPONENT_EXT: readonly string[] = ['.tsx', '.ts', '.jsx', '.js'];
 
+/**
+ * PRD §6.1a: `site width` — the frame every section aligns to. The value
+ * names a choice, never a number; the target maps each to a theme token.
+ */
+export const SITE_WIDTHS: Readonly<Record<string, string>> = {
+  full: 'Edge to edge; only the gutters inset the content',
+  wide: 'Theme container plus both gutters; wider than default',
+  default: 'The theme container, the usual frame (default)',
+  narrow: 'Tablet-wide frame (breakpoint md) for a quiet page',
+  reading: 'One text column at the body measure',
+};
+
 /** Properties those keywords accept — PRD §6.1a. */
 export const STRUCTURE_PROPS: Record<string, ReadonlySet<string>> = {
   site: new Set(['width', 'theme', 'font']),
@@ -510,6 +522,16 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
 
     // A structure keyword's property, e.g. `width` under `site`.
     if (parentWord && STRUCTURE_PROPS[parentWord]?.has(s.word)) {
+      // `site width` is a closed choice (PRD §6.1a); an unknown frame would
+      // otherwise compile and silently render as the default.
+      if (parentWord === 'site' && s.word === 'width') {
+        const value = s.args[0];
+        const choices = Object.keys(SITE_WIDTHS);
+        if (!value) err('AZ1205', `site: 'width' has no value — write: width ${choices.join('|')}`, s.pos);
+        else if (!Object.hasOwn(SITE_WIDTHS, value.value)) {
+          err('AZ1414', `site: width '${shown(value.value)}' is not one of: ${choices.join(', ')}`, value.pos);
+        }
+      }
       return { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as,
                children: [], pos: s.pos };
     }

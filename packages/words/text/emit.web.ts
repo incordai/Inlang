@@ -25,7 +25,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** Columns are a count, so a number is honest here — PRD §6.1a. */
 const COLUMN_COUNT = 2;
@@ -101,7 +101,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     attrs: { class: `az-text az-text--${variant}` },
     style: {
       paddingBlock: px(t.space[96]),
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: framed(t),
       textAlign: variant === 'centered' ? 'center' : 'start',
       marginInline: variant === 'centered' ? 'auto' : undefined,
     },

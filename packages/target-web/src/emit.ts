@@ -534,6 +534,22 @@ function solidNavCss(spec: Spec, theme: ThemeLike): string {
 }
 
 /**
+ * PRD §6.1a `site width`: the frame every section aligns to, as the
+ * `--az-frame` each section's inset reads (emit-contract `framed`). Every
+ * value is a theme token, so a frame follows the theme. `full` has no frame.
+ */
+function frameCss(theme: ThemeLike): string {
+  return `
+/* PRD §6.1a: the site frame (site width). Sections inset to it; none states a width. */
+.az-site { --az-frame: ${theme.size.container}px; }
+.az-site[data-width="full"] { --az-frame: 100%; }
+.az-site[data-width="wide"] { --az-frame: ${theme.size.container + 2 * theme.size['gutter-lg']}px; }
+.az-site[data-width="narrow"] { --az-frame: ${theme.breakpoint.md}px; }
+.az-site[data-width="reading"] { --az-frame: ${theme.size['measure-body']}ch; }
+`;
+}
+
+/**
  * nav-block-spec §10 Q2, resolved as its recommendation: `side` is a page
  * layout. At and above `breakpoint.sm` the nav is a column of
  * `size.nav-side` and the page's content fills the column beside it;
@@ -876,7 +892,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${schemeCss(named)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
+${frameCss(theme)}${schemeCss(named)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
     },
     {
       /**

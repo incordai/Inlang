@@ -236,6 +236,15 @@ export interface WordEmitter {
 export const px = (n: number): string => `${n}px`;
 
 /**
+ * PRD §6.1a: a section's inline inset — the desktop gutter, widened so the
+ * content sits in the site frame (`site width`, the `--az-frame` the target
+ * sets on the site). Sections never state a width of their own; this is the
+ * one place the frame reaches them. Below `sm` words use the mobile gutter.
+ */
+export const framed = (theme: ThemeLike): string =>
+  `max(${px(theme.size['gutter-lg'])}, calc((100% - var(--az-frame, 100%)) / 2))`;
+
+/**
  * The tag of a component node: a user component named by `raw` or `slot`
  * (PRD §6.6). `attrs.src` is its project-relative source path; the target
  * imports that module and renders it with the same theme a word sees. `#`

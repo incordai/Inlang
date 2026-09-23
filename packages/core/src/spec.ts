@@ -81,7 +81,7 @@ export interface SpecResult {
 
 /** Defaults for the frame and theme, so a Spec is always complete. */
 const SITE_DEFAULTS = {
-  width: 'center',
+  width: 'default',
   theme: 'midnight',
   accent: 'violet',
   pattern: 'glow',

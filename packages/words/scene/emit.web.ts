@@ -28,7 +28,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** The manifest default (scene-spec §12), for a block built without one. */
 const DEFAULT_RATIO = '4:3';
@@ -172,7 +172,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     style: {
       // A backdrop is a layer, not a band: it takes no room in the flow.
       paddingBlock: variant === 'backdrop' ? 0 : px(t.space[64]),
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: framed(t),
       background: t.color.bg,
       color: t.color.text,
     },

@@ -30,7 +30,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** faq-block-spec §7.5 — a two-question FAQPage is noise, so none is emitted. */
 const SCHEMA_MIN_ITEMS = 3;
@@ -253,7 +253,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     attrs: { class: `az-faq az-faq--${variant}` },
     style: {
       paddingBlock: px(t.space[96]),
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: framed(t),
       background: t.color.bg,
       color: t.color.text,
     },

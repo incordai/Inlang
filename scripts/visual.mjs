@@ -34,7 +34,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration } from './visual/checks.mjs';
+import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, frame } from './visual/checks.mjs';
 import { startServer } from './visual/serve.mjs';
 import {
   billing, carousel, copy, drawer, dropdown, faq, faqDeepLink, hideShrink, lightbox, navMotion, overlayMotion, play, reveal, revealReduced, scrollPadding, sheetDrag, solid, year,
@@ -81,7 +81,7 @@ async function pool(items, limit, fn) {
 
 /* ---- results ------------------------------------------------------------ */
 
-const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'disclosure', 'skip-link',
+const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'disclosure', 'skip-link',
   'no-js', 'hydration',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
@@ -320,6 +320,11 @@ async function checkSite(s, browsers, server) {
     }
   }
   if (restackAt) record(s.word, 'restack', `${s.label}/light`, restacks(tracks[390], tracks[1440], narrowColumns));
+  // PRD §6.1a: wider than the frame, every block's content sits inside it.
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: FRAME_WIDTH, height: 900 });
+  await open(page, s.path, server);
+  record(s.word, 'frame', `${s.label}/light/${FRAME_WIDTH}`, await frame(page));
   record(s.word, 'schemes', s.label, {
     pass: bg.light !== bg.dark,
     detail: `light and dark paint the same body background (${bg.light})`,
@@ -389,7 +394,9 @@ const BAD = `<!doctype html><html lang="en"><head><title>bad</title><style>
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { animation: spin 1s infinite; }
 </style></head><body>
+  <div class="az-site" style="--az-frame: 1440px"><div class="az-page">
   <main id="m" tabindex="-1"><a href="#m">Skip to content</a><h1>Bad</h1>
+  <section class="frame-probe" style="padding-inline: 64px"><p>Unframed: content runs past the frame.</p></section>
   <div class="g" style="display:grid;grid-template-columns:1fr 1fr"><span>a</span><span>b</span></div>
   <div class="f" style="display:flex;flex-wrap:wrap;gap:8px"><span style="width:40px">a</span><span style="width:40px">b</span></div>
   <div style="display:grid;grid-template-columns:1fr 1fr"><p class="c1">Title</p><p class="c2">Sub</p></div>
@@ -397,7 +404,7 @@ const BAD = `<!doctype html><html lang="en"><head><title>bad</title><style>
   <button></button>
   <button class="spin">Spin</button>
   <input aria-label="trap" onkeydown="if (event.key === 'Tab') event.preventDefault()">
-  </main></body></html>`;
+  </main></div></div></body></html>`;
 
 const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   body { background: white; }
@@ -411,7 +418,10 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   .skip:focus-visible { transform: none; }
   .g { display: grid; grid-template-columns: 1fr 1fr; }
   @media (width < 768px) { .g { grid-template-columns: 1fr; } }
+  /* PRD §6.1a: each block insets its content to the site frame. */
+  .az-page > :not(main), main > * { padding-inline: max(24px, calc((100% - var(--az-frame, 100%)) / 2)); }
 </style></head><body>
+  <div class="az-site" style="--az-frame: 1440px"><div class="az-page">
   <header><a class="skip" href="#m">Skip to content</a></header>
   <main id="m" tabindex="-1"><h1>Good</h1>
   <div class="g"><span>a</span><span>b</span></div>
@@ -424,7 +434,7 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
     <label><input type="radio" name="billing" checked> Monthly</label>
     <label><input type="radio" name="billing"> Annual</label>
   </fieldset>
-  </main></body></html>`;
+  </main></div></div></body></html>`;
 
 /** nav §5: a pinned bar, with or without the scroll padding that clears it. */
 const PINNED = (padded) => `<!doctype html><html lang="en"><head><title>pinned</title><style>
@@ -507,6 +517,8 @@ async function selfTest() {
     expect('responsive table: restacks below sm', restacks(narrow, await columnsOf(page, '.g')), shouldPass);
     expect('responsive table: a flex row stacks below sm', restacks(narrowFlex, await columnsOf(page, '.f')), shouldPass);
     expect('text shares one column', await sharedColumn(page, ['.c1', '.c2']), shouldPass);
+    await page.setViewportSize({ width: FRAME_WIDTH, height: 900 });
+    expect('PRD §6.1a content sits in the site frame', await frame(page), shouldPass);
     await page.setViewportSize({ width: 390, height: 900 });
     const bg = {};
     for (const scheme of SCHEMES) {

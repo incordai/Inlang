@@ -36,7 +36,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** §6 — height is a WORD, and the emitter supplies the unit. */
 const HEIGHT: Record<string, number> = {
@@ -237,7 +237,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       justifyContent: variant === 'stack' ? 'flex-start' : 'center',
       paddingBlock: variant === 'stack' ? px(t.space[96]) : undefined,
       textAlign: variant === 'center' || variant === 'full' ? 'center' : undefined,
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: framed(t),
       // §8 — text sits over media only with a SCRIM, and a scrim is a gradient
       // over a colour, never a flat opacity layer that dims the whole image.
       background: variant === 'full' ? t.color.scrim : 'transparent',

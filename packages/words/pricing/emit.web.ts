@@ -49,7 +49,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /**
  * Format a declared price.
@@ -399,7 +399,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     },
     style: {
       paddingBlock: px(t.space[96]),
-      paddingInline: px(t.size['gutter-lg']),
+      paddingInline: framed(t),
       background: t.color.bg,
       color: t.color.text,
     },

@@ -183,6 +183,17 @@ shell every section aligns to. Sections never declare a width of their own;
 they state a fraction of the shell or a text measure. A section that invents a
 px value is the defect this property exists to prevent.
 
+*Built (2026-09-23).* The default is `default`; any other value is refused
+(AZ1414). Each frame is a theme token, so it follows the theme: `full` — no
+frame, the gutters only · `wide` — `size.container` plus both desktop gutters ·
+`default` — `size.container` · `narrow` — `breakpoint.md` · `reading` —
+`size.measure-body`. Every section insets its content to the frame at desktop
+widths (`max(gutter, (100% − frame) / 2)`, emit-contract `framed`), so
+backgrounds stay full-bleed while content aligns; below `breakpoint.sm` the
+mobile gutter applies. (The compiler previously defaulted to `center`, which
+is not one of these values and rendered nothing; the code now follows this
+section.)
+
 **`theme accent`** — selects the hue whose ramp the theme draws from. Steps are
 addressed as tokens (`color.accent-700`), and every step states its contrast
 against both schemes (theme-spec §6). A step that fails the floor is not

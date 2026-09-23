@@ -7,7 +7,7 @@
  * Tests: packages/core/test/describe.test.ts, packages/words/test/descriptions.test.ts
  */
 
-import type { Manifest, PropSpec } from './link.ts';
+import { SITE_WIDTHS, type Manifest, type PropSpec } from './link.ts';
 import { BACKEND_SETTINGS } from './backend.ts';
 
 /** The owner's limit: short enough for an AI to read every one cheaply. */
@@ -34,6 +34,7 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
       theme: 'Theme name, e.g. midnight, paper or signal',
       font: 'Font roles for display, body and mono text',
     },
+    values: { width: SITE_WIDTHS },
   },
   theme: {
     description: 'Theme choice and its tuning (under site)',

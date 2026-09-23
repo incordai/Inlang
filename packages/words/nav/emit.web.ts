@@ -47,7 +47,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { glassSurface, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { framed, glassSurface, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 import { closeButton, drawer, dropdown, full, sheet } from '../../overlay/src/index.ts';
 
 /** The drawer's id — the toggle's aria-controls points here (§6). */
@@ -358,7 +358,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       overflowY: layout.vertical ? 'auto' : undefined,
       width: layout.vertical ? px(t.size['nav-side']) : undefined,
       paddingBlock: layout.vertical ? px(t.space[24]) : undefined,
-      paddingInline: px(t.size['gutter-lg']),
+      // A side column is not a section: it keeps the gutter, not the frame.
+      paddingInline: layout.vertical ? px(t.size['gutter-lg']) : framed(t),
       // `solid` is transparent at the top and solid after scroll (§4); the
       // scrolled state is the runtime's, so the emitted state is the top one.
       // At the top a scrim gradient, not a flat overlay, keeps the bar
