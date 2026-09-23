@@ -476,6 +476,12 @@ export function simulate(trace: Iterable<TraceStep>, init: EngineInit): ProbeSna
 export class TierProbe {
   readonly engine: ProbeEngine;
   private lastTs: number | null = null;
+  /**
+   * The page timestamp (the rAF clock) of the frame on which the engine's
+   * rung last changed. §5's deferral deadline runs from the DECISION, not
+   * from when a poller first noticed it.
+   */
+  decidedAt: number | null = null;
 
   constructor(init: EngineInit) {
     this.engine = new ProbeEngine(init);
@@ -487,7 +493,11 @@ export class TierProbe {
       this.lastTs = null;
       return;
     }
-    if (this.lastTs !== null) this.engine.sample(nowMs - this.lastTs);
+    if (this.lastTs !== null) {
+      const before = this.engine.rung;
+      this.engine.sample(nowMs - this.lastTs);
+      if (this.engine.rung !== before) this.decidedAt = nowMs;
+    }
     this.lastTs = nowMs;
   }
 

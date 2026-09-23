@@ -322,23 +322,33 @@ export function Hero() {
 
   // Follow the engine. Rungs 1–2 and the one promotion apply at once; 3–7
   // wait for SCROLL_IDLE_MS of scroll silence, or DEFER_DEADLINE_MS at most.
+  //
+  // The deadline is measured from the engine's decision (probe.decidedAt, the
+  // frame it happened on) and enforced by a timer set for that exact moment.
+  // Counting from when the 100ms poll first saw the decision, and checking
+  // the deadline only on poll ticks, let a deferred rung land up to two
+  // polls late — past the 2s the spec promises.
   useEffect(() => {
     if (!probe) return;
-    let pendingSince: number | null = null;
-    const id = setInterval(() => {
+    let deadline: ReturnType<typeof setTimeout> | null = null;
+    const clear = () => { if (deadline !== null) { clearTimeout(deadline); deadline = null; } };
+    const follow = (force: boolean) => {
       const s = probe.engine.snapshot;
       setSnap(s);
       setApplied((cur) => {
-        if (s.rung === cur) { pendingSince = null; return cur; }
-        if (s.rung < cur || !LADDER[s.rung].deferred) { pendingSince = null; return s.rung; }
+        if (s.rung === cur) { clear(); return cur; }
+        if (s.rung < cur || !LADDER[s.rung].deferred) { clear(); return s.rung; }
         const now = performance.now();
-        pendingSince ??= now;
+        const since = probe.decidedAt ?? now;
         const quiet = now - lastScrollAt.current >= SCROLL_IDLE_MS;
-        if (quiet || now - pendingSince >= DEFER_DEADLINE_MS) { pendingSince = null; return s.rung; }
+        if (force || quiet || now - since >= DEFER_DEADLINE_MS) { clear(); return s.rung; }
+        deadline ??= setTimeout(() => { deadline = null; follow(true); },
+          Math.max(0, since + DEFER_DEADLINE_MS - now));
         return cur;
       });
-    }, 100);
-    return () => clearInterval(id);
+    };
+    const id = setInterval(() => follow(false), 100);
+    return () => { clearInterval(id); clear(); };
   }, [probe]);
 
   const rung = LADDER[applied];
