@@ -22,12 +22,15 @@ const REGION_MAX_ITEMS = 6;
  * builds are byte-identical.
  */
 export function questionIds(questions: readonly string[]): string[] {
-  const seen = new Map<string, number>();
+  const used = new Set<string>();
   return questions.map((q) => {
     const base = `faq-${q.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'question'}`;
-    const n = (seen.get(base) ?? 0) + 1;
-    seen.set(base, n);
-    return n === 1 ? base : `${base}-${n}`;
+    // Numbered against every id already given, not just this slug's count:
+    // "A", "A", "A 2" would otherwise give faq-a-2 twice.
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+    used.add(id);
+    return id;
   });
 }
 
@@ -38,12 +41,12 @@ export function questionIds(questions: readonly string[]): string[] {
  * hidden="until-found" before first paint, so find-in-page still reaches
  * each one (§7.3).
  */
-function question(item: SpecBlock, id: string, region: boolean, ctx: EmitContext): EmittedNode[] {
+function question(item: SpecBlock, id: string, region: boolean, ctx: EmitContext, heading: 'h2' | 'h3'): EmittedNode[] {
   const t = ctx.theme;
   const more = item.children.filter((c) => c.word === 'more');
   return [
     {
-      tag: 'h3',
+      tag: heading,
       attrs: { id, class: 'az-faq-question' },
       style: { margin: 0, fontSize: t.typeSize.lg, lineHeight: t.type['leading-tight'], fontFamily: t.type.display },
       children: [{
@@ -215,7 +218,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
           borderBottom: `1px solid ${t.color.border}`,
         },
         below: { sm: { paddingBlock: px(t.space[24]) } },
-        children: question(q, ids[i], region, ctx),
+        children: question(q, ids[i], region, ctx, block.props.title ? 'h3' : 'h2'),
       })),
     });
   }

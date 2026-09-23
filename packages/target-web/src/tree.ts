@@ -61,7 +61,14 @@ function injected(block: SpecBlock, point: string, component: ComponentResolver)
  *
  * That shared shape is rendered here, once, rather than in nine emitters.
  */
-export function defaultChild(block: SpecBlock, ctx: EmitContext): EmittedNode {
+/**
+ * The heading level a fill's label takes: one below the section's own title,
+ * so the outline never skips a level (feature-spec §10). A section with a
+ * `title` has an <h2>, so its fills are <h3>; without one they are <h2>.
+ */
+export const fillLevel = (section: SpecBlock): number => (section.props.title ? 3 : 2);
+
+export function defaultChild(block: SpecBlock, ctx: EmitContext, level = 3): EmittedNode {
   const t = ctx.theme;
   const label = block.args[0]?.value ?? '';
   const href = block.args[1]?.value ?? null;
@@ -73,7 +80,7 @@ export function defaultChild(block: SpecBlock, ctx: EmitContext): EmittedNode {
     kids.push(href
       ? { tag: 'a', attrs: { class: 'az-child-label', href }, children: [label] }
       : {
-          tag: 'h3',
+          tag: `h${Math.min(level, 6)}`,
           attrs: { class: 'az-child-label' },
           style: {
             fontSize: t.typeSize.lg,
@@ -106,7 +113,7 @@ export function defaultChild(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // not list items: an <li> directly inside an <li> is invalid HTML.
   for (const c of block.children) {
     kids.push({ tag: 'div', attrs: { class: `az-child-nested az-child--${c.word}` },
-      children: defaultChild(c, ctx).children });
+      children: defaultChild(c, ctx, level + 1).children });
   }
 
   return {
@@ -147,7 +154,8 @@ function fallback(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // `mobile drawer` does not — and rendering every prop as a <p> put the
     // literal word "drawer" on the page. Nothing is lost: the values are all
     // still here, and the word's own emitter will place them properly.
-    children: block.children.filter((c) => !isEscapeHatch(c)).map((c) => defaultChild(c, ctx)),
+    // The fallback section has no heading of its own, so its fills are <h2>.
+    children: block.children.filter((c) => !isEscapeHatch(c)).map((c) => defaultChild(c, ctx, 2)),
   };
 }
 
@@ -165,7 +173,7 @@ function contextFor(
     // `slot <name> <path>` component naming it, in source order, as a list
     // item like the fills around it.
     slot: (name) => block.children.flatMap((c): EmittedNode[] => {
-      if (c.word === name) return [defaultChild(c, contextFor(c, theme, asset, site, component, inline))];
+      if (c.word === name) return [defaultChild(c, contextFor(c, theme, asset, site, component, inline), fillLevel(block))];
       if (c.word === 'slot' && c.args[0]?.value === name) {
         return [{
           tag: 'li',

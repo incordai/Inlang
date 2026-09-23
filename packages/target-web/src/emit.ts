@@ -17,6 +17,7 @@ import { resolve, schemeCss, schemeReferences, THEMES, type Theme } from '../../
 import { emitPages, type EmitterMap } from './tree.ts';
 import { sanitizeSvg, SvgError } from './svg.ts';
 import { compileStyles } from './stylesheet.ts';
+import { uniqueIds } from './ids.ts';
 import { COMPONENT_EXT } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 import { PUBLIC_ENV_PREFIX } from '../../core/src/index.ts';
@@ -613,8 +614,11 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   const seeded = seedViews(emitPages(spec, theme, options.emitters ?? {}, asset, component, inline), spec.site.name);
   // Every page's styles into one generated sheet (az.css): classes replace
   // inline styles, which is what lets `below` and `states` exist at all.
+  // Ids and radio groups unique per page: words name them from their own
+  // content, so two blocks of a kind on one page collided (ids.ts).
+  const unique = seeded.pages.map((p) => ({ ...p, nodes: uniqueIds(p.nodes) }));
   const styled = compileStyles(
-    seeded.pages,
+    unique,
     (ps, rewrite) => ps.map((p) => ({ ...p, nodes: p.nodes.map(rewrite) })),
     theme.breakpoint,
   );

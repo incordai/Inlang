@@ -151,3 +151,10 @@ test('faq §7.4: ids are slugs, collisions numbered, deterministic', () => {
     ['faq-can-i-return-them', 'faq-can-i-return-them-2', 'faq-question']);
   assert.deepEqual(questionIds(THREE), questionIds(THREE));
 });
+
+test('faq §7.4: a numbered collision never lands on a slug already taken', () => {
+  // "A 2" slugs to faq-a-2 — exactly the id the second "A" was given.
+  const ids = questionIds(['A', 'A', 'A 2']);
+  assert.equal(new Set(ids).size, ids.length, ids.join(' '));
+  assert.deepEqual(ids, ['faq-a', 'faq-a-2', 'faq-a-2-2']);
+});

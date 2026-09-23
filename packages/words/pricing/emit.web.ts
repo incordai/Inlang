@@ -56,6 +56,8 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
   shared?: ReadonlySet<string>;
   /** §6: a phone panel of a transposed table — rows as label/value pairs. */
   panel?: boolean;
+  /** <h3> under the section title, <h2> when there is none — no skipped level. */
+  heading: 'h2' | 'h3';
 }): EmittedNode {
   const t = ctx.theme;
   const name = p.args[0]?.value ?? '';
@@ -80,8 +82,8 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
   }
 
   body.push({
-    // §9: <h3> per plan name. Never <h1> — hero owns that.
-    tag: 'h3',
+    // §9: <h3> per plan name (<h2> with no section title). Never <h1>.
+    tag: opts.heading,
     attrs: { class: 'az-plan-name' },
     style: {
       margin: `0 0 ${px(t.space[12])}`,
@@ -205,7 +207,7 @@ function sharedRows(plans: SpecBlock[]): Set<string> {
 }
 
 /** §6: the shared list, once, after the plans — in the first plan's order. */
-function everyPlan(first: SpecBlock, shared: ReadonlySet<string>, ctx: EmitContext): EmittedNode {
+function everyPlan(first: SpecBlock, shared: ReadonlySet<string>, ctx: EmitContext, heading: 'h2' | 'h3'): EmittedNode {
   const t = ctx.theme;
   const rows = first.children.filter((c) => c.word === 'feature' && shared.has(rowKey(c)));
   return {
@@ -214,7 +216,7 @@ function everyPlan(first: SpecBlock, shared: ReadonlySet<string>, ctx: EmitConte
     style: { marginTop: px(t.space[32]) },
     children: [
       {
-        tag: 'h3',
+        tag: heading,
         attrs: { class: 'az-pricing-shared-title' },
         style: { margin: `0 0 ${px(t.space[12])}`, fontSize: t.typeSize.lg, fontFamily: t.type.display },
         children: ['In every plan'],
@@ -237,6 +239,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'cards';
   const table = variant === 'table';
+  // The outline never skips a level: plan names are <h3> under the section's
+  // <h2> title, and <h2> themselves when there is no title (§8).
+  const heading = block.props.title ? 'h3' : 'h2';
 
   const currency = block.props.currency ?? 'usd';
   const locale = block.props.locale ?? 'en-US';
@@ -325,7 +330,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // "in every plan" list, at all widths. `cards` keeps each card whole; its
     // repeats get the validator's warning instead (§11).
     const shared = table ? sharedRows(plans) : new Set<string>();
-    const rendered = plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table, shared }));
+    const rendered = plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table, shared, heading }));
     // §6 below sm: `cards` is one column, full width, in declared order (the
     // highlighted card moves first, §7.3); `table` TRANSPOSES to stacked
     // per-plan panels — no horizontal scroll. The transposition needs a
@@ -342,7 +347,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         ? { sm: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: px(t.space[24]) } }
         : { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } },
       children: table
-        ? plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table: false, panel: true, shared }))
+        ? plans.map((p) => plan(p, ctx, { currency, locale, billing, period, table: false, panel: true, shared, heading }))
         : rendered,
     };
     if (table) {
@@ -358,7 +363,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       });
     }
     children.push(stack);
-    if (shared.size > 0) children.push(everyPlan(plans[0], shared, ctx));
+    if (shared.size > 0) children.push(everyPlan(plans[0], shared, ctx, heading));
   }
 
   return {

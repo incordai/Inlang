@@ -30,7 +30,7 @@ const isLead = (item: SpecBlock) =>
  * row puts the media on the right); below sm media sits above the text in
  * every row and the alternation is dropped.
  */
-function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitContext): EmittedNode {
+function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitContext, heading: 'h2' | 'h3'): EmittedNode {
   const t = ctx.theme;
   const rows = variant === 'rows';
   const media = item.props.media && (rows || variant === 'bento')
@@ -66,7 +66,7 @@ function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitC
       : { tag: 'img', attrs: { src: ctx.asset(item.props.icon), alt: '', 'aria-hidden': 'true', class: 'az-feature-icon' }, style });
   }
   text.push({
-    tag: 'h3',
+    tag: heading,
     attrs: { class: 'az-feature-item-title' },
     style: {
       fontFamily: t.type.body,
@@ -177,7 +177,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // The word renders its own items: the generic slot renderer prints every
   // prop as a paragraph, which put `icon`/`media` paths and the `lead` flag on
   // the page as text.
-  const items = itemFills.map((c, i) => featureItem(c, i, variant, ctx));
+  // The outline never skips a level: items are <h3> under the section's
+  // <h2> title, and <h2> themselves when there is no title (feature-spec
+  // §10; faq and pricing specs: no skipped level).
+  const heading = block.props.title ? 'h3' : 'h2';
+  const items = itemFills.map((c, i) => featureItem(c, i, variant, ctx, heading));
   if (items.length > 0) {
     children.push({
       tag: 'ul',
