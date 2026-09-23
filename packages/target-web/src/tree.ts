@@ -31,6 +31,7 @@ export type AssetResolver = (path: string) => string;
 
 /** Reads and sanitises an SVG the author named; absent without file access. */
 export type InlineSvg = (path: string) => EmittedNode;
+export type MarkdownRender = NonNullable<EmitContext['markdown']>;
 
 export type SiteInfo = EmitContext['site'];
 
@@ -173,7 +174,7 @@ function fallback(block: SpecBlock, ctx: EmitContext): EmittedNode {
 /** Build the context one block sees. */
 function contextFor(
   block: SpecBlock, theme: ThemeLike, asset: AssetResolver, site: SiteInfo, component: ComponentResolver,
-  inline?: InlineSvg,
+  inline?: InlineSvg, markdown?: MarkdownRender,
 ): EmitContext {
   return {
     theme,
@@ -184,7 +185,7 @@ function contextFor(
     // `slot <name> <path>` component naming it, in source order, as a list
     // item like the fills around it.
     slot: (name) => block.children.flatMap((c): EmittedNode[] => {
-      if (c.word === name) return [defaultChild(c, contextFor(c, theme, asset, site, component, inline), fillLevel(block))];
+      if (c.word === name) return [defaultChild(c, contextFor(c, theme, asset, site, component, inline, markdown), fillLevel(block))];
       if (c.word === 'slot' && c.args[0]?.value === name) {
         return [{
           tag: 'li',
@@ -197,6 +198,7 @@ function contextFor(
     }),
     asset,
     ...(inline ? { inlineSvg: inline } : {}),
+    ...(markdown ? { markdown } : {}),
     ...actionsFor(theme, { asset, component: (c) => custom(c, component) }),
   };
 }
@@ -204,11 +206,11 @@ function contextFor(
 /** One block, through its word's emitter or the fallback. */
 export function emitBlock(
   block: SpecBlock, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver, site: SiteInfo,
-  component: ComponentResolver = noComponents, inline?: InlineSvg,
+  component: ComponentResolver = noComponents, inline?: InlineSvg, markdown?: MarkdownRender,
 ): EmittedNode {
   // A page-level `raw` is a component in the page's flow.
   if (block.word === 'raw') return custom(block, component);
-  const ctx = contextFor(block, theme, asset, site, component, inline);
+  const ctx = contextFor(block, theme, asset, site, component, inline, markdown);
   const word = emitters[block.word];
   const node = word ? word.emit(block, ctx) : fallback(block, ctx);
   // `raw` inside a block renders inside it, after the word's own content.
@@ -219,7 +221,7 @@ export function emitBlock(
 /** Every page, with the site's inherited blocks in front of each page's own. */
 export function emitPages(
   spec: Spec, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver, component: ComponentResolver,
-  inline?: InlineSvg,
+  inline?: InlineSvg, markdown?: MarkdownRender,
 ): { route: string; nodes: EmittedNode[] }[] {
   const site: SiteInfo = { name: spec.site.name };
   return spec.pages.map((page) => ({
@@ -229,7 +231,7 @@ export function emitPages(
     // the footer above the page content and rendered a suppressed nav twice.
     nodes: blocksFor(spec, page).flatMap((b) => [
       ...injected(b, 'before', component),
-      emitBlock(b, theme, emitters, asset, site, component, inline),
+      emitBlock(b, theme, emitters, asset, site, component, inline, markdown),
       ...injected(b, 'after', component),
     ]),
   }));

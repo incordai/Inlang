@@ -27,6 +27,7 @@ import { generated, generatedJson } from './generated.ts';
 import { azMd } from './azmd.ts';
 import { emitPages, type EmitterMap } from './tree.ts';
 import { sanitizeSvg, SvgError } from './svg.ts';
+import { markdownToNodes, MarkdownError } from './markdown.ts';
 import { compileStyles } from './stylesheet.ts';
 import { uniqueIds } from './ids.ts';
 import { COMPONENT_EXT } from '../../core/src/index.ts';
@@ -723,6 +724,8 @@ export interface EmittedProject {
   readonly auth: boolean;
   /** The site uses 3D: the caller copies the 3D runtime into THREE_DIR (scene-spec §5). */
   readonly three: boolean;
+  /** Build-time warnings the emitter found in files it read (text-spec §10), for the caller's report. */
+  readonly warnings: string[];
 }
 
 export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
@@ -761,8 +764,26 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
         return sanitizeSvg(source, raw, `az-i${icons++}-`);
       }
     : undefined;
+  // text-spec §5: a body file is parsed at build, through the same sandboxed
+  // reader, into nodes — never an HTML string. Its §10 warnings travel back
+  // to the caller; its errors (a javascript: link) stop the build.
+  const warnings: string[] = [];
+  const markdown = readText
+    ? (raw: string, opts: { readonly titled: boolean }): EmittedNode[] => {
+        const path = safeAssetPath(raw);
+        const source = readText(path);
+        if (source === null) throw new MarkdownError(`text: '${raw}' does not exist — add the file or fix the path`);
+        // A file's images and downloads are written relative to the file, as
+        // in any markdown; a root path still reaches the sandbox, which refuses it.
+        const dir = path.split('/').slice(0, -1).join('/');
+        const near = (p: string) => asset(dir && !p.startsWith('/') ? `${dir}/${p}` : p);
+        const r = markdownToNodes(source, { file: raw, titled: opts.titled, theme, asset: near });
+        warnings.push(...r.warnings);
+        return r.nodes;
+      }
+    : undefined;
   // Each 3D view gets its seed, and the site learns whether it uses 3D at all.
-  const seeded = seedViews(emitPages(spec, theme, options.emitters ?? {}, asset, component, inline), spec.site.name);
+  const seeded = seedViews(emitPages(spec, theme, options.emitters ?? {}, asset, component, inline, markdown), spec.site.name);
   // Every page's styles into one generated sheet (az.css): classes replace
   // inline styles, which is what lets `below` and `states` exist at all.
   // Ids and radio groups unique per page: words name them from their own
@@ -950,5 +971,6 @@ export default defineConfig({
     modules: moduleList,
     auth: plan !== null,
     three: seeded.used,
+    warnings: [...new Set(warnings)],
   };
 }

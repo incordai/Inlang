@@ -36,7 +36,7 @@
       ],
       "maxBytes": 262144,
       "maxWords": 800,
-      "description": "Body text; a .md file path is not rendered yet"
+      "description": "Inline text, or a .md file rendered at build"
     }
   },
   "slots": {
@@ -68,8 +68,12 @@
     "color.veil"
   ],
   "deps": {
+    "mdast-util-from-markdown": "2.0.3",
+    "mdast-util-gfm-strikethrough": "2.0.0",
+    "mdast-util-gfm-table": "2.0.0",
     "micromark": "4.0.2",
-    "micromark-extension-gfm": "3.0.0"
+    "micromark-extension-gfm-strikethrough": "2.1.0",
+    "micromark-extension-gfm-table": "2.1.2"
   },
   "targets": [
     "web"

@@ -2,17 +2,18 @@
  * @az word text
  * Purpose: a section of written copy — title, body and actions.
  * Spec: docs/text-block-spec.md · terms: az explain text
- * Renders: section.az-text.az-text--{variant} > h2.az-text-title? · div.az-text-body? (the body string) ·
+ * Renders: section.az-text.az-text--{variant} > h2.az-text-title? · div.az-text-body? (the string, or the .md file's nodes) ·
  *   ul.az-text-actions? > li > a|button
  * Variants: prose — body at the reading measure · centered — centred statement ·
  *   columns — two text columns, one below md.
  * Modifiers: reveal — data-az-reveal on the block (revealed as one unit); the overlay runtime hides by script, once.
- * Props: title → h2.az-text-title · body → div.az-text-body as text (a .md path is not rendered yet).
+ * Props: title → h2.az-text-title · body → div.az-text-body: inline text, or a .md file parsed at build
+ *   by target-web/src/markdown.ts (headings h2–h4, html stripped, links vetted) — never innerHTML.
  * Styling: theme tokens only; below.sm mobile gutter; below.md single column; states.overBackdrop veil.
  * Behaviour: none; buttons by target-web/src/actions.ts.
  * Edit guide: the body block → the div's style; column count → COLUMN_COUNT.
  *   Keep: text never emits an <h1>; the measure stays the theme's.
- * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/responsive.test.ts, packages/target-web/test/backdrop-veil.test.ts
+ * Tests: packages/target-web/test/markdown.test.ts, packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/responsive.test.ts, packages/target-web/test/backdrop-veil.test.ts
  */
 
 /**
@@ -28,6 +29,9 @@ import { px, revealed, type EmitContext, type EmittedNode } from '../../core/src
 
 /** Columns are a count, so a number is honest here — PRD §6.1a. */
 const COLUMN_COUNT = 2;
+
+/** §1: `body` is a file when its value is one path ending `.md`; anything else is inline text. */
+const MARKDOWN_FILE = /^[^\s]+\.md$/i;
 
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
@@ -68,7 +72,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // §7: `columns` collapses at breakpoint.md, NOT sm — two 38ch columns
       // plus the gap need ~900px; below that it is already prose.
       below: variant === 'columns' ? { md: { columnCount: 1 } } : undefined,
-      children: [block.props.body],
+      // §5/§8: a file is parsed at build into nodes, its headings below the
+      // title's h2. Without a reader (a bare emit) the path shows as text.
+      children: MARKDOWN_FILE.test(block.props.body) && ctx.markdown
+        ? ctx.markdown(block.props.body, { titled: Boolean(block.props.title) })
+        : [block.props.body],
     });
   }
 

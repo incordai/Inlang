@@ -826,3 +826,35 @@ binary. Version negotiation follows the SDK's own supported list
 
 Revisit if `az mcp` ever needs an HTTP transport, sampling, or OAuth — the
 SDK's weight pays for those.
+
+## 13. Markdown for `text` bodies — **ADOPT, build-time only**
+
+Decided 2026-09-23 when `text` began rendering `.md` bodies (text-spec §5).
+
+Checked on the npm registry the same day; each is the latest release, MIT,
+ESM-only, and runs on the repo's Node:
+
+| Package | Pinned | Role |
+|---|---|---|
+| `mdast-util-from-markdown` | `2.0.3` | the parser's syntax tree — the only module `markdown.ts` calls |
+| `micromark` | `4.0.2` | the CommonMark tokenizer underneath it |
+| `micromark-extension-gfm-table` | `2.1.2` | tables |
+| `mdast-util-gfm-table` | `2.0.0` | tables, as tree nodes |
+| `micromark-extension-gfm-strikethrough` | `2.1.0` | strikethrough |
+| `mdast-util-gfm-strikethrough` | `2.0.0` | strikethrough, as tree nodes |
+
+**Why a syntax tree, not an HTML compiler.** text-spec §11's criterion is a
+parser that never emits raw HTML. The tree meets it by construction: raw HTML
+is an `html` node the mapper drops with a warning, and every other node maps
+to an emit-contract element that React escapes. There is no HTML string to
+sanitise, so there is no scrub to bypass.
+
+**Why not the combined extension the spec named** (`micromark-extension-gfm`
+`3.0.0`): it also turns on footnotes, task lists, literal autolinks and the tag
+filter, which §5 puts outside the subset. The two extensions §5 accepts are
+taken individually instead.
+
+**Where they live.** In `packages/target-web` — the compiler — not in any
+generated site: the file is parsed at build and the site receives nodes. The
+`text` manifest pins the same set so the gate's exact-pin check covers it, and
+`packages/target-web/test/pins.test.ts` keeps the two lists equal.

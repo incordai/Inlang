@@ -232,6 +232,18 @@ try {
   check('nav §6: the menu is a <dialog> drawer its toggle controls',
     /<button[^>]*aria-controls="az-nav-panel"/.test(rendered['/']) &&
     /<dialog[^>]*id="az-nav-panel"[^>]*>|<dialog[^>]*data-az-overlay="drawer"[^>]*id="az-nav-panel"/.test(rendered['/']));
+  {
+    // text-spec §5/§8: the .md body ships as markup, its heading under the
+    // title's h2, its table in a keyboard-reachable scroll region.
+    const at = rendered['/'].indexOf('az-text-body');
+    const body = at < 0 ? '' : rendered['/'].slice(at, rendered['/'].indexOf('</section>', at));
+    check('text §5: the .md body is pre-rendered markup, not its path',
+      /<h3[^>]*>What we repair<\/h3>/.test(body) && /<strong>Resoling<\/strong>/.test(body) && !body.includes('repair.md'),
+      body.slice(0, 120));
+    check('text §8: the table scrolls in a focusable region; the external link says it opens a tab',
+      /<div(?=[^>]*tabindex="0")(?=[^>]*role="region")[^>]*>\s*<table/.test(body) &&
+        /<a(?=[^>]*target="_blank")(?=[^>]*rel="noopener noreferrer")[^>]*>care guide<span[^>]*> \(opens in new tab\)/.test(body));
+  }
 
   check('every page of the fixture is its own HTML file',
     ['/', '/login', '/legal'].every((r) => routes.includes(r)), routes.join(' '));

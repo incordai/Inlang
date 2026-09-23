@@ -82,3 +82,17 @@ test('pins are EXACT — a range would break determinism', () => {
       `${name} is '${version}' — a range lets two builds resolve differently`);
   }
 });
+
+test('text-spec §11: the text manifest pins exactly the markdown parser the compiler runs', () => {
+  // The file is parsed at build by target-web, so its package.json is what
+  // actually runs; the manifest carries the same pins for the gate to see.
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'packages/target-web/package.json'), 'utf8')) as
+    { dependencies?: Record<string, string> };
+  const text = JSON.parse(readFileSync(join(ROOT, 'packages/words/text/word.json'), 'utf8')) as
+    { deps?: Record<string, string> };
+  assert.deepEqual(text.deps, pkg.dependencies);
+  // Each is recorded in stack-evaluation §13 at the same version.
+  for (const [name, version] of Object.entries(pkg.dependencies ?? {})) {
+    assert.ok(doc.includes(`| \`${name}\` | \`${version}\` |`), `${name} ${version} has no stack-evaluation row`);
+  }
+});

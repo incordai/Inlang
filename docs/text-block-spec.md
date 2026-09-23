@@ -189,6 +189,11 @@ The rest of the floor:
 - Every markdown image needs alt text; `![](…)` is accepted **only** as an
   explicit empty alt on a decorative image, which the compiler makes the author
   write as `![]()` rather than infer from a missing attribute.
+  *Resolved at implementation (2026-09-23):* markdown has no image without an
+  alt — `![](bench.webp)` **is** the written-empty form, so it renders
+  `alt=""` (decorative) and the §10 "no alt" row cannot fire on a `.md` file.
+  Images and file links resolve relative to the `.md` file, through the same
+  asset sandbox as every other path.
 - `<pre tabindex="0">` on code blocks and `tabindex="0"` on the table scroll
   container: a region that scrolls must be reachable by keyboard, which is the
   most-missed rule in this list.

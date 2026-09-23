@@ -185,6 +185,13 @@ export interface EmitContext {
    */
   readonly inlineSvg?: (path: string) => EmittedNode;
   /**
+   * A `text` body file (.md) rendered to nodes at build time (text-spec §5):
+   * CommonMark plus tables and strikethrough, raw HTML stripped, headings
+   * shifted below the block's own (`titled`: it has a title h2). Absent when
+   * the caller has no files to read; a word then shows the path as text.
+   */
+  readonly markdown?: (path: string, options: { readonly titled: boolean }) => EmittedNode[];
+  /**
    * One slot fill (`cta "Reserve a pair" /reserve`) rendered as an action —
    * a link or a button, chosen by its destination (buttons §1.3–1.4), with
    * all six states (§1.5). The target owns the markup; a word asks.

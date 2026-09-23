@@ -28,6 +28,7 @@ import {
 } from '../../core/src/index.ts';
 import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../target-web/src/emit.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
+import { MarkdownError } from '../../target-web/src/markdown.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
 import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
@@ -153,7 +154,7 @@ export function build(options: BuildOptions): BuildOutcome {
       readText: (path) => readProjectText(projectDir, path),
     });
   } catch (e) {
-    if (e instanceof PathEscapeError || e instanceof SvgError) {
+    if (e instanceof PathEscapeError || e instanceof SvgError || e instanceof MarkdownError) {
       return { ok: false, files: [], assets: [], report: `${report}\n${e.message}`.trim(), exit: EXIT.missing };
     }
     throw e;
@@ -226,7 +227,8 @@ export function build(options: BuildOptions): BuildOutcome {
   const heavy = located.sources
     .filter((source) => source.toLowerCase().endsWith('.glb') && statSync(source).size > MODEL_BUDGET_BYTES)
     .map((source) => `warning: model '${basename(source)}' is ${(statSync(source).size / MB).toFixed(1)}MB — Draco-compress it or the page will stall on mobile (budget ${MODEL_BUDGET_BYTES / MB}MB)`);
-  return { ok: true, files, assets, report: [report, ...heavy].filter(Boolean).join('\n'), exit: EXIT.ok };
+  const read = project.warnings.map((w) => `warning: ${w}`);
+  return { ok: true, files, assets, report: [report, ...read, ...heavy].filter(Boolean).join('\n'), exit: EXIT.ok };
 }
 
 /** A package directory's modules, copied verbatim into the generated project at `to`. */
