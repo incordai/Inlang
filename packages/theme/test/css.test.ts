@@ -62,3 +62,9 @@ test('words read references, never colours (§3.3)', () => {
 test('DETERMINISM: the stylesheet is identical across calls', () => {
   assert.equal(schemeCss(THEMES.midnight), schemeCss(THEMES.midnight));
 });
+
+test('the theme\'s breakpoints are exactly the contract\'s names (ARCHITECTURE §4.3)', async () => {
+  const { BREAKPOINT } = await import('../src/tokens.ts');
+  const { BREAKPOINT_NAMES } = await import('../../core/src/emit-contract.ts');
+  assert.deepEqual(Object.keys(BREAKPOINT).sort(), [...BREAKPOINT_NAMES].sort());
+});

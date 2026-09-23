@@ -15,6 +15,7 @@ import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
 import { resolve, schemeCss, schemeReferences, THEMES, type Theme } from '../../theme/src/index.ts';
 import { emitPages, type EmitterMap } from './tree.ts';
+import { compileStyles } from './stylesheet.ts';
 import { COMPONENT_EXT } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 
@@ -202,8 +203,8 @@ function runtimeTsx(): string {
 
 export interface EmittedNode {
   tag: string;
+  /** Styling arrives as a generated class (az.css); nodes carry no inline style. */
   attrs?: Record<string, string>;
-  style?: Record<string, string | number>;
   children?: (EmittedNode | string)[];
 }
 
@@ -274,7 +275,7 @@ export function Node({ node }: { node: EmittedNode | string }): ReactNode {
   if (typeof node === "string") return node;
   if (node.tag === ${JSON.stringify(COMPONENT_TAG)}) return createElement(CustomNode, { src: node.attrs?.src ?? "" });
 
-  const props: Record<string, unknown> = { style: node.style };
+  const props: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node.attrs ?? {})) {
     props[REACT_NAME[k] ?? k] = v;
   }
@@ -355,7 +356,7 @@ function themeFor(named: Theme): ThemeLike {
     space: t.space as unknown as Record<string, number>,
     motion: t.motion as unknown as Record<string, string | number>,
     layer: t.layer as unknown as Record<string, number>,
-    breakpoint: t.breakpoint as unknown as Record<string, number>,
+    breakpoint: t.breakpoint,
     typeSize: t.typeSize as unknown as Record<string, string>,
   };
 }
@@ -441,7 +442,14 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     modules.add(path);
     return path;
   };
-  const pages = emitPages(spec, theme, options.emitters ?? {}, asset, component);
+  // Every page's styles into one generated sheet (az.css): classes replace
+  // inline styles, which is what lets `below` and `states` exist at all.
+  const styled = compileStyles(
+    emitPages(spec, theme, options.emitters ?? {}, asset, component),
+    (ps, rewrite) => ps.map((p) => ({ ...p, nodes: p.nodes.map(rewrite) })),
+    theme.breakpoint,
+  );
+  const pages = styled.value;
   const moduleList = [...modules].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
   const files: EmittedFile[] = [
     { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme) },
@@ -452,11 +460,19 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./theme.css";
+import "./az.css";
 
 const el = document.getElementById("root");
 if (!el) throw new Error("root element missing");
 createRoot(el).render(<StrictMode><App route={window.location.pathname} /></StrictMode>);
 `,
+    },
+    {
+      path: 'src/az.css',
+      content: `${HEADER}/* Every word's styles, one class per styled element. Generated from the
+   emitted tree: base rules, then breakpoints (widest first), then states,
+   then reduced motion — so the more specific condition wins a conflict. */
+${styled.css}`,
     },
     {
       path: 'src/theme.css',
@@ -473,6 +489,22 @@ body { margin: 0; }
 ul, ol { margin: 0; padding: 0; }
 img, video, canvas { max-width: 100%; height: auto; display: block; }
 a { color: inherit; }
+
+/* Reduced motion — theme-spec §9.3: opacity-only or instant, never "slower".
+   The net catches anything a word did not handle itself. !important because
+   a generated class outranks a universal selector, and a net that any
+   styled element can slip through is not one. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition-property: opacity !important;
+    transition-duration: ${theme.motion.reduced}ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
 
 ${schemeCss(named)}`,
     },

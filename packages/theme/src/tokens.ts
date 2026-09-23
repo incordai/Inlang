@@ -32,6 +32,14 @@ export type SpaceStep = keyof typeof SPACE;
 
 /** overlays-spec §3 fixes these. Themes do not get to be slower. */
 export const MOTION = {
+  /** theme-spec §1.7 — tooltip fade, and the ceiling for any reduced-motion change. */
+  snap: 100,
+  /**
+   * theme-spec §9.3's `motion.reduced`, flattened: the ThemeLike contract
+   * keeps `motion` a flat map, so this is the duration and the properties are
+   * fixed — opacity only, enforced by the target's reduced-motion net.
+   */
+  reduced: 100,
   fast: 120,
   normal: 160,
   slow: 240,

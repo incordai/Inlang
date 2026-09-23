@@ -16,6 +16,29 @@
 
 import type { SpecBlock } from './spec-block.ts';
 
+/** A set of style declarations: camelCase property to value; `undefined` is "not set". */
+export type StyleMap = Readonly<Record<string, string | number | undefined>>;
+
+/**
+ * The breakpoints a style may change at — theme-spec §1.9. A closed set: a
+ * word names a breakpoint, never a pixel width, and the target turns the
+ * name into a condition. The theme's BREAKPOINT table must have exactly
+ * these keys (a theme test holds the two together).
+ */
+export const BREAKPOINT_NAMES = ['xs', 'sm', 'md', 'lg'] as const;
+export type BreakpointName = (typeof BREAKPOINT_NAMES)[number];
+
+/**
+ * The interaction states a style may change in. Named by meaning, not by
+ * selector: `focusVisible` is keyboard focus, `loading` is a busy control,
+ * `current` the link to the page being viewed. The target decides how each
+ * is detected (buttons-and-sections-spec §1: six states per button).
+ */
+export const INTERACTION_STATES = [
+  'hover', 'focusVisible', 'active', 'disabled', 'loading', 'expanded', 'current',
+] as const;
+export type InteractionState = (typeof INTERACTION_STATES)[number];
+
 /** A node in the emitted tree. Deliberately close to HTML, but not HTML. */
 export interface EmittedNode {
   readonly tag: string;
@@ -31,7 +54,20 @@ export interface EmittedNode {
    * renderer already filtered it; the type said otherwise, which forced words
    * into building style objects conditionally to express "no value here".
    */
-  readonly style?: Readonly<Record<string, string | number | undefined>>;
+  readonly style?: StyleMap;
+  /**
+   * Overrides BELOW a breakpoint: `below.sm` applies at widths under
+   * `breakpoint.sm`. Desktop-first, because every block spec's responsive
+   * table is written as "<768px" (e.g. hero-spec §10).
+   */
+  readonly below?: Readonly<Partial<Record<BreakpointName, StyleMap>>>;
+  /** Overrides while the element is in an interaction state. */
+  readonly states?: Readonly<Partial<Record<InteractionState, StyleMap>>>;
+  /**
+   * Overrides when the visitor asks for reduced motion. Opacity-only or
+   * instant, never "slower" (theme-spec §9.3).
+   */
+  readonly reducedMotion?: StyleMap;
   readonly children?: readonly (EmittedNode | string)[];
 }
 
@@ -74,7 +110,7 @@ export interface ThemeLike {
   readonly space: Readonly<Record<string | number, number>>;
   readonly motion: Readonly<Record<string, string | number>>;
   readonly layer: Readonly<Record<string, number>>;
-  readonly breakpoint: Readonly<Record<string, number>>;
+  readonly breakpoint: Readonly<Record<BreakpointName, number>>;
   readonly typeSize: Readonly<Record<string, string>>;
 }
 

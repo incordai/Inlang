@@ -78,11 +78,15 @@ const check = (name, pass, detail = '') => {
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? '   ' + detail : ''}`);
 };
 
-/** Find an element by class, whatever order React emitted its attributes in. */
+/**
+ * Find an element by one of its classes, whatever order React emitted its
+ * attributes in. A styled element also carries its generated `az-s-…` class,
+ * so the match is on the class TOKEN, not the whole attribute.
+ */
 function elementWithClass(html, cls) {
-  const at = html.indexOf(`class="${cls}"`);
-  if (at < 0) return null;
-  return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1);
+  const m = new RegExp(`class="(?:[^"]* )?${cls}(?: [^"]*)?"`).exec(html);
+  if (!m) return null;
+  return html.slice(html.lastIndexOf('<', m.index), html.indexOf('>', m.index) + 1);
 }
 
 const work = mkdtempSync(join(tmpdir(), 'az-verify-'));
@@ -203,25 +207,39 @@ try {
   const h1On = (r) => (rendered[r].match(/<h1/g) ?? []).length;
   check('exactly one <h1> on the page — hero-spec §4', h1On('/') === 1, `h1=${h1On('/')}`);
   check('auth §11: the login form title is that page\'s <h1>',
-    h1On('/login') === 1 && /<h1[^>]*class="az-auth-title"/.test(rendered['/login']));
+    h1On('/login') === 1 && /<h1[^>]*class="az-auth-title(?: [^"]*)?"/.test(rendered['/login']));
   check('no page has more than one <h1>', routes.every((r) => h1On(r) <= 1),
     routes.map((r) => `${r}=${h1On(r)}`).join(' '));
   check('section headings are <h2>', (html.match(/<h2/g) ?? []).length > 0);
   check('the eyebrow is a <p>, not a heading — hero-spec §4',
     !!eyebrow && eyebrow.startsWith('<p'));
   check('the title is the <h1>', !!title && title.startsWith('<h1'));
+  // Styles live in the generated az.css, one class per element: read an
+  // element's own rule rather than an inline style attribute.
+  const azCss = readFileSync(join(proj, 'src/az.css'), 'utf8');
+  const ruleOf = (element) => {
+    const c = /\baz-s-[0-9a-z]+/.exec(element ?? '');
+    if (!c) return '';
+    return new RegExp(`^\\.${c[0]} \\{ ([^}]*) \\}`, 'm').exec(azCss)?.[1] ?? '';
+  };
+  const hero = elementWithClass(html, 'az-hero');
   check('the measure is on the TEXT — hero-spec §3',
-    !!title && /max-width:\d+ch/.test(title),
-    (title?.match(/max-width:[^;"]+/) ?? ['none'])[0]);
+    /max-width: \d+ch/.test(ruleOf(title)),
+    (ruleOf(title).match(/max-width: [^;]+/) ?? ['none'])[0]);
   check('the CONTAINER carries no measure — hero-spec §3',
-    !/class="az-hero [^"]*"[^>]*max-width/.test(html));
-  check('hero uses svh, not vh — hero-spec §6', /min-height:\d+svh/.test(html));
+    !!hero && ruleOf(hero) !== '' && !/max-width/.test(ruleOf(hero)));
+  check('hero uses svh, not vh — hero-spec §6', /min-height: \d+svh/.test(ruleOf(hero)));
+  // Word markup carries no inline style; only the author's own components
+  // (the fixture's, class fixture-…) style themselves.
+  check('word markup has no inline style — every style is a generated class',
+    !/style="/.test(html.replace(/<[^>]*class="fixture-[^"]*"[^>]*>/g, '')));
   // GRAMMAR §8's hero has `alt "Call the studio" tel:…` — the secondary
   // button. It was once swallowed as the poster's alt text, with no error.
   check('hero §1: the secondary `alt` button renders beside the primary',
-    /class="az-hero-actions"[^]*href="tel:\+50412345678"/.test(html));
-  // theme-spec §3.3: the page carries references; the stylesheet the colours.
-  check('theme colour tokens reached the DOM as references', /var\(--az-color-/.test(html));
+    /class="az-hero-actions(?: [^"]*)?"[^]*href="tel:\+50412345678"/.test(html));
+  // theme-spec §3.3: words' styles carry references; theme.css the colours.
+  check('theme colour tokens reached the styles as references',
+    /var\(--az-color-/.test(azCss) && !/hsl\(|rgb\(|#[0-9a-fA-F]{3,8}\b/.test(azCss));
   check('no colour literal reached the DOM', !/hsl\(|rgb\(/.test(html));
   {
     const cssFile = readdirSync(join(proj, 'dist/assets')).find((f) => f.endsWith('.css'));
@@ -239,11 +257,11 @@ try {
     !!firstFocusable && firstFocusable[0].includes('az-skip-link'),
     firstFocusable ? firstFocusable[0].slice(0, 48) : 'none found');
   check('nav §7: the logo link is named by the site, not left empty',
-    /class="az-nav-logo"[^>]*>(?:(?!<\/a>)[^])*class="az-visually-hidden"[^>]*>aurora<\/span>/.test(html));
+    /class="az-nav-logo(?: [^"]*)?"[^>]*>(?:(?!<\/a>)[^])*class="az-visually-hidden(?: [^"]*)?"[^>]*>aurora<\/span>/.test(html));
   // The fixture declares `adapter azbackend` once at site level; /login's
   // `auth login` must carry it rather than fall back to `custom`.
   check('auth §2: the login form uses the adapter declared at site level',
-    /class="az-auth-form"[^>]*data-adapter="azbackend"|data-adapter="azbackend"[^>]*class="az-auth-form"/.test(html));
+    /class="az-auth-form(?: [^"]*)?"[^>]*data-adapter="azbackend"|data-adapter="azbackend"[^>]*class="az-auth-form(?: [^"]*)?"/.test(html));
   check('auth §8: every field label is tied to its input (for → htmlFor)',
     /<label[^>]*for="[^"]+"/.test(html));
   check('auth §8: autocomplete reaches the inputs',

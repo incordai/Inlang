@@ -62,7 +62,7 @@ function context(): EmitContext {
       space: t.space as unknown as Record<string, number>,
       motion: t.motion as unknown as Record<string, string | number>,
       layer: t.layer as unknown as Record<string, number>,
-      breakpoint: t.breakpoint as unknown as Record<string, number>,
+      breakpoint: t.breakpoint,
       typeSize: t.typeSize as unknown as Record<string, string>,
     },
     target: 'web',

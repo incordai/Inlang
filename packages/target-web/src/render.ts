@@ -7,7 +7,8 @@
  * CONVENTIONS §6 is why the contract returns a tree at all.
  */
 
-import type { EmittedNode } from '../../core/src/emit-contract.ts';
+import type { BreakpointName, EmittedNode } from '../../core/src/emit-contract.ts';
+import { compileStyles, declarations } from './stylesheet.ts';
 
 /** HTML text/attribute escaping. The complete set, not a convenient subset. */
 export function escapeHtml(value: string): string {
@@ -23,9 +24,6 @@ export function escapeHtml(value: string): string {
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img',
   'input', 'link', 'meta', 'source', 'track', 'wbr']);
 
-/** camelCase to kebab-case, for CSS property names. */
-const kebab = (s: string) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
-
 /**
  * Serialise a style object.
  *
@@ -39,11 +37,20 @@ const kebab = (s: string) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 export function styleString(
   style: Readonly<Record<string, string | number | undefined>>,
 ): string {
-  return Object.keys(style)
-    .sort()
-    .filter((k) => style[k] !== undefined && style[k] !== null && style[k] !== '')
-    .map((k) => `${kebab(k)}:${style[k]}`)
-    .join(';');
+  // The stylesheet's own serialiser, so a value reads the same inline and in
+  // az.css: numbers get px exactly where React would add it.
+  return declarations(style).map(([p, v]) => `${p}:${v}`).join(';');
+}
+
+/**
+ * Render trees the way the web target ships them: styles moved into
+ * generated classes, returned alongside the stylesheet they need.
+ */
+export function renderStyled(
+  nodes: readonly EmittedNode[], breakpoint: Readonly<Record<BreakpointName, number>>,
+): { html: string; css: string } {
+  const { value, css } = compileStyles(nodes, (ns, rewrite) => ns.map(rewrite), breakpoint);
+  return { html: value.map(renderNode).join(''), css };
 }
 
 /** Render one emitted node to HTML. Recursive, and escaping at every leaf. */

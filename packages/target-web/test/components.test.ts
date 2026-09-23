@@ -73,7 +73,7 @@ test('placement: before/after beside the block, a named slot among its fills, ra
   assert.deepEqual([after.tag, after.attrs?.src], [COMPONENT_TAG, 'a.tsx']);
   assert.deepEqual([page.tag, page.attrs?.src], [COMPONENT_TAG, 'page.tsx']);
   // Inside the hero: the cta slot's component as a list item, and raw last.
-  const actions = walk(hero).find((x) => x.attrs?.class === 'az-hero-actions')!;
+  const actions = walk(hero).find((x) => x.attrs?.class?.split(' ').includes('az-hero-actions'))!;
   assert.deepEqual(actions.children?.map((c) => (typeof c === 'string' ? c : c.tag)), ['li', 'li']);
   assert.deepEqual(components(actions), ['c.tsx']);
   const last = hero.children?.[hero.children.length - 1];

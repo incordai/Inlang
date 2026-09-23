@@ -92,7 +92,8 @@ test('the ejected word still builds, and it is the one the build uses', () => {
   const p = project(HERO_SITE);
   const control = build({ source: p.file, outDir: join(p.dir, 'before'), wordsDir: WORDS });
   assert.equal(control.ok, true, control.report);
-  assert.match(app(join(p.dir, 'before')), /"az-hero-title"/, 'CONTROL: the bundled hero before eject');
+  // The class attribute also carries the generated style class (az.css).
+  assert.match(app(join(p.dir, 'before')), /"az-hero-title[ "]/, 'CONTROL: the bundled hero before eject');
 
   assert.ok(eject('hero', p.dir, WORDS).ok);
   const copy = join(p.dir, 'words/hero/emit.web.ts');
@@ -100,8 +101,8 @@ test('the ejected word still builds, and it is the one the build uses', () => {
 
   const after = build({ source: p.file, outDir: join(p.dir, 'after'), wordsDir: WORDS });
   assert.equal(after.ok, true, after.report);
-  assert.match(app(join(p.dir, 'after')), /"studio-title"/, 'the edit to the ejected copy is what renders');
-  assert.doesNotMatch(app(join(p.dir, 'after')), /"az-hero-title"/);
+  assert.match(app(join(p.dir, 'after')), /"studio-title[ "]/, 'the edit to the ejected copy is what renders');
+  assert.doesNotMatch(app(join(p.dir, 'after')), /"az-hero-title[ "]/);
 });
 
 test('eject refuses to overwrite, an unknown word, and a name that is a path', () => {

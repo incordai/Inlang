@@ -185,6 +185,32 @@ begin an HTML tag, so one is never mistaken for markup. The web target imports
 each module into the generated App and renders it with a `theme` prop: the
 same token object words read, colours as `var(--az-…)` references.
 
+**Style is data, with variants** (`emit-contract.ts`):
+
+```ts
+interface EmittedNode {
+  tag: string; attrs?: Record<string, string>; children?: (EmittedNode | string)[];
+  style?: StyleMap;                                          // base declarations
+  below?: Partial<Record<BreakpointName, StyleMap>>;         // "<768px" is below.sm
+  states?: Partial<Record<InteractionState, StyleMap>>;      // hover, focusVisible, active,
+                                                             // disabled, loading, expanded, current
+  reducedMotion?: StyleMap;                                  // opacity-only or instant
+}
+type BreakpointName = 'xs' | 'sm' | 'md' | 'lg';             // = keys of theme BREAKPOINT
+```
+
+Conditions are named, never written: a word says `below.sm`, not a media
+query, and `states.focusVisible`, not a selector. `below` is desktop-first
+because every block spec's responsive table is written as "<768px". The web
+target compiles every styled node into ONE generated class in `src/az.css`
+(`target-web/src/stylesheet.ts`) and removes its inline style — an inline
+declaration cannot be overridden by a media query or a state, so all of a
+node's style moves, not only its variants. Rules are emitted base first,
+then breakpoints widest first, then states in the order above (hover inside
+`@media (hover: hover)`), then reduced motion, so the more specific condition
+wins a conflict. Class names hash the canonical style (identical styles share
+a class); values that could end a rule (`{ } ; < > \ /*`) are refused.
+
 One emitter file per word **per target**: `emit.web.ts`, later `emit.mobile.ts`.
 A word with no emitter for a target is simply unavailable there — the compiler
 reports it, it is not an error in the word.
