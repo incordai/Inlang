@@ -173,7 +173,7 @@ function contextFor(
       return [];
     }),
     asset,
-    ...actionsFor(theme, (c) => custom(c, component)),
+    ...actionsFor(theme, { asset, component: (c) => custom(c, component) }),
   };
 }
 

@@ -12,18 +12,27 @@ Full specification: [`docs/nav-block-spec.md`](../../../docs/nav-block-spec.md).
 az 1
 
 site aurora
-  nav bar
+  nav split sticky solid
+    logo    ./preview-assets/assets/logo.svg
+    inverse ./preview-assets/assets/logo-w.svg
     link   "Work"   /work
     link   "Studio" /studio
+    group  "Products"
+      link "Shoes"  /shoes
+      link "Bags"   /bags
     cta    "Reserve" /reserve
 
 page /
-  hero center
+  hero full
     title "Built in the dark"
 
 page /work
 
 page /studio
+
+page /shoes
+
+page /bags
 
 page /reserve
 ```
@@ -87,8 +96,8 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 
 Known gaps:
 
-- The scroll behaviours (`sticky` offset, `hide`, `shrink`, the `solid` logo swap) and dropdown/mobile menu interaction need the motion/overlay runtime, which is not built; the markup hooks are emitted
-- The skip link is shown when it receives keyboard focus (§7), checked in a browser by `test:visual`. The rest of the responsive table — the mobile menu — waits for the overlay engine; hiding the links first would leave the menu unreachable.
+- Built and checked in a browser by `pnpm test:visual`: the mobile menu is a drawer (§6 — focus trapped, Escape and outside-click close, focus returns to the toggle, page scroll locked), links collapse into it below sm; every bar `group` is a dropdown (arrow keys, roving tabindex, Escape, Tab leaves it); `solid` turns solid past 80px and back above 40px with the logo swap (§4); the skip link shows on focus (§7)
+- Not built: the `hide` and `shrink` scroll modifiers, and §5's `scroll-padding-top` from the nav height
 
 ## Tested
 

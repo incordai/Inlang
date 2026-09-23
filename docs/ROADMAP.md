@@ -252,9 +252,17 @@ nothing) into the gitignored .thumbnails/ — no doc says where thumbnails
 ship, so they are build output; `--verify` renders twice and requires
 identical bytes. CI runs the gate and the thumbnail check.
 Footer `mega` accordions (cabe922) and pricing's "in every plan" list
-(4c4a61f) have landed. Not built: nav's mobile drawer, which needs the
-overlay engine. The play/copy/video/popup behaviours emit buttons with a
-compile warning (AZ1222) until their runtime exists.
+(4c4a61f) have landed. The overlay engine and behaviour runtime exist
+(packages/overlay, copied into each site as src/az/): nav's mobile menu
+is a drawer and its links collapse into it below sm; every bar group is a
+dropdown; `solid` turns solid on scroll with its logo swap; faq answers
+are disclosures (hidden="until-found"); `video:` opens a popup player and
+`copy:` copies with an announcement. Each is checked in real browsers by
+`pnpm test:visual` (drawer, dropdown, solid, faq, copy, play,
+overlay-motion), with a self-test proving each fails without the runtime.
+Still not built: `popup:#id` declared popups (Phase 1.5 grammar, warned
+AZ1222), the `sheet`/`tooltip`/`toast` presets, nav `hide`/`shrink`, and
+nav-spec §5's scroll-padding.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape

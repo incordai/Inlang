@@ -9,6 +9,6 @@ page /
     title "Forty pairs a month. One of them could be yours."
     sub   "Reserve now for the autumn run."
     cta   "Reserve a pair" /reserve
-    alt   "Call the studio" tel:+50412345678
+    alt   "Copy the studio address" copy:studio@aurora.example
 
 page /reserve

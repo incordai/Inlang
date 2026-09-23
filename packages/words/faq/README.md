@@ -74,8 +74,8 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 Known gaps:
 
 - An answer given as a file path (`text ./content/x.md`) is shown as the path; markdown answers are not read yet
-- "Two FAQPage blocks on one page" is not validated yet
-- Phone and tablet layouts from the spec's responsive table are not implemented for any word yet: the web target emits inline styles only, with no media queries.
+- Each question is a disclosure (§7.1): the answers ship open, so they read with JS off, and the behaviour runtime collapses them to `hidden="until-found"` so find-in-page still opens them (§7.3); arrow keys move between questions and `single` keeps one open. Checked in a browser by `pnpm test:visual`
+- The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested
 

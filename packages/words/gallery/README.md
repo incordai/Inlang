@@ -87,7 +87,7 @@ Known gaps:
 - `lightbox` is not built
 - Image `width`/`height` and `srcset` are not generated (needs build-time image reading)
 - Missing-alt and caption warnings from the validation table are not implemented yet
-- Phone and tablet layouts from the spec's responsive table are not implemented for any word yet: the web target emits inline styles only, with no media queries.
+- The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested
 

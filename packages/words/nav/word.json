@@ -80,9 +80,7 @@
     "size.nav-shrink",
     "size.tap"
   ],
-  "deps": {
-    "@floating-ui/react": "0.26.28"
-  },
+  "deps": {},
   "targets": [
     "web"
   ],

@@ -8,9 +8,8 @@ page /
     title   "Built in the dark"
     sub     "Handmade. Forty pairs a month."
     cta     "Reserve a pair" /reserve
-    alt     "See the process" /process
+    alt     "Watch the film" video:./preview-assets/assets/film.webm
     height  peek
 
 page /reserve
 
-page /process

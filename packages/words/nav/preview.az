@@ -1,17 +1,26 @@
 az 1
 
 site aurora
-  nav bar
+  nav split sticky solid
+    logo    ./preview-assets/assets/logo.svg
+    inverse ./preview-assets/assets/logo-w.svg
     link   "Work"   /work
     link   "Studio" /studio
+    group  "Products"
+      link "Shoes"  /shoes
+      link "Bags"   /bags
     cta    "Reserve" /reserve
 
 page /
-  hero center
+  hero full
     title "Built in the dark"
 
 page /work
 
 page /studio
+
+page /shoes
+
+page /bags
 
 page /reserve

@@ -29,6 +29,22 @@ Every overlay needs all of this. Get it right once:
 detection, flipping, shifting and arrow placement are genuinely hard and fully
 solved. Hand-rolling `getBoundingClientRect` math is a week you don't get back.
 
+> **Decision (Phase 1, recorded with the engine):** not adopted yet. The only
+> anchored preset Phase 1 ships is the nav dropdown, directly under a bar at
+> the top of the page: it never needs to flip, and staying on screen is one
+> right-edge check. The behaviour runtime is DOM-level rather than React
+> hooks, so `@floating-ui/react` would not fit it either (`@floating-ui/dom`
+> would). Revisit with `popover` and `tooltip` (Phase 1.5), which anchor
+> mid-page where flipping is real.
+>
+> **As built:** the engine is `packages/overlay` — presets as style and
+> policy — and a behaviour runtime copied into every generated project
+> (`src/az/`), wired by `data-az-behaviour`. Modal presets are native
+> `<dialog>` shown with `showModal()`: the top layer (the portal, without
+> clipping), an inert page and Escape for free; the runtime adds the Tab
+> wrap, the iOS scroll lock, outside-click, focus return and the exit
+> transition.
+
 ---
 
 ## 2. The preset matrix

@@ -55,18 +55,21 @@ const LOGOS = { logo: './logo.svg', inverse: './logo-w.svg' };
 test('nav-spec §4: a solid nav shows the inverse logo at the top', () => {
   const imgs = logoImages(emitNav(nav(['solid'], LOGOS), context()));
   assert.equal(imgs.length, 2, 'both logo versions are emitted so the runtime can swap');
-  const visible = imgs.filter((i) => i.attrs?.hidden === undefined);
+  const visible = imgs.filter((i) => i.style?.display !== 'none');
   assert.equal(visible.length, 1, 'exactly one logo is visible at a time');
   assert.equal(visible[0].attrs?.src, './logo-w.svg', 'the transparent top state shows the light inverse');
   assert.equal(visible[0].attrs?.['data-az-logo'], 'top');
 });
 
-test('nav-spec §4: the regular logo waits hidden for the solid state', () => {
+test('nav-spec §4: the regular logo waits for the solid state, and the swap is exact', () => {
   const imgs = logoImages(emitNav(nav(['solid'], LOGOS), context()));
   const regular = imgs.find((i) => i.attrs?.src === './logo.svg');
+  const inverse = imgs.find((i) => i.attrs?.src === './logo-w.svg');
   assert.ok(regular, 'the regular logo is present');
-  assert.equal(regular.attrs?.hidden, 'hidden');
   assert.equal(regular.attrs?.['data-az-logo'], 'solid');
+  // Once the runtime marks the bar scrolled, the two change places.
+  assert.equal(regular.states?.scrolled?.display, 'block', 'solid shows the regular logo');
+  assert.equal(inverse?.states?.scrolled?.display, 'none', 'and hides the light one');
 });
 
 test('the waiting logo is not displayed — an inline display would override `hidden`', () => {
@@ -88,7 +91,8 @@ test('CONTROL: without `solid` the inverse is ignored — there is no transparen
   const imgs = logoImages(emitNav(nav(['sticky'], LOGOS), context()));
   assert.equal(imgs.length, 1);
   assert.equal(imgs[0].attrs?.src, './logo.svg');
-  assert.equal(imgs[0].attrs?.hidden, undefined);
+  assert.equal(imgs[0].style?.display, 'block');
+  assert.equal(imgs[0].states, undefined, 'nothing to swap without a transparent state');
 });
 
 test('CONTROL: `solid` without an inverse keeps the single regular logo', () => {

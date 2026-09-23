@@ -14,6 +14,7 @@ import {
   type ActionOptions, type EmittedNode, type Hierarchy, type StyleMap, type SubmitOptions, type ThemeLike,
 } from '../../core/src/emit-contract.ts';
 import type { SpecBlock } from '../../core/src/spec-block.ts';
+import { closeButton, popup } from '../../overlay/src/index.ts';
 
 /**
  * §1.6: an icon LEADS when it says what kind of action this is (call, mail,
@@ -111,8 +112,53 @@ function actionStyle(t: ThemeLike, hierarchy: Hierarchy, options: ActionOptions)
   };
 }
 
+/**
+ * The popup a `video:` action opens — overlays-spec §4: `video:` → popup,
+ * player. It sits beside its button (the runtime opens the button's next
+ * sibling), holds a close control and the video, and plays nothing until the
+ * reader presses play: no autoplay, no preload (hero §9).
+ */
+function videoPopup(t: ThemeLike, label: string, src: string): EmittedNode {
+  const preset = popup(t, label);
+  const x = closeButton(t, 'Close video');
+  const glyph = icon(x.icon.d);
+  return {
+    tag: 'dialog',
+    attrs: { ...preset.attrs, class: 'az-overlay az-overlay--popup' },
+    style: preset.style,
+    states: { open: preset.states.open },
+    children: [
+      {
+        tag: 'div',
+        style: { display: 'flex', justifyContent: 'flex-end' },
+        children: [{
+          tag: 'button', attrs: x.attrs, style: x.style, states: x.states,
+          children: [{ ...glyph, attrs: { ...glyph.attrs, viewBox: x.icon.viewBox } }],
+        }],
+      },
+      {
+        tag: 'video',
+        attrs: { src, controls: 'controls', preload: 'none', playsinline: 'playsinline', 'aria-label': label, class: 'az-overlay-video' },
+        style: { display: 'block', width: '100%', height: 'auto' },
+        children: [],
+      },
+    ],
+  };
+}
+
+/** Where a `video:` destination is served from: a sandboxed file, or a URL as written. */
+function videoSource(value: string, asset: (path: string) => string): string {
+  const src = value.slice(value.indexOf(':') + 1);
+  return /^https?:\/\//i.test(src) ? src : asset(src);
+}
+
+/** An action and, for `video:`, the popup that goes beside it. */
+interface Rendered { readonly node: EmittedNode; readonly popup: EmittedNode | null }
+
 /** One slot fill as an action, at the given weight. */
-function renderAction(t: ThemeLike, fill: SpecBlock, hierarchy: Hierarchy, options: ActionOptions): EmittedNode {
+function renderAction(
+  t: ThemeLike, fill: SpecBlock, hierarchy: Hierarchy, options: ActionOptions, asset: (path: string) => string,
+): Rendered {
   const label = fill.args[0]?.value ?? '';
   const destination = fill.args[1];
   const intent = intentOf(destination) ?? 'go';
@@ -123,18 +169,26 @@ function renderAction(t: ThemeLike, fill: SpecBlock, hierarchy: Hierarchy, optio
   if (intent === 'external') kids.push(visuallyHidden(' (opens in new tab)'));
 
   const cls = `az-action az-action--${hierarchy} az-action--${intent}`;
-  // §1.4: navigating is a link; acting (play, copy) is a button. The
-  // behaviour runtime for those two is not built — the compiler warns
-  // (AZ1222) and the button carries what the runtime will need.
+  // §1.4: navigating is a link; acting (play, copy) is a button, wired by
+  // the behaviour runtime. `popup:#id` names declared overlay content, which
+  // is Phase 1.5 grammar — it stays a warned button (AZ1222) until then.
   if (intent === 'play' || intent === 'copy') {
+    const value = destination?.value ?? '';
+    const video = intent === 'play' && value.toLowerCase().startsWith('video:');
     return {
-      tag: 'button',
-      attrs: { type: 'button', class: cls, 'data-az-behaviour': intent, 'data-az-target': destination?.value ?? '' },
-      ...actionStyle(t, hierarchy, options),
-      children: kids,
+      node: {
+        tag: 'button',
+        attrs: {
+          type: 'button', class: cls, 'data-az-behaviour': intent, 'data-az-target': value,
+          ...(video ? { 'aria-haspopup': 'dialog', 'aria-expanded': 'false' } : {}),
+        },
+        ...actionStyle(t, hierarchy, options),
+        children: kids,
+      },
+      popup: video ? videoPopup(t, label, videoSource(value, asset)) : null,
     };
   }
-  return {
+  return { popup: null, node: {
     tag: 'a',
     attrs: {
       class: cls,
@@ -144,7 +198,7 @@ function renderAction(t: ThemeLike, fill: SpecBlock, hierarchy: Hierarchy, optio
     },
     ...actionStyle(t, hierarchy, options),
     children: kids,
-  };
+  } };
 }
 
 /**
@@ -152,24 +206,38 @@ function renderAction(t: ThemeLike, fill: SpecBlock, hierarchy: Hierarchy, optio
  * `component` renders a `slot <name> <path>` naming one of the action
  * slots, so a user component joins the actions in source order (PRD §6.6).
  */
-export function actionsFor(t: ThemeLike, component?: (c: SpecBlock) => EmittedNode): {
+export function actionsFor(t: ThemeLike, wiring: {
+  /** Renders a `slot <name> <path>` that names one of the action slots. */
+  readonly component?: (c: SpecBlock) => EmittedNode;
+  /** The sandboxed asset resolver, for a `video:` file. No default that skips it. */
+  readonly asset?: (path: string) => string;
+} = {}): {
   action: (fill: SpecBlock, options?: ActionOptions) => EmittedNode;
   actions: (block: SpecBlock, slots: readonly string[], options?: ActionOptions) => EmittedNode[];
   submit: (label: string, options?: SubmitOptions) => EmittedNode;
 } {
+  const component = wiring.component;
+  const asset = wiring.asset ?? ((path: string): string => {
+    throw new Error(`actions: no asset resolver for '${path}' — the target must pass one`);
+  });
   return {
-    action: (fill, options = {}) =>
-      renderAction(t, fill, options.hierarchy ?? defaultHierarchy(fill, fill.word === 'cta' ? 0 : -1), options),
+    action: (fill, options = {}) => {
+      const r = renderAction(t, fill, options.hierarchy ?? defaultHierarchy(fill, fill.word === 'cta' ? 0 : -1), options, asset);
+      // A lone action with a popup needs both in one node; `contents` keeps
+      // the wrapper out of the layout it sits in.
+      return r.popup ? { tag: 'div', style: { display: 'contents' }, children: [r.node, r.popup] } : r.node;
+    },
 
     actions: (block, slots, options = {}) => {
       let ctaIndex = 0;
-      const item = (kind: string, child: EmittedNode): EmittedNode => ({
-        tag: 'li', attrs: { class: `az-action-item az-action-item--${kind}` }, style: { listStyle: 'none' }, children: [child],
+      const item = (kind: string, ...children: EmittedNode[]): EmittedNode => ({
+        tag: 'li', attrs: { class: `az-action-item az-action-item--${kind}` }, style: { listStyle: 'none' }, children,
       });
       return slots.flatMap((slot) => block.children.flatMap((c): EmittedNode[] => {
         if (c.word === slot && ACTION_WORDS.has(c.word)) {
           const hierarchy = options.hierarchy ?? defaultHierarchy(c, c.word === 'cta' ? ctaIndex++ : -1);
-          return [item(c.word, renderAction(t, c, hierarchy, options))];
+          const r = renderAction(t, c, hierarchy, options, asset);
+          return [r.popup ? item(c.word, r.node, r.popup) : item(c.word, r.node)];
         }
         if (component && c.word === 'slot' && c.args[0]?.value === slot) return [item('custom', component(c))];
         return [];

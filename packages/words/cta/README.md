@@ -20,7 +20,7 @@ page /
     title "Forty pairs a month. One of them could be yours."
     sub   "Reserve now for the autumn run."
     cta   "Reserve a pair" /reserve
-    alt   "Call the studio" tel:+50412345678
+    alt   "Copy the studio address" copy:studio@aurora.example
 
 page /reserve
 ```
@@ -78,7 +78,7 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 Known gaps:
 
 - Primary and secondary buttons render as plain links until the button primitive exists
-- Phone and tablet layouts from the spec's responsive table are not implemented for any word yet: the web target emits inline styles only, with no media queries.
+- The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested
 

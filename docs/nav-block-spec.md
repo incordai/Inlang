@@ -215,7 +215,7 @@ validation.
     "layer.sticky", "layer.dropdown", "layer.scrim", "layer.skip",
     "size.nav", "size.nav-shrink", "size.tap"
   ],
-  "deps": { "@floating-ui/react": "0.26.28" },
+  "deps": {},
   "targets": ["web"],
   "tested": {
     "browsers": ["chrome-latest", "safari-latest", "firefox-latest", "ios-17"],
@@ -237,5 +237,9 @@ value; a nav that hardcodes its own height breaks anchor links site-wide.
 `@floating-ui/react` is required only by `group` (dropdown positioning) and by
 `mega`. A `nav bar` with no `group` must not pull it into the bundle — see
 overlays-spec §1 for why hand-rolling the positioning maths is the wrong trade.
+*(Superseded for Phase 1 — overlays-spec §1's decision note: the dropdown sits
+under a top bar and never flips, so the dependency is dropped and `deps` is
+empty. Every bar `group` is a dropdown, as this spec's example writes it;
+`as dropdown` says the same thing explicitly.)*
 **Version pin is UNVERIFIED** — confirm the current stable release before M2
 rather than trusting this number (CONVENTIONS §7, and see `stack-evaluation.md`).

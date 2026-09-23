@@ -689,10 +689,12 @@ function checkActions(
         err('AZ1220', `${f.word}: 'as ${f.as}' is not a button weight — use: ${HIERARCHIES.join(', ')}`, f.pos);
       }
       if (defaultHierarchy(f, f.word === 'cta' ? ctaIndex++ : -1) === 'primary') primaries.push(f);
-      const intent = intentOf(f.args[1]);
-      if (intent === 'play' || intent === 'copy') {
-        warn('AZ1222', `${f.word}: '${f.args[1].value}' needs the ${intent} behaviour, which is not built yet — `
-          + 'it renders as a button that does nothing', f.args[1].pos);
+      // `video:` and `copy:` have their behaviour. `popup:#id` names declared
+      // overlay content, which is Phase 1.5 grammar (GRAMMAR §5), so that
+      // button still has nothing to open.
+      if (intentOf(f.args[1]) === 'play' && f.args[1].value.toLowerCase().startsWith('popup:')) {
+        warn('AZ1222', `${f.word}: '${f.args[1].value}' opens declared popup content, which is not built yet — `
+          + "it renders as a button that does nothing; use 'video:' for a film", f.args[1].pos);
       }
     }
     if (primaries.length > 1) {

@@ -10,7 +10,7 @@ import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
 import type { SpecBlock } from '../../core/src/spec-block.ts';
 
 const T = resolve(THEMES.midnight, 'dark') as unknown as ThemeLike;
-const { action, actions, submit } = actionsFor(T);
+const { action, actions, submit } = actionsFor(T, { asset: (p) => `/sandboxed/${p}` });
 
 const fill = (word: string, label: string, dest?: { kind: string; value: string }, as: string | null = null): SpecBlock => ({
   word, variant: null, modifiers: [], as, children: [], props: {},
@@ -31,7 +31,8 @@ test('§1.2/§1.4: each intent gets its element and attributes', () => {
   assert.match(text(ext), /\(opens in new tab\)/, 'a new tab is announced');
   assert.equal(row('path', './deck.pdf').attrs?.download, '');
   for (const value of ['video:intro', 'copy:hello']) {
-    const b = row('pair', value);
+    // A video action comes with its popup beside it; the action is the button.
+    const b = walk(row('pair', value)).find((n) => n.attrs?.['data-az-behaviour'] !== undefined && n.tag !== 'dialog')!;
     assert.equal(b.tag, 'button', `${value} acts, so it is a <button> (§1.4)`);
     assert.equal(b.attrs?.type, 'button');
     assert.equal(b.attrs?.['data-az-behaviour'], value.startsWith('video') ? 'play' : 'copy');
@@ -102,7 +103,7 @@ test('submit: a real submit button carrying its method, optionally skipping vali
 });
 
 test('PRD §6.6: a slot component naming an action slot joins the actions in order', () => {
-  const custom = actionsFor(T, (c) => ({ tag: '#component', attrs: { src: c.args[1]?.value ?? '' } }));
+  const custom = actionsFor(T, { component: (c) => ({ tag: '#component', attrs: { src: c.args[1]?.value ?? '' } }) });
   const block: SpecBlock = {
     word: 'hero', variant: null, modifiers: [], as: null, props: {}, args: [],
     children: [fill('cta', 'A', { kind: 'route', value: '/a' }),
@@ -111,4 +112,41 @@ test('PRD §6.6: a slot component naming an action slot joins the actions in ord
   const items = custom.actions(block, ['cta']);
   assert.deepEqual(items.map((li) => li.attrs?.class), ['az-action-item az-action-item--cta', 'az-action-item az-action-item--custom']);
   assert.equal(actions(block, ['cta']).length, 1, 'CONTROL: without the hook only the fill renders');
+});
+
+/* ---- play: the video popup (overlays-spec §4) ---------------------------- */
+
+test('video: the play button opens a popup dialog beside it, with a close control', () => {
+  const [li] = actions({ ...fill('hero', ''), children: [fill('cta', 'Watch the film', { kind: 'pair', value: 'video:./film.mp4' })] }, ['cta']);
+  const [button, dialog] = (li.children ?? []) as EmittedNode[];
+  assert.equal(button.tag, 'button');
+  assert.equal(button.attrs?.['aria-haspopup'], 'dialog');
+  assert.equal(button.attrs?.['aria-expanded'], 'false');
+  assert.equal(dialog.tag, 'dialog', 'the runtime opens the button\'s next sibling');
+  assert.equal(dialog.attrs?.['data-az-behaviour'], 'dialog');
+  assert.equal(dialog.attrs?.['data-az-overlay'], 'popup');
+  assert.equal(dialog.attrs?.['aria-label'], 'Watch the film');
+  const x = walk(dialog).find((n) => n.attrs?.['data-az-close'] !== undefined);
+  assert.equal(x?.attrs?.['aria-label'], 'Close video');
+  const video = walk(dialog).find((n) => n.tag === 'video');
+  assert.equal(video?.attrs?.src, '/sandboxed/./film.mp4', 'the file goes through the asset sandbox');
+  assert.equal(video?.attrs?.preload, 'none', 'nothing loads until the reader asks');
+  assert.equal(video?.attrs?.autoplay, undefined, 'hero §9: never autoplay');
+});
+
+test('video: a URL is used as written; popup: stays a button without a dialog', () => {
+  const url = walk(action(fill('cta', 'Watch', { kind: 'pair', value: 'video:https://media.example.org/f.mp4' })));
+  assert.equal(url.find((n) => n.tag === 'video')?.attrs?.src, 'https://media.example.org/f.mp4');
+  const declared = action(fill('cta', 'Sizes', { kind: 'pair', value: 'popup:#sizes' }));
+  assert.equal(declared.tag, 'button', 'CONTROL: declared popups are Phase 1.5 — no dialog yet');
+  assert.equal(walk(declared).some((n) => n.tag === 'dialog'), false);
+});
+
+test('SECURITY: a video file outside the project is refused by the sandbox', () => {
+  const sandboxed = actionsFor(T, { asset: (p) => { if (p.includes('..')) throw new Error('escape'); return p; } });
+  assert.throws(() => sandboxed.action(fill('cta', 'X', { kind: 'pair', value: 'video:../../secret.mp4' })), /escape/);
+});
+
+test('no resolver means no silent bypass: a video action without one throws', () => {
+  assert.throws(() => actionsFor(T).action(fill('cta', 'X', { kind: 'pair', value: 'video:./f.mp4' })), /no asset resolver/);
 });

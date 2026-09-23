@@ -112,6 +112,8 @@ try {
   writeFileSync(join(proj, 'ssr.tsx'),
     'import { renderToStaticMarkup } from "react-dom/server";\n' +
     'import App from "./src/App.tsx";\n' +
+    '// The behaviour runtime must never be reached during a server render.\n' +
+    'if (typeof window !== "undefined") throw new Error("window exists during SSR");\n' +
     '// Each route renders on its own, as a browser loading that page would.\n' +
     'const routes = JSON.parse(process.argv[2]);\n' +
     'process.stdout.write(JSON.stringify(Object.fromEntries(\n' +
@@ -137,6 +139,20 @@ try {
   // Every page in route order, so the page-level checks below still see /
   // first and can find each page by its data-route.
   const html = routes.map((r) => rendered[r]).join('');
+
+  // The behaviour runtime ships with the site, byte for byte from its source.
+  {
+    const runtimeDir = join(ROOT, 'packages/overlay/src/runtime');
+    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts'));
+    check('behaviour runtime shipped verbatim into src/az/',
+      shipped.length > 0 && shipped.every((f) =>
+        existsSync(join(proj, 'src/az', f)) &&
+        readFileSync(join(proj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8')),
+      shipped.join(' '));
+  }
+  check('nav §6: the menu is a <dialog> drawer its toggle controls',
+    /<button[^>]*aria-controls="az-nav-panel"/.test(rendered['/']) &&
+    /<dialog[^>]*id="az-nav-panel"[^>]*>|<dialog[^>]*data-az-overlay="drawer"[^>]*id="az-nav-panel"/.test(rendered['/']));
 
   check('every page of the fixture is its own HTML file',
     ['/', '/login', '/legal'].every((r) => routes.includes(r)), routes.join(' '));

@@ -77,7 +77,7 @@ Known gaps:
 
 - `model` and `camera`: the emitter outputs a `<figure>` placeholder with the poster in a `data-poster` attribute and never creates a canvas; the 3D runtime is not ported yet
 - Because the poster is not resolved through the asset pipeline, the poster file is not copied into the build
-- Phone and tablet layouts from the spec's responsive table are not implemented for any word yet: the web target emits inline styles only, with no media queries.
+- The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested
 

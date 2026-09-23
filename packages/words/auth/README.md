@@ -83,7 +83,7 @@ Known gaps:
 - `impl` is validated but not yet imported into the build (ROADMAP M4)
 - No submit handler, session hook, protected route or adapter packages yet (M4); the form carries `data-adapter`, `data-methods` and `data-redirect` for that runtime
 - The email field uses `autocomplete="email"`; spec §6 says `username`
-- Phone and tablet layouts from the spec's responsive table are not implemented for any word yet: the web target emits inline styles only, with no media queries.
+- The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested
 

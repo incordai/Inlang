@@ -50,10 +50,15 @@ test('§1.2: two primaries in one section warn (AZ1221)', () => {
   assert.ok(!codes(hero('cta "Reserve" /a', 'alt "Or this" /b')).includes('AZ1221'), 'CONTROL: cta + alt is one primary');
 });
 
-test('play and copy warn that their behaviour is not built (AZ1222)', () => {
-  const r = hero('cta "Watch the film" video:intro');
+test('popup:#id warns that declared popups are not built yet (AZ1222)', () => {
+  const r = hero('cta "Size guide" popup:#sizes');
   assert.ok(r.diagnostics.some((d) => d.code === 'AZ1222' && d.severity === 'warning'), JSON.stringify(r.diagnostics));
   assert.ok(!codes(hero('cta "Reserve" /a')).includes('AZ1222'), 'CONTROL: a link has nothing missing');
+});
+
+test('video: and copy: work now, so they no longer warn', () => {
+  assert.ok(!codes(hero('cta "Watch the film" video:intro')).includes('AZ1222'));
+  assert.ok(!codes(hero('cta "Copy the address" copy:studio@aurora.example')).includes('AZ1222'));
 });
 
 test("CONTROL: a page's `cta` BLOCK is not an action of the page", () => {

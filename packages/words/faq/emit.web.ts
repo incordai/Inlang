@@ -13,6 +13,91 @@ import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-cont
 /** faq-block-spec §7.5 — a two-question FAQPage is noise, so none is emitted. */
 const SCHEMA_MIN_ITEMS = 3;
 
+/** §7.1: past this many items every answer as a landmark floods the rotor. */
+const REGION_MAX_ITEMS = 6;
+
+/**
+ * §7.4: a stable id per question — lowercase, non-alphanumerics to hyphens,
+ * collisions suffixed -2, -3 — so a deep link survives a rebuild and two
+ * builds are byte-identical.
+ */
+export function questionIds(questions: readonly string[]): string[] {
+  const seen = new Map<string, number>();
+  return questions.map((q) => {
+    const base = `faq-${q.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'question'}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return n === 1 ? base : `${base}-${n}`;
+  });
+}
+
+/**
+ * One question — §7.1's disclosure: the <button> inside the <h3>, the answer
+ * in a panel it controls. The markup ships every answer OPEN: with JS off
+ * every panel reads (§8), and the behaviour runtime collapses them to
+ * hidden="until-found" before first paint, so find-in-page still reaches
+ * each one (§7.3).
+ */
+function question(item: SpecBlock, id: string, region: boolean, ctx: EmitContext): EmittedNode[] {
+  const t = ctx.theme;
+  const more = item.children.filter((c) => c.word === 'more');
+  return [
+    {
+      tag: 'h3',
+      attrs: { id, class: 'az-faq-question' },
+      style: { margin: 0, fontSize: t.typeSize.lg, lineHeight: t.type['leading-tight'], fontFamily: t.type.display },
+      children: [{
+        tag: 'button',
+        attrs: {
+          type: 'button', id: `${id}-btn`, class: 'az-faq-toggle',
+          'aria-expanded': 'true', 'aria-controls': `${id}-panel`, 'data-az-disclosure': '',
+        },
+        style: {
+          display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between',
+          gap: px(t.space[16]), minHeight: px(t.size.tap), padding: 0, textAlign: 'start',
+          background: 'transparent', border: 0, color: t.color.text,
+          font: 'inherit', cursor: 'pointer',
+        },
+        // §8: a color.focus ring on the whole row, never outline: none.
+        states: { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } },
+        children: [
+          item.args[0]?.value ?? '',
+          {
+            tag: 'svg',
+            attrs: {
+              'aria-hidden': 'true', focusable: 'false', viewBox: '0 0 24 24', fill: 'none',
+              stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'data-az-chevron': '',
+            },
+            style: { width: '1em', height: '1em', flexShrink: 0, transition: `transform ${t.motion.fast}ms ${t.motion.ease}` },
+            // The runtime marks the chevron open with aria-expanded (§8).
+            states: { open: { transform: 'rotate(180deg)' } },
+            children: [{ tag: 'path', attrs: { d: 'M6 9l6 6 6-6' } }],
+          },
+        ],
+      }],
+    },
+    {
+      tag: 'div',
+      attrs: {
+        id: `${id}-panel`, class: 'az-faq-answer',
+        ...(region ? { role: 'region', 'aria-labelledby': `${id}-btn` } : {}),
+      },
+      style: { paddingTop: px(t.space[8]) },
+      children: [
+        {
+          tag: 'p',
+          style: {
+            margin: 0, fontSize: t.typeSize.base, lineHeight: t.type['leading-body'],
+            color: t.color.muted, maxWidth: `${t.size['measure-body']}ch`,
+          },
+          children: [item.props.text ?? ''],
+        },
+        ...more.map((c) => ctx.action(c, { hierarchy: 'link' })),
+      ],
+    },
+  ];
+}
+
 /**
  * FAQPage JSON-LD — faq-block-spec §7.5.
  *
@@ -93,12 +178,19 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  const items = ctx.slot('item');
-  if (items.length > 0) {
+  const questions = block.children.filter((c) => c.word === 'item');
+  const ids = questionIds(questions.map((q) => q.args[0]?.value ?? ''));
+  const region = questions.length <= REGION_MAX_ITEMS;
+  if (questions.length > 0) {
     // Slot fills are <li>; their container must be a list to be valid HTML.
     children.push({
       tag: 'ul',
-      attrs: { class: 'az-faq-items' },
+      attrs: {
+        class: 'az-faq-items',
+        // The runtime's hook; `single` opts into one open at a time (§7.2).
+        'data-az-behaviour': 'faq',
+        'data-single': String(block.modifiers.includes('single')),
+      },
       style: {
         listStyle: 'none',
         padding: 0,
@@ -114,15 +206,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // §3: rows are separated by one hairline, not boxed — dividers, not
       // cards. §6: below sm the row padding GROWS (the row is the tap
       // target), from the question padding space.16 to space.24.
-      children: items.map((row): EmittedNode => ({
-        ...row,
-        attrs: { ...row.attrs, class: `${row.attrs?.class ?? ''} az-faq-item`.trim() },
+      children: questions.map((q, i): EmittedNode => ({
+        tag: 'li',
+        attrs: { class: 'az-faq-item' },
         style: {
-          ...row.style,
+          listStyle: 'none',
           paddingBlock: px(t.space[16]),
           borderBottom: `1px solid ${t.color.border}`,
         },
         below: { sm: { paddingBlock: px(t.space[24]) } },
+        children: question(q, ids[i], region, ctx),
       })),
     });
   }

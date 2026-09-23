@@ -65,11 +65,16 @@ the banned-import list in §2 rather than being merely discouraged.
 ```
 core     → (nothing)
 theme    → core
-target-* → core, theme
+target-* → core, theme, overlay
 overlay  → theme
 words/*  → core, theme, overlay        (never a target directly)
 cli      → everything
 ```
+
+`target-* → overlay` was added with the behaviour runtime: the button
+primitive lives in the target (buttons-and-sections §1), and a `play` action's
+popup is an overlay preset. `overlay` depends only on `theme`, so the arrow
+creates no cycle and `core` stays ignorant of both.
 
 **Forbidden, and CI must fail on them:**
 
@@ -194,7 +199,8 @@ six states through the style contract below. Options: `tone: 'inverted'` for
 an accent band, `size: 'sm'` for dense bars, `fill` for a card, and
 `compactBelow` (the primary fills the row, a secondary becomes a text link).
 The link stage checks `as` (AZ1220), warns on two primaries in a section
-(AZ1221) and on play/copy until their behaviour runtime exists (AZ1222).
+(AZ1221) and on `popup:#id` until declared popups exist (AZ1222); `video:`
+and `copy:` are wired by the behaviour runtime (packages/overlay/src/runtime).
 
 A **component node** — `{ tag: '#component', attrs: { src } }` (`COMPONENT_TAG`
 in `emit-contract.ts`) — stands for an author component named by `raw` or

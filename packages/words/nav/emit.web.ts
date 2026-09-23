@@ -12,16 +12,31 @@
  *   - 44×44 touch targets, including the toggle (`size.tap`)
  *   - the CTA stays in the collapsed bar, never buried in the drawer
  *
- * WHAT THIS EMITTER DOES NOT DO: the mobile menu's BEHAVIOUR — focus trap,
- * Escape to close, scroll lock, returning focus to the toggle (§6). Those are
- * runtime, they need the motion/overlay runtime, and emitting the markup hooks
- * without them would look finished while being a keyboard dead end. The panel
- * is marked `data-az-behaviour="dialog"` so the runtime can find it and a test
- * can tell that it is still outstanding.
+ * The mobile menu is a `drawer` overlay (overlays-spec §2) on a <dialog>:
+ * the behaviour runtime shows it modally, which traps focus, makes the page
+ * inert and closes on Escape; it adds scroll lock, outside-click and the
+ * return of focus to the toggle (§6). `group "…" as dropdown` is the
+ * `dropdown` preset: a <button aria-expanded> and a plain <ul> of links,
+ * never role="menu" (overlays-spec §6).
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
 import { px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { closeButton, drawer, dropdown } from '../../overlay/src/index.ts';
+
+/** The drawer's id — the toggle's aria-controls points here (§6). */
+const PANEL_ID = 'az-nav-panel';
+
+/** A stroke icon, decorative: the control carries its own name. */
+const glyph = (d: string): EmittedNode => ({
+  tag: 'svg',
+  attrs: {
+    'aria-hidden': 'true', focusable: 'false', viewBox: '0 0 24 24', fill: 'none',
+    stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round',
+  },
+  style: { width: '1.5em', height: '1.5em' },
+  children: [{ tag: 'path', attrs: { d } }],
+});
 
 /** A nav child that points somewhere: `link "Work" /work`. */
 function navLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
@@ -50,20 +65,45 @@ function navLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
   };
 }
 
-/** `group "Products"` — a labelled set of links. */
-function navGroup(child: SpecBlock, ctx: EmitContext): EmittedNode {
+/**
+ * `group "Products"` — a labelled set of links. In the bar (an `id`) it is
+ * the dropdown preset; inside the drawer, which is already a list of
+ * everything, its label heads a plain list.
+ */
+function navGroup(child: SpecBlock, ctx: EmitContext, id: string | null): EmittedNode {
   const t = ctx.theme;
   const label = child.args[0]?.value ?? '';
+  const links = child.children.map((c) => navLink(c, ctx));
+  if (id === null) {
+    return {
+      tag: 'li',
+      attrs: { class: 'az-nav-group' },
+      style: { listStyle: 'none' },
+      children: [
+        {
+          tag: 'p',
+          attrs: { class: 'az-nav-group-label' },
+          style: {
+            margin: 0, paddingInline: px(t.space[12]), paddingBlock: px(t.space[8]),
+            color: t.color.muted, fontSize: t.typeSize.sm, fontFamily: t.type.body,
+          },
+          children: [label],
+        },
+        { tag: 'ul', attrs: { class: 'az-nav-group-items' }, style: { margin: 0, padding: 0, listStyle: 'none' }, children: links },
+      ],
+    };
+  }
+  const list = dropdown(t);
   return {
     tag: 'li',
-    attrs: { class: 'az-nav-group', 'data-az-behaviour': child.as ?? 'group' },
+    attrs: { class: 'az-nav-group', 'data-az-behaviour': 'dropdown' },
     style: { listStyle: 'none', position: 'relative' },
     children: [
       {
         // A group's own label is a button, not a link: it goes nowhere, and a
         // hover-only dropdown is a keyboard dead end (§7).
         tag: 'button',
-        attrs: { type: 'button', class: 'az-nav-group-label', 'aria-expanded': 'false' },
+        attrs: { type: 'button', class: 'az-nav-group-label', 'aria-expanded': 'false', 'aria-controls': id },
         style: {
           minHeight: px(t.size.tap),
           paddingInline: px(t.space[12]),
@@ -72,14 +112,19 @@ function navGroup(child: SpecBlock, ctx: EmitContext): EmittedNode {
           color: t.color.text,
           fontSize: t.typeSize.sm,
           fontFamily: t.type.body,
+          cursor: 'pointer',
+        },
+        states: {
+          focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) },
         },
         children: [label],
       },
       {
         tag: 'ul',
-        attrs: { class: 'az-nav-group-items' },
-        style: { margin: 0, padding: 0, listStyle: 'none' },
-        children: child.children.map((c) => navLink(c, ctx)),
+        attrs: { ...list.attrs, id, class: 'az-nav-group-items', hidden: 'hidden' },
+        style: list.style,
+        states: list.states,
+        children: links,
       },
     ],
   };
@@ -125,18 +170,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // empty alt inside a link is an unlabelled link (§7), so the text is always
   // present; a visual build hides it against the image, it is never omitted.
   if (block.props.logo) {
-    const logoImg = (src: string, state: string, hidden: boolean): EmittedNode => ({
+    // The runtime marks each logo `scrolled` with the bar, so each one knows
+    // whether it is the logo on show: at the top the light inverse, once
+    // solid the regular one. Exactly one displays in each state.
+    const logoImg = (src: string, state: 'top' | 'solid', waiting: boolean): EmittedNode => ({
       tag: 'img',
-      attrs: {
-        src: ctx.asset(src),
-        alt: '',
-        class: 'az-nav-logo-img',
-        'data-az-logo': state,
-        ...(hidden ? { hidden: 'hidden' } : {}),
-      },
-      // An inline `display` beats the `hidden` attribute's UA rule, so the
-      // waiting logo must say `none` itself or both logos render.
-      style: { display: hidden ? 'none' : 'block', height: px(t.space[32]) },
+      attrs: { src: ctx.asset(src), alt: '', class: 'az-nav-logo-img', 'data-az-logo': state },
+      style: { display: waiting ? 'none' : 'block', height: px(t.space[32]) },
+      states: waiting ? { scrolled: { display: 'block' } } : state === 'top' ? { scrolled: { display: 'none' } } : undefined,
     });
 
     // §4: a `solid` nav sits transparent over the hero, then turns solid on
@@ -159,9 +200,20 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  const linkItems = links.map((c) => (c.word === 'group' ? navGroup(c, ctx) : navLink(c, ctx)));
+  // In the bar every group is a dropdown — nav-spec's own example writes
+  // `group "Products"` and positions it as one (§11); `as dropdown`
+  // (overlays-spec §4) says the same thing explicitly. Ids by position, so a
+  // build is deterministic. In the drawer every group is a plain list.
+  let dropdowns = 0;
+  const barItems = links.map((c) => (c.word === 'group'
+    ? navGroup(c, ctx, `az-nav-group-${++dropdowns}`)
+    : navLink(c, ctx)));
+  const drawerItems = links.map((c) => (c.word === 'group' ? navGroup(c, ctx, null) : navLink(c, ctx)));
+  // §6: the links collapse into the drawer below sm — only now that the
+  // drawer is a working dialog. `minimal` has no bar links at any size.
+  const collapses = links.length > 0 && layout.linksInBar;
 
-  if (links.length > 0 && layout.linksInBar) {
+  if (collapses) {
     bar.push({
       tag: 'ul',
       attrs: { class: 'az-nav-items' },
@@ -180,7 +232,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         marginInline: variant === 'center' ? 'auto' : undefined,
         marginLeft: variant === 'bar' ? 'auto' : undefined,
       },
-      children: linkItems,
+      below: { sm: { display: 'none' } },
+      children: barItems,
     });
   }
 
@@ -190,26 +243,40 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // the 44px tap target holds at `sm`.
   for (const c of ctas) bar.push(ctx.action(c, { size: 'sm' }));
 
-  // The toggle is a <button>, never a div with an onclick (§6).
-  bar.push({
+  // The toggle is a <button>, never a div with an onclick (§6). It shows
+  // wherever the links are in the drawer: below sm, or always for `minimal`.
+  const toggle: EmittedNode = {
     tag: 'button',
     attrs: {
       type: 'button',
       class: 'az-nav-toggle',
       'aria-expanded': 'false',
-      'aria-controls': 'az-nav-panel',
+      'aria-controls': PANEL_ID,
       'aria-label': 'Menu',
     },
     style: {
+      display: collapses ? 'none' : 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
       minWidth: px(t.size.tap),
       minHeight: px(t.size.tap),
       background: 'transparent',
       border: '0',
       color: t.color.text,
+      cursor: 'pointer',
     },
-    children: [],
-  });
+    states: {
+      focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) },
+    },
+    below: collapses ? { sm: { display: 'inline-flex' } } : undefined,
+    children: [glyph('M4 7h16M4 12h16M4 17h16')],
+  };
+  if (links.length > 0) bar.push(toggle);
 
+  const panel = drawer(t, 'Menu');
+  const x = closeButton(t, 'Close menu');
+
+  const solid = block.modifiers.includes('solid');
   return {
     tag: 'nav',
     attrs: {
@@ -217,6 +284,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // §7: a page has more than one nav landmark — this one and the footer's.
       'aria-label': 'Main',
       'data-mobile': block.props.mobile ?? 'drawer',
+      ...(solid ? { 'data-az-behaviour': 'solid' } : {}),
     },
     style: {
       // `split` needs three explicit zones — logo | links | CTA — or the CTA
@@ -235,14 +303,20 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       paddingInline: px(t.size['gutter-lg']),
       // `solid` is transparent at the top and solid after scroll (§4); the
       // scrolled state is the runtime's, so the emitted state is the top one.
-      background: block.modifiers.includes('solid') ? 'transparent' : t.color.bg,
+      // At the top a scrim gradient, not a flat overlay, keeps the bar
+      // readable over a bright image without dimming all of it (§4.1).
+      background: solid ? 'transparent' : t.color.bg,
+      backgroundImage: solid
+        ? `linear-gradient(to bottom, color-mix(in srgb, ${t.color.scrim} 35%, transparent), transparent)`
+        : undefined,
       color: t.color.text,
       position: block.modifiers.includes('sticky') ? 'sticky' : 'static',
       top: 0,
       zIndex: t.layer.sticky,
     },
-    // The mobile gutter below sm (theme-spec §1). The links stay: hiding
-    // them before the drawer exists would leave the menu unreachable.
+    // §4: once scrolled, solid — and the hysteresis lives in the runtime.
+    states: solid ? { scrolled: { background: t.color.bg, backgroundImage: 'none', boxShadow: t.shadow.sm } } : undefined,
+    // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children: [
       {
@@ -267,32 +341,28 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         children: ['Skip to content'],
       },
       ...bar,
-      {
-        // The panel. Present in the markup so the runtime has something to
-        // open; inert until the dialog behaviour of §6 exists.
-        //
-        // `minimal` puts the menu button at ALL sizes (§2), so its links live
-        // here rather than in the bar — that is the whole layout, not a
-        // mobile fallback. `mega` marks its panel full-width.
-        tag: 'div',
-        attrs: {
-          id: 'az-nav-panel',
-          class: 'az-nav-panel',
-          'data-az-behaviour': 'dialog',
-          hidden: 'hidden',
-        },
-        style: variant === 'mega'
-          ? { position: 'absolute', left: 0, right: 0, background: t.color.surface }
-          : undefined,
-        children: layout.linksInBar
-          ? []
-          : [{
-              tag: 'ul',
-              attrs: { class: 'az-nav-items' },
-              style: { margin: 0, padding: 0, listStyle: 'none' },
-              children: linkItems,
-            }],
-      },
+      ...(links.length > 0 ? [{
+        // The drawer (§6, overlays-spec §2): a <dialog> the runtime shows
+        // modally. It holds every link, in order, so the collapsed bar loses
+        // nothing — and for `minimal` it is the whole menu at every size.
+        tag: 'dialog',
+        attrs: { ...panel.attrs, id: PANEL_ID, class: 'az-nav-panel az-overlay' },
+        style: panel.style,
+        states: panel.states,
+        children: [
+          {
+            tag: 'div',
+            style: { display: 'flex', justifyContent: 'flex-end', marginBottom: px(t.space[16]) },
+            children: [{ tag: 'button', attrs: x.attrs, style: x.style, states: x.states, children: [glyph(x.icon.d)] }],
+          },
+          {
+            tag: 'ul',
+            attrs: { class: 'az-nav-drawer-items' },
+            style: { display: 'flex', flexDirection: 'column', gap: px(t.space[4]), margin: 0, padding: 0, listStyle: 'none' },
+            children: drawerItems,
+          },
+        ],
+      } satisfies EmittedNode] : []),
     ],
   };
 }

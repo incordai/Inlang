@@ -32,6 +32,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink } from './visual/checks.mjs';
 import { startServer } from './visual/serve.mjs';
+import { copy, drawer, dropdown, faq, overlayMotion, play, solid } from './visual/behaviours.mjs';
+import { behaviourSelfTest } from './visual/behaviour-selftest.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
@@ -70,7 +72,8 @@ async function pool(items, limit, fn) {
 
 /* ---- results ------------------------------------------------------------ */
 
-const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'disclosure', 'skip-link', 'firefox', 'webkit'];
+const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'disclosure', 'skip-link',
+  'drawer', 'dropdown', 'solid', 'faq', 'copy', 'play', 'overlay-motion', 'firefox', 'webkit'];
 
 /**
  * Responsive-table rows the gate measures, per word and variant: the
@@ -270,7 +273,27 @@ async function checkSite(s, browsers, server) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
   record(s.word, 'reduced-motion', `${s.label}/light/1440`, await reducedMotion(page));
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
+  const still = await overlayMotion(page);
+  if (still) record(s.word, 'overlay-motion', `${s.label}/light/390`, still);
   await ctx.close();
+
+  // The behaviour runtime, in a fresh context per width: the drawer is the
+  // phone menu, the dropdown the desktop one; faq, copy, play and solid are
+  // width-independent and checked on the desktop page.
+  for (const width of [390, 1440]) {
+    const bctx = await browsers.chromium.newContext({ viewport: { width, height: 900 } });
+    const bpage = await bctx.newPage();
+    bpage.setDefaultTimeout(NAV_TIMEOUT_MS);
+    const checks = width === 390 ? { drawer } : { dropdown, solid, faq, copy, play };
+    for (const [name, fn] of Object.entries(checks)) {
+      await bpage.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
+      const r = await fn(bpage);
+      if (r) record(s.word, name, `${s.label}/light/${width}`, r);
+    }
+    await bctx.close();
+  }
 
   // The smaller pass: another engine at one width, overflow and page errors.
   for (const [name, width] of [['firefox', 1440], ['webkit', 390]]) {
@@ -380,6 +403,8 @@ async function selfTest() {
     expect('item 6 reduced motion', await reducedMotion(page), shouldPass);
     await ctx.close();
   }
+  console.log('\nbehaviour runtime — each check fails without it and passes with it');
+  await behaviourSelfTest(browser, server, dir, expect);
   await browser.close();
   await server.close();
   rmSync(dir, { recursive: true, force: true });
