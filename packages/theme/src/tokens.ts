@@ -42,10 +42,17 @@ export const MOTION = {
   reduced: 100,
   fast: 120,
   normal: 160,
+  /** overlays-spec §3 — popup enter. */
+  emphasis: 200,
   slow: 240,
   spring: 280,
   ease: 'cubic-bezier(0.16, 1, 0.3, 1)',
   easeIn: 'cubic-bezier(0.4, 0, 1, 1)',
+  /** overlays-spec §3 — the dropdown's enter offset, in px. A distance the
+   *  motion owns, not spacing, so it is not a space-scale step. */
+  slide: 6,
+  /** theme-spec §1.7 `motion.ease.out` — the CSS ease-out curve; the drawer's. */
+  easeOut: 'cubic-bezier(0, 0, 0.58, 1)',
 } as const;
 
 /** CONVENTIONS §4 bans raw z-index; overlays-spec §1 needs a layer manager. */

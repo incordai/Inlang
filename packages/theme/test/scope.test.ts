@@ -32,6 +32,8 @@ const BANNED = [
   ...sources(join(ROOT, 'packages/core/src')),
   ...sources(join(ROOT, 'packages/cli/src')),
   ...sources(join(ROOT, 'packages/theme/src')),
+  // theme-spec §4 note 3: overlay emits CSS and is in scope for the ban.
+  ...sources(join(ROOT, 'packages/overlay/src')),
 ].map((f) => relative(ROOT, f).replace(/\\/g, '/')).filter((f) => !THEME_DATA.has(f));
 
 test('CONTROL: the scope covers every package and still excludes the theme data', () => {

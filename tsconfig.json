@@ -14,5 +14,5 @@
     "types": ["node"]
   },
   "include": ["packages/*/src", "packages/*/test"],
-  "exclude": ["packages/*/test/fixture-assets"]
+  "exclude": ["packages/*/test/fixture-assets", "packages/overlay/src/runtime/behaviours.ts"]
 }

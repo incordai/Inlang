@@ -137,6 +137,7 @@ Values and the tracking rule: **§8**.
 | `motion.backdrop` | `Ms` | 150ms | overlays-spec §3 — modal backdrop, leads the panel |
 | `motion.normal` | `Ms` | 160ms | overlays-spec §3 — dropdown / popover enter |
 | `motion.emphasis` | `Ms` | 200ms | overlays-spec §3 — popup enter, toast slide |
+| `motion.slide` | `Px` | 6px | overlays-spec §3 — the dropdown's enter offset. A motion distance, not spacing, so it is not a space-scale step |
 | `motion.slow` | `Ms` | 240ms | overlays-spec §3 — drawer |
 | `motion.sheet` | `Ms` | 280ms | overlays-spec §3 — sheet budget |
 | `motion.ease.emphasis` | `Easing` | `cubic-bezier(0.16, 1, 0.3, 1)` | overlays-spec §3, named verbatim |

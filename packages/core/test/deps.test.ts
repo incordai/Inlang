@@ -55,7 +55,7 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay'];
 
 test('every package has sources to check — CONTROL', () => {
   // Without this, an empty glob would make every rule below pass vacuously.
@@ -98,14 +98,23 @@ test('a target imports only core — never a word, never the cli', () => {
     for (const spec of importsOf(file)) {
       const pkg = crossPackage(spec);
       if (pkg === null) continue;
-      assert.ok(['core', 'theme'].includes(pkg),
-        `target-web imports '${pkg}' — targets may use core and theme only`);
+      assert.ok(['core', 'theme', 'overlay'].includes(pkg),
+        `target-web imports '${pkg}' — targets may use core, theme and overlay only`);
+    }
+  }
+});
+
+test('overlay imports only theme — ARCHITECTURE §2', () => {
+  for (const file of sources('packages/overlay')) {
+    for (const spec of importsOf(file)) {
+      const pkg = crossPackage(spec);
+      assert.ok(pkg === null || pkg === 'theme', `overlay imports '${pkg}' (${spec}) — overlay → theme only`);
     }
   }
 });
 
 test('nothing imports from cli — ARCHITECTURE §2', () => {
-  for (const pkg of ['core', 'target-web']) {
+  for (const pkg of ['core', 'target-web', 'overlay']) {
     for (const file of sources(`packages/${pkg}`)) {
       for (const spec of importsOf(file)) {
         assert.ok(crossPackage(spec) !== 'cli', `${pkg} imports from cli (${spec})`);

@@ -10,11 +10,12 @@
  */
 
 import {
-  readFileSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
+  readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
 } from 'node:fs';
-import { dirname, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { compile, formatDiagnostics, serialiseSpec } from '../../core/src/index.ts';
-import { emitProject, PathEscapeError, USER_DIR } from '../../target-web/src/emit.ts';
+import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../target-web/src/emit.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
@@ -110,7 +111,11 @@ export function build(options: BuildOptions): BuildOutcome {
     }
     throw e;
   }
-  const { files, assets, modules } = project;
+  const { assets, modules } = project;
+  // The behaviour runtime ships with every site, copied verbatim from the
+  // overlay package into RUNTIME_DIR — part of the output, so it is written
+  // and checked like any emitted file.
+  const files = [...project.files, ...runtimeFiles()].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
 
   // The author's components go through the same sandbox as assets: they must
   // exist and really be inside the project, symlinks followed.
@@ -151,6 +156,15 @@ export function build(options: BuildOptions): BuildOutcome {
   }
 
   return { ok: true, files, assets, report, exit: EXIT.ok };
+}
+
+/** The overlay runtime's modules, as files of the generated project. */
+function runtimeFiles(): { path: string; content: string }[] {
+  const dir = fileURLToPath(new URL('../../overlay/src/runtime/', import.meta.url));
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.ts'))
+    .sort()
+    .map((f) => ({ path: `${RUNTIME_DIR}/${f}`, content: readFileSync(join(dir, f), 'utf8') }));
 }
 
 export function specOf(options: Omit<BuildOptions, 'outDir'>): string | null {

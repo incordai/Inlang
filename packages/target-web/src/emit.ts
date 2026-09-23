@@ -26,6 +26,13 @@ import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
  */
 export const USER_DIR = 'src/user';
 
+/**
+ * Where the behaviour runtime lives in a generated project. Its source is
+ * packages/overlay/src/runtime; the caller copies it here, as it copies the
+ * author's components into USER_DIR, because this stage has no filesystem.
+ */
+export const RUNTIME_DIR = 'src/az';
+
 export interface EmittedFile {
   readonly path: string;
   readonly content: string;
@@ -199,7 +206,8 @@ export default function App({ route }: { route: string }) {
  * writes a description, the runtime knows how to render it.
  */
 function runtimeTsx(): string {
-  return `${HEADER}import { createContext, createElement, useContext, type ComponentType, type ReactNode } from "react";
+  return `${HEADER}import { createContext, createElement, useContext, useLayoutEffect, type ComponentType, type ReactNode } from "react";
+import { attach } from "./az/behaviours.ts";
 
 export interface EmittedNode {
   tag: string;
@@ -321,6 +329,11 @@ export function Site(
   { name, width, theme, accent, pattern, children }:
   { name: string; width: string; theme: string; accent: string; pattern: string; children?: ReactNode },
 ) {
+  // The behaviour runtime wires what the words marked (data-az-behaviour).
+  // A layout effect, so a deep-linked FAQ answer opens before first paint
+  // (faq §7.4); it never runs in a server render, so nothing there reaches
+  // window. attach returns its own cleanup, so StrictMode's double run is safe.
+  useLayoutEffect(() => attach(document), []);
   return (
     <div className="az-site" data-site={name} data-width={width}
          data-theme={theme} data-accent={accent} data-pattern={pattern}>
@@ -505,6 +518,14 @@ body { margin: 0; }
 ul, ol { margin: 0; padding: 0; }
 img, video, canvas { max-width: 100%; height: auto; display: block; }
 a { color: inherit; }
+
+/* \`hidden\` must hide even when a generated class sets display — except
+   until-found, which must stay findable (faq §7.3). */
+[hidden]:not([hidden="until-found"]) { display: none !important; }
+/* A modal overlay's backdrop (overlays-spec §2). */
+dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
+/* The runtime's polite announcer (copy confirmation): read, never seen. */
+.az-live { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Reduced motion — theme-spec §9.3: opacity-only or instant, never "slower".
    The net catches anything a word did not handle itself. !important because

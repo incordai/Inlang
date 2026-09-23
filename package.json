@@ -4,8 +4,8 @@
   "type": "module",
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test packages/core/test/*.test.ts packages/theme/test/*.test.ts packages/words/test/*.test.ts packages/target-web/test/*.test.ts packages/cli/test/*.test.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/overlay/tsconfig.json",
+    "test": "node --experimental-strip-types --test packages/core/test/*.test.ts packages/theme/test/*.test.ts packages/words/test/*.test.ts packages/target-web/test/*.test.ts packages/cli/test/*.test.ts packages/overlay/test/*.test.ts",
     "verify": "pnpm typecheck && pnpm test",
     "verify:build": "node scripts/verify-build.mjs",
     "coverage": "node scripts/word-coverage.mjs",

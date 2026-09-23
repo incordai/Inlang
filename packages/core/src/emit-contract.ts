@@ -33,9 +33,14 @@ export type BreakpointName = (typeof BREAKPOINT_NAMES)[number];
  * selector: `focusVisible` is keyboard focus, `loading` is a busy control,
  * `current` the link to the page being viewed. The target decides how each
  * is detected (buttons-and-sections-spec §1: six states per button).
+ *
+ * Two belong to the behaviour runtime rather than to the pointer: `open` is
+ * an overlay that is showing (overlays-spec §3 — it animates in from its
+ * base style), and `scrolled` is a `solid` nav past its threshold
+ * (nav-block-spec §4). The runtime sets them; the stylesheet styles them.
  */
 export const INTERACTION_STATES = [
-  'hover', 'focusVisible', 'active', 'disabled', 'loading', 'expanded', 'current',
+  'hover', 'focusVisible', 'active', 'disabled', 'loading', 'expanded', 'open', 'scrolled', 'current',
 ] as const;
 export type InteractionState = (typeof INTERACTION_STATES)[number];
 

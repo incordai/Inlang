@@ -47,6 +47,8 @@ const STATE_SELECTOR: Record<InteractionState, (cls: string) => string> = {
   disabled: (c) => `${c}:disabled, ${c}[aria-disabled="true"]`,
   loading: (c) => `${c}[aria-busy="true"]`,
   expanded: (c) => `${c}[aria-expanded="true"]`,
+  open: (c) => `${c}[data-state="open"]`,
+  scrolled: (c) => `${c}[data-scrolled="true"]`,
   current: (c) => `${c}[aria-current="page"]`,
 };
 
