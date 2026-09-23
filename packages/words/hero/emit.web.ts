@@ -64,7 +64,10 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         letterSpacing: '-0.03em',
         fontWeight: t.type['weight-display'],
         fontFamily: t.type.display,
-        color: t.color.text,
+        // On `full` the title sits on the scrim like the eyebrow and sub; its
+        // own class overrides the header's colour, and `text` IS `scrim` in
+        // every light scheme — a 1:1 title.
+        color: variant === 'full' ? t.color['on-scrim'] : t.color.text,
         margin: 0,
       },
       children: [block.props.title],

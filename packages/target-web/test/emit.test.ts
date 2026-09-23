@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
-import { emit, emitProject, escapeText, safeAssetPath, PathEscapeError } from '../src/emit.ts';
+import { emit, emitProject, escapeHtml, safeAssetPath, PathEscapeError } from '../src/emit.ts';
 // A TEST may compose target + words, exactly as the CLI does. `deps.test.ts`
 // forbids this in `src/` — that rule is about the shipped dependency arrow,
 // and it scans src only. Without the real registry these tests would exercise
@@ -67,9 +67,9 @@ test('SECURITY: a title cannot terminate the string literal', () => {
   assert.ok(!/[^\]"[^,}\s]/.test(titleLine.replace(/^\s*/, '')) || titleLine.includes('\u0022'));
 });
 
-test('CONTROL: escapeText leaves ordinary text readable', () => {
+test('CONTROL: escapeHtml leaves ordinary text readable', () => {
   // Without this, escaping everything to nothing would pass the tests above.
-  assert.equal(escapeText('Built in the dark'), 'Built in the dark');
+  assert.equal(escapeHtml('Built in the dark'), 'Built in the dark');
 });
 
 test('SECURITY: a path cannot escape the project', () => {

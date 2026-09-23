@@ -47,6 +47,9 @@ const colourOf = (variant: string, cls: string) =>
 test('hero full: eyebrow and sub sit on the scrim in its own text colour', () => {
   assert.equal(colourOf('full', 'az-hero-eyebrow'), T.color['on-scrim']);
   assert.equal(colourOf('full', 'az-hero-sub'), T.color['on-scrim']);
+  // The title too: its own class overrides the header's inherited colour,
+  // and `text` equals `scrim` in every light scheme — a 1:1 title.
+  assert.equal(colourOf('full', 'az-hero-title'), T.color['on-scrim']);
 });
 
 test('CONTROL: on the page background they stay muted', () => {

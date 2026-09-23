@@ -124,3 +124,29 @@ test('the project ships az.css, main imports it, and no page carries inline styl
   assert.match(file('src/main.tsx'), /import "\.\/theme\.css";\nimport "\.\/az\.css";/);
   assert.doesNotMatch(file('src/App.tsx'), /"style":/, 'styles live in az.css, not inline');
 });
+
+test('SECURITY: an unbalanced quote or parenthesis cannot swallow the next rule', () => {
+  // An open string or `(` runs on past the `;` into the rest of az.css.
+  for (const value of ['"Inter, sans', "'x", 'calc(1px + 2px', 'url(a', 'a)b']) {
+    assert.throws(() => one({ tag: 'p', style: { fontFamily: value } }), StyleValueError, value);
+  }
+});
+
+test('CONTROL: balanced quotes and parentheses pass', () => {
+  const { css } = one({ tag: 'p', style: { fontFamily: '"Inter", \'Geist\', system-ui', width: 'min(calc(100% - 2rem), 40ch)' } });
+  assert.match(css, /font-family: "Inter", 'Geist', system-ui;/);
+  assert.match(css, /width: min\(calc\(100% - 2rem\), 40ch\);/);
+});
+
+test('a hash collision between two styles gets a distinct class, never an error', () => {
+  // These two canonical style keys share an FNV-1a hash (found by search):
+  // the author can do nothing about a collision, so the compiler resolves it.
+  const pair = (): EmittedNode[] => [{ tag: 'p', style: { width: 'v447599' } }, { tag: 'p', style: { width: 'v1048144' } }];
+  const { value: [a, b], css } = compileStyles(pair(), (ns, rw) => ns.map(rw), BP);
+  assert.notEqual(cls(a), cls(b));
+  assert.ok(css.includes(`.${cls(a)} { width: v447599; }`), css);
+  assert.ok(css.includes(`.${cls(b)} { width: v1048144; }`), css);
+  // Deterministic: the same input gives the same names.
+  const again = compileStyles(pair(), (ns, rw) => ns.map(rw), BP);
+  assert.deepEqual(again.value.map(cls), [cls(a), cls(b)]);
+});

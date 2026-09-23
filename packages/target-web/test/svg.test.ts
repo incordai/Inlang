@@ -70,7 +70,9 @@ test('SECURITY: references may point only inside the file', () => {
   assert.equal(uses.length, 1, 'only the local <use> survives (§7)');
   assert.equal(uses[0].attrs?.href, '#a');
   const paths = walk(svg).filter((n) => n.tag === 'path' && n.attrs?.id !== 'a');
-  assert.equal(paths[0].attrs?.fill, 'currentColor', 'a local gradient paint becomes currentColor');
+  // A local paint server stays referenced; its stops take currentColor below,
+  // so an opacity gradient keeps its shape in the theme colour.
+  assert.equal(paths[0].attrs?.fill, 'url(#g)', 'a local gradient paint stays a reference');
   assert.equal(paths[1].attrs?.fill, undefined, 'an outside url() is dropped');
   assert.equal(paths[2].attrs?.['clip-path'], 'url(#a)', 'CONTROL: a local reference is kept');
   assert.equal(paths[2].attrs?.mask, undefined);
@@ -112,5 +114,56 @@ test('every kept element and attribute is on the allowlist', () => {
   for (const n of walk(svg)) {
     assert.ok(allowedTags.has(n.tag), n.tag);
     assert.ok(!('data-x' in (n.attrs ?? {})) && !('xml:space' in (n.attrs ?? {})), `${n.tag} kept an unknown attribute`);
+  }
+});
+
+/* ---- paint: a single-colour icon, and the parts that are never painted ---- */
+
+const byId = (n: EmittedNode, id: string) => walk(n).find((x) => x.attrs?.id?.endsWith(id));
+
+test('a mask keeps its authored paints — they are luminance, never shown', () => {
+  // The exporter's usual cut-out: white keeps, black removes.
+  const svg = sanitizeSvg(`<svg viewBox="0 0 24 24"><defs><mask id="m"><rect id="keep" width="24" height="24" fill="white"/><circle id="cut" cx="12" cy="12" r="4" fill="black"/></mask></defs><path id="shape" d="M0 0h24v24H0z" fill="#111" mask="url(#m)"/></svg>`, './i.svg');
+  assert.equal(byId(svg, 'keep')?.attrs?.fill, 'white');
+  assert.equal(byId(svg, 'cut')?.attrs?.fill, 'black');
+  assert.equal(byId(svg, 'shape')?.attrs?.fill, 'currentColor', 'CONTROL: the painted shape still takes the theme colour');
+});
+
+test('transparent and white paints become none; they are background, not ink', () => {
+  // A design tool's artboard background, and a transparent hit area.
+  const svg = sanitizeSvg('<svg viewBox="0 0 24 24"><rect id="bg" width="24" height="24" fill="#FFFFFF"/><rect id="hit" width="24" height="24" fill="transparent"/><path id="ink" d="M4 12h16" stroke="#0a0a0a"/><circle id="w" r="2" fill="white" stroke="rgb(255, 255, 255)"/></svg>', './i.svg');
+  assert.equal(byId(svg, 'bg')?.attrs?.fill, 'none');
+  assert.equal(byId(svg, 'hit')?.attrs?.fill, 'none');
+  assert.equal(byId(svg, 'w')?.attrs?.fill, 'none');
+  assert.equal(byId(svg, 'w')?.attrs?.stroke, 'none');
+  assert.equal(byId(svg, 'ink')?.attrs?.stroke, 'currentColor');
+});
+
+/* ---- ids: every inlined copy has its own ---------------------------------- */
+
+const GRAD = '<svg viewBox="0 0 24 24"><defs><clipPath id="a"><rect width="12" height="24"/></clipPath><linearGradient id="g"><stop offset="0"/></linearGradient></defs><path d="M0 0" clip-path="url(#a)" fill="url(#g)"/><use href="#a"/></svg>';
+
+test('ids are prefixed per inlined instance, and every reference follows', () => {
+  const one = sanitizeSvg(GRAD, './i.svg', 'az-i0-');
+  const two = sanitizeSvg(GRAD, './i.svg', 'az-i1-');
+  const ids = (n: EmittedNode) => walk(n).map((x) => x.attrs?.id).filter(Boolean);
+  assert.deepEqual(ids(one), ['az-i0-a', 'az-i0-g']);
+  assert.deepEqual(ids(two), ['az-i1-a', 'az-i1-g']);
+  const path = walk(two).find((x) => x.tag === 'path')!;
+  assert.equal(path.attrs?.['clip-path'], 'url(#az-i1-a)');
+  assert.equal(path.attrs?.fill, 'url(#az-i1-g)', 'a gradient reference is not recoloured');
+  assert.equal(walk(two).find((x) => x.tag === 'use')?.attrs?.href, '#az-i1-a');
+});
+
+test('two icons on one page never share an id', () => {
+  const nodes = [sanitizeSvg(GRAD, './a.svg', 'az-i0-'), sanitizeSvg(GRAD, './b.svg', 'az-i1-')];
+  const all = nodes.flatMap(walk).map((x) => x.attrs?.id).filter(Boolean);
+  assert.equal(new Set(all).size, all.length);
+});
+
+test('a character reference beyond Unicode is an SvgError, not a crash', () => {
+  for (const ref of ['&#x110000;', '&#1114112;', '&#x99999999999;']) {
+    assert.throws(() => sanitizeSvg(`<svg viewBox="0 0 1 1"><g id="a${ref}"/></svg>`, './i.svg'),
+      (e: unknown) => e instanceof SvgError && e.message.includes("'./i.svg'"), ref);
   }
 });

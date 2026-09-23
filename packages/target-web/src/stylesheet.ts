@@ -79,10 +79,30 @@ function cssValue(property: string, value: string | number): string {
   const text = typeof value === 'number'
     ? (value === 0 || UNITLESS.has(property) || property.startsWith('--') ? String(value) : `${value}px`)
     : value;
-  if (UNSAFE_VALUE.test(text)) {
+  if (UNSAFE_VALUE.test(text) || !balanced(text)) {
     throw new StyleValueError(`style: ${property} value ${JSON.stringify(text)} could break out of its rule`);
   }
   return text;
+}
+
+/**
+ * Quotes closed and parentheses matched. An open string or `(` makes the CSS
+ * parser consume past the `;` and `}` into the following rules — the same
+ * injection UNSAFE_VALUE stops, reached without any of its characters.
+ */
+function balanced(text: string): boolean {
+  let depth = 0;
+  let quote: string | null = null;
+  for (const ch of text) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')' && --depth < 0) return false;
+  }
+  return quote === null && depth === 0;
 }
 
 /** A style map's declarations, sorted, `undefined` and empty dropped. */
@@ -146,6 +166,20 @@ function fnv1a(text: string): string {
   return (h >>> 0).toString(36);
 }
 
+/**
+ * The class for one canonical style: its hash, or — when a DIFFERENT style
+ * already holds that hash — the hash salted with a counter until free. The
+ * author cannot act on a 32-bit collision, so it is resolved, not reported;
+ * the walk order is fixed, so the same site always gets the same names.
+ */
+function classFor(key: string, rules: ReadonlyMap<string, { key: string }>): string {
+  for (let salt = 0; ; salt++) {
+    const cls = `az-s-${fnv1a(salt === 0 ? key : `${salt}:${key}`)}`;
+    const seen = rules.get(cls);
+    if (!seen || seen.key === key) return cls;
+  }
+}
+
 const block = (selector: string, decls: [string, string][], indent = '') =>
   `${indent}${selector} { ${decls.map(([p, v]) => `${p}: ${v};`).join(' ')} }`;
 
@@ -178,11 +212,7 @@ export function compileStyles<T>(
     const { style: _style, below: _below, states: _states, reducedMotion: _rm, ...rest } = node;
     if (!c) return { ...rest, ...(children ? { children } : {}) };
     const key = JSON.stringify(c);
-    const cls = `az-s-${fnv1a(key)}`;
-    const seen = rules.get(cls);
-    if (seen && seen.key !== key) {
-      throw new StyleValueError(`style: class ${cls} names two different styles — hash collision`);
-    }
+    const cls = classFor(key, rules);
     rules.set(cls, { key, c });
     const existing = node.attrs?.class;
     return {
