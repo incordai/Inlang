@@ -72,7 +72,7 @@ async function suite(engine) {
       await d.get('SELECT 1 AS ok');
       return d;
     }, engine);
-    check(`${engine}: migrations apply`, (await migrate(db)).join() === '1');
+    check(`${engine}: migrations apply`, (await migrate(db)).join() === '1,2');
     check(`${engine}: migrations are a no-op the second time`, (await migrate(db)).length === 0);
 
     const secret = randomBytes(32);
