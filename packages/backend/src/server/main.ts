@@ -34,11 +34,23 @@ if (!loaded.ok) {
 }
 const { config } = loaded;
 
+/** AZ_DATABASE_CA_FILE, read once at start; a missing file stops the server with its name. */
+function readCa(path: string): string | undefined {
+  if (!path) return undefined;
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    process.stderr.write(`backend: cannot start — AZ_DATABASE_CA_FILE: cannot read ${path}\n`);
+    process.exit(1);
+  }
+}
+const ca = readCa(config.databaseCaFile);
+
 const db: Db = config.setup.database === 'sqlite'
   ? await openSqlite(config.sqlitePath)
   : config.setup.database === 'postgres'
-    ? await openPostgres(config.databaseUrl, config.databaseTls)
-    : await openMysql(config.databaseUrl, config.databaseTls);
+    ? await openPostgres(config.databaseUrl, config.databaseTls, ca)
+    : await openMysql(config.databaseUrl, config.databaseTls, ca);
 const applied = await migrate(db);
 if (applied.length > 0) process.stdout.write(`backend: applied migrations ${applied.join(', ')}\n`);
 

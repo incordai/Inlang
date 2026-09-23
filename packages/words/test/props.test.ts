@@ -189,8 +189,9 @@ const wordDirs = readdirSync(WORDS).filter((d) =>
  */
 const KNOWN_INERT: Record<string, string[]> = {
   // Site configuration the TARGET consumes, not the form's markup: `impl` is
-  // the custom adapter module the app imports, `protect` the pages it wraps.
-  auth: ['impl', 'protect'],
+  // the custom adapter module the app imports, `protect` the pages it wraps,
+  // `profile` which hosted protocol module it imports (§3.5).
+  auth: ['impl', 'profile', 'protect'],
 };
 
 test('CONTROL: a prop KNOWN to work is detected as working', () => {

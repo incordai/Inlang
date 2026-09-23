@@ -44,6 +44,20 @@ export function attachAuth(doc: Document, adapter: AuthAdapter, options?: Attach
 
   const forms = [...doc.querySelectorAll<HTMLFormElement>('form[data-az-behaviour="auth"]')];
   showResetState(forms, params);
+  // §3.5: an email link or a provider may have brought a session back to
+  // this page. A recovery session opens the set-new-password form; a
+  // sign-in on a login or sign-up page continues where the visitor was going.
+  if (adapter.landing) {
+    void adapter.landing().then((landed) => {
+      if (ac.signal.aborted || !landed) return;
+      if (landed.kind === 'recovery') {
+        showResetState(forms, params, true);
+        return;
+      }
+      const start = forms.find((f) => f.dataset.flow === 'login' || f.dataset.flow === 'signup');
+      if (start) loc.assign(safeNext(params.get('next'), loc.origin) ?? start.dataset.redirect ?? '/');
+    });
+  }
   showReturnedError(forms, params, win);
   for (const box of doc.querySelectorAll<HTMLElement>('[data-az-oauth="providers"]')) {
     void fillProviders(box, adapter, loc, params, ac.signal);
@@ -231,13 +245,15 @@ function clear(form: HTMLFormElement) {
  * request form without one, the set-new-password form with one (the address
  * prefilled read-only when the link carries it, so a manager can file it).
  */
-function showResetState(forms: readonly HTMLFormElement[], params: URLSearchParams) {
+function showResetState(forms: readonly HTMLFormElement[], params: URLSearchParams, recovering = false) {
   const request = forms.find((f) => f.dataset.flow === 'reset');
   const set = forms.find((f) => f.dataset.flow === 'reset-set');
   if (!request || !set) return;
+  // A `?token=` link, or (§3.5) a recovery session the adapter adopted.
   const token = params.get('token');
-  request.hidden = Boolean(token);
-  set.hidden = !token;
+  const setting = Boolean(token) || recovering;
+  request.hidden = setting;
+  set.hidden = !setting;
   const email = params.get('email');
   const field = set.querySelector<HTMLInputElement>('input[name="email"]');
   if (token && email && field) field.value = email;

@@ -76,8 +76,9 @@ export interface AuthAdapter {
 `AuthResult` is `{ ok: true, session }` or `{ ok: false, code, field? }`, where
 `AuthErrorCode` is a **closed set owned by AZ**: `invalid_credentials` ·
 `email_taken` · `weak_password` · `password_mismatch` · `rate_limited` ·
-`expired_token` · `oauth_failed` · `email_unverified` · `network` · `unknown`
-(the three §3.4 codes added 2026-09-23). Each adapter maps its own errors into it and the block maps it to
+`expired_token` · `oauth_failed` · `email_unverified` · `email_unconfirmed` ·
+`network` · `unknown` (the three §3.4 codes added 2026-09-23; `email_unconfirmed`
+with §3.5 — an account that has not yet confirmed its address). Each adapter maps its own errors into it and the block maps it to
 copy, so no generated component contains a provider-specific string — switching
 adapters is one line in the `.az` file and nothing in the output moves.
 
@@ -308,6 +309,89 @@ like the provider callback. `pnpm test:auth` also runs that real server
 checklist from another origin — including a mock OpenID Connect provider on a
 third — in Chromium, Firefox and WebKit.
 
+### 3.5 The `hosted` adapter's `token-endpoint` profile
+
+`hosted` speaks one of two protocols, chosen at site level by `profile`:
+
+```
+site studio
+  auth
+    adapter hosted
+    profile token-endpoint      # default: standard (§3.2)
+```
+
+**Why a grammar property, not an env variable.** The protocol is a structural
+choice — which module the site imports, which `methods` are possible — and it
+does not change between a developer's machine and production, so it belongs in
+the `.az` file where the compiler checks it (AZ2006). The env holds only what
+varies per deployment: the URL and the public key.
+
+`standard` is §3.2. `token-endpoint` is the protocol of widely used
+open-source identity servers — the one a managed cloud project runs
+(docs/cloud-setup.md): a token endpoint with grant types, a user resource,
+and email links that return to the site with the session in the URL.
+Configuration is the same two public variables: `AZ_PUBLIC_AUTH_URL` (the
+server's base URL, **API path included**) and `AZ_PUBLIC_AUTH_KEY` (the public,
+anonymous key — never a service key; the build refuses one, §4). Every request
+carries `apikey: <public key>` and `authorization: Bearer <access token, or the
+public key>`:
+
+| Call | Request | Success |
+|---|---|---|
+| sign in | `POST /token?grant_type=password {email, password}` | a token response |
+| sign up | `POST /signup?redirect_to=<page> {email, password, data: {name, location?}}` | a token response, or a user alone when the address must be confirmed (`200 {}` semantics) |
+| sign-in link | `POST /otp?redirect_to=<page> {email, create_user: false}` | `200` |
+| reset | `POST /recover?redirect_to=<reset page> {email}` | `200` |
+| set password | `PUT /user {password}` with the recovery session | the user |
+| session read | `GET /user` | the user |
+| refresh | `POST /token?grant_type=refresh_token {refresh_token}` | a token response |
+| sign out | `POST /logout` | `204` |
+| providers | `GET /settings` → enabled ids in `external` | — |
+| provider start | `GET /authorize?provider=<id>&redirect_to=<page>&code_challenge=…&code_challenge_method=s256` | redirect |
+| code exchange | `POST /token?grant_type=pkce {auth_code, code_verifier}` | a token response |
+
+A token response is `{access_token, refresh_token, expires_in | expires_at,
+user: {id, email, user_metadata: {name?, location?}}}`, checked for shape.
+
+**Returning from an email or a provider.** A reset link, a sign-in link or a
+sign-up confirmation comes back to the page it was requested from with the
+session in the URL fragment (`#access_token=…&refresh_token=…&type=…`); a
+provider round-trip comes back with a PKCE `?code=`. The adapter's `landing()`
+(§3.1) reads it, adopts the session, and **removes it from the address** at
+once (`history.replaceState`), so tokens are not left in history, a bookmark
+or a copied link. `type=recovery` opens the reset page's set-new-password
+form; any other landing on a login or sign-up page continues to `?next`
+(same-origin only, §5) or the form's `redirect`. Email links use the fragment
+rather than PKCE deliberately: they are often opened in a new tab, where a
+per-tab verifier would be missing. Provider sign-in stays in one tab and uses
+PKCE S256.
+
+**Session storage and its trade-off.** As §3.2: `sessionStorage` — one tab,
+cleared when it closes. That includes the refresh token (rotated by the
+server on every refresh; renewed a minute before the access token expires,
+and at page load if it already has). Storage any script on the page can read
+means an injected script could keep a session alive — which is why §4.1
+(row-level security) and a page with no third-party script are the
+protection, not this storage. A refused refresh ends the session locally.
+
+**Errors** map onto the closed set from the server's `error_code` (newer) or
+`error` (older): `invalid_credentials`/`invalid_grant` → `invalid_credentials`;
+`user_already_exists`/`email_exists` → `email_taken`; `weak_password`;
+`over_request_rate_limit`/`over_email_send_rate_limit`/HTTP 429 →
+`rate_limited`; `otp_expired`/`flow_state_expired`/`flow_state_not_found`/
+`bad_code_verifier` → `expired_token`; `email_not_confirmed` →
+`email_unconfirmed`; anything else → `unknown`. Only `otp_disabled`,
+`signup_disabled` and `user_not_found` are answered like success on the link
+and reset calls (no enumeration); any other error — a refused redirect, a rate
+limit — is reported, so a misconfiguration is never mistaken for a sent email.
+
+**Provider labels** are the server's enabled ids with a capital first letter —
+text only (§9); this code names no provider.
+
+`pnpm test:cloud-auth` runs this profile against the real server software in
+Docker (its image, database setup and settings are data in
+`docs/reference/token-endpoint-server.json`), with a captured SMTP mailbox.
+
 ## 4. Secret leakage — a hard build error
 
 word-quality-gate §4 governs, and it bites here because **a static bundler
@@ -508,7 +592,9 @@ CONVENTIONS §5.
   "modifiers": ["glass"],
   "props": {
     "adapter":  { "type": "enum", "values": ["hosted", "session", "azbackend", "custom"],
-                  "required": true, "scope": "site", "deferred": ["azbackend"] },
+                  "required": true, "scope": "site" },
+    "profile":  { "type": "enum", "values": ["standard", "token-endpoint"],
+                  "default": "standard", "scope": "site" },
     "title":    { "type": "string", "maxWords": 8 },
     "sub":      { "type": "string", "maxWords": 20 },
     "methods":  { "type": "list", "of": "enum", "values": ["password", "link", "oauth"],
@@ -558,7 +644,8 @@ CONVENTIONS §5.
 | `glass` on an auth page | warning | `auth: 'glass' reduces contrast on credential fields — use the plain surface` |
 | submit label in the denylist | warning | `auth: 'Submit' is not what the button does — name the action, e.g. "Sign in"` |
 | `<Protected>` with no `login` page (AZ2004) | warning | `auth: a protected route has nowhere to send signed-out users — add a page with 'auth login'` |
-| `methods oauth` without `azbackend`/`session` (AZ2005) | error | `auth: 'methods oauth' needs adapter azbackend or session — their server runs the provider sign-in` |
+| `methods oauth` without a server that runs it (AZ2005) | error | `auth: 'methods oauth' needs adapter azbackend, session or hosted — their server runs the provider sign-in` |
+| `methods oauth` on `hosted` with the standard profile (AZ2006) | error | `auth: 'methods oauth' with adapter hosted needs profile token-endpoint — the standard hosted protocol has no provider sign-in` |
 
 **Where the two unsuppressible errors run.** Rule 1 runs twice: `az build`
 scans the environment and the project's `.env` files before it writes
@@ -591,8 +678,9 @@ in AZ is a judgement call with an escape hatch; shipping a database key is not.
    **Decided by the owner, 2026-09-23: yes — overriding the deferral.** It
    ships provider-neutral: generic OpenID Connect and OAuth 2 providers
    configured in the backend's environment, the round-trip run by the
-   backend (§3.4), text-only labels (§9). It needs a cookie adapter's server:
-   `adapter azbackend` or `session` (AZ2005 otherwise).
+   backend (§3.4), text-only labels (§9). It needs a server that runs the
+   round-trip: `adapter azbackend`, `session`, or `hosted` with
+   `profile token-endpoint` (§3.5) — AZ2005/AZ2006 otherwise.
 4. **Should `<Protected>` exist at all in Phase 1**, given §5's admission that it
    protects nothing? *(Recommend: yes, with the header comment stating what it is
    not. Without it every user writes a worse one, without the warning.)*

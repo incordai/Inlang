@@ -76,10 +76,24 @@ export async function openSqlite(path: string): Promise<Db> {
   };
 }
 
-export async function openPostgres(url: string, tls: boolean): Promise<Db> {
+/**
+ * TLS for a database connection: the server certificate is always verified —
+ * against the system's roots, or `ca` when the host publishes its own.
+ */
+const tlsOptions = (tls: boolean, ca?: string) =>
+  (tls ? { ssl: { rejectUnauthorized: true, ...(ca ? { ca } : {}) } } : {});
+
+/**
+ * Pooler-safe by construction: every query is a single statement sent with
+ * an UNNAMED prepared statement (`pool.query(text, params)`), no session
+ * state (SET, advisory locks, LISTEN) and no multi-statement transaction
+ * across calls — so a transaction-mode connection pooler in front of the
+ * database is fine (backend-spec §3.1).
+ */
+export async function openPostgres(url: string, tls: boolean, ca?: string): Promise<Db> {
   const pg = await loadDriver('pg') as { default?: { Pool: new (o: object) => PgPool }; Pool?: new (o: object) => PgPool };
   const Pool = (pg.default?.Pool ?? pg.Pool)!;
-  const pool = new Pool({ connectionString: url, max: 10, ...(tls ? { ssl: { rejectUnauthorized: true } } : {}) });
+  const pool = new Pool({ connectionString: url, max: 10, ...tlsOptions(tls, ca) });
   return {
     dialect: 'postgres',
     all: async (sql, p = []) => (await pool.query(numbered(sql), p)).rows,
@@ -89,12 +103,12 @@ export async function openPostgres(url: string, tls: boolean): Promise<Db> {
   };
 }
 
-export async function openMysql(url: string, tls: boolean): Promise<Db> {
+export async function openMysql(url: string, tls: boolean, ca?: string): Promise<Db> {
   const mysql = await loadDriver('mysql2/promise') as { createPool?: (o: object) => MysqlPool; default?: { createPool: (o: object) => MysqlPool } };
   const createPool = (mysql.createPool ?? mysql.default?.createPool)!;
   const pool = createPool({
     uri: url, connectionLimit: 10, supportBigNumbers: true, bigNumberStrings: false,
-    ...(tls ? { ssl: { rejectUnauthorized: true } } : {}),
+    ...tlsOptions(tls, ca),
   });
   return {
     dialect: 'mysql',

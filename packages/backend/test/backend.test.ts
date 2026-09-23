@@ -39,6 +39,20 @@ test('config: unsafe values are refused — short secret, http origin, credentia
   assert.match(text, /without a path/);
 });
 
+test('config: a database CA file needs TLS required; with it, the path is kept for the start-up read', () => {
+  const base = {
+    AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'https://api.example.org', AZ_ALLOWED_ORIGINS: 'https://www.example.org',
+    AZ_EMAIL_FROM: 'x', AZ_SMTP_HOST: 'h', AZ_SMTP_PORT: '587', AZ_DATABASE_URL: 'postgres://u@db.example.org/app',
+  };
+  const setup = { database: 'postgres', email: 'smtp' } as const;
+  const bad = loadConfig({ ...base, AZ_DATABASE_CA_FILE: './ca.pem' }, setup, 's');
+  assert.match(bad.ok ? '' : bad.problems.join('\n'), /AZ_DATABASE_CA_FILE is only used with AZ_DATABASE_TLS=require/);
+  const good = loadConfig({ ...base, AZ_DATABASE_CA_FILE: './ca.pem', AZ_DATABASE_TLS: 'require' }, setup, 's');
+  assert.ok(good.ok, good.ok ? '' : good.problems.join('\n'));
+  assert.equal(good.ok && good.config.databaseCaFile, './ca.pem');
+  assert.equal(good.ok && good.config.databaseTls, true);
+});
+
 test('config: every provider key is checked, and an oauth2 provider without a verified field is still valid', () => {
   const base = { AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'https://api.example.org', AZ_ALLOWED_ORIGINS: 'https://www.example.org', AZ_EMAIL_FROM: 'x', AZ_SMTP_HOST: 'h', AZ_SMTP_PORT: '587' };
   const bad = loadConfig({ ...base, AZ_OAUTH_PROVIDERS: 'work,Bad_Id', AZ_OAUTH_WORK_TYPE: 'oidc' }, { database: 'sqlite', email: 'smtp' }, 's');

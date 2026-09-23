@@ -65,6 +65,22 @@ test('a hosted site: config reads the PUBLIC env, the guard requires it, App gua
   assert.match(file(p, 'src/theme.css'), /\.az-session \{/);
 });
 
+test('§3.5: the token-endpoint profile imports its own module and lands resets on the reset page', () => {
+  const p = project(site('hosted', '    profile token-endpoint\npage /reset\n  auth reset\n'));
+  const config = file(p, 'src/az-auth/config.ts');
+  assert.match(config, /import \{ createTokenEndpointAdapter \} from "\.\/hosted-token\.ts"/);
+  assert.match(config, /resetPath: "\/reset"/);
+  assert.match(config, /import\.meta\.env\.AZ_PUBLIC_AUTH_URL/);
+  assert.doesNotMatch(config, /createHostedAdapter/, 'only the chosen protocol ships');
+  assert.match(file(p, 'az-vite/guard.ts'), /"AZ_PUBLIC_AUTH_URL","AZ_PUBLIC_AUTH_KEY"/, 'same public variables as standard');
+});
+
+test('CONTROL: the standard profile is the default and imports the standard module only', () => {
+  const config = file(project(site('hosted')), 'src/az-auth/config.ts');
+  assert.match(config, /createHostedAdapter/);
+  assert.doesNotMatch(config, /hosted-token/);
+});
+
 test('a session site uses same-origin routes and needs no env', () => {
   const p = project(site('session'));
   assert.match(file(p, 'src/az-auth/config.ts'), /createSessionAdapter\(\{ base: "\/api\/auth" \}\)/);

@@ -163,10 +163,23 @@ test('§12.3 overridden by the owner: methods oauth compiles on a cookie adapter
 });
 
 test('AZ2005: methods oauth on an adapter with no server to run the round-trip is an error', () => {
-  const r = compileFile(file('    methods oauth\n', '    adapter hosted\n'));
+  const r = compileFile(file('    methods oauth\n', '    adapter custom\n    impl ./adapter.ts\n'));
   const d = r.diagnostics.find((x) => x.code === 'AZ2005');
   assert.ok(d && d.severity === 'error', r.diagnostics.map((x) => x.code).join(','));
-  assert.match(d.message, /needs adapter azbackend or session/);
+  assert.match(d.message, /needs adapter azbackend, session or hosted/);
+});
+
+test('AZ2006: methods oauth on the STANDARD hosted protocol is an error — it has no provider sign-in', () => {
+  const r = compileFile(file('    methods oauth\n', '    adapter hosted\n'));
+  const d = r.diagnostics.find((x) => x.code === 'AZ2006');
+  assert.ok(d && d.severity === 'error', r.diagnostics.map((x) => x.code).join(','));
+  assert.match(d.message, /needs profile token-endpoint/);
+});
+
+test('§3.5 CONTROL: methods oauth compiles on hosted with the token-endpoint profile', () => {
+  const codes = compileFile(file('    methods password oauth\n', '    adapter hosted\n    profile token-endpoint\n'))
+    .diagnostics.map((d) => d.code);
+  assert.ok(!codes.includes('AZ2005') && !codes.includes('AZ2006'), codes.join(','));
 });
 
 test('§3.4 oauth: a hidden provider container with ONE secondary template action, beside the form', () => {

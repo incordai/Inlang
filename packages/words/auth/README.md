@@ -50,6 +50,7 @@ Combine freely.
 | Property | Type | Values | Default | Constraints | Meaning |
 |---|---|---|---|---|---|
 | `adapter` | enum | `hosted` / `session` / `azbackend` / `custom` |  | required, site-level | which adapter role handles the credentials; site-level, once per site |
+| `profile` | enum | `standard` / `token-endpoint` | `standard` | site-level | which protocol a `hosted` provider speaks — the standard one (spec §3.2) or a token endpoint (§3.5, e.g. a managed cloud's sign-in service) |
 | `title` | string |  |  | ≤ 8 words | the form heading (the page's only `<h1>`) |
 | `sub` | string |  |  | ≤ 20 words | one supporting line under the title |
 | `methods` | list | `password` / `link` / `oauth` | `password` | max 3 | sign-in methods offered: `password`, `link`, `oauth` (provider buttons from the backend; needs `azbackend` or `session`, spec §3.4) |
@@ -77,7 +78,7 @@ The full floor is in the spec.
 
 | `adapter` | Configure | Reaches the browser |
 |---|---|---|
-| `hosted` | `AZ_PUBLIC_AUTH_URL` (the provider's base URL) and `AZ_PUBLIC_AUTH_KEY` (its **public / anon** key) in `.env` or the environment — the build fails without them | the public key only |
+| `hosted` | `AZ_PUBLIC_AUTH_URL` (the provider's base URL) and `AZ_PUBLIC_AUTH_KEY` (its **public / anon** key) in `.env` or the environment — the build fails without them. `profile token-endpoint` for a token-endpoint server ([cloud setup](../../../docs/cloud-setup.md)) | the public key only |
 | `session` | your own server answering `/api/auth/*` (spec §3.3) and setting an httpOnly cookie | nothing secret |
 | `custom` | `impl ./auth/adapter.ts` — a module whose default export implements the adapter interface (spec §3.1) | your choice; the build rules below still apply |
 | `azbackend` | the site owner's own backend on its own origin — one public base URL, `AZ_PUBLIC_BACKEND_URL`; protocol in [spec §3.4](../../../docs/auth-block-spec.md) | — |

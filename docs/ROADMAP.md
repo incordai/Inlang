@@ -141,7 +141,13 @@ Adapters only. **We never implement auth** (PRD §6.5).
 **Exit criteria**
 - [ ] working login against a real hosted-provider project — **open**: needs a
       provider account; the same flows pass against a local mock provider
-      speaking the §3.2 protocol (`pnpm test:auth`, in CI)
+      speaking the §3.2 protocol (`pnpm test:auth`, in CI). The owner's chosen
+      cloud is reached through `profile token-endpoint` (auth-spec §3.5, unit
+      tested); `pnpm test:cloud-auth` drives it against the **real
+      open-source server software** that cloud runs, in Docker, with no
+      account — **written but not yet run**: Docker was paused on the
+      development machine when it landed. Tick only after it passes; even then
+      it is the server software, not a hosted account.
 - [x] build **fails** when a service key is present in env (verify-build, by
       name and by token role; `az build` refuses first — cli/test/secrets)
 - [x] bundle scan finds no high-entropy secrets (every generated build scans

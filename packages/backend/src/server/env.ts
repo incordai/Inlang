@@ -46,6 +46,7 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_SQLITE_PATH', about: 'SQLite database file. Created on first start.', when: (s) => s.database === 'sqlite', required: false, example: './data/app.db' },
   { name: 'AZ_DATABASE_URL', about: 'Database connection string, e.g. postgres://user:password@host:5432/db or mysql://user:password@host:3306/db.', when: (s) => s.database !== 'sqlite', required: true, secret: true },
   { name: 'AZ_DATABASE_TLS', about: '`require` to insist on an encrypted database connection (recommended off-host).', when: (s) => s.database !== 'sqlite', required: false, example: 'require' },
+  { name: 'AZ_DATABASE_CA_FILE', about: 'Path to the database host\'s root certificate (PEM), when it is not one your system already trusts — managed databases often publish their own. Needs AZ_DATABASE_TLS=require; the certificate is still verified.', when: (s) => s.database !== 'sqlite', required: false, example: './certs/database-ca.pem' },
   { name: 'AZ_EMAIL_FROM', about: 'The From address of every email this server sends.', when: always, required: true, example: 'Studio <no-reply@example.org>' },
   { name: 'AZ_SMTP_HOST', about: 'SMTP server host.', when: (s) => s.email === 'smtp', required: true },
   { name: 'AZ_SMTP_PORT', about: 'SMTP port: 587 (STARTTLS) or 465 (TLS).', when: (s) => s.email === 'smtp', required: true, example: '587' },
@@ -119,6 +120,8 @@ export interface Config {
   readonly sqlitePath: string;
   readonly databaseUrl: string;
   readonly databaseTls: boolean;
+  /** AZ_DATABASE_CA_FILE: a PEM root certificate to verify the database against, or '' for the system's. */
+  readonly databaseCaFile: string;
   readonly emailFrom: string;
   readonly smtp: { host: string; port: number; user: string; password: string };
   readonly emailApi: { url: string; key: string };
@@ -207,6 +210,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
   }
   const dbTls = (get('AZ_DATABASE_TLS') || '').toLowerCase();
   if (dbTls && dbTls !== 'require' && dbTls !== 'off') problems.push('AZ_DATABASE_TLS must be require or off');
+  if (get('AZ_DATABASE_CA_FILE') && dbTls !== 'require') {
+    problems.push('AZ_DATABASE_CA_FILE is only used with AZ_DATABASE_TLS=require — set that too');
+  }
 
   const smtpPort = Number(get('AZ_SMTP_PORT') || '0');
   if (setup.email === 'smtp' && get('AZ_SMTP_PORT') && (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535)) {
@@ -288,6 +294,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
       sqlitePath: get('AZ_SQLITE_PATH') || './data/app.db',
       databaseUrl: get('AZ_DATABASE_URL'),
       databaseTls: dbTls === 'require',
+      databaseCaFile: get('AZ_DATABASE_CA_FILE'),
       emailFrom: get('AZ_EMAIL_FROM'),
       smtp: { host: get('AZ_SMTP_HOST'), port: smtpPort, user: get('AZ_SMTP_USER'), password: get('AZ_SMTP_PASSWORD') },
       emailApi: { url: get('AZ_EMAIL_API_URL'), key: get('AZ_EMAIL_API_KEY') },

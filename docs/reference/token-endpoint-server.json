@@ -1,0 +1,37 @@
+{
+  "about": "Reference configuration for the open-source identity server that the managed cloud in docs/cloud-setup.md runs (Supabase Auth, formerly GoTrue). scripts/cloud-auth-e2e.mjs reads this file so the test code names no product. {{…}} placeholders are filled in per run; every secret is generated for that run and discarded.",
+  "image": "supabase/auth:v2.197.0",
+  "database": { "image": "postgres:18.6-alpine", "user": "supabase_auth_admin", "schema": "auth" },
+  "initSql": [
+    "CREATE USER {{DB_USER}} NOINHERIT CREATEROLE LOGIN NOREPLICATION PASSWORD '{{DB_PASSWORD}}';",
+    "CREATE SCHEMA IF NOT EXISTS {{DB_SCHEMA}} AUTHORIZATION {{DB_USER}};",
+    "GRANT CREATE ON DATABASE postgres TO {{DB_USER}};",
+    "ALTER USER {{DB_USER}} SET search_path = '{{DB_SCHEMA}}';",
+    "CREATE ROLE anon NOLOGIN;",
+    "CREATE ROLE authenticated NOLOGIN;",
+    "CREATE ROLE service_role NOLOGIN;"
+  ],
+  "port": 9999,
+  "env": {
+    "GOTRUE_API_HOST": "0.0.0.0",
+    "PORT": "9999",
+    "GOTRUE_DB_DRIVER": "postgres",
+    "GOTRUE_DB_DATABASE_URL": "postgres://{{DB_USER}}:{{DB_PASSWORD}}@{{DB_HOST}}:5432/postgres",
+    "GOTRUE_SITE_URL": "{{SITE_URL}}",
+    "GOTRUE_URI_ALLOW_LIST": "{{SITE_URL}}/**",
+    "GOTRUE_JWT_SECRET": "{{JWT_SECRET}}",
+    "GOTRUE_JWT_EXP": "3600",
+    "GOTRUE_JWT_AUD": "authenticated",
+    "GOTRUE_JWT_DEFAULT_GROUP_NAME": "authenticated",
+    "GOTRUE_JWT_ADMIN_ROLES": "service_role",
+    "GOTRUE_DISABLE_SIGNUP": "false",
+    "GOTRUE_EXTERNAL_EMAIL_ENABLED": "true",
+    "GOTRUE_MAILER_AUTOCONFIRM": "true",
+    "GOTRUE_SMTP_HOST": "{{SMTP_HOST}}",
+    "GOTRUE_SMTP_PORT": "{{SMTP_PORT}}",
+    "GOTRUE_SMTP_ADMIN_EMAIL": "no-reply@studio.test",
+    "GOTRUE_SMTP_SENDER_NAME": "Studio",
+    "GOTRUE_RATE_LIMIT_EMAIL_SENT": "1000",
+    "GOTRUE_SMTP_MAX_FREQUENCY": "1s"
+  }
+}

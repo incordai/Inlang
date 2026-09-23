@@ -18,7 +18,7 @@ export type AdapterId = 'hosted' | 'session' | 'azbackend' | 'custom';
 /** The closed set of failures an adapter may report (§3). */
 export const AUTH_ERROR_CODES = [
   'invalid_credentials', 'email_taken', 'weak_password', 'password_mismatch', 'rate_limited', 'expired_token',
-  'oauth_failed', 'email_unverified', 'network', 'unknown',
+  'oauth_failed', 'email_unverified', 'email_unconfirmed', 'network', 'unknown',
 ] as const;
 export type AuthErrorCode = (typeof AUTH_ERROR_CODES)[number];
 
@@ -93,6 +93,13 @@ export interface AuthAdapter {
   providers?(): Promise<readonly OAuthProvider[]>;
   /** §3.4: where a provider button goes; `next` is a same-origin path. */
   oauthStart?(provider: string, next: string, site: string): string;
+  /**
+   * §3.5: what an email link or a provider round-trip brought back to this
+   * page — a sign-in, or a password-recovery session — once the adapter has
+   * read it from the address and adopted it. Null when the page was reached
+   * normally. Adapters whose links carry a `?token=` do not need it.
+   */
+  landing?(): Promise<{ readonly kind: 'signin' | 'recovery' } | null>;
 }
 
 /** Any string an adapter or provider returns, as one of the closed codes. */
@@ -114,6 +121,7 @@ export const ERROR_COPY: Readonly<Record<AuthErrorCode, string>> = {
   expired_token: 'This link has expired, or was opened in a different browser. Request a new one here.',
   oauth_failed: "Signing in with that provider didn't finish. Try again, or use your email.",
   email_unverified: "That provider hasn't verified your email address, so it can't sign you in here. Use your email instead.",
+  email_unconfirmed: 'Confirm your email address first — open the link we sent you, then sign in.',
   network: "We couldn't reach the sign-in service. Check your connection and try again.",
   unknown: 'Something went wrong. Try again in a moment.',
 };

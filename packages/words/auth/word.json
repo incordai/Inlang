@@ -22,6 +22,15 @@
       "required": true,
       "scope": "site"
     },
+    "profile": {
+      "type": "enum",
+      "values": [
+        "standard",
+        "token-endpoint"
+      ],
+      "default": "standard",
+      "scope": "site"
+    },
     "title": {
       "type": "string",
       "maxWords": 8
@@ -165,7 +174,7 @@
       "code": "AZ2005",
       "kind": "pageWhen",
       "severity": "error",
-      "message": "'methods oauth' needs adapter azbackend or session — their server runs the provider sign-in",
+      "message": "'methods oauth' needs adapter azbackend, session or hosted — their server runs the provider sign-in",
       "when": {
         "prop": "methods",
         "includes": "oauth",
@@ -173,8 +182,29 @@
           "prop": "adapter",
           "notIn": [
             "azbackend",
-            "session"
+            "session",
+            "hosted"
           ]
+        }
+      }
+    },
+    {
+      "code": "AZ2006",
+      "kind": "pageWhen",
+      "severity": "error",
+      "message": "'methods oauth' with adapter hosted needs profile token-endpoint — the standard hosted protocol has no provider sign-in",
+      "when": {
+        "prop": "methods",
+        "includes": "oauth",
+        "also": {
+          "prop": "adapter",
+          "value": "hosted",
+          "also": {
+            "prop": "profile",
+            "notIn": [
+              "token-endpoint"
+            ]
+          }
         }
       }
     }

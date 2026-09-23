@@ -115,6 +115,25 @@ On Node 22 it prints an *ExperimentalWarning* at start; the API it uses
 (`DatabaseSync`) is small and wrapped in one file, so a change is one edit.
 The alternative, a native SQLite package, needs a compile or install step.
 
+### 3.1 Managed databases and connection poolers
+
+A managed PostgreSQL (a cloud project's database — docs/cloud-setup.md) is an
+ordinary `database postgres`: its connection string in `AZ_DATABASE_URL`,
+`AZ_DATABASE_TLS=require`, and — when the host signs with its own root
+certificate rather than one your system trusts — that certificate's PEM file
+in `AZ_DATABASE_CA_FILE`. The certificate is always verified; there is no
+setting that turns verification off.
+
+**Transaction-mode poolers** (the pooled port a managed database offers)
+break *named* prepared statements, session settings and transactions that
+span several calls, because consecutive queries may run on different server
+connections. This server uses none of them: every query is one statement sent
+as an *unnamed* prepared statement (`pool.query(text, params)`), with no
+`SET`, advisory lock, `LISTEN` or multi-call transaction. The one-time-use
+token spend is a single conditional `UPDATE`. So the pooled port works; the
+direct port works too. *(Verified by reading the code; a run against a real
+pooler is pending — see docs/cloud-setup.md.)*
+
 ## 4. Configuration — the env file
 
 Every setting lives in the server's environment; `server/src/env.ts` is the
@@ -141,6 +160,7 @@ one schema for all three readers:
 | `AZ_COOKIE_SAMESITE` | optional | `lax` (same site, default) or `none` |
 | `AZ_SQLITE_PATH` | sqlite | database file (`./data/app.db`) |
 | `AZ_DATABASE_URL`, `AZ_DATABASE_TLS` | postgres, mysql | connection string; `require` for TLS |
+| `AZ_DATABASE_CA_FILE` | optional | PEM root certificate for a host that signs with its own (§3.1); needs `AZ_DATABASE_TLS=require` |
 | `AZ_EMAIL_FROM` | always | the From address |
 | `AZ_SMTP_HOST`, `_PORT`, `_USER`, `_PASSWORD` | smtp | the relay |
 | `AZ_EMAIL_API_URL`, `AZ_EMAIL_API_KEY` | api | the email endpoint (§7) |
