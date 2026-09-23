@@ -31,7 +31,7 @@ for (const c of COMBOS) {
   // and only the gutter differs, which hides the distinction being captured.
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.goto(`${BASE}/?tier=full&site=${c.site}&hero=${c.hero}&pattern=${c.pattern}`, {
+  await page.goto(`${BASE}/?az-probe=off&az-tier=full&site=${c.site}&hero=${c.hero}&pattern=${c.pattern}`, {
     waitUntil: 'domcontentloaded',
   });
   await page.waitForSelector('canvas', { state: 'attached', timeout: 30_000 });

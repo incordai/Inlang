@@ -16,21 +16,67 @@ import { CAMERA, computeFraming } from './framing.ts';
 import { resolveLayout, layoutVars, sitePreset, HERO_PRESETS } from './layout.ts';
 import { resolvePattern, patternCss } from './patterns.ts';
 import {
-  TIER_SETTINGS, TierProbe, capabilityGate, forcedTier,
-  type Tier, type ProbeState,
+  LADDER, STATIC_RUNG, TierProbe, capabilityGate, readGateSignals, readForced, startFrom,
+  type Rung, type ProbeSnapshot,
 } from './tiers.ts';
 
-function Strands({ tier, scroll }: { tier: Tier; scroll: React.RefObject<number> }) {
+/**
+ * The post-fx chain this scene renders. The spike draws straight to the
+ * canvas — no composer, no passes — so rung 2 has nothing to remove here. It
+ * is kept as data so the rung's effect is still MEASURED (0 → 0) rather than
+ * assumed, and so a scene that adds a pass puts it on the ladder (§5.2).
+ */
+const POST_CHAIN: readonly string[] = [];
+
+/** §5: deferred rungs wait for this much scroll silence... */
+const SCROLL_IDLE_MS = 200;
+/** ...or this long at most, so a visitor who never stops still gets relief. */
+const DEFER_DEADLINE_MS = 2000;
+
+/** What the renderer is ACTUALLY doing — read back, never assumed (§6.1). */
+interface Measured {
+  pixelRatio: number;
+  postPasses: number;
+  cameraSubscriptions: number;
+  shadowMap: boolean;
+  vertices: number;
+  frameloop: 'always' | 'demand' | 'none';
+  probeCostP95Ms: number;
+}
+
+/** Scroll progress, published to explicit subscribers so they can be counted. */
+type ScrollSubscribers = Set<(progress: number) => void>;
+
+function Strands({ rung, scroll, subscribers, measured }: {
+  rung: Rung;
+  scroll: React.RefObject<number>;
+  subscribers: ScrollSubscribers;
+  measured: React.RefObject<Measured>;
+}) {
   const group = useRef<THREE.Group>(null);
-  const settings = TIER_SETTINGS[tier];
+  const high = rung.lod === 'high';
 
-  // Built once. Rebuilding per frame is the mistake that kills weak devices.
-  const built = useMemo(
-    () => buildStrands({ seed: 0x415a, strands: settings.shells > 8 ? 16 : 10 }),
-    [settings.shells],
-  );
+  // Built once per LOD. Rebuilding per frame is the mistake that kills weak devices.
+  const built = useMemo(() => buildStrands({ seed: 0x415a, strands: high ? 16 : 10 }), [high]);
 
-  const { material, uniforms } = useMemo(() => createStrandMaterial(tier), [tier]);
+  // §5 rung 5: the low LOD also drops the clearcoat pass, the most expensive
+  // shading term in this material (§5.2: every expensive term is on the ladder).
+  const { material, uniforms } = useMemo(() => createStrandMaterial(high ? 'full' : 'lite'), [high]);
+
+  useEffect(() => { measured.current.vertices = built.vertexCount; }, [built, measured]);
+
+  // The camera follows scroll only while subscribed. Rung 6 unsubscribes: the
+  // scene holds its pose, and the count below reads 0.
+  const target = useRef(scroll.current ?? 0);
+  const invalidate = useThree((st) => st.invalidate);
+  useEffect(() => {
+    if (!rung.scrollLinkedCamera) return;
+    const follow = (p: number) => { target.current = p; };
+    follow(scroll.current ?? 0);
+    subscribers.add(follow);
+    return () => { subscribers.delete(follow); };
+  }, [rung.scrollLinkedCamera, scroll, subscribers]);
+  useEffect(() => { invalidate(); }, [rung, invalidate]);
 
   // Framing follows the viewport aspect. A fixed scale overflows on narrow
   // screens — hero-spec §10 requires the behaviour below 768px to be DEFINED,
@@ -45,15 +91,14 @@ function Strands({ tier, scroll }: { tier: Tier; scroll: React.RefObject<number>
   // until the tab dies, and nothing in a demo ever reveals it.
   useEffect(() => () => { disposeStrands(built); material.dispose(); }, [built, material]);
 
-  const damped = useRef(0);
+  const damped = useRef(target.current);
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.1);            // clamp: a stall must not jump
-    const target = scroll.current ?? 0;
-    damped.current += (target - damped.current) * (1 - Math.exp(-6 * dt));
+    damped.current += (target.current - damped.current) * (1 - Math.exp(-6 * dt));
     // Opens already formed: the first paint is what decides whether the page
     // reads as expensive, so scroll COMPLETES the growth rather than starting it.
     uniforms.uGrowth.value = 0.62 + damped.current * 0.48;
-    if (group.current && settings.scrollLinkedCamera) {
+    if (group.current) {
       group.current.rotation.y = -0.35 + damped.current * Math.PI * 0.55;
     }
   });
@@ -101,22 +146,83 @@ function StudioEnv() {
   );
 }
 
-/** Feeds the probe one sample per frame and reports the tier upward. */
-function ProbeDriver({
-  probe, onState,
-}: { probe: TierProbe; onState: (s: ProbeState) => void }) {
-  const { gl } = useThree();
-  const frames = useRef(0);
+/**
+ * Feeds the probe one sample per frame, and times itself doing it — §8.1
+ * check 7 wants the probe's cost measured, not argued.
+ */
+function ProbeDriver({ probe, measured }: { probe: TierProbe; measured: React.RefObject<Measured> }) {
+  const cost = useRef(new Float64Array(600));
+  const i = useRef(0);
+  useEffect(() => () => probe.pause(), [probe]);
   useFrame(() => {
-    probe.sample(performance.now());
-    if (++frames.current % 15 === 0) onState(probe.state);
+    const t0 = performance.now();
+    probe.sample(t0, document.visibilityState === 'visible');
+    cost.current[i.current++ % cost.current.length] = performance.now() - t0;
+    if (i.current % 60 === 0) {
+      const n = Math.min(i.current, cost.current.length);
+      const s = Array.from(cost.current.subarray(0, n)).sort((a, b) => a - b);
+      measured.current.probeCostP95Ms = s[Math.ceil(0.95 * n) - 1];
+    }
   });
-  useEffect(() => () => { gl.dispose(); }, [gl]);
   return null;
 }
 
+/**
+ * `?az-load=<ms>` — burn that much main thread per frame. Spike-only test
+ * input for motion-tiers-spec §8.3: CPU throttling cannot starve this scene
+ * on a fast GPU (its per-frame JS is tiny), so the detector is exercised with
+ * a synthetic per-frame load instead — labelled proxy, like throttling.
+ */
+function SyntheticLoad({ ms }: { ms: number }) {
+  useFrame(() => {
+    const end = performance.now() + ms;
+    while (performance.now() < end) { /* synthetic load */ }
+  });
+  return null;
+}
+
+const SYNTHETIC_LOAD_MS = (() => {
+  const v = Number(new URLSearchParams(window.location.search).get('az-load'));
+  return Number.isFinite(v) && v > 0 ? v : 0;
+})();
+
+/**
+ * Reads the renderer's real state back every frame, and turns a lost context
+ * into the floor (§2 #9). Disposes the renderer on unmount — hero-spec §8.
+ */
+function RendererWatch({ rung, looping, measured, subscribers, onContextLost }: {
+  rung: Rung;
+  looping: boolean;
+  measured: React.RefObject<Measured>;
+  subscribers: ScrollSubscribers;
+  onContextLost: () => void;
+}) {
+  const { gl } = useThree();
+  useEffect(() => {
+    const el = gl.domElement;
+    const lost = (e: Event) => { e.preventDefault(); onContextLost(); };
+    el.addEventListener('webglcontextlost', lost);
+    return () => el.removeEventListener('webglcontextlost', lost);
+  }, [gl, onContextLost]);
+  useEffect(() => () => { gl.dispose(); }, [gl]);
+  const publish = () => {
+    const m = measured.current;
+    m.pixelRatio = gl.getPixelRatio();
+    m.shadowMap = gl.shadowMap.enabled;
+    m.postPasses = rung.postFx ? POST_CHAIN.length : 0;
+    m.cameraSubscriptions = subscribers.size;
+    m.frameloop = looping ? 'always' : 'demand';
+  };
+  useEffect(publish);
+  useFrame(publish);
+  return null;
+}
+
+declare global {
+  interface Window { __AZ_TIER__?: unknown }
+}
+
 export function Hero() {
-  const pinned = useMemo(() => forcedTier(), []);
 
   /**
    * The FRAME, resolved before anything is laid out.
@@ -157,55 +263,95 @@ export function Hero() {
   }, [layout, pattern]);
 
   /**
-   * The entry tier is resolved ONCE, synchronously, before the probe exists.
+   * The entry rung is resolved ONCE, synchronously, before the probe exists.
    *
    * This ordering is load-bearing. An earlier version set the tier from the
    * gate in an effect while constructing the probe from React's initial state,
    * so the probe started at `full` and its polling loop wrote that back over
    * the gate's decision — a `prefers-reduced-motion` visitor was served the
-   * full scene. The gate is a ceiling, not a suggestion: the probe may only
-   * ever move DOWN from it.
+   * full scene. The gate is a ceiling, not a suggestion.
    */
-  const entry = useMemo(
-    () => (pinned
-      ? { tier: pinned, reasons: [`forced via ?tier=${pinned}`] }
-      : capabilityGate()),
-    [pinned],
-  );
+  const start = useMemo(() => {
+    const signals = readGateSignals();
+    const gate = capabilityGate(signals);
+    return { signals, gate, ...startFrom(gate, readForced()) };
+  }, []);
 
-  // Seeded from `entry` on the very first render, so a disqualified visitor
-  // never sees even one frame of a canvas they should not get.
-  const [tier, setTier] = useState<Tier>(entry.tier);
-  const [probeState, setProbeState] = useState<ProbeState | null>(null);
-  const [log, setLog] = useState<string[]>([]);
-  const gateReasons = entry.reasons;
+  // The engine is the authority on the rung; this is what the page SHOWS,
+  // which may lag it while a deferred rung waits for a quiet moment (§5).
+  const [applied, setApplied] = useState(start.rung);
+  const [snap, setSnap] = useState<ProbeSnapshot | null>(null);
   const scroll = useRef(0);
+  const lastScrollAt = useRef(0);
+  const subscribers = useMemo<ScrollSubscribers>(() => new Set(), []);
+  const measured = useRef<Measured>({
+    pixelRatio: 0, postPasses: 0, cameraSubscriptions: 0, shadowMap: false,
+    vertices: 0, frameloop: 'none', probeCostP95Ms: 0,
+  });
 
   const probe = useMemo(() => {
-    if (pinned) return null;
-    return new TierProbe(entry.tier, (t, why) =>
-      setLog((l) => [...l, `${new Date().toISOString().slice(11, 19)}  → ${t}  (${why})`]),
-    );
-    // Keyed on the ENTRY tier: the probe owns every subsequent change, so
-    // re-creating it on each tier change would reset the ratchet and
+    if (!start.probe || start.rung === STATIC_RUNG) return null;
+    return new TierProbe({ rung: start.rung, ceilingRung: start.ceilingRung, promotable: start.promotable });
+    // One probe per page view: re-creating it would reset the ratchet and
     // reintroduce the oscillation it exists to prevent.
-  }, [pinned, entry.tier]);
+  }, [start]);
 
-  // Mirror the probe's tier into React state without re-creating the probe.
+  const onContextLost = useMemo(() => () => {
+    probe?.contextLost();
+    setApplied(STATIC_RUNG);       // nothing to defer: the canvas is already dead
+  }, [probe]);
+
+  // Follow the engine. Rungs 1–2 and the one promotion apply at once; 3–7
+  // wait for SCROLL_IDLE_MS of scroll silence, or DEFER_DEADLINE_MS at most.
   useEffect(() => {
     if (!probe) return;
+    let pendingSince: number | null = null;
     const id = setInterval(() => {
-      const s = probe.state;
-      setProbeState(s);
-      setTier((cur) => (s.tier !== cur ? s.tier : cur));
-    }, 250);
+      const s = probe.engine.snapshot;
+      setSnap(s);
+      setApplied((cur) => {
+        if (s.rung === cur) { pendingSince = null; return cur; }
+        if (s.rung < cur || !LADDER[s.rung].deferred) { pendingSince = null; return s.rung; }
+        const now = performance.now();
+        pendingSince ??= now;
+        const quiet = now - lastScrollAt.current >= SCROLL_IDLE_MS;
+        if (quiet || now - pendingSince >= DEFER_DEADLINE_MS) { pendingSince = null; return s.rung; }
+        return cur;
+      });
+    }, 100);
     return () => clearInterval(id);
   }, [probe]);
+
+  const rung = LADDER[applied];
+  const tier = rung.tier;
+  // §3.6 measures two windows WHILE RENDERING `lite`, before the scroll-link
+  // engages; §5.1 drops `lite` to on-demand frames. Both hold only if the loop
+  // keeps running until the promotion question is settled (ratchet armed).
+  const armed = snap?.armed ?? !start.promotable;
+  const looping = rung.scrollLinkedCamera || (!!probe && !armed);
+
+  // §9 instrumentation. The spike ships its readout in every build; a real
+  // target would keep this behind import.meta.env.DEV.
+  useEffect(() => {
+    const id = setInterval(() => {
+      window.__AZ_TIER__ = {
+        entry: start.gate.entry, ceiling: start.gate.ceiling, promotable: start.promotable,
+        reasons: start.reasons, missing: start.gate.missing, signals: start.signals,
+        probe: !!probe, decidedRung: probe?.engine.rung ?? applied, rung: applied, tier,
+        canvas: rung.canvas, ...measured.current,
+        cameraSubscriptions: subscribers.size,
+        engine: probe?.engine.snapshot ?? null,
+      };
+    }, 100);
+    return () => clearInterval(id);
+  }, [start, probe, applied, tier, rung, subscribers]);
 
   useEffect(() => {
     const onScroll = () => {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       scroll.current = max > 0 ? window.scrollY / max : 0;
+      lastScrollAt.current = performance.now();
+      for (const follow of subscribers) follow(scroll.current);
 
       // Fade the 3D layer out as the reader leaves the hero. Written as a CSS
       // custom property rather than React state: this runs on every scroll
@@ -230,9 +376,10 @@ export function Hero() {
       window.removeEventListener('scroll', onScroll);
       document.documentElement.style.removeProperty('--stage-opacity');
     };
-  }, []);
+  }, [subscribers]);
 
-  const settings = TIER_SETTINGS[tier];
+  const gateReasons = start.reasons;
+  const dpr = Math.min(window.devicePixelRatio || 1, rung.dprCap);
 
   return (
     <>
@@ -253,15 +400,24 @@ export function Hero() {
       </header>
 
       <div className="stage" aria-hidden="true">
-        {tier !== 'static' ? (
+        {rung.canvas ? (
           <Canvas
-            dpr={settings.dpr}
+            dpr={dpr}
+            shadows={rung.shadows}
+            // §5.1 step 3: once the camera stops following scroll, frames are
+            // drawn only on demand, so the scene's remaining cost is zero.
+            frameloop={looping ? 'always' : 'demand'}
             gl={{ antialias: false, powerPreference: 'high-performance' }}
             camera={{ position: CAMERA.position, fov: CAMERA.fov }}
           >
             <StudioEnv />
-            <Strands tier={tier} scroll={scroll} />
-            {probe && <ProbeDriver probe={probe} onState={setProbeState} />}
+            <Strands rung={rung} scroll={scroll} subscribers={subscribers} measured={measured} />
+            <RendererWatch rung={rung} looping={looping} measured={measured}
+                           subscribers={subscribers} onContextLost={onContextLost} />
+            {/* An on-demand loop has no frame rate to measure: sampling its
+                gaps would read an idle page as a frozen one. */}
+            {probe && looping && <ProbeDriver probe={probe} measured={measured} />}
+            {SYNTHETIC_LOAD_MS > 0 && <SyntheticLoad ms={SYNTHETIC_LOAD_MS} />}
           </Canvas>
         ) : (
           <div className="poster" role="img"
@@ -273,21 +429,28 @@ export function Hero() {
         <h2>Probe</h2>
         <dl>
           <div><dt>tier</dt><dd data-tier={tier}>{tier}</dd></div>
-          <div><dt>entry gate</dt><dd>{gateReasons.length ? gateReasons.join(', ') : 'no disqualifiers'}</dd></div>
-          <div><dt>dpr</dt><dd>{settings.dpr}</dd></div>
+          <div><dt>rung</dt><dd data-rung={applied}>{applied} — {rung.label}</dd></div>
+          <div><dt>entry gate</dt><dd>{gateReasons.length ? gateReasons.join(', ') : 'no disqualifiers'}{start.gate.missing.length ? ` · missing: ${start.gate.missing.join(', ')}` : ''}</dd></div>
+          <div><dt>ceiling</dt><dd>{start.gate.ceiling}{start.promotable ? ' (one promotion allowed)' : ''}</dd></div>
+          <div><dt>dpr</dt><dd>{rung.canvas ? dpr : '—'}</dd></div>
           <div><dt>site width</dt><dd data-site={layout.site}>{layout.site} — {sitePreset(layout.site, layout.size).label}</dd></div>
           <div><dt>hero width</dt><dd data-hero={layout.hero}>{layout.hero} — {HERO_PRESETS[layout.hero].label}</dd></div>
           <div><dt>pattern</dt><dd data-pattern={pattern.shape}>{pattern.shape} · {pattern.origin}</dd></div>
-          <div><dt>settled</dt><dd>{probeState?.settled ? 'yes' : 'settling…'}</dd></div>
-          <div><dt>samples</dt><dd>{probeState?.samples ?? 0}</dd></div>
-          <div><dt>p50 interval</dt><dd>{probeState ? `${probeState.p50.toFixed(1)} ms` : '—'}</dd></div>
-          <div><dt>p95 interval</dt><dd>{probeState ? `${probeState.p95.toFixed(1)} ms` : '—'}</dd></div>
+          <div><dt>settled</dt><dd>{snap?.settled ? 'yes' : probe ? 'settling…' : 'probe off'}</dd></div>
+          <div><dt>samples</dt><dd>{snap?.samples ?? 0}</dd></div>
+          <div><dt>windows judged</dt><dd>{snap?.windowsJudged ?? 0}</dd></div>
+          <div><dt>ratchet</dt><dd>{snap ? (snap.armed ? 'armed' : 'not armed — one promotion possible') : '—'}</dd></div>
+          <div><dt>p50 interval</dt><dd>{snap?.lastWindow ? `${snap.lastWindow.p50.toFixed(1)} ms` : '—'}</dd></div>
+          <div><dt>p95 interval</dt><dd>{snap?.lastWindow ? `${snap.lastWindow.p95.toFixed(1)} ms` : '—'}</dd></div>
         </dl>
         <h3>Ratchet log</h3>
-        <pre>{log.length ? log.join('\n') : 'no downgrades — tier held'}</pre>
+        <pre>{snap?.transitions.length
+          ? snap.transitions.map((x) => `t+${(x.atMs / 1000).toFixed(1)}s  rung ${x.from}→${x.to} (${LADDER[x.to].label}) · ${x.reason}`).join('\n')
+          : 'no transitions — rung held'}</pre>
         <p className="hint">
-          Pin a tier with <code>?tier=full</code>, <code>?tier=lite</code> or
-          <code>?tier=static</code> — this is what keeps visual snapshots deterministic.
+          Pin a tier with <code>?az-tier=full|lite|static</code> or a rung with{' '}
+          <code>?az-rung=0…7</code>; add <code>&amp;az-probe=off</code> to freeze it — this
+          is what keeps visual snapshots deterministic.
           The frame is independent of it: <code>?site=</code>{' '}
           <code>full|gap|center</code> (with <code>?size=</code>{' '}
           <code>wide|default|narrow|reading</code> for <code>center</code>) and <code>?hero=</code>{' '}

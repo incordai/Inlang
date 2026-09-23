@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 const b = await chromium.launch();
-for (const q of ['tier=full&site=wide&hero=bleed', 'tier=full&site=narrow&hero=container']) {
+for (const q of ['az-probe=off&az-tier=full&site=wide&hero=bleed', 'az-probe=off&az-tier=full&site=narrow&hero=container']) {
   const p = await b.newPage();
   await p.setViewportSize({ width: 1440, height: 900 });
   await p.goto(`http://127.0.0.1:4173/?${q}`, { waitUntil: 'domcontentloaded' });

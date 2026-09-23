@@ -44,7 +44,7 @@ async function measure(
 ) {
   const page = await browser.newPage();
   await page.setViewportSize({ width: screen.w, height: screen.h });
-  await page.goto(`${BASE}/?tier=static&site=${site}&size=${size}&hero=${hero}`, {
+  await page.goto(`${BASE}/?az-probe=off&az-tier=static&site=${site}&size=${size}&hero=${hero}`, {
     waitUntil: 'domcontentloaded',
   });
   await page.waitForSelector('.readout');
@@ -130,7 +130,7 @@ console.log('\nThe frame — three modes, every screen\n');
 {
   const page = await browser.newPage();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${BASE}/?tier=static&site=center`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE}/?az-probe=off&az-tier=static&site=center`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.readout');
   await page.addStyleTag({
     content: '.readout { width: 3000px !important; max-width: none !important; }',

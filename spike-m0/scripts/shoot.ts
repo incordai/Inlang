@@ -25,7 +25,7 @@ for (const vp of VIEWPORTS) {
   const page = await browser.newPage();
   await page.setViewportSize({ width: vp.width, height: vp.height });
   await page.emulateMedia({ colorScheme: 'dark' });
-  const q = process.env.SHOOT_QUERY ?? 'tier=full';
+  const q = process.env.SHOOT_QUERY ?? 'az-probe=off&az-tier=full';
   await page.goto(`${BASE}/?${q}`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('canvas', { timeout: 15_000 });
   await page.waitForTimeout(3200);               // let growth settle past t=0

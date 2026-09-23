@@ -50,8 +50,9 @@ async function run() {
   /* 2. A WebGL context is genuinely obtained and the canvas has real pixels.
         This is the thing no headless logic test can assert. */
   {
-    const page = await browser.newPage();
-    await page.goto(`${BASE}/?tier=full`, { waitUntil: 'domcontentloaded' });
+    // DPR 3, so the rung-0 cap (2.0) has something to clamp.
+    const page = await browser.newPage({ deviceScaleFactor: 3 });
+    await page.goto(`${BASE}/?az-probe=off&az-tier=full`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('canvas', { timeout: 10_000 });
     // R3F sizes the canvas from a resize observer AFTER mount; 300x150 is the
     // HTML default and reading it before the observer fires measures nothing.
@@ -69,9 +70,9 @@ async function run() {
     });
     check('canvas exists with a backing store', !!info && info.w > 0 && info.h > 0,
           info ? `${info.w}x${info.h} backing, ${info.cssW}x${info.cssH} css` : 'no canvas');
-    // DPR clamp: backing/css must equal the tier's dpr (1.75 at full).
+    // motion-tiers-spec §5 rung 0: the device ratio is capped at 2.0, never raised.
     const ratio = info ? info.w / info.cssW : 0;
-    check('DPR clamped to 1.75 at `full`', Math.abs(ratio - 1.75) < 0.01, `ratio=${ratio.toFixed(3)}`);
+    check('rung 0 caps a DPR-3 device at 2.0', Math.abs(ratio - 2.0) < 0.01, `ratio=${ratio.toFixed(3)}`);
     await page.close();
   }
 
@@ -79,13 +80,13 @@ async function run() {
         (motion-tiers-spec §6, word-quality-gate §1 checks 3/6/7). */
   for (const t of ['full', 'lite', 'static'] as const) {
     const page = await browser.newPage();
-    await page.goto(`${BASE}/?tier=${t}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE}/?az-probe=off&az-tier=${t}`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1200);
     const shown = (await readout(page, 'tier')).trim();
     const hasCanvas = (await page.locator('canvas').count()) > 0;
     const expectCanvas = t !== 'static';
-    check(`?tier=${t} pins the tier`, shown === t, `readout says "${shown}"`);
-    check(`?tier=${t} canvas ${expectCanvas ? 'present' : 'absent'}`,
+    check(`?az-probe=off&az-tier=${t} pins the tier`, shown === t, `readout says "${shown}"`);
+    check(`?az-probe=off&az-tier=${t} canvas ${expectCanvas ? 'present' : 'absent'}`,
           hasCanvas === expectCanvas);
     await page.screenshot({ path: `dist-shots/tier-${t}.png`, fullPage: false });
     await page.close();
@@ -127,24 +128,29 @@ async function run() {
     await page.close();
   }
 
-  /* 7. The probe actually runs: it must settle and accumulate samples. */
+  /* 7. The probe actually runs: it must settle and accumulate samples.
+        On the GPU-backed browser: the default headless shell renders with
+        SwiftShader at ~600ms a frame, and §3.2's 60 warm-up frames then take
+        ~36s — correct behaviour, but not what this check is about. */
   {
-    const page = await browser.newPage();
+    const gpu = await chromium.launch({ channel: 'chromium' });
+    const page = await gpu.newPage();
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(4000);
     const settled = (await readout(page, 'settled')).trim();
     const samples = parseInt((await readout(page, 'samples')).trim(), 10);
+    const windows = parseInt((await readout(page, 'windows judged')).trim(), 10);
     const p95 = (await readout(page, 'p95')).trim();
-    check('probe settles and collects samples', settled === 'yes' && samples > 0,
-          `settled=${settled}, samples=${samples}, p95=${p95}`);
-    await page.close();
+    check('probe settles and collects samples', settled === 'yes' && (samples > 0 || windows > 0),
+          `settled=${settled}, samples=${samples}, windows=${windows}, p95=${p95}`);
+    await gpu.close();
   }
 
   /* 8. dispose() on unmount — hero-spec §8. Navigating away must not leave a
         live WebGL context behind. Verified by context count, not by hope. */
   {
     const page = await browser.newPage();
-    await page.goto(`${BASE}/?tier=full`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE}/?az-probe=off&az-tier=full`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('canvas');
     await page.waitForTimeout(1500);
     const lost = await page.evaluate(async () => {
@@ -166,7 +172,7 @@ async function run() {
   {
     const page = await browser.newPage();
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${BASE}/?tier=static`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE}/?az-probe=off&az-tier=static`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.hero .sub');
 
     // Count VISUAL lines, not rect fragments. getClientRects() returns one
@@ -223,7 +229,7 @@ async function run() {
   {
     const page = await browser.newPage();
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${BASE}/?tier=static`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE}/?az-probe=off&az-tier=static`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.hero .sub');
     await page.addStyleTag({ content: '.hero { max-width: 26ch !important; }' });
     await page.waitForTimeout(200);

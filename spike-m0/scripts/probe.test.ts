@@ -1,18 +1,18 @@
 /**
- * A1b probe: does the runtime tier probe pick correctly, and never oscillate?
+ * A1b — the capability gate, forcing, and the probe's behaviour around the
+ * §8.2 decision rows (those live in decision.test.ts).
  *
- * ROADMAP.md M0 exit criteria — "the probe selects the right tier on every
- * device available, including a deliberately throttled one" and "zero tier
- * oscillation across a 60s scroll; downgrade ratchets one way".
- *
- * This drives TierProbe.sample() with synthetic frame intervals, which is the
- * real mechanism — a slow device IS a sequence of long frame intervals. Every
- * assertion has a control that proves it can fail.
+ * The gate and the engine are pure over their inputs, so every row of the
+ * motion-tiers-spec §2 table is driven directly. Every assertion has a control
+ * that proves it can fail.
  *
  * Run: pnpm test:probe
  */
 
-import { TierProbe, DEFAULT_PROBE, type Tier } from '../src/tiers.ts';
+import {
+  capabilityGate, startFrom, readForced, ProbeEngine, TierProbe, simulate, LADDER,
+  PROBE, STATIC_RUNG, TIER_ENTRY_RUNG, type GateSignals, type TraceStep,
+} from '../src/tiers.ts';
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -20,147 +20,148 @@ const check = (name: string, ok: boolean, detail = '') => {
   if (!ok) failures++;
 };
 
-/** Feed `count` frames of `intervalMs`, starting after the settle period. */
-function drive(probe: TierProbe, intervalMs: number, count: number, t0 = 0): number {
-  let t = t0;
-  for (let i = 0; i < count; i++) {
-    probe.sample(t);
-    t += intervalMs;
-  }
-  return t;
+const CAPABLE: GateSignals = {
+  reducedMotion: false, webgl2: true, accelerated: true, cores: 8, deviceMemory: 8, saveData: false,
+};
+const gate = (over: Partial<GateSignals>) => capabilityGate({ ...CAPABLE, ...over });
+const summary = (g: ReturnType<typeof capabilityGate>) =>
+  `entry ${g.entry}, ceiling ${g.ceiling}${g.promotable ? ', promotable' : ''} [${g.reasons.join(', ')}]`;
+
+console.log('\nA1b — capability gate (§2)\n');
+
+check('CONTROL: every signal capable → full/full, not promotable',
+  summary(gate({})) === 'entry full, ceiling full []');
+for (const [label, over, entry, ceiling] of [
+  ['#1 reduced motion', { reducedMotion: true }, 'static', 'static'],
+  ['#2 no WebGL2', { webgl2: false }, 'static', 'static'],
+  ['#3 software raster', { accelerated: false }, 'lite', 'lite'],
+  ['#4 cores ≤ 4', { cores: 4 }, 'full', 'lite'],
+  ['#5 cores ≤ 1', { cores: 1 }, 'static', 'static'],
+  ['#6 memory ≤ 2', { deviceMemory: 2 }, 'full', 'lite'],
+  ['#7 memory ≤ 1', { deviceMemory: 1 }, 'static', 'static'],
+  ['#8 save-data', { saveData: true }, 'static', 'static'],
+] as const) {
+  const g = gate(over);
+  // A ceiling below the entry is clamped: `entry full, ceiling lite` enters lite.
+  const want = ceiling === 'lite' && entry === 'full' ? 'lite' : entry;
+  check(`${label} → entry ${want}, ceiling ${ceiling}`,
+    g.entry === want && g.ceiling === ceiling && !g.promotable, summary(g));
 }
 
-function newProbe(entry: Tier = 'full') {
-  const log: Array<{ tier: Tier; why: string }> = [];
-  const p = new TierProbe(entry, (tier, why) => log.push({ tier, why }));
-  return { p, log };
-}
-
-/** Frames needed to clear the settle window at a given interval. */
-const settleFrames = (ms: number) => Math.ceil(DEFAULT_PROBE.settleMs / ms) + 2;
-
-console.log('\nA1b — runtime tier probe\n');
-
-/* 1. A fast device must NOT be downgraded. This is the false-positive case,
-      and it is the one that would quietly make every site worse. */
 {
-  const { p, log } = newProbe();
-  drive(p, 16, settleFrames(16) + 600); // ~60fps for ~10s
-  check('60fps device holds `full`', p.state.tier === 'full' && log.length === 0,
-        `p95=${p.state.p95.toFixed(1)}ms, ${log.length} downgrades`);
+  const g = gate({ deviceMemory: undefined });
+  check('§2.1 missing deviceMemory → entry lite, ceiling full, promotable once',
+    g.entry === 'lite' && g.ceiling === 'full' && g.promotable, `${summary(g)} missing=${g.missing}`);
+  const h = gate({ cores: undefined, deviceMemory: 2 });
+  check('§2.1 missing signal with a measured cap → lite/lite, NOT promotable',
+    h.entry === 'lite' && h.ceiling === 'lite' && !h.promotable, summary(h));
+  const z = gate({ cores: undefined });
+  check('§2.1 an unreadable core count is missing, never 0 (0 ≤ 1 would force static)',
+    z.entry === 'lite' && z.missing.includes('hardwareConcurrency'), summary(z));
 }
 
-/* 2. A genuinely slow device MUST be downgraded. */
+console.log('\nForcing (§6.1)\n');
 {
-  const { p, log } = newProbe();
-  drive(p, 50, settleFrames(50) + 400); // ~20fps
-  check('20fps device downgrades off `full`', p.state.tier !== 'full' && log.length > 0,
-        `→ ${p.state.tier} after ${log.length} step(s)`);
+  const f = readForced('?az-tier=lite&az-probe=off');
+  check('?az-tier=lite&az-probe=off parses', f.tier === 'lite' && f.probeOff && f.rung === null);
+  check('?az-rung=4 parses; junk rung ignored',
+    readForced('?az-rung=4').rung === 4 && readForced('?az-rung=9').rung === null);
+  const s = startFrom(gate({}), readForced('?az-tier=lite'));
+  check('forcing lite on a capable device enters rung 6 with the probe on',
+    s.rung === 6 && s.probe && !s.promotable, s.reasons.join(', '));
+  const up = startFrom(gate({ webgl2: false }), readForced('?az-tier=full'));
+  check('?az-tier=full cannot force above the ceiling (no WebGL2 → static)',
+    up.rung === STATIC_RUNG, up.reasons.join(', '));
+  const rm = startFrom(gate({ reducedMotion: true }), readForced('?az-rung=0&az-probe=off'));
+  check('reduced motion is not overridable, even by ?az-rung=0', rm.rung === STATIC_RUNG);
+  const ok = startFrom(gate({}), readForced('?az-rung=3&az-probe=off'));
+  check('CONTROL: an allowed forced rung is honoured, probe off', ok.rung === 3 && !ok.probe);
 }
 
-/* 3. CONTROL for 1 and 2 together: the threshold must actually discriminate.
-      If both cases produced the same tier, tests 1 and 2 would be vacuous. */
+console.log('\nLadder (§5)\n');
 {
-  const fast = newProbe(); drive(fast.p, 16, settleFrames(16) + 600);
-  const slow = newProbe(); drive(slow.p, 50, settleFrames(50) + 400);
-  check('CONTROL: fast and slow reach DIFFERENT tiers',
-        fast.p.state.tier !== slow.p.state.tier,
-        `fast=${fast.p.state.tier} slow=${slow.p.state.tier}`);
+  const dpr = LADDER.map((r) => r.dprCap).join(' ');
+  check('DPR caps step 2.0 → 1.5 (rung 1) → 1.0 (rung 4)', dpr === '2 1.5 1.5 1.5 1 1 1 1', dpr);
+  check('each rung removes exactly the one thing §5 names, cumulatively',
+    LADDER.every((r, i) => i === 0 || (
+      (r.postFx <= LADDER[i - 1].postFx) && (r.shadows <= LADDER[i - 1].shadows)
+      && (r.scrollLinkedCamera <= LADDER[i - 1].scrollLinkedCamera) && (r.canvas <= LADDER[i - 1].canvas))));
+  check('tiers: rungs 0–5 full, 6 lite, 7 static',
+    LADDER.map((r) => r.tier[0]).join('') === 'ffffffls');
+  check('rungs 1–2 immediate, 3–7 deferred to a quiet moment',
+    LADDER.map((r) => (r.deferred ? 'd' : 'i')).join('') === 'iiiddddd');
 }
 
-/* 4. The settle period must suppress load jank. A burst of terrible frames
-      inside the settle window must not trip anything. */
+console.log('\nProbe behaviour around the §8.2 rows\n');
+
+const frames = (ms: number, n: number): TraceStep[] => Array(n).fill(ms);
+
+/* Load jank inside the settle period must never count (§3.2). */
 {
-  const { p, log } = newProbe();
+  const s = simulate([...frames(55, 25), ...frames(16.7, 3000)], { rung: 0 });
+  check('load jank inside the settle period is ignored', s.transitions.length === 0 && s.settled);
+  const c = simulate([...frames(16.7, 200), ...frames(55, 1000)], { rung: 0 });
+  check('CONTROL: the same 55ms frames after settle do count', c.transitions.length > 0);
+}
+
+/* The browser adapter: a hidden tab's gap is not a frame. */
+{
+  const p = new TierProbe({ rung: 0 });
   let t = 0;
-  for (let i = 0; i < 20; i++) { p.sample(t); t += 55; } // 20 awful frames, ~1.1s
-  check('load jank inside settle window is ignored',
-        p.state.tier === 'full' && log.length === 0,
-        `${log.length} downgrades during settle`);
+  for (let i = 0; i < 2000; i++) { p.sample(t, true); t += 16.7; }
+  p.sample(t, false);                     // tab hidden
+  t += 30_000;                            // 30s away
+  for (let i = 0; i < 2000; i++) { p.sample(t, true); t += 16.7; }
+  const s = p.engine.snapshot;
+  check('a 30s hidden-tab gap is not a frame and trips nothing',
+    s.transitions.length === 0 && s.outliers === 0, `outliers=${s.outliers}`);
+  const q = new TierProbe({ rung: 0 });
+  let u = 0;
+  for (let i = 0; i < 2000; i++) { q.sample(u, true); u += 16.7; }
+  u += 30_000;                            // same gap, but the page never said it was hidden
+  for (let i = 0; i < 2000; i++) { q.sample(u, true); u += 16.7; }
+  check('CONTROL: the same gap reported as visible is caught as an outlier',
+    q.engine.snapshot.outliers === 1, `outliers=${q.engine.snapshot.outliers}`);
 }
 
-/* 5. The one-way ratchet: no upgrade, ever. Drive it slow until it drops,
-      then drive it fast for a long time and assert it does NOT climb back. */
+/* Closed loop: in a real page each rung makes frames faster. A device that
+   holds 20ms only at low DPR must REST there, not fall through to static. */
 {
-  const { p } = newProbe();
-  let t = drive(p, 50, settleFrames(50) + 400);
-  const dropped = p.state.tier;
-  drive(p, 8, 1200, t); // 120fps for a long stretch
-  check('ratchet is one-way — fast frames never promote',
-        p.state.tier === dropped && dropped !== 'full',
-        `stayed at ${p.state.tier} after 1200 fast frames`);
+  const costOf = (rung: number) => [26, 24, 23, 22, 18, 16, 12, 0][rung];
+  const e = new ProbeEngine({ rung: 0 });
+  for (let i = 0; i < 20_000; i++) e.sample(costOf(e.rung));
+  check('closed loop: a device that holds the floor at rung 4 rests at rung 4',
+    e.rung === 4, `path ${e.snapshot.transitions.map((x) => x.to).join('→')}`);
+  const worse = (rung: number) => [60, 58, 55, 52, 48, 45, 40, 0][rung];
+  const f = new ProbeEngine({ rung: 0 });
+  for (let i = 0; i < 40_000 && f.rung < STATIC_RUNG; i++) f.sample(worse(f.rung));
+  check('CONTROL: a device that fails every rung continues to static',
+    f.rung === STATIC_RUNG, `ended at rung ${f.rung}`);
 }
 
-/* 6. No oscillation across a long alternating run — the failure the ratchet
-      exists to prevent. Alternating good/bad must produce a bounded number of
-      transitions, never a flapping stream. */
+/* Context loss goes straight to the floor from anywhere (§2 #9). */
 {
-  const { p, log } = newProbe();
-  let t = 0;
-  for (let i = 0; i < 4000; i++) {           // ~60s of frames
-    p.sample(t);
-    t += i % 200 < 100 ? 12 : 45;            // alternating fast / slow blocks
-  }
-  check('no oscillation over ~60s alternating load',
-        log.length <= 2,                     // at most full→lite→static
-        `${log.length} transitions: ${log.map((l) => l.tier).join(' → ') || 'none'}`);
+  const s = simulate([...frames(16.7, 500), 'contextlost'], { rung: 0 });
+  check('webglcontextlost → static immediately', s.rung === STATIC_RUNG,
+    s.transitions.map((x) => x.reason).join(', '));
 }
 
-/* 7. `static` is the floor — it must not attempt a further downgrade. */
+/* Post-transition settle: the window after a rung change is not judged. */
 {
-  const { p, log } = newProbe('static');
-  drive(p, 200, 400); // catastrophically slow
-  check('`static` is the floor, no further downgrade',
-        p.state.tier === 'static' && log.length === 0);
+  const e = new ProbeEngine({ rung: 0 });
+  for (let i = 0; i < 200; i++) e.sample(16.7);
+  const before = e.snapshot.windowsJudged;
+  for (let i = 0; i < PROBE.windowSize * PROBE.confirmWindows; i++) e.sample(30);
+  const atDrop = e.snapshot.windowsJudged;
+  for (let i = 0; i < PROBE.windowSize; i++) e.sample(30);
+  check('the window after a rung change is discarded, not judged',
+    e.rung === 1 && e.snapshot.windowsJudged === atDrop,
+    `judged ${before} → ${atDrop} → ${e.snapshot.windowsJudged}`);
 }
 
-/* 8. A backgrounded tab produces one enormous interval. That is not device
-      capability and must not trip the ratchet. */
-{
-  const { p, log } = newProbe();
-  let t = drive(p, 16, settleFrames(16) + 200);
-  p.sample(t + 30000);                        // tab hidden for 30s
-  drive(p, 16, 200, t + 30016);
-  check('a 30s tab-hidden gap does not trip the ratchet',
-        p.state.tier === 'full' && log.length === 0,
-        `${log.length} downgrades`);
-}
-
-/* 9. CONTROL for 8: prove the probe WOULD have downgraded on sustained slow
-      frames at that same point, so test 8 is not passing by accident. */
-{
-  const { p, log } = newProbe();
-  let t = drive(p, 16, settleFrames(16) + 200);
-  drive(p, 50, 400, t);                       // sustained slow, not one spike
-  check('CONTROL: sustained slow frames at the same point DO downgrade',
-        log.length > 0, `${log.length} downgrade(s)`);
-}
-
-/* 10. CLOSED LOOP — the realistic case tests 2 and 6 cannot express.
-       In a real page, dropping a tier makes frames FASTER. Feed intervals that
-       improve as the tier drops, and assert the probe RESTS at `lite` rather
-       than falling through to `static`. Without this, "it downgraded" could
-       mean "it over-downgraded" and every test above would still pass. */
-{
-  const { p, log } = newProbe();
-  const intervalFor = (t: Tier) => (t === 'full' ? 45 : t === 'lite' ? 14 : 8);
-  let t = 0;
-  for (let i = 0; i < 3000; i++) { p.sample(t); t += intervalFor(p.state.tier); }
-  check('closed loop: a lite-capable device RESTS at `lite`',
-        p.state.tier === 'lite',
-        `ended at ${p.state.tier} after ${log.length} step(s): ${log.map((l) => l.tier).join(' -> ')}`);
-}
-
-/* 11. CONTROL for 10: a device that cannot manage `lite` either must continue
-       to `static`, proving test 10 rests by measurement and not by stalling. */
-{
-  const { p } = newProbe();
-  const intervalFor = (t: Tier) => (t === 'full' ? 60 : t === 'lite' ? 48 : 10);
-  let t = 0;
-  for (let i = 0; i < 3000; i++) { p.sample(t); t += intervalFor(p.state.tier); }
-  check('CONTROL: a device failing `lite` too continues to `static`',
-        p.state.tier === 'static', `ended at ${p.state.tier}`);
-}
+check('CONTROL: TIER_ENTRY_RUNG agrees with the ladder',
+  LADDER[TIER_ENTRY_RUNG.full].tier === 'full' && LADDER[TIER_ENTRY_RUNG.lite].tier === 'lite'
+  && LADDER[TIER_ENTRY_RUNG.static].tier === 'static');
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}\n`);
 process.exitCode = failures === 0 ? 0 : 1;

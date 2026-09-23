@@ -3,7 +3,7 @@ const b = await chromium.launch();
 for (const site of ['full', 'wide', 'narrow']) {
   const p = await b.newPage();
   await p.setViewportSize({ width: 1440, height: 900 });
-  await p.goto(`http://127.0.0.1:4173/?tier=static&site=${site}`, { waitUntil: 'domcontentloaded' });
+  await p.goto(`http://127.0.0.1:4173/?az-probe=off&az-tier=static&site=${site}`, { waitUntil: 'domcontentloaded' });
   await p.waitForSelector('.readout');
   const r = await p.evaluate(() => {
     const e = document.querySelector('.readout') as HTMLElement;

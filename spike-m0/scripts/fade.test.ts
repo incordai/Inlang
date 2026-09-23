@@ -14,7 +14,7 @@ const check = (n: string, ok: boolean, d = '') => {
 const browser = await chromium.launch();
 const page = await browser.newPage();
 await page.setViewportSize({ width: 1440, height: 900 });
-await page.goto(`${BASE}/?tier=full`, { waitUntil: 'domcontentloaded' });
+await page.goto(`${BASE}/?az-probe=off&az-tier=full`, { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('canvas');
 await page.waitForTimeout(1200);
 

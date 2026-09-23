@@ -3,7 +3,7 @@ const b = await chromium.launch();
 const p = await b.newPage();
 await p.setViewportSize({ width: 1440, height: 900 });
 await p.emulateMedia({ colorScheme: 'dark' });
-await p.goto('http://localhost:4173/?tier=static', { waitUntil: 'domcontentloaded' });
+await p.goto('http://localhost:4173/?az-probe=off&az-tier=static', { waitUntil: 'domcontentloaded' });
 await p.waitForTimeout(800);
 const info = await p.evaluate(() => {
   const out: Record<string, unknown> = {};

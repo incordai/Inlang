@@ -82,43 +82,80 @@ downgraded.
 conservatively to `lite`. That is a worse product but a safe one — and it puts
 A1 back in the critical path, so re-read this file before re-planning.
 
-### What has been verified
+### What has been verified — 2026-09-22 (supersedes the 2026-08-21 record)
 
-`spike-m0/scripts/probe.test.ts` — 11 assertions, 5 of them controls, driving
-the real `TierProbe.sample()` with synthetic frame intervals:
+The probe was rebuilt to `motion-tiers-spec.md` as written: the 8-rung ladder
+(§5) as data, the §2 gate with ceilings and §2.1 missing-signal handling, and
+the decision function (§3–§4) as a deterministic engine fed intervals, with
+`simulate(trace)` as its pure form (`spike-m0/src/tiers.ts`).
 
-- a 60fps device holds `full` (the false-positive case that would quietly
-  degrade every visitor) — and the control proves fast and slow reach
-  *different* tiers, so the threshold discriminates
-- a 20fps device downgrades; load jank inside the settle window does not
-- the ratchet is one-way: 1200 fast frames after a drop never promote
-- ≤2 transitions across ~60s of alternating load — no oscillation
-- a 30s tab-hidden gap does not trip it, with a control proving sustained slow
-  frames at the same point *do*
-- **closed loop**: when dropping a tier actually improves frame time, the probe
-  **rests at `lite`** in one step rather than falling through to `static` — and
-  its control proves a lite-incapable device still continues to `static`
+**§8.2 — decision function, synthetic traces** (`pnpm test:decision`, 15
+assertions, one control per row) — all pass:
 
-`spike-m0/scripts/browser.test.ts` — 16 assertions in real Chromium: forced
-tier pinning works for all three, DPR is clamped to exactly 1.750 at `full`,
-the three tiers render visibly differently, and `prefers-reduced-motion`
-reaches `static`.
+- steady 16.7 ms: never leaves rung 0 over 10 minutes (298 windows)
+- steady 40 ms from `lite`: `static` after exactly 3 windows
+- 16.7 ms with one 300 ms spike per 10 s: never downgrades
+- alternating good/bad windows: 200 windows, never downgrades
+- 16.7→30 ms ramp over 6 minutes: the drift **detector** trips exactly once.
+  In this open-loop trace every step-down (0→6, first at 94.3 s) comes from the
+  3-window rule; the drift trip lands at `lite`, where the floor is not
+  breached, so it steps nothing down. It tests the detector, not thermal
+  throttling
+- after `static`, 10 minutes of 8 ms frames never climb back; the one §3.6
+  promotion happens once and never again
+- 89 samples then a hidden tab: no decision; the control with 90 is judged
 
-**A real bug was found and fixed by this test.** The probe was constructed from
-React's initial state rather than from the capability gate, so its polling loop
-wrote `full` back over the gate's `static` — a `prefers-reduced-motion` visitor
-was served the full scene. Re-introducing the defect makes the test fail on the
-intended assertion; the fix is `Hero.tsx`, where the gate is now resolved
-before first render and is a ceiling the probe may only move *down* from.
+**The row-4 proof the spec demands was run.** With the strike counter no longer
+reset by a passing window, row 4 fails on its assertion (cascade 0→6). With an
+upgrade rule injected, row 6 fails — with the setter's ratchet intact (an
+extra promotion slips in before arming) and with it removed (0→3→0
+oscillation). Restoring the file restores ALL PASS.
+
+`pnpm test:probe` — 31 assertions: every §2 gate row, §2.1 missing signals,
+§6.1 forcing and its guard rails, ladder shape, settle, the hidden-tab gap,
+context loss, post-transition settle, and a closed loop resting at rung 4.
+
+**In a browser, on a real GPU** (`pnpm test:m0`, Playwright `chromium`
+channel headless → ANGLE Metal, Apple M1, 2020 MacBook — one year older than
+§8.1's "2021+ laptop"):
+
+| §8.1 | Result |
+|---|---|
+| 1 `full` sustained, 10 s scroll, DPR 2 | **PASS** p50 16.7 ms, p95 18.3 ms (p5 55 fps) |
+| 2 heap over 5 mount/unmount cycles | **PASS** +1.0 MB (JS heap only; GPU memory not measured) |
+| 3 LCP element | **PASS** `<h1>` |
+| 6 each rung forced, effect read back | **PASS** 8/8 — pixel ratio 2/1.5/1.5/1.5/1/1/1/—, shadow map on→off at rung 3, camera scroll subscriptions 1→0 at rung 6, vertices 5488→3430 at rung 5, canvas gone at 7. Post-pass count is 0 at every rung: **the spike has no post-fx chain**, so rung 2 has nothing to remove here |
+| 7 probe overhead | **PASS** frame p95 delta on−off −0.10 / +0.10 ms across two runs; the probe's own per-frame cost p95 0.1 ms |
+| 8 context loss | **PASS** `WEBGL_lose_context` → rung 7, poster with its text alternative, no console error |
+| 4, 5 | see A2; Draco (A8) not built |
+
+**§8.3 — proxy, never device evidence.** At 4× and 6× CPU throttle the scene
+held rung 0 for 60 s of scroll (frame p95 18.3 / 18.4 ms). A control shows the
+throttle is applied (a fixed JS loop: 24 → 87 → 135 ms) — **this scene's
+per-frame main-thread work is too small for CPU throttling to starve it on
+this GPU, even at 40×**, so the spec's throttle protocol does not exercise the
+detector here. A synthetic 22 ms/frame load (`?az-load=22`, spike-only) does:
+0→1→2→3→4→5 in 60 s of continuous scroll, one way, about one rung per 10.9 s;
+rungs 1–2 applied within ~200 ms of the decision, deferred rungs 3–5 at 2.25 s —
+the 2 s deadline under a scroll that never idles, plus polling. Rung
+transitions have not been recorded on video.
+
+**Two spec gaps found while implementing.** (1) §3.6 promotes by measuring
+two windows *while rendering `lite`*, but §5.1 puts `lite` on on-demand frames,
+which have no frame rate. The spike keeps the loop running until the ratchet
+arms, then drops to on-demand; after that `lite → static` can only come from
+freezes or context loss, not the 33.3 ms floor. (2) SwiftShader passes
+`failIfMajorPerformanceCaveat`, so §2 #3 does not catch it; and in the default
+headless shell a SwiftShader frame takes ~600 ms, so §3.2's 60 warm-up frames
+take ~36 s.
 
 ### What is still open
 
-Only one machine, and headless Chromium at that — its p95 sat at 25–27ms,
-uncomfortably near the 33ms threshold, which is likely software rasterisation
-rather than a real GPU. **The thresholds are unvalidated against varied real
-hardware**, and that is exactly the gap A1 describes. Status stays `TESTING`
-until the probe has run on at least one genuinely slow device.
-
+No genuinely slow device has run the probe; every threshold is validated only
+on one fast machine and synthetic traces. The ladder's post-fx and shadow rungs
+have no real cost to remove in this scene, and rung 6's ease-to-rest (§5.1
+step 2) and the poster cross-fade are not built. Status stays `TESTING` until
+the probe has run on at least one genuinely slow device.
 
 ---
 
@@ -159,6 +196,22 @@ shaders in a tested runtime package; let the emitter pass seeds and uniforms.
 That keeps `emit.web.ts` declarative and short **and** keeps the distinctive
 look, instead of trading one for the other.
 
+
+### Re-measured 2026-09-22 — after the 8-rung ladder
+
+Counted as code lines (no blank or comment lines), so the numbers do not move
+with comment density. The probe module is counted separately, per §8.1 check 4.
+
+| What was counted | Code lines | vs ~250 |
+|---|---|---|
+| `Hero.tsx` as it stands | 314 | fails |
+| minus debug readout (35), `__AZ_TIER__` instrumentation (13), measurement publishing (18) and the `?az-load` test hook (11) | **237** | **passes** |
+| + the distinctive look: `geometry.ts` 78, `material.ts` 78, `seed.ts` 43, `framing.ts` 45 | **481** | **fails** |
+| probe module `tiers.ts` (counted separately) | 336 | — |
+
+The split holds: the structural hero fits, and adding the ladder did not push it
+over; the generator and surface code are what break the budget. The consequence
+above stands.
 
 ### Evidence gathered 2026-08-21 — the assumption holds for *structure*, and the risk sits elsewhere
 

@@ -52,7 +52,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage();
 await page.setViewportSize({ width: WIDTH, height: HEIGHT });
 await page.emulateMedia({ colorScheme: 'dark' });
-await page.goto(`${BASE}/?tier=static`, { waitUntil: 'domcontentloaded' });
+await page.goto(`${BASE}/?az-probe=off&az-tier=static`, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(1200);
 
 /**
