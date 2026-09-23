@@ -534,6 +534,23 @@ try {
         posts.length > 0 && posts.every((c) => c.csrf === '1' && c.origin === backendHost.url));
       const forged = await p.evaluate(async (url) => (await fetch(`${url}/auth/sign-out`, { method: 'POST', credentials: 'include' })).status, backend.url);
       check(`${name} CONTROL: a request without the CSRF header is refused by the backend`, forged === 403, `status ${forged}`);
+      // §3.4 rule 14: a sign-out the server does not confirm leaves the
+      // visitor signed in — and the page must say so, not throw or pretend.
+      {
+        const errors = [];
+        const onError = (e) => errors.push(e.message);
+        p.on('pageerror', onError);
+        await p.route(`${backend.url}/auth/sign-out`, (route) => route.fulfill({ status: 503, body: '{"error":"unknown"}',
+          headers: { 'content-type': 'application/json', 'access-control-allow-origin': backendHost.url, 'access-control-allow-credentials': 'true' } }), { times: 1 });
+        await p.locator('.az-session').getByRole('button', { name: 'Sign out' }).click();
+        const told = await p.waitForFunction(() => /still signed in/.test(document.querySelector('.az-session-error')?.textContent ?? ''),
+          undefined, { timeout: 5000 }).then(() => true, () => false);
+        await p.waitForTimeout(200);
+        p.off('pageerror', onError);
+        check(`${name}: a sign-out the server did not confirm keeps the page signed in and says so`,
+          told && /\/account$/.test(p.url()) && await p.locator('.az-session').isVisible() && errors.length === 0,
+          errors.join('; ') || p.url());
+      }
       await p.locator('.az-session').getByRole('button', { name: 'Sign out' }).click();
       await p.waitForURL(/\/login$/);
       await p.goto(on('/account'));
