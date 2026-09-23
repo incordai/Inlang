@@ -41,7 +41,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         fontSize: t.typeSize.xs,
         letterSpacing: '0.14em',
         textTransform: 'uppercase',
-        color: t.color.muted,
+        // `full` sets its type on the scrim: `muted` is for the page's own
+        // background, and on the scrim it falls to 2.4:1 in the light scheme.
+        color: variant === 'full' ? t.color['on-scrim'] : t.color.muted,
         marginBottom: px(t.space[16]),
       },
       children: [block.props.eyebrow],
@@ -77,7 +79,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         maxWidth: `${t.size['measure-body']}ch`,
         fontSize: t.typeSize.lg,
         lineHeight: t.type['leading-body'],
-        color: t.color.muted,
+        color: variant === 'full' ? t.color['on-scrim'] : t.color.muted,
         // §7 — the gap before the buttons is the LARGEST internal gap: it
         // separates "what this is" from "what to do".
         margin: `${px(t.space[24])} 0 0`,
@@ -92,7 +94,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // Buttons through the primitive (buttons-and-sections §1): the first `cta`
   // primary, `alt` secondary; below xs the primary fills the row and the
   // secondary becomes a text link (§5).
-  const actions = ctx.actions(block, ['cta', 'alt'], { compactBelow: 'xs' });
+  // `full` sets everything on the scrim, its actions included.
+  const actions = ctx.actions(block, ['cta', 'alt'], { compactBelow: 'xs', tone: variant === 'full' ? 'scrim' : undefined });
   if (actions.length > 0) {
     // Slot fills are <li>; an <li> in a <div> is invalid HTML.
     children.push({

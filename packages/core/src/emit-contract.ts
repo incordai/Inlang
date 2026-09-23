@@ -65,8 +65,12 @@ export type Hierarchy = (typeof HIERARCHIES)[number];
 export interface ActionOptions {
   /** Overrides the default hierarchy (and an author's `as`). */
   readonly hierarchy?: Hierarchy;
-  /** `inverted` for an action sitting on an accent surface (cta `band`). */
-  readonly tone?: 'page' | 'inverted';
+  /**
+   * The surface an action sits on: the page (default), an accent surface
+   * (`inverted`, cta `band`), or the dark scrim a full-bleed hero sets its
+   * type on (`scrim`, hero `full`) — where page ink is the scrim's own colour.
+   */
+  readonly tone?: 'page' | 'inverted' | 'scrim';
   /** `sm` for dense bars (nav). The 44px tap target holds at every size. */
   readonly size?: 'md' | 'sm';
   /** Fill the container's width — a card's action (pricing). */

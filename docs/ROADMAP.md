@@ -244,7 +244,7 @@ inverted tone on the cta band. feature, gallery and text had been dropping
 their section actions; they now render them.
 All of this is checked by `pnpm test:visual` in CI (axe, keyboard, overflow,
 reduced motion, schemes, restack, column, skip link; Chromium, plus Firefox
-and WebKit for overflow and page errors). Block validation tables are
+and WebKit for overflow, page errors and every behaviour check). Block validation tables are
 manifest `checks`; `az lint` exists.
 `pnpm gate [words/<name>]` runs the 12-point word gate as one command and
 passes for all eleven words: it aggregates typecheck, `az lint`, the
@@ -252,7 +252,16 @@ browser checks, each preview with a site nav and footer built and
 server-rendered, the bundle budget, exact pins, docs and previews, and the
 `tested` field (`pnpm gate --self-test` proves each non-browser item can
 fail). The browser items cover each word's previews — preview.az and any
-preview.<variant>.az — not yet every variant, so that box stays open.
+preview.<variant>.az — in all three themes. `pnpm gate --every-variant`
+adds every other variant (preview.az with the variant swapped in, default
+theme, light and dark, all widths and engines; 85 sites): every word and
+variant passes except nav `side`. Its 256px column takes the full viewport
+height and the page's content flows BELOW it instead of beside it, so an
+anchor lands under it (scroll-padding check, Firefox and WebKit). Putting
+content beside a sidebar is page layout — nav-spec open question 2
+("page layout that happens to contain a nav … decide before docs") — so it
+is left for that decision, and the "every variant" box stays open. CI runs
+the gate without the flag.
 `pnpm thumbnails` renders one PNG per word × variant (37; `none` renders
 nothing) into the gitignored .thumbnails/ — no doc says where thumbnails
 ship, so they are build output; `--verify` renders twice and requires
@@ -263,12 +272,19 @@ Footer `mega` accordions (cabe922) and pricing's "in every plan" list
 is a drawer and its links collapse into it below sm; every bar group is a
 dropdown; `solid` turns solid on scroll with its logo swap; faq answers
 are disclosures (hidden="until-found"); `video:` opens a popup player and
-`copy:` copies with an announcement. Each is checked in real browsers by
-`pnpm test:visual` (drawer, dropdown, solid, faq, copy, play,
-overlay-motion), with a self-test proving each fails without the runtime.
-Still not built: `popup:#id` declared popups (Phase 1.5 grammar, warned
-AZ1222), the `sheet`/`tooltip`/`toast` presets, nav `hide`/`shrink`, and
-nav-spec §5's scroll-padding.
+`copy:` copies with an announcement; nav `hide` retracts on scrolling
+down and `shrink` shrinks inside a frame that reserves its height (no
+layout shift); a pinned nav ships §5's scroll-padding from `--az-size-nav`;
+gallery `carousel` has previous/next controls and `lightbox` a popup viewer
+(no wrap, polite counter, focus back to the thumbnail shown); faq answers
+open from a text-fragment link on arrival; feature icons are inlined and
+sanitised at build (feature-spec §7). Each behaviour is checked in
+Chromium, Firefox and WebKit by `pnpm test:visual` (drawer, dropdown,
+solid, hide-shrink, scroll-padding, faq, faq-deep-link, carousel,
+lightbox, copy, play, overlay-motion, nav-motion), with a self-test
+proving each fails without what it tests. Still not built: `popup:#id`
+declared popups (Phase 1.5 grammar, warned AZ1222) and the
+`sheet`/`tooltip`/`toast` presets.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape

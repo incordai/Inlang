@@ -16,6 +16,10 @@
  *     node scripts/visual.mjs              the full gate
  *     node scripts/visual.mjs hero cta     only these words
  *     node scripts/visual.mjs --self-test  prove every check can fail and pass
+ *     node scripts/visual.mjs --every-variant
+ *                                          also every variant without a preview
+ *                                          of its own (preview.az with the variant
+ *                                          swapped in), in the default theme
  *
  * Output (screenshots, report.json) goes to .visual-out/, which is ignored.
  */
@@ -36,6 +40,7 @@ import {
   carousel, copy, drawer, dropdown, faq, faqDeepLink, hideShrink, lightbox, navMotion, overlayMotion, play, scrollPadding, solid,
 } from './visual/behaviours.mjs';
 import { behaviourSelfTest } from './visual/behaviour-selftest.mjs';
+import { withVariant } from './thumbnails.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
@@ -149,27 +154,54 @@ function themed(source, theme) {
   return lines.join('\n');
 }
 
+/** The reserved variant that renders nothing (GRAMMAR §5.2) — nothing to check. */
+const RENDERS_NOTHING = 'none';
+
 /**
- * A word's previews: preview.az (its default variant) plus any
- * preview.<variant>.az, for variants whose layout differs enough to check.
+ * The theme the extra variant sites use. Every variant is checked — light
+ * and dark, every width, every engine — and the previews are checked in all
+ * three themes; checking every variant in every theme as well would triple
+ * a run whose theme coverage the previews already give.
  */
-function previewsOf(word) {
-  return readdirSync(join(WORDS, word))
-    .map((f) => /^preview(?:\.([a-z]+))?\.az$/.exec(f))
-    .filter(Boolean)
-    .map((m) => ({ file: m[0], variant: m[1] ?? null }))
-    .sort((a, b) => a.file.localeCompare(b.file));
+const VARIANT_THEME = 'midnight';
+
+/** The variant a preview's word line uses: the one written, else the manifest's first. */
+function variantIn(source, word, variants) {
+  const line = source.split('\n').find((l) => new RegExp(`^\\s+${word}(\\s|$)`).test(l));
+  const written = line?.trim().split(/\s+/).slice(1).find((t) => variants.includes(t));
+  return written ?? variants[0];
 }
 
-async function buildAll(words, work) {
-  const sites = words.flatMap((word) => previewsOf(word).flatMap((p) =>
-    THEMES.map((theme) => ({ word, theme, variant: p.variant, file: p.file,
+/**
+ * A word's sites: preview.az (its default variant) and any
+ * preview.<variant>.az in every theme — plus, so EVERY variant is checked,
+ * each remaining variant as preview.az with that variant swapped in (the
+ * approach the thumbnails use), in one theme.
+ */
+function previewsOf(word, everyVariant) {
+  const dir = join(WORDS, word);
+  const files = readdirSync(dir)
+    .map((f) => /^preview(?:\.([a-z]+))?\.az$/.exec(f))
+    .filter(Boolean)
+    .map((m) => ({ file: m[0], variant: m[1] ?? null, themes: THEMES }));
+  const { variants = [] } = JSON.parse(readFileSync(join(dir, 'word.json'), 'utf8'));
+  const preview = readFileSync(join(dir, 'preview.az'), 'utf8');
+  const covered = new Set([variantIn(preview, word, variants), ...files.map((f) => f.variant)]);
+  const rest = variants
+    .filter((v) => v !== RENDERS_NOTHING && !covered.has(v))
+    .map((v) => ({ file: `preview.az as ${v}`, variant: v, source: withVariant(preview, word, v, variants), themes: [VARIANT_THEME] }));
+  return [...files, ...(everyVariant ? rest : [])].sort((a, b) => a.file.localeCompare(b.file));
+}
+
+async function buildAll(words, work, everyVariant) {
+  const sites = words.flatMap((word) => previewsOf(word, everyVariant).flatMap((p) =>
+    p.themes.map((theme) => ({ word, theme, variant: p.variant, file: p.file, source: p.source,
       label: p.variant ? `${theme}:${p.variant}` : theme }))));
   for (const s of sites) {
     s.dir = join(work, `${s.word}-${s.variant ?? 'default'}-${s.theme}`);
     mkdirSync(s.dir, { recursive: true });
     const src = join(WORDS, s.word);
-    const preview = readFileSync(join(src, s.file), 'utf8');
+    const preview = s.source ?? readFileSync(join(src, s.file), 'utf8');
     writeFileSync(join(s.dir, 'site.az'), themed(preview, s.theme));
     // Each page is its own HTML file, and a preview's extra pages exist only
     // so its links resolve. The word under test is on the FIRST page declared.
@@ -452,9 +484,11 @@ async function selfTest() {
 async function main(argv) {
   if (argv.includes('--self-test')) return selfTest();
 
+  const everyVariant = argv.includes('--every-variant');
+  const names = argv.filter((a) => !a.startsWith('--'));
   const all = readdirSync(WORDS).filter((w) => existsSync(join(WORDS, w, 'preview.az'))).sort();
-  const words = argv.length ? all.filter((w) => argv.includes(w)) : all;
-  const unknown = argv.filter((a) => !all.includes(a));
+  const words = names.length ? all.filter((w) => names.includes(w)) : all;
+  const unknown = names.filter((a) => !all.includes(a));
   if (unknown.length) throw new Error(`visual: no preview for: ${unknown.join(', ')}`);
 
   const started = performance.now();
@@ -462,7 +496,7 @@ async function main(argv) {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
 
-  const sites = await buildAll(words, work);
+  const sites = await buildAll(words, work, everyVariant);
   const browsers = { chromium: await chromium.launch(), firefox: await firefox.launch(), webkit: await webkit.launch() };
   const versions = Object.fromEntries(Object.entries(browsers).map(([k, b]) => [k, b.version()]));
   const server = await startServer();

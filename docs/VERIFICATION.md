@@ -11,6 +11,7 @@ make publicly.**
 pnpm gate                    # the 12-point word gate (§3), every word
 pnpm gate words/hero         # the 12-point gate for one word
 pnpm gate --self-test        # proves each non-browser item can fail
+pnpm gate --every-variant    # items 3–7 also on every variant without its own preview
 
 pnpm typecheck               # tsc --noEmit, all packages
 pnpm lint                    # az lint over every word pack (theme tokens, A7)

@@ -39,9 +39,18 @@ const icon = (d: string): EmittedNode => ({
   children: [{ tag: 'path', attrs: { d } }],
 });
 
+/** Ink for an action that draws in the surface's own foreground, per tone. */
+function inkOf(t: ThemeLike, tone: ActionOptions['tone']): string {
+  return tone === 'inverted' ? t.color['accent-contrast'] : tone === 'scrim' ? t.color['on-scrim'] : t.color.text;
+}
+
 /** Surface and ink per hierarchy and tone — every value a theme token. */
-function look(t: ThemeLike, hierarchy: Hierarchy, inverted: boolean): { base: StyleMap; hover: StyleMap } {
-  const ink = inverted ? t.color['accent-contrast'] : t.color.text;
+function look(t: ThemeLike, hierarchy: Hierarchy, tone: ActionOptions['tone']): { base: StyleMap; hover: StyleMap } {
+  const inverted = tone === 'inverted';
+  // Off the page (an accent band, a scrim) an action draws in the surface's
+  // own foreground: page ink and page borders vanish there.
+  const offPage = tone === 'inverted' || tone === 'scrim';
+  const ink = inkOf(t, tone);
   switch (hierarchy) {
     case 'primary':
       return inverted
@@ -50,21 +59,21 @@ function look(t: ThemeLike, hierarchy: Hierarchy, inverted: boolean): { base: St
         : { base: { background: t.color.accent, color: t.color['accent-contrast'], border: `1px solid ${t.color.accent}` },
             hover: { background: t.color['accent-hover'], borderColor: t.color['accent-hover'] } };
     case 'secondary':
-      return { base: { background: 'transparent', color: ink, border: `1px solid ${inverted ? ink : t.color['border-strong']}` },
-               hover: inverted ? { textDecoration: 'underline' } : { background: t.color['surface-alt'] } };
+      return { base: { background: 'transparent', color: ink, border: `1px solid ${offPage ? ink : t.color['border-strong']}` },
+               hover: offPage ? { textDecoration: 'underline' } : { background: t.color['surface-alt'] } };
     case 'ghost':
       return { base: { background: 'transparent', color: ink, border: '1px solid transparent' },
-               hover: inverted ? { textDecoration: 'underline' } : { background: t.color['surface-alt'] } };
+               hover: offPage ? { textDecoration: 'underline' } : { background: t.color['surface-alt'] } };
     case 'link':
-      return { base: { background: 'transparent', color: inverted ? ink : t.color.accent, border: '1px solid transparent', paddingInline: 0 },
+      return { base: { background: 'transparent', color: offPage ? ink : t.color.accent, border: '1px solid transparent', paddingInline: 0 },
                hover: { textDecoration: 'underline' } };
   }
 }
 
 /** The shared style of every action, with its six states (§1.5). */
 function actionStyle(t: ThemeLike, hierarchy: Hierarchy, options: ActionOptions): Pick<EmittedNode, 'style' | 'states' | 'below'> {
-  const inverted = options.tone === 'inverted';
-  const { base, hover } = look(t, hierarchy, inverted);
+  const offPage = options.tone === 'inverted' || options.tone === 'scrim';
+  const { base, hover } = look(t, hierarchy, options.tone);
   const compact = options.compactBelow;
   const full = options.fullWidthBelow;
   return {
@@ -91,11 +100,11 @@ function actionStyle(t: ThemeLike, hierarchy: Hierarchy, options: ActionOptions)
       hover,
       // No transform anywhere, so reduced motion has nothing to undo.
       active: hover,
-      // theme-spec §6.1: ring + offset, never `outline: none`. On an accent
-      // band the ring is drawn in accent-contrast — `focus` is an accent
-      // shade and would vanish against the band.
+      // theme-spec §6.1: ring + offset, never `outline: none`. Off the page
+      // the ring is drawn in the surface's foreground — `focus` is an accent
+      // shade and vanishes against an accent band or a dark scrim.
       focusVisible: {
-        outline: `${px(t.size.ring)} solid ${inverted ? t.color['accent-contrast'] : t.color.focus}`,
+        outline: `${px(t.size.ring)} solid ${offPage ? inkOf(t, options.tone) : t.color.focus}`,
         outlineOffset: px(t.size['ring-offset']),
       },
       disabled: { background: t.color['surface-alt'], color: t.color.muted, borderColor: t.color.border, cursor: 'not-allowed' },
@@ -105,7 +114,7 @@ function actionStyle(t: ThemeLike, hierarchy: Hierarchy, options: ActionOptions)
     below: compact
       ? { [compact]: hierarchy === 'primary'
           ? { width: '100%' }
-          : { background: 'transparent', border: '1px solid transparent', color: inverted ? t.color['accent-contrast'] : t.color.accent, paddingInline: 0 } }
+          : { background: 'transparent', border: '1px solid transparent', color: offPage ? inkOf(t, options.tone) : t.color.accent, paddingInline: 0 } }
       : full && hierarchy === 'primary'
         ? { [full]: { width: '100%' } }
         : undefined,

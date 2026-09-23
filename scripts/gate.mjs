@@ -22,7 +22,8 @@
  *   12  tested populated honestly     word.json `tested`
  *
  * No argument gates every word. Prints one row per word and exits non-zero
- * if any item fails.
+ * if any item fails. `--every-variant` also runs items 3–7 on every variant
+ * that has no preview of its own (see scripts/visual.mjs).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -115,7 +116,8 @@ function docs(word, dir = join(WORDS, word)) {
 }
 
 function visual(words) {
-  const r = spawnSync(process.execPath, [join(ROOT, 'scripts/visual.mjs'), ...words], {
+  const flags = process.argv.includes('--every-variant') ? ['--every-variant'] : [];
+  const r = spawnSync(process.execPath, [join(ROOT, 'scripts/visual.mjs'), ...words, ...flags], {
     cwd: ROOT, stdio: 'inherit', env: process.env,
   });
   const reportFile = join(ROOT, '.visual-out/report.json');
@@ -234,7 +236,7 @@ if (process.argv.includes('--self-test')) {
   process.exit();
 }
 
-const words = wordsFrom(process.argv.slice(2));
+const words = wordsFrom(process.argv.slice(2).filter((a) => !a.startsWith('--')));
 const started = performance.now();
 const work = mkdtempSync(join(tmpdir(), 'az-gate-'));
 

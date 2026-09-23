@@ -61,6 +61,9 @@ function navLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
         minHeight: px(t.size.tap),
         paddingInline: px(t.space[12]),
         color: t.color.text,
+        // Nothing above sets a typeface; without this the link falls back to
+        // the browser's default serif beside the theme's sans group button.
+        fontFamily: t.type.body,
         fontSize: t.typeSize.sm,
         textDecoration: 'none',
       },
@@ -366,6 +369,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
           padding: px(t.space[8]),
           background: t.color.surface,
           color: t.color.text,
+          fontFamily: t.type.body,
           transform: 'translateY(-200%)',
         },
         // §7: visually hidden until focused — and SHOWN when focused. Without
