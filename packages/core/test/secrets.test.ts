@@ -112,3 +112,19 @@ test('SECURITY: the exemptions do not open a hole for real keys', () => {
     assert.equal(scanText(text).length, 1, text);
   }
 });
+
+test('env: a backend server setting given a public name fails the site build (backend-spec §4)', () => {
+  const found = scanEnv({
+    AZ_PUBLIC_SMTP_PASSWORD: 'hunter2hunter2',
+    AZ_PUBLIC_DATABASE_URL: 'postgres://u:p@db.internal/app',
+    AZ_PUBLIC_EMAIL_API_KEY: 'k-123',
+    AZ_PUBLIC_SESSION_SECRET: 'x'.repeat(43),
+    AZ_PUBLIC_BACKEND_URL: 'https://api.example.org',
+  });
+  assert.deepEqual(found.map((f) => f.where), [
+    'AZ_PUBLIC_DATABASE_URL', 'AZ_PUBLIC_EMAIL_API_KEY', 'AZ_PUBLIC_SESSION_SECRET', 'AZ_PUBLIC_SMTP_PASSWORD',
+  ]);
+  assert.ok(found.every((f) => f.rule === 'private-name'));
+  // The server's own names carry no public prefix and are never judged, never inlined.
+  assert.deepEqual(scanEnv({ AZ_SMTP_PASSWORD: 'hunter2hunter2', AZ_DATABASE_URL: 'postgres://u:p@h/db' }), []);
+});

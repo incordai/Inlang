@@ -55,7 +55,7 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend'];
 
 test('every package has sources to check — CONTROL', () => {
   // Without this, an empty glob would make every rule below pass vacuously.
@@ -137,13 +137,32 @@ test('CONTROL: the scene-runtime rule reads real imports', () => {
   assert.ok(stage && importsOf(stage).includes('three'), 'stage.ts imports three');
 });
 
+test('the backend server imports only its siblings and node built-ins — it is copied whole into server/src', () => {
+  const server = sources('packages/backend').filter((f) => f.includes(`${sep}server${sep}`));
+  assert.ok(server.length > 5, 'CONTROL: the server sources are found');
+  for (const file of server) {
+    for (const spec of importsOf(file)) {
+      assert.ok(spec.startsWith('./') || spec.startsWith('node:'), `backend server imports '${spec}' — only siblings and node:*`);
+    }
+  }
+});
+
+test('the backend package reaches core only for types and data, never a target or a word', () => {
+  for (const file of sources('packages/backend')) {
+    for (const spec of importsOf(file)) {
+      const pkg = crossPackage(spec);
+      assert.ok(pkg === null || pkg === 'core', `backend imports from ${pkg} (${spec})`);
+    }
+  }
+});
+
 test('the secret scanner imports nothing — it is copied whole into every site (§4)', () => {
   const file = join(ROOT, 'packages/core/src/secrets.ts');
   assert.deepEqual(importsOf(file), []);
 });
 
 test('nothing imports from cli — ARCHITECTURE §2', () => {
-  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime']) {
+  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend']) {
     for (const file of sources(`packages/${pkg}`)) {
       for (const spec of importsOf(file)) {
         assert.ok(crossPackage(spec) !== 'cli', `${pkg} imports from cli (${spec})`);

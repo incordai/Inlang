@@ -80,3 +80,17 @@ jobs:
       # time from here is device evidence.
       - run: pnpm test:3d
       - run: pnpm thumbnails --verify
+
+  backend-db:
+    name: built-in backend on PostgreSQL and MySQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # Pinned images, started and removed by the script (backend-spec §10).
+      - run: pnpm test:backend-db

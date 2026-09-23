@@ -14,13 +14,15 @@
  */
 
 import { createServer } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
+import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
-import { buildSites } from './visual/pipeline.mjs';
+import { ROOT as ROOT_DIR, buildSites } from './visual/pipeline.mjs';
 
 const PUBLIC_KEY = 'pk-probe-public';
 const USER = { id: 'u-ada', email: 'ada@studio.test', password: 'correct-horse-battery' };
@@ -603,6 +605,207 @@ try {
   provider.close();
   backend.close();
   oidc.close();
+}
+
+/* ---- 12. the REAL built-in backend (backend-spec) --------------------- */
+
+/**
+ * Not the mock: a site that declares `backend`, and the server `az build`
+ * generated for it, started as its own process over SQLite. Its email goes
+ * to a local SMTP listener, so the reset flow is followed from the message
+ * a person would receive. Provider sign-in uses the mock OpenID provider
+ * above. Chromium.
+ */
+
+/** Test-only SMTP listener: accepts one conversation at a time, keeps each message. */
+function startSmtpCapture() {
+  const messages = [];
+  const server = createNetServer((socket) => {
+    socket.setEncoding('utf8');
+    let buffer = '';
+    let data = false;
+    let body = '';
+    socket.write('220 capture ESMTP\r\n');
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      let i;
+      while ((i = buffer.indexOf('\r\n')) >= 0) {
+        const line = buffer.slice(0, i);
+        buffer = buffer.slice(i + 2);
+        if (data) {
+          if (line === '.') { data = false; messages.push(decodeMessage(body)); body = ''; socket.write('250 queued\r\n'); }
+          else body += `${line.startsWith('..') ? line.slice(1) : line}\r\n`;
+          continue;
+        }
+        const verb = line.slice(0, 4).toUpperCase();
+        if (verb === 'EHLO' || verb === 'HELO') socket.write('250 capture\r\n');
+        else if (verb === 'DATA') { data = true; socket.write('354 go ahead\r\n'); }
+        else if (verb === 'QUIT') { socket.end('221 bye\r\n'); }
+        else socket.write('250 ok\r\n');
+      }
+    });
+  });
+  return new Promise((done) => server.listen(0, '127.0.0.1', () =>
+    done({ port: server.address().port, messages, close: () => server.close() })));
+}
+
+/** The text of a captured message: headers dropped, quoted-printable undone. */
+function decodeMessage(raw) {
+  const text = raw.slice(raw.indexOf('\r\n\r\n') + 4);
+  return /quoted-printable/i.test(raw)
+    ? text.replace(/=\r\n/g, '').replace(/=([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    : text;
+}
+
+const freePort = () => new Promise((done) => {
+  const probe = createNetServer();
+  probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => done(port)); });
+});
+
+{
+  const smtp = await startSmtpCapture();
+  const oidc2 = await startOidcProvider();
+  const serverPort = await freePort();
+  const serverUrl = `http://127.0.0.1:${serverPort}`;
+  process.env.AZ_PUBLIC_BACKEND_URL = serverUrl;
+  // `backend` after the site-level `auth` block (whose `protect` is its own child).
+  const REAL_SITE = BACKEND_SITE.replace('\npage /\n', '  backend\n    database sqlite\n    email smtp\n\npage /\n');
+  const real = { dir: join(work, 'real'), source: REAL_SITE };
+  await buildSites([real], work);
+  check('backend: the site that declares it compiles and builds', Boolean(real.compiled && real.dist), real.error ?? '');
+  const serverDir = join(real.proj, 'server');
+  // The server's only package for SQLite + SMTP; zero dependencies of its own.
+  mkdirSync(join(serverDir, 'node_modules'), { recursive: true });
+  symlinkSync(realpathSync(join(ROOT_DIR, 'node_modules/nodemailer')), join(serverDir, 'node_modules/nodemailer'), 'dir');
+  const realHost = await startSite(normalize(real.dist));
+  const child = spawn(process.execPath, ['src/main.ts'], {
+    cwd: serverDir,
+    env: {
+      PATH: process.env.PATH,
+      AZ_SESSION_SECRET: randomBytes(32).toString('base64url'),
+      AZ_BACKEND_PUBLIC_URL: serverUrl, AZ_PORT: String(serverPort), AZ_ALLOWED_ORIGINS: realHost.url,
+      AZ_SQLITE_PATH: join(serverDir, 'data/test.db'),
+      AZ_EMAIL_FROM: 'Studio <no-reply@studio.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(smtp.port),
+      AZ_OAUTH_PROVIDERS: 'work,guest',
+      AZ_OAUTH_WORK_TYPE: 'oidc', AZ_OAUTH_WORK_LABEL: 'Work account', AZ_OAUTH_WORK_ISSUER: oidc2.url,
+      AZ_OAUTH_WORK_CLIENT_ID: 'work-client', AZ_OAUTH_WORK_CLIENT_SECRET: OIDC_CLIENTS['work-client'].secret,
+      AZ_OAUTH_GUEST_TYPE: 'oidc', AZ_OAUTH_GUEST_LABEL: 'Guest account', AZ_OAUTH_GUEST_ISSUER: oidc2.url,
+      AZ_OAUTH_GUEST_CLIENT_ID: 'guest-client', AZ_OAUTH_GUEST_CLIENT_SECRET: OIDC_CLIENTS['guest-client'].secret,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let serverLog = '';
+  child.stdout.on('data', (c) => { serverLog += c; });
+  child.stderr.on('data', (c) => { serverLog += c; });
+  const up = await new Promise((done) => {
+    const until = Date.now() + 15_000;
+    const poll = () => fetch(`${serverUrl}/health`).then((r) => done(r.ok), () => (Date.now() > until ? done(false) : setTimeout(poll, 200)));
+    poll();
+  });
+  check('backend: the generated server starts from its own folder', up, up ? '' : serverLog.slice(0, 300));
+  const b = await chromium.launch();
+  const ctx = await b.newContext();
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message));
+  const on = (path) => `${realHost.url}${path}`;
+  const mailTo = async (n) => {
+    const until = Date.now() + 10_000;
+    while (smtp.messages.length < n && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+    return smtp.messages[n - 1] ?? '';
+  };
+  try {
+    /* sign up — with the retype and a location suggested from the list */
+    await p.goto(on('/signup'));
+    const su = p.locator('form[data-flow="signup"]');
+    const listId = await su.locator('input[name="location"]').getAttribute('list');
+    check('backend: the location field offers type-ahead suggestions (native datalist)',
+      !!listId && (await p.locator(`datalist#${listId} option`).count()) > 200);
+    await su.locator('input[name="name"]').fill('Ada');
+    await su.locator('input[name="email"]').fill(USER.email);
+    await su.locator('input[name="password"]').fill(USER.password);
+    await su.locator('input[name="passwordConfirm"]').fill(USER.password);
+    await su.locator('input[name="location"]').fill('Portugal');
+    await su.locator('input[name="terms"]').check();
+    await su.getByRole('button', { name: 'Create account' }).click();
+    await p.waitForURL((u) => !u.pathname.startsWith('/signup'));
+    // All cookies, not cookies(url): for a plain-http URL Playwright leaves Secure ones out.
+    const cookies = await ctx.cookies();
+    const session = cookies.find((c) => c.name === 'az_session' && c.domain === '127.0.0.1');
+    check('backend: sign-up sets an httpOnly, Secure session cookie from the real server',
+      !!session?.httpOnly && !!session?.secure, JSON.stringify(session && { httpOnly: session.httpOnly, secure: session.secure, sameSite: session.sameSite }));
+    const profile = await p.evaluate(async (url) => (await fetch(`${url}/auth/session`, { credentials: 'include', headers: { 'x-az-request': '1' } })).json(), serverUrl);
+    check('backend: the server stored name, email and location', profile.session?.user?.name === 'Ada'
+      && profile.session.user.location === 'Portugal' && profile.session.user.email === USER.email, JSON.stringify(profile.session?.user));
+
+    /* sign out, then sign in with the wrong password and the right one */
+    await p.goto(on('/account'));
+    await p.locator('.az-session').getByRole('button', { name: 'Sign out' }).click();
+    await p.waitForURL(/\/login$/);
+    const login = p.locator('form[data-flow="login"]');
+    await login.locator('input[name="email"]').fill(USER.email);
+    await login.locator('input[name="password"]').fill('wrong-password-here');
+    await login.getByRole('button', { name: 'Sign in' }).click();
+    await p.waitForFunction(() => /don't match/.test(document.querySelector('.az-auth-summary')?.textContent ?? ''));
+    check('backend: a wrong password shows invalid_credentials copy', true);
+    await login.locator('input[name="password"]').fill(USER.password);
+    await login.getByRole('button', { name: 'Sign in' }).click();
+    await p.waitForURL(/\/account$/);
+    check('backend: the right password signs in', true);
+    await p.locator('.az-session').getByRole('button', { name: 'Sign out' }).click();
+    await p.waitForURL(/\/login$/);
+
+    /* forgot password → the email → the link → a new password */
+    await p.goto(on('/reset'));
+    await p.locator('form[data-flow="reset"] input[name="email"]').fill(USER.email);
+    await p.locator('form[data-flow="reset"]').getByRole('button', { name: 'Email me a link' }).click();
+    const message = await mailTo(1);
+    const link = /https?:\/\/\S+/.exec(message)?.[0] ?? '';
+    check('backend: the reset email arrives over SMTP with a link to the site\'s reset page',
+      link.startsWith(`${realHost.url}/reset?token=`), link.slice(0, 80));
+    await p.goto(link);
+    const set = p.locator('form[data-flow="reset-set"]');
+    await set.locator('input[name="password"]').fill('a-brand-new-password');
+    await set.locator('input[name="passwordConfirm"]').fill('a-brand-new-password');
+    await set.getByRole('button', { name: 'Save new password' }).click();
+    await p.waitForURL((u) => !u.pathname.startsWith('/reset'));
+    check('backend: the emailed link sets a new password and signs in', true);
+    await p.goto(link);
+    await set.locator('input[name="password"]').fill('yet-another-password');
+    await set.locator('input[name="passwordConfirm"]').fill('yet-another-password');
+    await set.getByRole('button', { name: 'Save new password' }).click();
+    await p.waitForFunction(() => /expired/.test(document.querySelector('form[data-flow="reset-set"] .az-auth-summary')?.textContent ?? ''));
+    check('backend: the same link a second time is expired', true);
+    await p.goto(on('/account'));
+    await p.locator('.az-session').getByRole('button', { name: 'Sign out' }).click();
+    await p.waitForURL(/\/login$/);
+
+    /* provider sign-in through the real server */
+    await p.goto(on('/login?next=%2Faccount'));
+    const providerLinks = p.locator('[data-az-oauth="providers"] a');
+    await providerLinks.first().waitFor({ state: 'visible' });
+    check('backend: the provider buttons come from the server\'s own configuration',
+      (await providerLinks.allTextContents()).join('|') === 'Continue with Work account|Continue with Guest account');
+    await p.getByRole('link', { name: 'Continue with Work account' }).click();
+    await p.waitForURL(/\/account$/);
+    await p.locator('.az-session').waitFor({ state: 'visible' });
+    check('backend: a verified provider email signs in to the existing account (OIDC, PKCE, nonce, signed id_token)', true);
+    await p.locator('.az-session').getByRole('button', { name: 'Sign out' }).click();
+    await p.waitForURL(/\/login$/);
+    await providerLinks.first().waitFor({ state: 'visible' });
+    await p.getByRole('link', { name: 'Continue with Guest account' }).click();
+    await p.waitForFunction(() => /hasn't verified your email/.test(document.querySelector('.az-auth-summary')?.textContent ?? ''));
+    check('backend: an unverified provider email never links (email_unverified)', true);
+    check('backend: no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
+    check('backend: the server logged no password or token',
+      !serverLog.includes(USER.password) && !serverLog.includes('a-brand-new-password') && !/token=/.test(serverLog), serverLog.slice(0, 200));
+  } finally {
+    await b.close();
+    child.kill('SIGTERM');
+    realHost.close();
+    smtp.close();
+    oidc2.close();
+  }
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED — work dir kept: ${work}`);

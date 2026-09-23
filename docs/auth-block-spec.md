@@ -284,6 +284,14 @@ never reaches a route.
     PKCE (+ `nonce` for OIDC) on every round-trip; link by verified email
     only; redirect only to an allow-listed `site`.
 
+**The built-in backend.** A site that declares `backend` (backend-spec.md)
+gets a generated server that implements this section exactly. It adds one
+route the site never calls: `GET /auth/link/verify?token=…`, the address in a
+sign-in-link email — a top-level navigation that spends the single-use token,
+sets the session cookie and redirects to an allowed site origin, protected
+like the provider callback. `pnpm test:auth` also runs that real server
+(SQLite, SMTP capture, a mock OpenID provider) in Chromium.
+
 `pnpm test:auth` runs the site's side against a local mock that meets this
 checklist from another origin — including a mock OpenID Connect provider on a
 third — in Chromium, Firefox and WebKit.

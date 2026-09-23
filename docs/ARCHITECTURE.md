@@ -71,7 +71,13 @@ words/*  → core, theme, overlay        (never a target directly)
 cli      → everything
 auth-runtime → (nothing)                 (copied whole into a site that uses auth)
 scene-runtime → three                   (copied whole into a site that uses 3D)
+backend  → core (types, data)           (its server/ is node built-ins + pinned drivers only)
 ```
+
+`backend` is the optional built-in server (backend-spec.md). Its `src/server/`
+imports only its siblings and `node:*` — the drivers it may load are one
+closed, pinned list (`drivers.ts`) — because the CLI copies it verbatim into a
+site's `server/src/`; `src/emit.ts` writes the rest of `server/`.
 
 `auth-runtime` (M4) is the adapter layer a generated site runs: the §3
 contract, the `hosted` and `session` adapters and the form behaviour. It

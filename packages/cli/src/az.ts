@@ -10,7 +10,7 @@
  */
 
 import {
-  readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
+  readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync, chmodSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,7 @@ import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../targe
 import { SvgError } from '../../target-web/src/svg.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
+import { backendFiles, envFile, SERVER_DIR } from '../../backend/src/emit.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
@@ -147,6 +148,11 @@ export function build(options: BuildOptions): BuildOutcome {
     ...(project.auth ? copied('../../auth-runtime/src/runtime/', AUTH_DIR) : []),
     // The 3D runtime only with a site whose pages declare a 3D view (scene-spec §5).
     ...(project.three ? copied('../../scene-runtime/src/runtime/', THREE_DIR) : []),
+    // The built-in backend only with a site that declares one (backend-spec §8).
+    ...(result.spec.site.backend
+      ? [...backendFiles(result.spec.site.name, result.spec.site.backend),
+         ...copied('../../backend/src/server/', `${SERVER_DIR}/src`)]
+      : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
 
   // The author's components go through the same sandbox as assets: they must
@@ -246,9 +252,39 @@ const USAGE = `az — words to a website
   az lint  [words-dir]             theme-token check of every word pack
   az migrate <file.az>             upgrade the file to this grammar version
   az eject <word> [--dir project]  take ownership of a word's source — one-way
+  az backend init <server-dir>     write the backend's .env with a fresh secret
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend']);
+
+/**
+ * `az backend init <server-dir>` — write `.env` beside a generated server's
+ * `az.config.json` (backend-spec §4): every key its setup reads, a fresh
+ * random session secret, owner-only permissions. Refuses to overwrite: a
+ * second init would silently rotate the secret and sign everyone out.
+ */
+function runBackend(sub: string, rest: string[]): number {
+  if (sub !== 'init' || !rest[0]) {
+    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build)\n');
+    return EXIT.config;
+  }
+  const dir = resolve(rest[0]);
+  const configFile = join(dir, 'az.config.json');
+  if (!existsSync(configFile)) {
+    process.stderr.write(`az: no az.config.json in ${dir} — point at the server/ folder az build wrote\n`);
+    return EXIT.missing;
+  }
+  const target = join(dir, '.env');
+  if (existsSync(target)) {
+    process.stderr.write(`az: ${target} already exists — not overwritten (a new secret would sign everyone out)\n`);
+    return EXIT.config;
+  }
+  const setup = JSON.parse(readFileSync(configFile, 'utf8')) as { database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api' };
+  writeFileSync(target, envFile({ database: setup.database, email: setup.email }), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  chmodSync(target, 0o600);
+  process.stdout.write(`az: wrote ${target} (owner read/write only) with a fresh AZ_SESSION_SECRET — fill in the empty values\n`);
+  return EXIT.ok;
+}
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
@@ -329,6 +365,7 @@ export function main(argv: string[]): number {
     return EXIT.config;
   }
   if (cmd === 'migrate') return runMigrate(file);
+  if (cmd === 'backend') return runBackend(file, rest);
   if (cmd === 'eject') {
     const dirFlag = rest.indexOf('--dir');
     return runEject(file, dirFlag >= 0 ? rest[dirFlag + 1] : process.cwd());

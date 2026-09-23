@@ -28,6 +28,8 @@ export type { Manifest, LinkedWord, PropSpec } from './link.ts';
 export { COMPONENT_EXT, INJECTION_POINTS } from './link.ts';
 export type { Spec, SpecBlock, SpecPage, SpecSite } from './spec.ts';
 export { serialiseSpec, blocksFor } from './spec.ts';
+export { BACKEND_DATABASES, BACKEND_EMAIL, BACKEND_SETTINGS } from './backend.ts';
+export type { BackendDatabase, BackendEmail, SpecBackend } from './backend.ts';
 export { INTENTS, intentOf, defaultHierarchy, isHierarchy, ACTION_WORDS, type Intent } from './actions.ts';
 export { HIERARCHIES, type Hierarchy, type ActionOptions, type SubmitOptions } from './emit-contract.ts';
 

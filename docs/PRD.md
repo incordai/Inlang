@@ -345,12 +345,28 @@ auth hosted          # or: session | azbackend | custom
 
 - `hosted` / `session` — the sane default: a managed provider or a
   self-hosted session library, both battle-tested, both with a free tier
-- `azbackend` — points at the Python/Node backend you already built, for
-  self-hosters. This is where your two projects connect.
+- `azbackend` — the site owner's own backend, speaking the protocol in
+  auth-block-spec §3.4. There is no separate backend project: the built-in
+  backend below is the one that fulfils it, and any other server that meets
+  §3.4 works too.
 
 The word generates: login/signup/reset forms styled from the theme, session
 hook, protected-route wrapper, and error states. The security lives in the
 adapter.
+
+> **Decision revised (2026-09-23, owner): an OPTIONAL built-in backend.** For
+> SaaS sites, `az` can now generate the server as well — a `backend`
+> declaration (site-level, choices only: `database sqlite|postgres|mysql`,
+> `email smtp|api`) emits a Node server into `server/` that implements
+> §3.4: accounts, sessions, sign-up with a retyped password, password reset
+> and sign-in links by email, and provider sign-in (generic OpenID Connect
+> and OAuth 2). The concern above still stands, so the rule becomes: **no
+> hand-rolled crypto primitives.** Hashing, randomness and signature checks
+> are Node's own `crypto` (scrypt, HMAC, `crypto.verify`); every security
+> property has a failing test (backend-spec §5). It is opt-in: a site
+> without `backend` builds exactly as before, and `hosted` / `session` /
+> `custom` remain the choices for anyone who would rather not run one.
+> backend-spec.md is the specification.
 
 ### 6.6 Escape hatch
 
@@ -579,15 +595,18 @@ train a model once you have real correction data from users.
 | Generated 3D sites all look identical | high | 3–4 *hand-designed* themes; strong `raw`/`slot` story; distinct signature elements per theme. **Sharpened by the procedural default** (scene-spec §11.1): each theme ships its own generator and they must differ in kind, not hue — one shared generator would make every AZ site recognisable at a glance |
 | Tauri mobile WebGL underperforms | medium | Phase 3 gated on spike; don't market mobile early |
 | Solo maintenance burden | medium | word packs as npm packages so growth isn't all yours |
-| The backend AZ project gets abandoned | medium | it becomes the `azbackend` auth adapter — a real reason to keep it alive |
+| The built-in backend carries a security flaw into every site that uses it | high | opt-in only; Node's own crypto, no hand-rolled primitives; a failing test per property (backend-spec §5); real PostgreSQL/MySQL runs; an external review before a production launch |
 
 ## 11. Open questions — answer before M1
 
 1. **Public open-source project, or your internal studio tool?** This changes
    curation, docs, and contribution model, and an internal tool ships ~2x
    faster. *(Recommendation: build it internal, open-source after M5.)*
-2. **Does the backend AZ project continue,** or does it survive only as the
-   `azbackend` adapter? Doing both at half attention is the main failure mode.
+2. ~~**Does the backend AZ project continue,** or does it survive only as the
+   `azbackend` adapter?~~ **Answered (2026-09-23): yes, as the optional
+   built-in backend** — `az` generates it from a `backend` declaration, and it
+   implements `azbackend` (§6.5, backend-spec.md). There is no separate
+   backend project.
 3. **Do you have a real client site to dogfood at M5?** If not, find one now —
    M5 is the gate and it needs a real brief, not a demo.
 4. ~~**Which mid-range Android do you own for the M0 spike?**~~ **Answered:

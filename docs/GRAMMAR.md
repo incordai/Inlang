@@ -492,6 +492,8 @@ value           = STRING | PAIR | BARE ;
 | `display` / `body` / `mono` `<family>` | `font` | 1 | PRD §6.1 |
 | `page <route>` | file | 1 | PRD §6.1 |
 | `raw <path>` | `page`, any block | 1 (M3) | PRD §6.6 |
+| `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
+| `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here |
 | `nav …` | `site`, `page` | 1 | nav-spec §8 |
 | `footer …` | `site`, `page` | 1 | PRD §6.1 |
 | `scene backdrop` | `site`, `page` | 1 | scene-spec §6 — the only *layer* block |
@@ -511,6 +513,11 @@ Nesting is permitted exactly where the parent's `word.json` declares a
 `children` list — there is no general "any block inside any block" rule, and a
 block placed somewhere its parent does not accept is
 `<word>: not allowed inside 'nav' — move it to the page` (AZ1202, link stage).
+
+`backend`'s diagnostics: AZ1223 declared outside `site` · AZ1224 not a backend
+setting · AZ1225 a setting missing · AZ1412 a value outside its choices (a
+connection string is told where it belongs) · AZ1506 declared twice · AZ1507
+the site's `auth` must use `adapter azbackend`.
 
 ### 3.4 Deferred constructs
 

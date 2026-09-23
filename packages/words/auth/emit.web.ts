@@ -20,6 +20,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
+import { COUNTRIES } from './countries.ts';
 import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 interface Field {
@@ -33,6 +34,12 @@ interface Field {
   readonly readonly?: boolean;
   /** Not required; its label says so (§6: labels, not placeholders). */
   readonly optional?: boolean;
+  /**
+   * Type-ahead suggestions, as a native <datalist>: the browser's own
+   * combobox, keyboard and screen-reader support included, no script, no
+   * service — and free text still accepted.
+   */
+  readonly suggestions?: readonly string[];
 }
 
 /**
@@ -64,7 +71,7 @@ const FIELDS: Record<string, Field[]> = {
     NEW_PASSWORD,
     RETYPE,
     // §3.4: optional, free text — a town or a country, as the person writes it.
-    { name: 'location', label: 'Location (optional)', type: 'text', autocomplete: 'address-level2', optional: true },
+    { name: 'location', label: 'Location (optional)', type: 'text', autocomplete: 'address-level2', optional: true, suggestions: COUNTRIES },
   ],
   // §5's first state; the second (below) is chosen by a URL token at runtime.
   reset: [EMAIL],
@@ -112,6 +119,7 @@ function field(f: Field, ctx: EmitContext, prefix = 'az-auth'): EmittedNode {
           ...(f.optional ? {} : { required: 'required' }),
           ...(f.readonly ? { readonly: 'readonly' } : {}),
           ...(f.hint ? { 'aria-describedby': `${id}-hint` } : {}),
+          ...(f.suggestions ? { list: `${id}-options` } : {}),
         },
         style: {
           minHeight: px(t.size.tap),
@@ -123,6 +131,11 @@ function field(f: Field, ctx: EmitContext, prefix = 'az-auth'): EmittedNode {
           fontSize: t.typeSize.base,
         },
       },
+      ...(f.suggestions ? [{
+        tag: 'datalist',
+        attrs: { id: `${id}-options` },
+        children: f.suggestions.map((value): EmittedNode => ({ tag: 'option', attrs: { value } })),
+      } satisfies EmittedNode] : []),
       ...(f.hint ? [small('hint', f.hint, t.color.muted)] : []),
       small('error', null, t.color.danger),
     ],

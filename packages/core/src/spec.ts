@@ -14,6 +14,7 @@
  * begins here — if the Spec is unstable, nothing downstream can be stable.
  */
 
+import type { BackendDatabase, BackendEmail, SpecBackend } from './backend.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { SpecBlock } from './spec-block.ts';
 import type { LinkedWord } from './link.ts';
@@ -51,6 +52,11 @@ export interface SpecSite {
    * but the target still needs its settings to wire the site (M4).
    */
   readonly scoped: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
+   * The optional built-in backend (backend-spec §2) — absent unless the file
+   * declares one, so a site without it serialises exactly as before.
+   */
+  readonly backend?: SpecBackend;
 }
 
 export interface Spec {
@@ -235,6 +241,26 @@ export function buildSpec(
   const valueOf = (w: LinkedWord | undefined, fallback: string) =>
     w?.args[0]?.value ?? w?.variant ?? fallback;
   const widthWord = kids.find((w) => w.word === 'width');
+
+  // ---- the built-in backend (backend-spec §2) ----------------------------
+  const backendWords = kids.filter((w) => w.word === 'backend');
+  for (const extra of backendWords.slice(1)) {
+    diagnostics.push({ code: 'AZ1506', message: 'backend: declared twice — keep one', pos: extra.pos, severity: 'error' });
+  }
+  const declared = backendWords[0];
+  const backend: SpecBackend | null = declared && declared.props.database && declared.props.email
+    ? { database: declared.props.database.value as BackendDatabase, email: declared.props.email.value as BackendEmail }
+    : null;
+  // The built-in backend IS an azbackend (auth-spec §3.4): a site that
+  // declares one but signs in some other way would ship a server nothing uses.
+  if (declared && site.get('auth')?.adapter !== 'azbackend') {
+    diagnostics.push({
+      code: 'AZ1507',
+      message: "backend: the site's auth must use it — add at site level: auth / adapter azbackend",
+      pos: declared.pos,
+      severity: 'error',
+    });
+  }
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');
   const patternWord = themeWord?.children.find((w) => w.word === 'pattern');
 
@@ -249,6 +275,7 @@ export function buildSpec(
       fonts,
       inherited,
       scoped: Object.fromEntries([...site.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+      ...(backend ? { backend } : {}),
     },
     pages,
   };

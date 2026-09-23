@@ -11,6 +11,7 @@
  */
 
 import { ACTION_WORDS, defaultHierarchy, intentOf, isHierarchy } from './actions.ts';
+import { BACKEND_SETTINGS } from './backend.ts';
 import { HIERARCHIES } from './emit-contract.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { Arg, Statement, AzFile } from './parse.ts';
@@ -114,7 +115,7 @@ const NAMED_VALUE_SETS: Record<string, { test: (v: string) => boolean; describe:
 };
 
 /** Structure keywords live in core, not in `words/` — PRD §6.2. */
-export const STRUCTURE = new Set(['site', 'theme', 'font', 'page', 'raw', 'slot']);
+export const STRUCTURE = new Set(['site', 'theme', 'font', 'page', 'raw', 'slot', 'backend']);
 
 /**
  * Where `slot <name> <path>` may put a component on EVERY block, beside the
@@ -396,7 +397,57 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
              children: [], pos: s.pos };
   }
 
+  /**
+   * `backend` (backend-spec §2): site-level, and only closed choices. A value
+   * outside them is refused rather than carried — and one that looks like a
+   * connection string is told where such a thing belongs, because the
+   * mistake it prevents is a password committed in a `.az` file.
+   */
+  function backendDecl(s: Statement, parentWord: string | null): LinkedWord | null {
+    if (parentWord !== 'site') {
+      err('AZ1223', 'backend: declared outside site — it is site-level, one per site', s.pos);
+      return null;
+    }
+    if (s.args.length > 0) {
+      err('AZ1219', 'backend: takes no value — write its settings beneath it', s.args[0].pos);
+    }
+    const props: Record<string, Arg> = {};
+    for (const c of s.children) {
+      const choices = BACKEND_SETTINGS[c.word];
+      if (!choices) {
+        err('AZ1224', `backend: '${c.word}' is not a backend setting — use: ${Object.keys(BACKEND_SETTINGS).join(', ')}`, c.pos);
+        continue;
+      }
+      const value = c.args[0];
+      if (!value || c.args.length !== 1 || c.children.length > 0) {
+        err('AZ1205', `backend: '${c.word}' has no value — write: ${c.word} ${choices.join('|')}`, c.pos);
+        continue;
+      }
+      if (value.kind !== 'word' || !choices.includes(value.value)) {
+        const secretLike = /[:/@]/.test(value.value);
+        err('AZ1412', secretLike
+          ? `backend: ${c.word} is a choice, not an address — write ${c.word} ${choices.join('|')}; `
+            + 'connection strings and keys go in the backend\'s .env (az backend init)'
+          : `backend: ${c.word} '${value.value}' is not one of: ${choices.join(', ')}`, value.pos);
+        continue;
+      }
+      if (c.word in props) {
+        err('AZ1504', `backend: '${c.word}' set twice — keep one`, c.pos);
+        continue;
+      }
+      props[c.word] = value;
+    }
+    for (const key of Object.keys(BACKEND_SETTINGS)) {
+      if (!(key in props) && s.children.every((c) => c.word !== key)) {
+        err('AZ1225', `backend: no ${key} — add: ${key} ${BACKEND_SETTINGS[key].join('|')}`, s.pos);
+      }
+    }
+    return { word: 'backend', variant: null, modifiers: [], args: [], props, as: s.as, children: [], pos: s.pos };
+  }
+
   function resolve(s: Statement, parent: Manifest | undefined, parentWord: string | null): LinkedWord | null {
+    if (s.word === 'backend') return backendDecl(s, parentWord);
+
     // A property of the enclosing word.
     if (isProp(s, parent)) {
       return { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as,

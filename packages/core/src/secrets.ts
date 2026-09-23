@@ -18,8 +18,13 @@
 /** The prefix a generated project exposes to the browser. Nothing else is inlined. */
 export const PUBLIC_ENV_PREFIX = 'AZ_PUBLIC_';
 
-/** Variable names that say "this is not public" whatever their value is. */
-const PRIVATE_NAME = /SERVICE|SECRET|PRIVATE/i;
+/**
+ * Variable names that say "this is not public" whatever their value is —
+ * including the built-in backend's server-only settings (backend-spec §4),
+ * so `AZ_PUBLIC_SMTP_PASSWORD` or `AZ_PUBLIC_DATABASE_URL` fails the site's
+ * build instead of shipping a credential to every visitor.
+ */
+const PRIVATE_NAME = /SERVICE|SECRET|PRIVATE|PASSWORD|PASSWD|DATABASE_URL|SMTP|EMAIL_API_KEY/i;
 
 /** JWT roles that bypass row-level security — a service key, not a public one. */
 const PRIVILEGED_ROLES: ReadonlySet<string> = new Set(['service_role', 'service', 'admin']);
