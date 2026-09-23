@@ -15,6 +15,7 @@
  */
 
 import type { Diagnostic, Pos } from './lex.ts';
+import type { SpecBlock } from './spec-block.ts';
 import type { LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
 import { runPageChecks, type CheckSubject, type PageEntry } from './checks.ts';
@@ -25,23 +26,9 @@ import { runPageChecks, type CheckSubject, type PageEntry } from './checks.ts';
  */
 const written = new WeakMap<SpecBlock, Pos>();
 
-export interface SpecBlock {
-  readonly word: string;
-  readonly variant: string | null;
-  readonly modifiers: string[];
-  /**
-   * Positional values, in source order.
-   *
-   * `link "Work" /work` carries its label and destination here. Without this
-   * a child word reached the target as a bare tag with its content dropped —
-   * the same bug that lost the site name, one level down.
-   */
-  readonly args: { kind: string; value: string }[];
-  /** Resolved values — defaults applied, so a target never guesses. */
-  readonly props: Record<string, string>;
-  readonly as: string | null;
-  readonly children: SpecBlock[];
-}
+// SpecBlock lives in its own dependency-free module so the emit contract,
+// and a word ejected with it (`az eject`), can import it without this file.
+export type { SpecBlock } from './spec-block.ts';
 
 export interface SpecPage {
   readonly route: string;

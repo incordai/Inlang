@@ -14,7 +14,7 @@
  *      pointing the right way.
  */
 
-import type { SpecBlock } from './spec.ts';
+import type { SpecBlock } from './spec-block.ts';
 
 /** A node in the emitted tree. Deliberately close to HTML, but not HTML. */
 export interface EmittedNode {
@@ -85,6 +85,17 @@ export interface WordEmitter {
 
 /** Convenience for emitters: px from a space step, so no word writes `13px`. */
 export const px = (n: number): string => `${n}px`;
+
+/**
+ * The tag of a component node: a user component named by `raw` or `slot`
+ * (PRD §6.6). `attrs.src` is its project-relative source path; the target
+ * imports that module and renders it with the same theme a word sees. `#`
+ * can never begin an HTML tag, so a component node is never mistaken for
+ * markup. Targets create these; words never need to.
+ */
+export const COMPONENT_TAG = '#component';
+
+export const componentNode = (src: string): EmittedNode => ({ tag: COMPONENT_TAG, attrs: { src } });
 
 /**
  * Text that assistive technology reads and the screen does not show.

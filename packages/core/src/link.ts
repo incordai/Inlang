@@ -112,6 +112,17 @@ const NAMED_VALUE_SETS: Record<string, { test: (v: string) => boolean; describe:
 /** Structure keywords live in core, not in `words/` — PRD §6.2. */
 export const STRUCTURE = new Set(['site', 'theme', 'font', 'page', 'raw', 'slot']);
 
+/**
+ * Where `slot <name> <path>` may put a component on EVERY block, beside the
+ * slots a word's manifest declares: immediately before or after the block
+ * (GRAMMAR §8 writes `slot after ./custom/Ticker.tsx` in a hero). Universal,
+ * so no word needs per-slot code to host one.
+ */
+export const INJECTION_POINTS: readonly string[] = ['before', 'after'];
+
+/** File types an escape-hatch component may be (PRD §6.6). */
+export const COMPONENT_EXT: readonly string[] = ['.tsx', '.ts', '.jsx', '.js'];
+
 /** Properties those keywords accept — PRD §6.1a. */
 export const STRUCTURE_PROPS: Record<string, ReadonlySet<string>> = {
   site: new Set(['width', 'theme', 'font']),
@@ -335,6 +346,45 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
    * recognised as that word's PROPERTY rather than as an unknown word — the
    * same token shape means different things by position (GRAMMAR §3.1).
    */
+  /**
+   * The escape hatch — `raw <path>` and `slot <name> <path>` (PRD §6.6).
+   *
+   * GRAMMAR §3.3: `raw` is legal in a page body and inside a block; `slot`
+   * inside a block, naming one of that block's slots or an injection point.
+   * The path is sandboxed and typed like any path value, so user code is
+   * named only from inside the project and only as a component module.
+   */
+  function escapeHatch(s: Statement, parent: Manifest | undefined, parentWord: string | null): LinkedWord | null {
+    // Directly inside a block word — not a slot fill, whose manifest is
+    // synthesised from its parent's `slots` entry.
+    const inBlock = parentWord !== null && parent !== undefined && manifests.get(parentWord) === parent;
+    if (s.word === 'raw' ? !(inBlock || parentWord === 'page') : !inBlock) {
+      err('AZ1217', s.word === 'raw'
+        ? `raw: only inside a page or a block — move it under the page it belongs to`
+        : `slot: only directly inside a block — put it under the block it fills`, s.pos);
+      return null;
+    }
+    const arity = s.word === 'raw' ? 1 : 2;
+    const path = s.args[arity - 1];
+    if (s.args.length !== arity || path.kind !== 'path' || s.children.length > 0) {
+      err('AZ1219', s.word === 'raw'
+        ? 'raw: write it as raw ./custom/Component.tsx'
+        : 'slot: write it as slot <name> ./custom/Component.tsx', s.pos);
+      return null;
+    }
+    if (s.word === 'slot') {
+      const name = s.args[0];
+      const names = [...INJECTION_POINTS, ...Object.keys(parent?.slots ?? {})];
+      if (name.kind !== 'word' || !names.includes(name.value)) {
+        err('AZ1218', `slot: '${name.value}' is not a slot of ${parentWord} — try: ${names.join(', ')}`, name.pos);
+        return null;
+      }
+    }
+    checkValues(s.word, { component: path }, { component: { type: 'path', ext: [...COMPONENT_EXT] } });
+    return { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as,
+             children: [], pos: s.pos };
+  }
+
   function resolve(s: Statement, parent: Manifest | undefined, parentWord: string | null): LinkedWord | null {
     // A property of the enclosing word.
     if (isProp(s, parent)) {
@@ -391,6 +441,8 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
                children: s.children.map((c) => resolve(c, parent, s.word)).filter(Boolean) as LinkedWord[],
                pos: s.pos };
     }
+
+    if (s.word === 'raw' || s.word === 'slot') return escapeHatch(s, parent, parentWord);
 
     const m = manifests.get(s.word);
     const structural = STRUCTURE.has(s.word);
