@@ -221,11 +221,17 @@ holds. The remaining four props are blocked:
 `hero.model`, `scene.model` and `scene.camera` need the 3D runtime ported
 from the spike (after M0, and after the pin, renderer-placement and Draco
 decoder decisions); `auth.impl` needs M4.
-Not built: responsive CSS (the target emits inline styles only, so no
-variant's phone layout exists), the button primitive, the overlay engine,
-thumbnails, the 12-point gate and `lint` as commands, and parts of each
-block's validation table (e.g. gallery's missing-alt and caption warnings,
-faq's one-FAQPage-per-page error, hero's three-button limit).
+Styling: words describe `style` plus named variants — `below.<breakpoint>`,
+`states.<state>`, `reducedMotion` (ARCHITECTURE §4.3) — and the target
+compiles every styled node into one generated class in `src/az.css`; lint
+rejects raw conditions in word source. Piloted on hero (`split` restacks
+below sm, actions full-width below xs) and nav (skip link shown on focus),
+both checked in a browser by `pnpm test:visual`, which runs in CI with axe,
+keyboard, overflow, reduced-motion, scheme, restack and skip-link checks.
+The block validation tables are implemented as manifest `checks`, and
+`az lint` exists.
+Not built: the other ten words' responsive tables, the button primitive,
+the overlay engine, thumbnails, and the 12-point gate as one command.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape
