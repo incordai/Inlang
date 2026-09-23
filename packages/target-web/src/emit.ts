@@ -269,6 +269,17 @@ const REACT_NAME: Record<string, string> = {
 };
 
 /**
+ * HTML state attributes that React treats as CONTROLLED when spelt as HTML.
+ *
+ * The page is static HTML plus behaviour, so \`checked\` means "checked at
+ * first", which is React's \`defaultChecked\`; as \`checked\` React renders a
+ * read-only field and warns.
+ */
+const INITIAL: Record<string, string> = {
+  checked: "defaultChecked",
+};
+
+/**
  * Render one emitted node.
  *
  * Text arrives as a plain string and React escapes it. Nothing here builds
@@ -280,12 +291,14 @@ export function Node({ node }: { node: EmittedNode | string }): ReactNode {
 
   const props: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node.attrs ?? {})) {
-    props[REACT_NAME[k] ?? k] = v;
+    props[INITIAL[k] ?? REACT_NAME[k] ?? k] = v;
   }
 
   if (VOID.has(node.tag)) return createElement(node.tag, props);
+  // Text stays text. Wrapping it in a component made a <script>'s JSON-LD a
+  // child element rather than the single string React requires there.
   return createElement(node.tag, props,
-    ...(node.children ?? []).map((c, i) => createElement(Node, { key: i, node: c })));
+    ...(node.children ?? []).map((c, i) => typeof c === "string" ? c : createElement(Node, { key: i, node: c })));
 }
 
 export function Page({ route, children }: { route: string; children?: ReactNode }) {

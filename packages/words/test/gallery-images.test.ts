@@ -113,3 +113,16 @@ test('orbit caps the set at 16 images', () => {
   assert.equal(imgs(emit(gallery('orbit', many), context())).length, 16);
   assert.equal(imgs(emit(gallery('grid', many), context())).length, 20, 'CONTROL: grid does not cap');
 });
+
+test('§10: a scrolling track is a named list the keyboard can reach', () => {
+  const track = (variant: string, props: Record<string, string> = {}) =>
+    walk(emit(gallery(variant, SET, props), context())).find((x) => x.tag === 'ul')!;
+  for (const v of ['carousel', 'orbit']) {
+    const t = track(v, { title: 'The workshop' });
+    assert.equal(t.attrs?.role, undefined, `${v}: stays a list, so its items are list items`);
+    assert.equal(t.attrs?.['aria-label'], 'The workshop', v);
+    assert.equal(t.attrs?.tabindex, '0', v);
+  }
+  assert.equal(track('carousel').attrs?.['aria-label'], 'Gallery', 'a title-less track is still named');
+  assert.equal(track('grid').attrs?.tabindex, undefined, 'CONTROL: a grid does not scroll and is no tab stop');
+});

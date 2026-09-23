@@ -10,6 +10,9 @@
 import type { SpecBlock } from '../../core/src/spec.ts';
 import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
+/** The track's name when the gallery has no title to lend it. */
+const GALLERY_LABEL = 'Gallery';
+
 /** §2 — orbit "caps at 16 images". Past that it is a cost, not a gallery. */
 const ORBIT_MAX = 16;
 
@@ -125,6 +128,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         // here is what lets the runtime load that machinery for this page and
         // nowhere else — scene-spec §5, one renderer per page.
         ...(variant === 'orbit' ? { 'data-az-runtime': '3d' } : {}),
+        // §10: a scrolling track is named and the keyboard can reach it —
+        // focused, the arrow keys scroll it. `orbit` becomes this carousel
+        // below sm (§6). §10 says role="group"; on the <ul> that would strip
+        // the list its <li>s need, so the track stays a list with a name.
+        // The arrow buttons wait for the behaviour runtime.
+        ...(variant === 'carousel' || variant === 'orbit'
+          ? { 'aria-label': block.props.title ?? GALLERY_LABEL, tabindex: '0' }
+          : {}),
       },
       style: {
         // §2, four genuinely different jobs:
