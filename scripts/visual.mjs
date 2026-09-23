@@ -369,8 +369,7 @@ const BAD = `<!doctype html><html lang="en"><head><title>bad</title><style>
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { animation: spin 1s infinite; }
 </style></head><body>
-  <a href="#m" style="position:absolute;top:0;transform:translateY(-200%)">Skip to content</a>
-  <main id="m"><h1>Bad</h1>
+  <main id="m" tabindex="-1"><a href="#m">Skip to content</a><h1>Bad</h1>
   <div class="g" style="display:grid;grid-template-columns:1fr 1fr"><span>a</span><span>b</span></div>
   <div class="f" style="display:flex;flex-wrap:wrap;gap:8px"><span style="width:40px">a</span><span style="width:40px">b</span></div>
   <div style="display:grid;grid-template-columns:1fr 1fr"><p class="c1">Title</p><p class="c2">Sub</p></div>
@@ -394,7 +393,7 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   @media (width < 768px) { .g { grid-template-columns: 1fr; } }
 </style></head><body>
   <header><a class="skip" href="#m">Skip to content</a></header>
-  <main id="m"><h1>Good</h1>
+  <main id="m" tabindex="-1"><h1>Good</h1>
   <div class="g"><span>a</span><span>b</span></div>
   <div class="f" style="display:flex;flex-wrap:wrap;gap:8px"><span style="width:40px">a</span><span style="width:40px">b</span></div>
   <style>@media (width < 768px) { .f { flex-direction: column; } }</style>
@@ -418,11 +417,13 @@ const PINNED = (padded) => `<!doctype html><html lang="en"><head><title>pinned</
  * layout the target emits (grid: column + content) and needs no padding;
  * `over` pins the same column on top of the content, which must fail.
  */
+// The target's structure: a page wrapper holding the nav, then <main> as the
+// content column (the nav sits before <main>, so the skip link skips it).
 const SIDE = (beside) => `<!doctype html><html lang="en"><head><title>side</title><style>
-  main { ${beside ? 'display: grid; grid-template-columns: 256px minmax(0, 1fr); align-items: start;' : ''} }
+  .az-page { ${beside ? 'display: grid; grid-template-columns: 256px minmax(0, 1fr); align-items: start;' : ''} }
   nav { position: ${beside ? 'sticky' : 'fixed'}; top: 0; left: 0; width: 256px; height: 100svh; background: white; }
-</style></head><body><main><nav aria-label="Main"><a href="/">Home</a></nav>
-<div class="az-layout-content"><h1>Docs</h1></div></main></body></html>`;
+</style></head><body><div class="az-page"><nav aria-label="Main"><a href="/">Home</a></nav>
+<main><h1>Docs</h1></main></div></body></html>`;
 
 async function selfTest() {
   const dir = mkdtempSync(join(tmpdir(), 'az-visual-self-'));

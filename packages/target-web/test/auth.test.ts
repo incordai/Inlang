@@ -60,8 +60,10 @@ test('a hosted site: config reads the PUBLIC env, the guard requires it, App gua
   assert.match(file(p, 'az-vite/guard.ts'), /const REQUIRED: readonly string\[\] = \["AZ_PUBLIC_AUTH_URL","AZ_PUBLIC_AUTH_KEY"\]/);
   const app = file(p, 'src/App.tsx');
   assert.match(app, /import \{ AuthRuntime, Protected \} from "\.\/az-auth\/react\.tsx";/);
-  // The login page is never protected (a loop); the nav leads the protected page.
-  assert.match(app, /const PROTECT: Record<string, number> = \{\n  "\/account": 1\n\};/);
+  // The login page is never protected (a loop). The nav leads the page,
+  // before <main>, so it stays outside <Protected> and shows while checking.
+  assert.match(app, /const PROTECT = new Set<string>\(\[\n  "\/account"\n\]\);/);
+  assert.match(app, /<Protected lead=\{null\}>\{nodes\(page, page\.lead, /);
   assert.match(file(p, 'src/theme.css'), /\.az-session \{/);
 });
 

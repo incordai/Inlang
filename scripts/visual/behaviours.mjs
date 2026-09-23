@@ -146,6 +146,18 @@ export async function solid(page) {
   };
   const problems = [];
   const top = await at(0);
+  // §4: over a full or 3D hero the bar is transparent ON the hero — the hero
+  // starts at the top of the page, under the bar, and the bar stays on top.
+  const over = await page.evaluate(() => {
+    const hero = document.querySelector('main > :first-child:is(.az-hero--full, [data-az-3d-host])');
+    if (!hero) return null;
+    const nav = document.querySelector('[data-az-behaviour="solid"]');
+    const r = nav.getBoundingClientRect();
+    const onTop = nav.contains(document.elementFromPoint(r.left + 4, r.top + r.height / 2));
+    return { heroTop: hero.getBoundingClientRect().top, onTop };
+  });
+  if (over && over.heroTop > 0.5) problems.push(`the hero starts ${Math.round(over.heroTop)}px down, below the bar — not under it`);
+  if (over && !over.onTop) problems.push('the hero paints over the bar');
   const down = await at(200);
   const between = await at(60);
   const back = await at(20);
@@ -378,10 +390,10 @@ export async function scrollPadding(page) {
     target.id = 'az-probe-target';
     target.textContent = 'Anchor target';
     target.style.marginTop = '2000px';
-    // Where the page's content lives: beside a `side` nav that is its own
-    // column (nav-spec §10 Q2), else <main>. Appending to a side page's
-    // <main> would auto-place the probe into the nav's column.
-    (document.querySelector('.az-layout-content') ?? document.querySelector('main')).append(target);
+    // Where the page's content lives: <main>. The nav sits before it — and on
+    // a `side` page <main> is the content column beside the nav's column
+    // (nav-spec §10 Q2) — so the probe never lands in the nav.
+    document.querySelector('main').append(target);
     location.hash = 'az-probe-target';
   });
   await page.waitForTimeout(300);

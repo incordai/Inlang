@@ -341,7 +341,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       color: t.color.text,
       // A shrinking bar is pinned by its frame (below), which holds its
       // full height in the page; the bar itself pins otherwise.
-      position: (pinned && !shrinks) || layout.vertical ? 'sticky' : 'static',
+      // A solid bar that does not pin is still positioned: the hero is pulled
+      // up under it (§4), and z-index only lifts a positioned box above it.
+      position: (pinned && !shrinks) || layout.vertical ? 'sticky' : solid ? 'relative' : 'static',
       top: 0,
       zIndex: t.layer.sticky,
       transition: hides || shrinks

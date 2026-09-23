@@ -423,25 +423,29 @@ try {
   check('nav §7: the skip link lands on an element that exists and takes focus',
     routes.every((r) => !/href="#az-content"/.test(rendered[r]) ||
       /<main[^>]*id="az-content"[^>]*tabindex="-1"|<main[^>]*tabindex="-1"[^>]*id="az-content"/i.test(rendered[r])));
+  // The skip link must skip something: <main> is its target, so the nav has
+  // to sit BEFORE <main>, not inside it — inside, focus landed on <main> and
+  // the next Tab went straight back to the skip link. And a <footer> inside
+  // <main> is not a contentinfo landmark: it belongs after it.
+  for (const r of routes) {
+    const page = rendered[r];
+    if (!page.includes('az-skip-link')) continue;
+    const main = page.indexOf('<main');
+    const mainEnd = page.lastIndexOf('</main>');
+    check(`nav §7 (${r}): the nav and its skip link come before <main>, not inside it`,
+      page.indexOf('az-skip-link') < main && page.indexOf('<nav') < main);
+    if (page.includes('<footer')) {
+      check(`footer (${r}): the <footer> comes after </main>, so it is a landmark`,
+        page.indexOf('<footer') > mainEnd);
+    }
+  }
   check('nav §7: the main landmark is labelled',
     /<nav[^>]*aria-label="Main"/.test(html));
   check('nav §6: the toggle is a button wired to a panel that exists',
     /<button[^>]*aria-controls="az-nav-panel"/.test(html) && /id="az-nav-panel"/.test(html));
 
-  /**
-   * The markup of one page.
-   *
-   * App.tsx renders EVERY page into one document — there is no router yet —
-   * so a check that scanned the whole string would happily find `/`'s nav
-   * while looking at `/login`.
-   */
-  const pageHtml = (route) => {
-    const open = html.indexOf(`data-route="${route}"`);
-    if (open < 0) return '';
-    const rest = html.slice(open);
-    const next = rest.indexOf('<main', 1);
-    return next < 0 ? rest : rest.slice(0, next);
-  };
+  /** The markup of one page — each route is rendered on its own. */
+  const pageHtml = (route) => rendered[route] ?? '';
 
   const home = pageHtml('/');
   check('CONTROL: both fixture pages rendered', !!home && !!pageHtml('/login'));

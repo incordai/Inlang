@@ -180,5 +180,36 @@ export async function skipLink(page) {
     return { first: 'skip', visible: box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight };
   });
   if (r.first !== 'skip') return { pass: false, detail: `first Tab reached ${r.first}, not a skip link` };
-  return { pass: r.visible, detail: r.visible ? '' : 'the focused skip link is off-screen' };
+  if (!r.visible) return { pass: false, detail: 'the focused skip link is off-screen' };
+  // And it must SKIP: after following it, the next Tab lands inside its
+  // target and past the link. A skip link inside its own target moves focus
+  // to the target, and the next Tab comes straight back to the link.
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(SCROLL_SETTLE_MS);
+  const landed = await page.evaluate(() => {
+    const el = document.activeElement;
+    const skip = document.querySelector('a[href^="#"]');
+    const target = skip && document.getElementById((skip.getAttribute('href') ?? '').slice(1));
+    const focusable = target ? [...target.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter((f) => f !== skip && f.getClientRects().length > 0) : [];
+    return { onTarget: !!(el && target && (el === target || target.contains(el))), content: focusable.length > 0 };
+  });
+  if (!landed.onTarget) return { pass: false, detail: 'following the skip link did not move focus to its target' };
+  if (!landed.content) return { pass: true, detail: '' };
+  // The target has something to reach: the next Tab must land on it.
+  await page.keyboard.press('Tab');
+  const after = await page.evaluate(() => {
+    const el = document.activeElement;
+    const skip = document.querySelector('a[href^="#"]');
+    const target = skip && document.getElementById((skip.getAttribute('href') ?? '').slice(1));
+    return {
+      inside: !!(el && target && target !== el && target.contains(el)),
+      onSkip: el === skip,
+      what: el ? `${el.tagName.toLowerCase()}${el.className ? `.${String(el.className).split(' ')[0]}` : ''}` : 'nothing',
+    };
+  });
+  if (!after.inside || after.onSkip) {
+    return { pass: false, detail: `after the skip link, Tab reached ${after.what}, not the content it skips to` };
+  }
+  return { pass: true, detail: '' };
 }

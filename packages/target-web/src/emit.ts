@@ -162,16 +162,35 @@ function stableJson(value: unknown): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
-/** Whether a page opens with a `side` nav — the page is then laid out beside it. */
-function sideLead(nodes: readonly EmittedNode[]): boolean {
-  return /(^| )az-nav--side( |$)/.test(nodes[0]?.attrs?.class ?? '');
-}
+/** A node carries one of the given word classes. */
+const isWord = (node: EmittedNode | undefined, cls: RegExp) => cls.test(node?.attrs?.class ?? '');
 
-/** How many of a page's leading nodes are its nav — shown while <Protected> checks. */
+/**
+ * The run of a page's leading nodes that sit BEFORE <main>: its nav, and a
+ * `scene backdrop` placed with it. The skip link targets <main>, so the nav
+ * must precede it — inside, the skip link skipped nothing (nav-spec §7).
+ */
 function leadOf(nodes: readonly EmittedNode[]): number {
   let n = 0;
-  while (n < nodes.length && /(^| )az-nav( |$)/.test(nodes[n].attrs?.class ?? '')) n++;
+  // `az-nav-frame` is the pinned frame a shrinking nav sits in.
+  while (n < nodes.length && isWord(nodes[n], /(^| )(az-nav|az-nav-frame|az-scene--backdrop)( |$)/)) n++;
   return n;
+}
+
+/** The run of trailing nodes that sit AFTER </main>: the footer, a landmark only outside <main>. */
+function tailOf(nodes: readonly EmittedNode[], lead: number): number {
+  let n = 0;
+  while (nodes.length - n > lead && isWord(nodes[nodes.length - 1 - n], /(^| )az-footer( |$)/)) n++;
+  return n;
+}
+
+/** A page as the App carries it: its nodes, and where <main> starts and ends. */
+interface LaidOut { route: string; lead: number; tail: number; layout?: 'side'; nodes: EmittedNode[] }
+
+function layOut(page: { route: string; nodes: EmittedNode[] }): LaidOut {
+  const lead = leadOf(page.nodes);
+  const side = page.nodes.slice(0, lead).some((n) => isWord(n, /(^| )az-nav--side( |$)/));
+  return { route: page.route, lead, tail: tailOf(page.nodes, lead), ...(side ? { layout: 'side' as const } : {}), nodes: page.nodes };
 }
 
 function appTsx(
@@ -184,44 +203,32 @@ function appTsx(
   const components = modules.filter((m) => m !== plan?.impl);
   const imports = components.map((m, i) => `import U${i} from ${JSON.stringify(`./user/${m}`)};\n`).join('');
   const table = components.map((m, i) => `  ${JSON.stringify(m)}: U${i},\n`).join('');
-  // Auth pages only (M4): a site without auth imports none of it.
-  // nav-spec §10 Q2: `side` is a PAGE layout. Those pages render their nav
-  // as a column and everything else in a content column beside it; the nav
-  // is then outside the content, so <Protected> needs no lead on them.
-  const side = Object.fromEntries(pages.filter((p) => sideLead(p.nodes)).map((p) => [p.route, leadOf(p.nodes)]));
-  const lead = Object.fromEntries((plan?.protect ?? [])
-    .map((r) => [r, r in side ? 0 : leadOf(pages.find((p) => p.route === r)?.nodes ?? [])]));
+  // Auth pages only (M4): a site without auth imports none of it. The nav
+  // sits before <main>, outside <Protected>, so it shows while the check runs.
   const auth = plan ? `import { AuthRuntime, Protected } from "./az-auth/react.tsx";
 
-/** Pages wrapped in <Protected>, and how many leading nodes (the nav) show while it checks. */
-const PROTECT: Record<string, number> = ${stableJson(lead)};
+/** Pages whose content is wrapped in <Protected>. */
+const PROTECT = new Set<string>(${stableJson(plan.protect)});
 ` : '';
   const content = plan
-    ? `PROTECT[page.route] !== undefined
-            ? <Protected lead={page.nodes.slice(0, PROTECT[page.route]).map((node, i) => <Node key={i} node={node} />)}>
-                {page.nodes.slice(PROTECT[page.route]).map((node, i) => <Node key={i} node={node} />)}
-              </Protected>
-            : page.nodes.map((node, i) => <Node key={i} node={node} />)`
-    : `page.nodes.map((node, i) => <Node key={i} node={node} />)`;
-  const sided = Object.keys(side).length > 0;
-  const sideTable = sided ? `
-/** Pages laid out beside a \`side\` nav, and how many leading nodes are that nav. */
-const SIDE: Record<string, number> = ${stableJson(side)};
-` : '';
-  const plain = `<Page route={page.route}>{${content}}</Page>`;
-  const body = sided
-    ? `SIDE[page.route] !== undefined
-            ? <Page route={page.route} layout="side">
-                {page.nodes.slice(0, SIDE[page.route]).map((node, i) => <Node key={i} node={node} />)}
-                <div className="az-layout-content">{${content.split('page.nodes').join('page.nodes.slice(SIDE[page.route])')}}</div>
-              </Page>
-            : ${plain}`
-    : plain;
+    ? `PROTECT.has(page.route)
+              ? <Protected lead={null}>{nodes(page, page.lead, page.nodes.length - page.tail)}</Protected>
+              : nodes(page, page.lead, page.nodes.length - page.tail)`
+    : `nodes(page, page.lead, page.nodes.length - page.tail)`;
+  const laidOut = pages.map(layOut);
   return `${HEADER}import { Components, Node, NotFound, Page, Site } from "./runtime.tsx";
 import type { Custom, EmittedNode } from "./runtime.tsx";
 ${auth}${imports}
-const PAGES: { route: string; nodes: EmittedNode[] }[] = ${stableJson(pages)};
-${sideTable}
+/**
+ * Every page: its nodes, how many lead (nav, before <main>) and how many
+ * tail (footer, after </main>), and its layout (nav-spec §10 Q2: \`side\`).
+ */
+const PAGES: { route: string; lead: number; tail: number; layout?: string; nodes: EmittedNode[] }[] = ${stableJson(laidOut)};
+
+/** A run of a page's nodes, keyed by position so React keeps them apart. */
+const nodes = (page: { nodes: EmittedNode[] }, from: number, to: number) =>
+  page.nodes.slice(from, to).map((node, i) => <Node key={from + i} node={node} />);
+
 /**
  * The author's own components (raw / slot, PRD §6.6), by source path, and
  * the theme they receive — the same tokens a word reads, colours as
@@ -255,7 +262,10 @@ export default function App({ route }: { route: string }) {
         pattern=${jsxValue(spec.site.pattern)}
       >
         {page
-          ? ${body}
+          ? <Page route={page.route} layout={page.layout}
+              lead={nodes(page, 0, page.lead)} tail={nodes(page, page.nodes.length - page.tail, page.nodes.length)}>
+              {${content}}
+            </Page>
           : <NotFound />}${plan ? `
         <AuthRuntime />` : ''}
       </Site>
@@ -381,20 +391,33 @@ export function Node({ node }: { node: EmittedNode | string }): ReactNode {
     ...(node.children ?? []).map((c, i) => typeof c === "string" ? c : createElement(Node, { key: i, node: c })));
 }
 
-export function Page({ route, layout, children }: { route: string; layout?: string; children?: ReactNode }) {
-  // nav's skip link points here (nav-spec §7); tabIndex -1 lets focus land
-  // on the landmark without adding it to the tab order. \`layout\` is the page
-  // layout a \`side\` nav asks for (nav-spec §10 Q2): nav column + content.
-  return <main id="az-content" tabIndex={-1} className="az-page" data-route={route} data-layout={layout}>{children}</main>;
+export function Page(
+  { route, layout, lead, tail, children }:
+  { route: string; layout?: string; lead?: ReactNode; tail?: ReactNode; children?: ReactNode },
+) {
+  // The nav (lead) comes before <main> and the footer (tail) after it: the
+  // skip link targets <main> (nav-spec §7) and must skip the nav, and a
+  // <footer> is the contentinfo landmark only outside <main>. tabIndex -1
+  // lets focus land on <main> without adding it to the tab order.
+  // \`layout\` is the page layout a \`side\` nav asks for (nav-spec §10 Q2).
+  return (
+    <div className="az-page" data-route={route} data-layout={layout}>
+      {lead}
+      <main id="az-content" tabIndex={-1} className="az-main">{children}</main>
+      {tail}
+    </div>
+  );
 }
 
 /** A path that is not a page of this site. */
 export function NotFound() {
   return (
-    <main id="az-content" tabIndex={-1} className="az-page az-not-found" data-route="">
-      <h1>Page not found</h1>
-      <p><a href="/">Go to the home page</a></p>
-    </main>
+    <div className="az-page az-not-found" data-route="">
+      <main id="az-content" tabIndex={-1} className="az-main">
+        <h1>Page not found</h1>
+        <p><a href="/">Go to the home page</a></p>
+      </main>
+    </div>
   );
 }
 
@@ -463,6 +486,30 @@ html { scroll-padding-top: calc(var(--az-size-nav) + ${theme.space[16]}px); }
 }
 
 /**
+ * nav-block-spec §4: a `solid` nav sits transparent OVER a full-bleed hero at
+ * the top, then turns solid on scroll. In normal flow the hero started below
+ * the nav, so the "transparent" bar showed the page background and its light
+ * `inverse` logo sat on it. A `full` or 3D hero opening <main> on such a page
+ * is pulled up under the nav by the nav's height and reserves that height
+ * inside itself — a transparent border, so its own padding and its
+ * background (painted under the border) are untouched. The nav's own z-index
+ * keeps it above. Other heroes are left alone: §4 says `solid` does nothing
+ * without a full or 3D hero.
+ */
+function solidNavCss(spec: Spec, theme: ThemeLike): string {
+  const solid = (b: { word: string; modifiers: string[] }) => b.word === 'nav' && b.modifiers.includes('solid');
+  if (!spec.site.inherited.some(solid) && !spec.pages.some((p) => p.blocks.some(solid))) return '';
+  return `
+/* nav-block-spec §4: a solid nav is transparent over a full or 3D hero. */
+:root { --az-size-nav: ${theme.size.nav}px; }
+.az-page:has([data-az-behaviour="solid"]) > .az-main > :first-child:is(.az-hero--full, [data-az-3d-host]) {
+  margin-top: calc(-1 * var(--az-size-nav));
+  border-top: var(--az-size-nav) solid transparent;
+}
+`;
+}
+
+/**
  * nav-block-spec §10 Q2, resolved as its recommendation: `side` is a page
  * layout. At and above `breakpoint.sm` the nav is a column of
  * `size.nav-side` and the page's content fills the column beside it;
@@ -479,7 +526,9 @@ function sideLayoutCss(spec: Spec, theme: ThemeLike): string {
   grid-template-columns: ${theme.size['nav-side']}px minmax(0, 1fr);
   align-items: start;
 }
-.az-layout-content { min-width: 0; }
+/* The nav column spans the page; <main> and the footer fill the content column. */
+.az-page[data-layout="side"] > :first-child { grid-row: 1 / span 2; }
+.az-page[data-layout="side"] > :not(:first-child) { grid-column: 2; min-width: 0; }
 @media (width < ${theme.breakpoint.sm}px) {
   .az-page[data-layout="side"] { display: block; }
 }
@@ -697,7 +746,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${schemeCss(named)}${pinnedNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
+${schemeCss(named)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
     },
     {
       /**
