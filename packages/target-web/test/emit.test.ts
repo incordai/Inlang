@@ -116,6 +116,24 @@ test('theme-spec §3.3: pages carry colour references, the stylesheet carries co
   assert.match(fileNamed(files, 'index.html').content, /<meta name="color-scheme" content="light dark"/);
 });
 
+test('every page is its own HTML entry, so a static host serves each route', () => {
+  const files = build('az 1\nsite aurora\npage /\n  hero center\n    title "x"\npage /work\npage /studio/team\n');
+  const html = files.map((f) => f.path).filter((p) => p.endsWith('.html')).sort();
+  assert.deepEqual(html, ['index.html', 'studio/team/index.html', 'work/index.html']);
+  const vite = fileNamed(files, 'vite.config.ts').content;
+  assert.match(vite, /"studio\/team": "studio\/team\/index\.html"/);
+  assert.match(vite, /"index": "index\.html"/);
+  const app = fileNamed(files, 'src/App.tsx').content;
+  assert.match(app, /export default function App\(\{ route \}/, 'App renders one route, not every page');
+});
+
+test('SECURITY: a route cannot place an HTML file outside the project', () => {
+  const r = compile('az 1\nsite aurora\npage /\n', { manifests });
+  assert.ok(r.spec);
+  const spec = { ...r.spec, pages: [...r.spec.pages, { route: '/../../escape', blocks: [] }] };
+  assert.throws(() => emit(spec, { emitters: WEB_EMITTERS }), PathEscapeError);
+});
+
 /* ---------------- determinism, CONVENTIONS §6 ---------------- */
 
 test('DETERMINISM: two emits are byte-identical', () => {

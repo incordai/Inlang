@@ -108,13 +108,38 @@ try {
   writeFileSync(join(proj, 'ssr.tsx'),
     'import { renderToStaticMarkup } from "react-dom/server";\n' +
     'import App from "./src/App.tsx";\n' +
-    'process.stdout.write(renderToStaticMarkup(<App />));\n');
+    '// Each route renders on its own, as a browser loading that page would.\n' +
+    'const routes = JSON.parse(process.argv[2]);\n' +
+    'process.stdout.write(JSON.stringify(Object.fromEntries(\n' +
+    '  routes.map((r) => [r, renderToStaticMarkup(<App route={r} />)]))));\n');
   vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], proj);
+
+  // The routes are whatever pages the BUILD produced as HTML files, so this
+  // also proves every page got one: `/` is index.html, `/work` work/index.html.
+  const htmlFiles = (dir, prefix = '') => readdirSync(join(proj, 'dist', dir), { withFileTypes: true })
+    .flatMap((e) => e.isDirectory() && e.name !== 'assets'
+      ? htmlFiles(join(dir, e.name), `${prefix}/${e.name}`)
+      : e.name === 'index.html' ? [prefix || '/'] : []);
+  const routes = htmlFiles('.');
   // stderr is kept: React reports a misspelt DOM attribute there as a
   // warning, and the page still renders — so only stderr shows it.
-  const ssr = spawnSync(process.execPath, [join(proj, 'ssr-out/ssr.js')], { cwd: proj, encoding: 'utf8' });
+  const ssr = spawnSync(process.execPath,
+    [join(proj, 'ssr-out/ssr.js'), JSON.stringify([...routes, '/no-such-page'])],
+    { cwd: proj, encoding: 'utf8' });
   if (ssr.status !== 0) throw new Error(`ssr failed: ${ssr.stderr}`);
-  const html = ssr.stdout;
+  const rendered = JSON.parse(ssr.stdout);
+  const notFound = rendered['/no-such-page'];
+  delete rendered['/no-such-page'];
+  // Every page in route order, so the page-level checks below still see /
+  // first and can find each page by its data-route.
+  const html = routes.map((r) => rendered[r]).join('');
+
+  check('every page of the fixture is its own HTML file',
+    ['/', '/login', '/legal'].every((r) => routes.includes(r)), routes.join(' '));
+  check('a route renders only its own page — one <main> each',
+    routes.every((r) => (rendered[r].match(/<main/g) ?? []).length === 1 && rendered[r].includes(`data-route="${r}"`)));
+  check('an unknown path renders not-found, not a site page',
+    /az-not-found/.test(notFound) && !/data-route="\/"/.test(notFound));
   check('React renders without warnings', ssr.stderr.trim() === '', ssr.stderr.trim().split('\n')[0]);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
 
@@ -254,7 +279,7 @@ try {
   cpSync(join(proj, 'node_modules'), join(evilProj, 'node_modules'), { recursive: true });
   cpSync(join(proj, 'ssr.tsx'), join(evilProj, 'ssr.tsx'));
   vite(['build', '--ssr', 'ssr.tsx', '--outDir', 'ssr-out'], evilProj);
-  const evilHtml = node(join(evilProj, 'ssr-out/ssr.js'), [], evilProj);
+  const evilHtml = JSON.parse(node(join(evilProj, 'ssr-out/ssr.js'), [JSON.stringify(['/'])], evilProj))['/'];
 
   check('SECURITY: no executable <script> reaches the DOM', !/<script/i.test(evilHtml));
   check('SECURITY: the text survives ESCAPED, not silently dropped',

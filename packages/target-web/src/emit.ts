@@ -127,12 +127,23 @@ function stableJson(value: unknown): string {
 }
 
 function appTsx(spec: Spec, pages: { route: string; nodes: EmittedNode[] }[]): string {
-  return `${HEADER}import { Node, Page, Site } from "./runtime.tsx";
+  return `${HEADER}import { Node, NotFound, Page, Site } from "./runtime.tsx";
 import type { EmittedNode } from "./runtime.tsx";
 
 const PAGES: { route: string; nodes: EmittedNode[] }[] = ${stableJson(pages)};
 
-export default function App() {
+/** "/work/" and "/work/index.html" are "/work"; the root stays "/". */
+export function routeOf(pathname: string): string {
+  // String operations, not a regex: this source sits inside a template
+  // literal in the emitter, where regex escapes are easy to lose.
+  let path = pathname.endsWith("/index.html") ? pathname.slice(0, -"index.html".length) : pathname;
+  while (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+  return path === "" ? "/" : path;
+}
+
+/** One page of the site: the one whose route matches, or not-found. */
+export default function App({ route }: { route: string }) {
+  const page = PAGES.find((p) => p.route === routeOf(route));
   return (
     <Site
       name=${lit(spec.site.name)}
@@ -141,11 +152,9 @@ export default function App() {
       accent=${lit(spec.site.accent)}
       pattern=${lit(spec.site.pattern)}
     >
-      {PAGES.map((page) => (
-        <Page key={page.route} route={page.route}>
-          {page.nodes.map((node, i) => <Node key={i} node={node} />)}
-        </Page>
-      ))}
+      {page
+        ? <Page route={page.route}>{page.nodes.map((node, i) => <Node key={i} node={node} />)}</Page>
+        : <NotFound />}
     </Site>
   );
 }
@@ -220,6 +229,16 @@ export function Page({ route, children }: { route: string; children?: ReactNode 
   return <main className="az-page" data-route={route}>{children}</main>;
 }
 
+/** A path that is not a page of this site. */
+export function NotFound() {
+  return (
+    <main className="az-page az-not-found" data-route="">
+      <h1>Page not found</h1>
+      <p><a href="/">Go to the home page</a></p>
+    </main>
+  );
+}
+
 export function Site(
   { name, width, theme, accent, pattern, children }:
   { name: string; width: string; theme: string; accent: string; pattern: string; children?: ReactNode },
@@ -281,6 +300,47 @@ function themeFor(named: Theme): ThemeLike {
 }
 
 /**
+ * Where each page's HTML file goes: `/` is index.html, `/work` is
+ * work/index.html. Routes come from the author, so each segment is checked
+ * the way asset paths are — nothing may climb out of the project.
+ */
+function htmlFiles(spec: Spec): string[] {
+  return spec.pages.map((page) => {
+    const segments = page.route.split('/').filter(Boolean);
+    if (segments.some((seg) => seg === '..' || seg === '.' || seg.includes('\\'))) {
+      throw new PathEscapeError(`route: '${page.route}' is not a plain path`);
+    }
+    return segments.length === 0 ? 'index.html' : `${segments.join('/')}/index.html`;
+  }).sort();
+}
+
+/** Vite's multi-page input: entry name to HTML file, in a stable order. */
+function htmlEntries(spec: Spec): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const file of htmlFiles(spec)) {
+    out[file === 'index.html' ? 'index' : file.replace(/\/index\.html$/, '')] = file;
+  }
+  return out;
+}
+
+function indexHtml(spec: Spec): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>${escapeText(spec.site.name)}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`;
+}
+
+/**
  * The generated project plus the assets its pages reference.
  *
  * `assets` are project-relative paths (`assets/shoe.webp`), sorted and
@@ -320,7 +380,7 @@ import "./theme.css";
 
 const el = document.getElementById("root");
 if (!el) throw new Error("root element missing");
-createRoot(el).render(<StrictMode><App /></StrictMode>);
+createRoot(el).render(<StrictMode><App route={window.location.pathname} /></StrictMode>);
 `,
     },
     {
@@ -376,7 +436,13 @@ ${schemeCss(named)}`,
 export default defineConfig({
   // Relative, so the built site works from a subdirectory as well as a root.
   base: "./",
-  build: { outDir: "dist", emptyOutDir: true },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    // One HTML entry per page, so every route is a real file a static host
+    // serves directly — no rewrite rules, and a deep link loads its own page.
+    rolldownOptions: { input: ${stableJson(htmlEntries(spec))} },
+  },
 });
 `,
     },
@@ -396,23 +462,7 @@ export default defineConfig({
         include: ['src'],
       }, null, 2) + '\n',
     },
-    {
-      path: 'index.html',
-      content: `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
-    <title>${escapeText(spec.site.name)}</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-`,
-    },
+    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec) })),
   ];
   const byPath = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
   return {
