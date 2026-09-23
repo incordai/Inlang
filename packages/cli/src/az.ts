@@ -1,4 +1,13 @@
 /**
+ * @az module az
+ * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain.
+ * Spec: docs/PRD.md §6.7 · docs/ARCHITECTURE.md §1a
+ * Exports: main, build, specOf, wordsFor, EXIT
+ * Edit guide: filesystem work lives here, never in core; a new command needs USAGE, COMMANDS and a test.
+ * Tests: packages/cli/test/cli.test.ts, packages/cli/test/hardening.test.ts
+ */
+
+/**
  * The `az` binary.
  *
  * ARCHITECTURE §1a: this is ONE caller of the compiler, not the compiler.

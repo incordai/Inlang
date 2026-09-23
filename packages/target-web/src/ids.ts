@@ -1,4 +1,13 @@
 /**
+ * @az module ids
+ * Purpose: makes element ids unique on a page and rewrites every reference to them.
+ * Spec: docs/ARCHITECTURE.md §4.2
+ * Exports: uniqueIds
+ * Edit guide: any new id-referencing attribute must be added to the rewrite list.
+ * Tests: packages/target-web/test/ids.test.ts
+ */
+
+/**
  * Ids unique on a page.
  *
  * A word builds its ids from its own content (faq slugs its questions, auth

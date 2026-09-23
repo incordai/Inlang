@@ -1,4 +1,26 @@
 /**
+ * @az word faq
+ * Purpose: questions with expandable answers, plus FAQPage structured data.
+ * Spec: docs/faq-block-spec.md · terms: az explain faq
+ * Renders: section.az-faq.az-faq--{variant} > h2.az-faq-title? · p.az-faq-sub? ·
+ *   ul.az-faq-items[data-az-behaviour=faq][data-single] > li.az-faq-item >
+ *     h3|h2.az-faq-question#faq-{slug} > button.az-faq-toggle[aria-expanded][aria-controls] + svg chevron ·
+ *     div.az-faq-answer#faq-{slug}-panel[role=region ≤6 items] > p (the answer) + more links ·
+ *   script[type=application/ld+json]? (≥3 answered questions, schema on)
+ * Variants: list — one column at the body measure · columns — two-column grid, one column below sm.
+ * Modifiers: single — data-single=true, the runtime keeps one answer open · reveal — declared, not rendered yet.
+ * Props: title → h2.az-faq-title · sub → p.az-faq-sub · schema → FAQPage JSON-LD on/off ·
+ *   item "question" → the question button; its text → the answer paragraph; more → link-hierarchy action.
+ * Styling: theme tokens only; hairline dividers between rows; row padding grows below sm (tap target);
+ *   focusVisible ring on the toggle; states.open rotates the chevron.
+ * Behaviour: packages/overlay runtime (wireFaq) collapses answers to hidden="until-found" after load;
+ *   answers ship open, so they read without JS.
+ * Edit guide: question markup → question(); ids → questionIds() (stable, deterministic); JSON-LD → faqSchema().
+ *   Keep: JSON-LD escaping of < > & U+2028/9; question ids stable across builds; no skipped heading level.
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/faq-schema.test.ts, packages/words/test/faq-rows.test.ts, packages/words/test/behaviour-markup.test.ts
+ */
+
+/**
  * `faq` — web emitter.
  *
  * faq-block-spec.md is the specification; this implements its structural

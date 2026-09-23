@@ -1,4 +1,28 @@
 /**
+ * @az word gallery
+ * Purpose: a set of images in a chosen layout, optionally opening in a lightbox.
+ * Spec: docs/gallery-block-spec.md · terms: az explain gallery
+ * Renders: section.az-gallery.az-gallery--{variant}[data-az-behaviour] > h2.az-gallery-title? · p.az-gallery-sub? ·
+ *   (orbit) div.az-gallery-orbit[data-az-3d=orbit] > img.az-gallery-poster? ·
+ *   ul.az-gallery-items[data-az-track] > li.az-gallery-item >
+ *     img.az-gallery-img | figure.az-gallery-figure > img + figcaption.az-gallery-caption ;
+ *     with lightbox: button.az-gallery-open[data-az-index] around the image ·
+ *   (carousel) div.az-gallery-carousel > div.az-gallery-controls > button.az-gallery-step ×2 ·
+ *   (lightbox) dialog.az-gallery-lightbox > p.az-gallery-counter · figure > img.az-gallery-lightbox-img +
+ *     figcaption.az-gallery-lightbox-caption · ul.az-gallery-actions? > li > a|button
+ * Variants: grid — uniform crops in columns · masonry — uncropped, column-major · carousel — snapping row
+ *   with step buttons · orbit — 3D ring of the images (poster first), carousel below sm.
+ * Modifiers: lightbox — images become buttons opening the dialog · reveal — declared, not rendered yet.
+ * Props: title → h2 · sub → p · columns → grid tracks · ratio → aspect-ratio (ASPECT table) ·
+ *   poster → orbit's still image · image src/alt/caption/focus → img, alt, figcaption, object-position.
+ * Styling: theme tokens only; responsive tracks via below; focus rings via states; lazy images after row one.
+ * Behaviour: packages/overlay runtime (carousel steps, lightbox); 3D ring by packages/scene-runtime.
+ * Edit guide: one image → galleryImage(); carousel → carousel(); lightbox → lightboxDialog().
+ *   Keep: an image is never a CTA; alt is not the caption; never fetchpriority (the hero owns LCP).
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/gallery-images.test.ts, packages/words/test/gallery-poster.test.ts, packages/words/test/gallery-lightbox.test.ts
+ */
+
+/**
  * `gallery` — web emitter.
  *
  * gallery-block-spec.md is the specification; this implements its structural

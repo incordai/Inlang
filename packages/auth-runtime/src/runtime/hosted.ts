@@ -1,4 +1,13 @@
 /**
+ * @az runtime hosted
+ * Purpose: the hosted adapter, standard profile: a managed provider over HTTPS with a public key.
+ * Spec: docs/auth-block-spec.md §3.2
+ * Exports: createHostedAdapter
+ * Edit guide: public key only; validate every provider response before use.
+ * Tests: packages/auth-runtime/test/adapters.test.ts
+ */
+
+/**
  * The `hosted` adapter — a managed identity provider, reached over HTTPS.
  *
  * Provider-neutral: it speaks the request/response shapes auth-block-spec

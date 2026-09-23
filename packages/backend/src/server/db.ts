@@ -1,4 +1,13 @@
 /**
+ * @az server db
+ * Purpose: one small interface over SQLite, PostgreSQL and MySQL, plus migrations.
+ * Spec: docs/backend-spec.md §3
+ * Exports: openSqlite, openPostgres, openMysql, migrate, Db
+ * Edit guide: parameterised queries only; unnamed statements (pooler-safe).
+ * Tests: packages/backend/test/backend.test.ts
+ */
+
+/**
  * The database — one small interface over three engines (backend-spec §3).
  *
  * Every query is written once with `?` placeholders and parameters; values

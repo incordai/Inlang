@@ -1,4 +1,13 @@
 /**
+ * @az runtime azbackend
+ * Purpose: the azbackend adapter: the site owner's backend at one public URL.
+ * Spec: docs/auth-block-spec.md §3.4
+ * Exports: createBackendAdapter, backendUrlProblem, CSRF_HEADER
+ * Edit guide: https only (http on loopback); every POST carries the CSRF header.
+ * Tests: packages/auth-runtime/test/adapters.test.ts
+ */
+
+/**
  * The `azbackend` adapter — the site owner's own backend (auth-block-spec §3.4).
  *
  * The same cookie routes as `session` (§3.3), served by a backend on its own

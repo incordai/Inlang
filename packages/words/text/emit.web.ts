@@ -1,4 +1,21 @@
 /**
+ * @az word text
+ * Purpose: a section of written copy — title, body and actions.
+ * Spec: docs/text-block-spec.md · terms: az explain text
+ * Renders: section.az-text.az-text--{variant} > h2.az-text-title? · div.az-text-body? (the body string) ·
+ *   ul.az-text-actions? > li > a|button
+ * Variants: prose — body at the reading measure · centered — centred statement ·
+ *   columns — two text columns, one below md.
+ * Modifiers: reveal — declared, not rendered yet.
+ * Props: title → h2.az-text-title · body → div.az-text-body as text (a .md path is not rendered yet).
+ * Styling: theme tokens only; below.sm mobile gutter; below.md single column; states.overBackdrop veil.
+ * Behaviour: none; buttons by target-web/src/actions.ts.
+ * Edit guide: the body block → the div's style; column count → COLUMN_COUNT.
+ *   Keep: text never emits an <h1>; the measure stays the theme's.
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/responsive.test.ts, packages/target-web/test/backdrop-veil.test.ts
+ */
+
+/**
  * `text` — web emitter.
  *
  * text-block-spec.md. The simplest block in the set, which makes it the honest

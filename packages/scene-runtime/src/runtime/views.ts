@@ -1,4 +1,13 @@
 /**
+ * @az runtime views
+ * Purpose: what a view draws: procedural strands, a loaded model, or the image ring.
+ * Spec: docs/scene-block-spec.md §11
+ * Exports: strands, model, ring, ModelCache, disposeTree
+ * Edit guide: models are ref-counted in ModelCache; failed images keep the ring from going ready.
+ * Tests: scripts/test-3d.mjs
+ */
+
+/**
  * What a view draws: the procedural strands (the default), a loaded model,
  * or gallery `orbit`'s ring of images. Each is a scene plus a camera; the
  * shared renderer (stage.ts) decides when and where each one is drawn.

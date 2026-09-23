@@ -1,4 +1,13 @@
 /**
+ * @az module words
+ * Purpose: the word set a project compiles with (bundled + project overrides) and az eject.
+ * Spec: docs/ARCHITECTURE.md §7
+ * Exports: loadWords, loadManifests, eject, BUNDLED_WORDS
+ * Edit guide: read-only tools load manifests only ({ code: false }) — project code never runs for them.
+ * Tests: packages/cli/test/escape-hatch.test.ts
+ */
+
+/**
  * The words a project compiles with — and `az eject`, which hands one over.
  *
  * A project uses the bundled words, and its own `words/` folder overrides

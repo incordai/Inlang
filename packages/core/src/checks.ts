@@ -1,4 +1,13 @@
 /**
+ * @az module checks
+ * Purpose: runs each word's validation table (word.json `checks`) at block, page and site level.
+ * Spec: each docs/*-block-spec.md validation table
+ * Exports: runBlockChecks, runPageChecks, runSiteChecks, Check
+ * Edit guide: a new rule kind is added here once, then used as data by any word; codes are per word AZ2xxx.
+ * Tests: packages/core/test/checks.test.ts
+ */
+
+/**
  * Per-word validations, declared in `word.json` and run here.
  *
  * Every block spec ends in a validation table (hero-spec §11, gallery-spec §11,

@@ -1,4 +1,27 @@
 /**
+ * @az word auth
+ * Purpose: sign-in, sign-up or password-reset form on its own page; the form title is the page's <h1>.
+ * Spec: docs/auth-block-spec.md · terms: az explain auth
+ * Renders: section.az-auth.az-auth--{variant} > h1.az-auth-title · p.az-auth-sub? ·
+ *   form.az-auth-form[data-az-behaviour=auth][data-flow] > div.az-auth-summary (p.az-auth-summary-title +
+ *     ul.az-auth-summary-list) · div.az-auth-field > label.az-auth-label + input + p.az-auth-error ·
+ *     div.az-auth-terms? (checkbox + link + p#az-auth-terms-error) · p.az-auth-status · submit button(s) ·
+ *   div.az-auth-oauth? > p.az-auth-or + ul.az-auth-providers (filled by the runtime) ·
+ *   (reset) a second hidden form with az-auth-set fields · ul.az-auth-alt? > li > a
+ * Variants: login — email + password · signup — name, email, password, retype, location, terms ·
+ *   reset — request a link, then set a new password (second form, shown by the URL token).
+ * Modifiers: glass — declared, not rendered yet.
+ * Props: adapter / profile / impl / protect → site level, read by target-web/src/auth.ts ·
+ *   title → h1 (default per flow) · sub → p.az-auth-sub · methods → fields and buttons ·
+ *   redirect → data-redirect · terms → the terms link.
+ * Styling: theme tokens only; card on color.surface; below.sm full width; errors tied by aria-describedby.
+ * Behaviour: packages/auth-runtime (form.ts) validates, calls the adapter, shows errors and status.
+ * Edit guide: one field → field(); errors → summary()/status(); methods → methodsOf(); providers → providers().
+ *   Keep: one <h1>; submit never disabled; never say whether an email exists; no tokens in markup.
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/auth-props.test.ts, packages/target-web/test/auth.test.ts
+ */
+
+/**
  * `auth` — web emitter.
  *
  * auth-block-spec.md §1 is emphatic: this block emits UI ONLY. No credential,

@@ -1,4 +1,13 @@
 /**
+ * @az module themes
+ * Purpose: the three themes as data (midnight, paper, signal), light and dark per theme.
+ * Spec: docs/theme-spec.md §5
+ * Exports: midnight, paper, signal, THEMES, DEFAULT_THEME
+ * Edit guide: a theme is data only; every colour pair must pass the contrast test.
+ * Tests: packages/theme/test/contrast.test.ts
+ */
+
+/**
  * The three themes.
  *
  * GENERATED FROM docs/theme-spec.md §5 — the colour values are extracted from

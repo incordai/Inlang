@@ -1,4 +1,13 @@
 /**
+ * @az module lex
+ * Purpose: text → tokens with positions; indentation, strings, escapes, pairs.
+ * Spec: docs/GRAMMAR.md §1–§2
+ * Exports: lex, Token, Diagnostic, Pos
+ * Edit guide: a new token kind needs parse.ts to accept it; diagnostics use the GRAMMAR codes (AZ10xx).
+ * Tests: packages/core/test/lex.test.ts, packages/core/test/escapes.test.ts
+ */
+
+/**
  * Lexer — text to tokens.
  *
  * Implements GRAMMAR.md §1 (lexical structure) and §2 (indentation).

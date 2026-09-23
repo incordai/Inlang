@@ -1,4 +1,13 @@
 /**
+ * @az runtime material
+ * Purpose: the strand surface shader material and its growth uniforms.
+ * Spec: docs/3d-technique-reference.md
+ * Exports: createStrandMaterial, GrowthUniforms
+ * Edit guide: animate through uniforms, never by rebuilding geometry.
+ * Tests: packages/scene-runtime/test/scene-runtime.test.ts
+ */
+
+/**
  * The surface. This is where "expensive" actually comes from.
  *
  * Built to the recipe measured in docs/3d-technique-reference.md §1: a physical

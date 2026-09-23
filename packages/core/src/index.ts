@@ -1,4 +1,13 @@
 /**
+ * @az module core
+ * Purpose: the compiler API — compile() runs lex → parse → link → spec and returns diagnostics.
+ * Spec: docs/ARCHITECTURE.md §3
+ * Exports: compile, formatDiagnostics, explain, serialiseSpec, blocksFor
+ * Edit guide: add a stage by exporting it here; keep this file free of node: imports (core runs in a browser).
+ * Tests: packages/core/test/compile.test.ts, packages/core/test/deps.test.ts
+ */
+
+/**
  * The compiler API — the single entry point.
  *
  * `az build` is NOT the compiler; it is one caller of it. The other is the

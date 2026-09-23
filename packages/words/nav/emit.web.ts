@@ -1,4 +1,28 @@
 /**
+ * @az word nav
+ * Purpose: the site navigation — logo, links, dropdown groups, one CTA and a phone drawer.
+ * Spec: docs/nav-block-spec.md · docs/overlays-spec.md · terms: az explain nav
+ * Renders: a.az-skip-link (first focusable) · div.az-nav-frame? (shrink reserves height) >
+ *   nav.az-nav.az-nav--{variant}[aria-label=Main][data-az-behaviour] >
+ *     a.az-nav-logo? > img.az-nav-logo-img (×2 with solid + inverse) + visually hidden site name ·
+ *     ul.az-nav-items > li > a.az-nav-link | li.az-nav-group > button.az-nav-group-label + ul.az-nav-group-items ·
+ *     the cta action · button.az-nav-toggle[aria-controls] ·
+ *     dialog.az-nav-panel.az-overlay (drawer) > close button + ul.az-nav-drawer-items
+ * Variants: bar · center · split · mega (links in the bar, group panels full width) · minimal (menu button at
+ *   every size) · side (vertical column; the page lays out beside it) · none (renders nothing).
+ * Modifiers: sticky — pinned to the top · hide — data-az-hide, retracts on scroll down · shrink — data-az-shrink,
+ *   shorter past the top · solid — clear over the hero, solid after scroll · glass — declared, not rendered yet.
+ * Props: logo → img.az-nav-logo-img · inverse → the light logo while solid is clear ·
+ *   mobile → data-mobile (drawer is the one built) · link / group / cta children → the items above.
+ * Styling: theme tokens only; LAYOUT table per variant; below.sm links collapse into the drawer;
+ *   states: scrolled, shrunk, retracted, focusVisible.
+ * Behaviour: packages/overlay runtime — drawer dialog, dropdowns, solid/hide/shrink on scroll.
+ * Edit guide: per-variant layout → LAYOUT; one link → navLink(); groups → navGroup(); drawer → the dialog block.
+ *   Keep: the skip link first and pointing at #az-content; one CTA; never role="menu".
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/nav-footer.test.ts, packages/words/test/nav-inverse.test.ts, packages/words/test/nav-scroll.test.ts, packages/words/test/behaviour-markup.test.ts
+ */
+
+/**
  * `nav` — web emitter.
  *
  * nav-block-spec.md §7 is an accessibility FLOOR, not a wish list, and most of

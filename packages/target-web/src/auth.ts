@@ -1,4 +1,13 @@
 /**
+ * @az module auth-web
+ * Purpose: auth wiring for sites that use auth: adapter config, <Protected>, useSession, build guard.
+ * Spec: docs/auth-block-spec.md §3–§5
+ * Exports: authPlan, authConfig, authReact, secretGuard
+ * Edit guide: only public (AZ_PUBLIC_) values may reach the browser; auth code ships only when a site uses auth.
+ * Tests: packages/target-web/test/auth.test.ts
+ */
+
+/**
  * Auth wiring for the web target — auth-block-spec §3–§5, ROADMAP M4.
  *
  * The auth word emits forms; this file emits what connects them to the

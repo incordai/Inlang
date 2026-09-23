@@ -1,4 +1,13 @@
 /**
+ * @az module serve
+ * Purpose: az dev's serving half: install once, Vite dev server, optional local backend.
+ * Spec: docs/PRD.md §6.7 · docs/backend-spec.md §2a
+ * Exports: serve, ensureInstalled, freePort, openerFor
+ * Edit guide: everything started is stopped on failure and on Ctrl-C.
+ * Tests: packages/cli/test/dev-serve.test.ts
+ */
+
+/**
  * `az dev`'s serving half — PRD §6.7: "compile, serve, watch, hot-reload,
  * open browser".
  *

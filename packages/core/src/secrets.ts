@@ -1,4 +1,13 @@
 /**
+ * @az module secrets
+ * Purpose: secret detection for env, bundles and literals — never prints a value.
+ * Spec: docs/auth-block-spec.md §4 · docs/word-quality-gate.md §4
+ * Exports: scanText, scanEnv, redact, envMessage, bundleMessage
+ * Edit guide: patterns stay vendor-neutral; findings report name/offset and length only.
+ * Tests: packages/core/test/secrets.test.ts, packages/cli/test/secrets.test.ts
+ */
+
+/**
  * Secret detection — auth-block-spec §4, word-quality-gate §4.
  *
  * A static bundler inlines public environment variables into the shipped

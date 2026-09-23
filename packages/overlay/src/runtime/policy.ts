@@ -1,4 +1,13 @@
 /**
+ * @az runtime overlay-policy
+ * Purpose: overlay presets as policy: modal or not, trap, scroll lock, dismissal.
+ * Spec: docs/overlays-spec.md §2
+ * Exports: POLICY, PRESETS, isPreset
+ * Edit guide: the spec's matrix, as data; change both together.
+ * Tests: packages/overlay/test/presets.test.ts
+ */
+
+/**
  * The overlay presets as policy — overlays-spec §2's matrix.
  *
  * "Build the engine once. The presets are configuration." This file is that

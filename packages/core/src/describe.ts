@@ -1,12 +1,10 @@
 /**
  * @az module describe
- * Purpose: one-line (≤60 char) meaning of every term of the .az language.
- * Spec: GRAMMAR.md §2–§5 (structure keywords); each word.json (block terms).
- * Exports: STRUCTURE_DESCRIPTIONS, DESCRIPTION_MAX, explain(), Explained.
- * Behaviour: pure; reads manifests, never the filesystem (runs in a browser).
- * Edit guide: a new structure keyword or setting needs a row here — the
- *   describe test fails otherwise. Block terms live in their word.json.
- * Tests: core/test/describe.test.ts, words/test/descriptions.test.ts.
+ * Purpose: one-line (≤60 char) meaning of every .az term; explain() resolves terms in context.
+ * Spec: docs/GRAMMAR.md §2–§5 · each word.json
+ * Exports: explain, formatExplained, STRUCTURE_DESCRIPTIONS, DESCRIPTION_MAX
+ * Edit guide: a new structure keyword or setting needs a row here; block terms live in word.json.
+ * Tests: packages/core/test/describe.test.ts, packages/words/test/descriptions.test.ts
  */
 
 import type { Manifest, PropSpec } from './link.ts';

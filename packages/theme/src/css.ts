@@ -1,4 +1,13 @@
 /**
+ * @az module theme-css
+ * Purpose: colour schemes as CSS custom properties: default scheme, OS preference, data-scheme.
+ * Spec: docs/theme-spec.md §3
+ * Exports: schemeCss, schemeReferences
+ * Edit guide: words read var(--az-color-*) references; declarations are generated here only.
+ * Tests: packages/theme/test/css.test.ts
+ */
+
+/**
  * Colour schemes as CSS custom properties — theme-spec §3.
  *
  * Words never see a colour. `ctx.theme.color.accent` is the string

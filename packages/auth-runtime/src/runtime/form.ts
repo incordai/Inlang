@@ -1,4 +1,13 @@
 /**
+ * @az runtime auth-form
+ * Purpose: wires auth forms (also late ones on protected pages) to the adapter.
+ * Spec: docs/auth-block-spec.md §5–§6
+ * Exports: attachAuth
+ * Edit guide: validate on submit, never disable submit; each form wired once; cleanup aborts everything.
+ * Tests: scripts/auth-e2e.mjs
+ */
+
+/**
  * The auth forms' behaviour — auth-block-spec §5 and §6.
  *
  * The word emits one real <form> per flow, complete and labelled, marked

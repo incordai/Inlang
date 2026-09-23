@@ -1,4 +1,27 @@
 /**
+ * @az word pricing
+ * Purpose: plans and prices, with a monthly/annual switch.
+ * Spec: docs/pricing-block-spec.md · terms: az explain pricing
+ * Renders: section.az-pricing.az-pricing--{variant} > h2.az-pricing-title? · p.az-pricing-sub? ·
+ *   fieldset.az-pricing-billing[data-az-behaviour]? > legend + label > input[type=radio] ×2 (when any annual) ·
+ *   (cards) div.az-pricing-plans > article.az-plan(.az-plan--highlight)[aria-label] >
+ *     p.az-plan-badge? · h3|h2.az-plan-name · p.az-plan-price · p.az-plan-period · ul.az-plan-features ·
+ *     div.az-plan-action · (table) table.az-pricing-plans (hidden below sm) + div.az-pricing-panels (below sm) +
+ *     div.az-pricing-shared > h3|h2.az-pricing-shared-title + ul.az-pricing-shared-items ; panels use dl.az-plan-rows
+ * Variants: cards — one card per plan, one column below sm, highlighted first · table — comparison table,
+ *   transposed to per-plan panels below sm; rows equal in every plan collapse into the shared list.
+ * Modifiers: reveal — declared, not rendered yet.
+ * Props: title → h2 · sub → p · currency / locale → formatPrice() · billing → which price shows first ·
+ *   period → p.az-plan-period · plan monthly/annual → data prices · highlight → accent border ·
+ *   badge → p.az-plan-badge · feature children → the feature rows · cta → div.az-plan-action.
+ * Styling: theme tokens only; highlight uses color.accent at size.edge-emphasis; below.sm restacks.
+ * Behaviour: packages/overlay runtime (wireBilling) swaps prices and keeps ?billing= current.
+ * Edit guide: one plan → plan(); prices → formatPrice(); shared rows → sharedRows()/everyPlan().
+ *   Keep: both DOM forms for table (one hidden per width); radio names unique per block.
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/pricing.test.ts, packages/words/test/pricing-shared.test.ts
+ */
+
+/**
  * `pricing` — web emitter.
  *
  * pricing-block-spec.md §7.2 settles the two questions this word raises:

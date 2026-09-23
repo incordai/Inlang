@@ -1,4 +1,13 @@
 /**
+ * @az module svg
+ * Purpose: strict allowlist SVG sanitiser → a node tree (never an HTML string).
+ * Spec: docs/feature-block-spec.md §7
+ * Exports: sanitizeSvg, SvgError, MAX_SVG_BYTES
+ * Edit guide: fail closed: unknown constructs throw; ids are prefixed per icon instance.
+ * Tests: packages/target-web/test/svg.test.ts, packages/cli/test/icons.test.ts
+ */
+
+/**
  * Inline SVG, sanitised — feature-block-spec §7.
  *
  * An icon is the author's own file, and it becomes part of the page: so it is

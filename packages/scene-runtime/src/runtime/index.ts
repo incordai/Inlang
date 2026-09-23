@@ -1,4 +1,13 @@
 /**
+ * @az runtime scene-entry
+ * Purpose: the 3D chunk's entry, loaded lazily after the gate says yes.
+ * Spec: docs/scene-block-spec.md §5
+ * Exports: start
+ * Edit guide: nothing here runs at import; the chunk is fetched only by pages with a live 3D view.
+ * Tests: packages/scene-runtime/test/scene-runtime.test.ts, scripts/test-3d.mjs
+ */
+
+/**
  * The 3D chunk's entry. A site imports this lazily, only after gate.ts has
  * decided the page view gets a renderer — so a page at `static`, or a page
  * with no 3D, never fetches three at all (scene-spec §8).

@@ -1,4 +1,27 @@
 /**
+ * @az word feature
+ * Purpose: a set of features or benefits as items, with optional section actions.
+ * Spec: docs/feature-block-spec.md · terms: az explain feature
+ * Renders: section.az-feature.az-feature--{variant} > h2.az-feature-title? · p.az-feature-sub? ·
+ *   ul.az-feature-items > li.az-feature-item(.az-feature-item--lead) > img.az-feature-media? (rows, bento) ·
+ *     div.az-feature-item-body > svg|img.az-feature-icon? · h3|h2.az-feature-item-title ·
+ *     p.az-feature-item-text? · div.az-feature-item-link? ·
+ *   ul.az-feature-actions? > li > a|button
+ * Variants: grid — columns tracks (default 3), two below md, one below sm (two for a spec sheet) ·
+ *   rows — one per row, media alternates sides on desktop, above text below sm ·
+ *   bento — uneven tiles; the lead item gets the larger tile.
+ * Modifiers: reveal — declared, not rendered yet.
+ * Props: title → h2.az-feature-title · sub → p.az-feature-sub · columns → grid tracks ·
+ *   item title/text/icon/media/lead → the item parts above; item link → div.az-feature-item-link.
+ * Styling: theme tokens only; row gap larger than column gap; below.md / below.sm track counts;
+ *   icons inlined and sanitised (ctx.inlineSvg) so they take the text colour.
+ * Behaviour: none; section buttons by target-web/src/actions.ts.
+ * Edit guide: one item → featureItem(); grid tracks → the ul's style/below.
+ *   Keep: items render their own props (never the generic slot renderer); no skipped heading level.
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/feature-items.test.ts, packages/words/test/responsive.test.ts
+ */
+
+/**
  * `feature` — web emitter.
  *
  * feature-block-spec.md is the specification; this implements its structural

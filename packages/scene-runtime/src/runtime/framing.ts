@@ -1,4 +1,13 @@
 /**
+ * @az runtime framing
+ * Purpose: camera framing as data: keep the object in frame at every aspect.
+ * Spec: docs/hero-block-spec.md §10
+ * Exports: computeFraming, computeCentredFraming, fitsInFrame, CAMERA
+ * Edit guide: size against the swept radius, not the bounding box.
+ * Tests: packages/scene-runtime/test/scene-runtime.test.ts
+ */
+
+/**
  * Scene framing, as data rather than as magic numbers in JSX.
  *
  * Extracted so it can be TESTED. The scene cropped at the right edge twice:

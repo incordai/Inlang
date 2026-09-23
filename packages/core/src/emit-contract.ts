@@ -1,4 +1,13 @@
 /**
+ * @az module emit-contract
+ * Purpose: the word-emitter contract: EmittedNode, EmitContext, style variants, helpers.
+ * Spec: docs/ARCHITECTURE.md §4.3
+ * Exports: EmittedNode, EmitContext, ThemeLike, px, visuallyHidden, componentNode
+ * Edit guide: a contract change touches every emitter and target-web; update ARCHITECTURE §4.3 in the same commit.
+ * Tests: packages/target-web/test/stylesheet.test.ts, packages/words/test/words.test.ts
+ */
+
+/**
  * The word-emitter contract — ARCHITECTURE §4.3.
  *
  * A word emits a small serialisable TREE, not a string of JSX. Two reasons,

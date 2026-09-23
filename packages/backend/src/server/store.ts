@@ -1,4 +1,13 @@
 /**
+ * @az server store
+ * Purpose: accounts, sessions and single-use tokens over the database.
+ * Spec: docs/backend-spec.md §3, §5
+ * Exports: createStore, normaliseEmail, DEFAULT_SESSION_POLICY
+ * Edit guide: single use by one conditional UPDATE; tokens stored as digests only.
+ * Tests: packages/backend/test/backend.test.ts
+ */
+
+/**
  * Accounts, sessions and single-use tokens (backend-spec §3, §5).
  *
  * Tokens are never stored — only their keyed digest (crypto.ts). "Single

@@ -1,4 +1,13 @@
 /**
+ * @az runtime evict
+ * Purpose: budget eviction: least-recently-visible paused views go back to their poster.
+ * Spec: docs/scene-block-spec.md §7
+ * Exports: toEvict, sceneResources, SCENE_BUDGET_BYTES, budgetFrom
+ * Edit guide: never evict a visible view or the backdrop; count a shared resource once.
+ * Tests: packages/scene-runtime/test/evict.test.ts
+ */
+
+/**
  * Budget eviction — scene-spec §7.
  *
  * Paused views keep their GPU resources, so scrolling back costs nothing. But

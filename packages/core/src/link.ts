@@ -1,4 +1,13 @@
 /**
+ * @az module link
+ * Purpose: statements → resolved words against manifests: props, slots, requires, values, routes.
+ * Spec: docs/GRAMMAR.md §4–§5 · docs/ARCHITECTURE.md §4.1
+ * Exports: link, Manifest, PropSpec, STRUCTURE, STRUCTURE_PROPS
+ * Edit guide: never name a specific word here — per-word rules are manifest data (checks.ts); lookups use Object.hasOwn.
+ * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts
+ */
+
+/**
  * Link stage — statements become resolved words.
  *
  * Implements ARCHITECTURE.md §3 (pipeline) and §4.1 (word manifest).

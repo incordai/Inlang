@@ -1,4 +1,13 @@
 /**
+ * @az module overlay
+ * Purpose: overlay presets (dropdown, drawer, popup) as styles from theme tokens.
+ * Spec: docs/overlays-spec.md §2–§3
+ * Exports: dropdown, drawer, popup, closeButton, POLICY, PRESETS
+ * Edit guide: only transform and opacity animate; exit is faster than enter; never set display.
+ * Tests: packages/overlay/test/presets.test.ts
+ */
+
+/**
  * The overlay presets — overlays-spec §2 and §3 — as style.
  *
  * A word asks for a preset and spreads the result into the node it emits;

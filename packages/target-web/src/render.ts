@@ -1,4 +1,13 @@
 /**
+ * @az module render
+ * Purpose: emitted tree → HTML string (tests and tooling; the site itself renders with React).
+ * Spec: docs/ARCHITECTURE.md §4.2
+ * Exports: renderNode, renderStyled, styleString, escapeHtml
+ * Edit guide: escape every text and attribute value; used by tests, not by generated sites.
+ * Tests: packages/target-web/test/render.test.ts
+ */
+
+/**
  * Emitted tree to markup.
  *
  * This is the ONE place user content is escaped. A word returns a tree of

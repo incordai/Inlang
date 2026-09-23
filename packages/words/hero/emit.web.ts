@@ -1,4 +1,30 @@
 /**
+ * @az word hero
+ * Purpose: page opener — the page's only <h1>, a supporting line, up to three actions, optional 3D.
+ * Spec: docs/hero-block-spec.md · terms: az explain hero
+ * Renders: header.az-hero.az-hero--{variant}[data-height] >
+ *   p.az-hero-eyebrow? · h1.az-hero-title? · p.az-hero-sub? ·
+ *   ul.az-hero-actions? > li > a|button (ctx.actions: cta primary, alt secondary) ·
+ *   div.az-hero-visual[data-az-3d=hero]? > img.az-hero-poster?   (only with 3d)
+ *   split wraps them as div.az-hero-text + div.az-hero-media (visual goes in media).
+ * Variants: center — centred column, centred text · split — two-column grid text|media, one column below sm ·
+ *   full — scrim background, on-scrim type, visual absolutely behind · stack — column from the top, visual below ·
+ *   minimal — centred column, larger display type (display-lg).
+ * Modifiers: 3d — emits the visual box + poster for the page renderer · scroll / parallax — set data-az-camera ·
+ *   glass — declared, not rendered yet.
+ * Props: eyebrow → p.az-hero-eyebrow · title → h1.az-hero-title · sub → p.az-hero-sub ·
+ *   height → min-height in svh (HEIGHT table) + data-height · poster → img.az-hero-poster via ctx.asset ·
+ *   describe → poster alt and the visual's aria-label · model → data-az-model via ctx.asset.
+ * Styling: theme tokens only; below.sm mobile gutter (+ split one column); actions below.xs stack;
+ *   states.live hides the poster (full: gradient scrim); states.overBackdrop gives the veil.
+ * Behaviour: 3D drawn by packages/scene-runtime from data-az-3d; buttons by target-web/src/actions.ts.
+ * Edit guide: layout per variant → the header's style; type → the h1/p styles; actions → ctx.actions options.
+ *   Keep: exactly one <h1>; eyebrow never a heading; measure on the text, not the container; svh not vh;
+ *   no raw colour or off-scale px (az lint).
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/hero-alt.test.ts, packages/words/test/responsive-pilot.test.ts, packages/words/test/type-on-scrim.test.ts, packages/target-web/test/solid-over-hero.test.ts
+ */
+
+/**
  * `hero` — web emitter.
  *
  * hero-block-spec.md is the specification; this file implements it. The rules

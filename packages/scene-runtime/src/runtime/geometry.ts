@@ -1,4 +1,13 @@
 /**
+ * @az runtime geometry
+ * Purpose: procedural strand geometry — the default scene, seeded and deterministic.
+ * Spec: docs/scene-block-spec.md §11 · docs/ASSUMPTIONS.md A8b
+ * Exports: buildStrands, disposeStrands, DEFAULT_STRANDS
+ * Edit guide: the vertex hash must stay stable across engines (cc723c2a1b107de4 for the default seed).
+ * Tests: packages/scene-runtime/test/scene-runtime.test.ts
+ */
+
+/**
  * Procedural geometry — the DEFAULT source of a 3D scene.
  *
  * Implements docs/scene-block-spec.md §11.1. The technique (swept spline tubes

@@ -1,4 +1,13 @@
 /**
+ * @az runtime session
+ * Purpose: cookie-session adapters: session (same origin) and azbackend (cross origin).
+ * Spec: docs/auth-block-spec.md §3.3–§3.4
+ * Exports: createSessionAdapter, createCookieAdapter
+ * Edit guide: no token in JS; sign-out rejects unless the server confirms.
+ * Tests: packages/auth-runtime/test/adapters.test.ts, packages/auth-runtime/test/security.test.ts
+ */
+
+/**
  * Cookie-session adapters — `session` (auth-block-spec §3.3) and, through
  * the same routes at another origin, `azbackend` (§3.4).
  *

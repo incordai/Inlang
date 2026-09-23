@@ -1,4 +1,13 @@
 /**
+ * @az module backend-init
+ * Purpose: az backend init: the backend's .env, written once with a fresh secret, mode 0600.
+ * Spec: docs/backend-spec.md §4
+ * Exports: initBackendEnv
+ * Edit guide: never overwrite an existing .env; never return or print the secret.
+ * Tests: packages/cli/test/backend.test.ts
+ */
+
+/**
  * `az backend init` — the built-in backend's `.env`, written once.
  *
  * Shared by the CLI command and the `az_backend_init` MCP tool, so both apply

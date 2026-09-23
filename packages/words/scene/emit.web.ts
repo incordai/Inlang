@@ -1,4 +1,24 @@
 /**
+ * @az word scene
+ * Purpose: a standalone 3D scene with a poster fallback, inline, full-bleed or as a page backdrop.
+ * Spec: docs/scene-block-spec.md · docs/motion-tiers-spec.md · terms: az explain scene
+ * Renders: section.az-scene.az-scene--{variant}[data-az-3d-host] > figure.az-scene-viewport >
+ *   div.az-scene-view[data-az-3d][data-az-variant][data-az-camera][data-az-model?] > img.az-scene-poster ·
+ *   figcaption? · (none) div.az-scene.az-scene--none[hidden]
+ * Variants: inline — capped at the text measure · full — full-bleed section · backdrop — fixed layer behind the
+ *   page · none — opts a page out of the site's backdrop.
+ * Modifiers: 3d — required; marks the view for the renderer · scroll / parallax — set data-az-camera.
+ * Props: model → data-az-model via ctx.asset · poster → img.az-scene-poster · alt → the poster's alt ·
+ *   ratio → aspect-ratio · caption → figcaption · camera → data-az-camera (fixed, orbit, scroll).
+ * Styling: theme tokens only; backdrop fixed at layer.behind; below.sm inline goes full width and full 1:1 → 4:3;
+ *   states.live hides the poster once the canvas draws.
+ * Behaviour: packages/scene-runtime draws every view into the page's one renderer.
+ * Edit guide: the view's data attributes are the runtime contract — change them with scene-runtime.
+ *   Keep: poster always present (static tier, loading, eviction); alt names the scene.
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/scene-poster.test.ts, packages/target-web/test/three.test.ts
+ */
+
+/**
  * `scene` — web emitter.
  *
  * scene-block-spec.md is the specification; this implements its structural

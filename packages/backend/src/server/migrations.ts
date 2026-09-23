@@ -1,4 +1,13 @@
 /**
+ * @az server migrations
+ * Purpose: the schema as versioned steps per engine.
+ * Spec: docs/backend-spec.md §3
+ * Exports: MIGRATIONS
+ * Edit guide: append a step, never edit a shipped one.
+ * Tests: packages/backend/test/backend.test.ts
+ */
+
+/**
  * The schema, as versioned steps per engine (backend-spec §3).
  *
  * A step is never edited once shipped — a change is a new step. Types are

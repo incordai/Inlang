@@ -1,4 +1,13 @@
 /**
+ * @az runtime auth-contract
+ * Purpose: the adapter contract: interface, closed error codes and copy, validation, safe redirects.
+ * Spec: docs/auth-block-spec.md §3
+ * Exports: AuthAdapter, AUTH_ERROR_CODES, ERROR_COPY, validate, safeNext
+ * Edit guide: error copy never reveals whether an email exists; safeNext allows same-site paths only.
+ * Tests: packages/auth-runtime/test/adapters.test.ts, packages/auth-runtime/test/security.test.ts
+ */
+
+/**
  * The adapter contract — auth-block-spec §3.
  *
  * The form compiles against THIS and nothing else about any identity

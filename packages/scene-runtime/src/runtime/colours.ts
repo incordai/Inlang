@@ -1,4 +1,13 @@
 /**
+ * @az runtime colours
+ * Purpose: theme colours for WebGL, read live and repainted on scheme change.
+ * Spec: docs/theme-spec.md §3.4
+ * Exports: value, hex, onSchemeChange
+ * Edit guide: the only place a literal colour reaches WebGL; CSS never uses it.
+ * Tests: scripts/test-3d.mjs
+ */
+
+/**
  * Theme colours for WebGL — theme-spec §3.4.
  *
  * A material cannot read a CSS custom property, so a scene asks for the

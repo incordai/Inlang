@@ -1,4 +1,13 @@
 /**
+ * @az module backend-emit
+ * Purpose: the server/ files az build writes for a site that declares backend.
+ * Spec: docs/backend-spec.md §2
+ * Exports: backendFiles, envExample, envFile, BACKEND_PINS, SERVER_DIR
+ * Edit guide: dependencies only for the chosen database/email; pins exact.
+ * Tests: packages/backend/test/emit.test.ts
+ */
+
+/**
  * The files `az build` writes for a site that declares a `backend`
  * (backend-spec §8), and the `.env` that `az backend init` writes.
  *

@@ -1,4 +1,13 @@
 /**
+ * @az module mcp-tools
+ * Purpose: the tools az mcp offers, as data: schema, annotations and run.
+ * Spec: docs/mcp.md
+ * Exports: TOOLS, validate, ToolFailure, Toolbox
+ * Edit guide: mark any tool that writes or runs project code; arguments are validated against own keys only.
+ * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/hardening.test.ts, packages/mcp/test/explain.test.ts
+ */
+
+/**
  * The tools `az mcp` offers, as data an agent can read.
  *
  * Each tool's operation is INJECTED (`Toolbox`): the CLI is the composition

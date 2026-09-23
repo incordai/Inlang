@@ -1,4 +1,13 @@
 /**
+ * @az module target-web
+ * Purpose: Spec → project files: App, runtime, per-route HTML, pre-render, stylesheet, theme.
+ * Spec: docs/ARCHITECTURE.md §4.2
+ * Exports: emitProject, emit, PINS, safeAssetPath, escapeHtml, routeOf
+ * Edit guide: generated files carry the HEADER; keep output deterministic (sorted, no timestamps); pins must match stack-evaluation.md.
+ * Tests: packages/target-web/test/emit.test.ts, packages/target-web/test/prerender.test.ts, packages/target-web/test/pins.test.ts
+ */
+
+/**
  * Web target — Spec to files.
  *
  * ARCHITECTURE.md §4.2. This is the ONLY stage that knows what React, CSS or a

@@ -1,4 +1,13 @@
 /**
+ * @az runtime behaviours
+ * Purpose: what makes the emitted markup interactive: dialogs, dropdowns, nav scroll, faq, copy, billing, year, lightbox, carousel.
+ * Spec: docs/overlays-spec.md · docs/nav-block-spec.md · docs/faq-block-spec.md
+ * Exports: attach
+ * Edit guide: wire by data-az-behaviour; each element once (late content via MutationObserver); attach() returns full cleanup.
+ * Tests: packages/overlay/test/fixes.test.ts, scripts/visual/behaviours.mjs
+ */
+
+/**
  * The behaviour runtime — what makes the emitted markup do things.
  *
  * Words emit complete, correct markup and mark what needs behaviour with

@@ -1,4 +1,13 @@
 /**
+ * @az module lint-cli
+ * Purpose: az lint: the theme lint over every word pack (a folder with word.json).
+ * Spec: docs/PRD.md §7.3
+ * Exports: lintWords, LintReport
+ * Edit guide: a word pack is exactly what the manifest loader loads.
+ * Tests: packages/cli/test/lint-migrate.test.ts
+ */
+
+/**
  * `az lint` — theme-token enforcement over word packs (PRD §7.3, A7).
  *
  * A word pack is a directory holding a `word.json` — the same rule the

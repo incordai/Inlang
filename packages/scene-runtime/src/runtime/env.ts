@@ -1,4 +1,13 @@
 /**
+ * @az runtime environment
+ * Purpose: a studio lighting environment built from emissive planes.
+ * Spec: docs/3d-technique-reference.md
+ * Exports: studioEnvironment
+ * Edit guide: dispose the prefiltered target with the stage.
+ * Tests: scripts/test-3d.mjs
+ */
+
+/**
  * A studio environment from emissive planes, prefiltered for image-based
  * lighting — 3d-technique-reference §1: the physical material reads as a
  * product render only when it has an environment to reflect.

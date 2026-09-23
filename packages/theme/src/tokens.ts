@@ -1,4 +1,13 @@
 /**
+ * @az module tokens
+ * Purpose: the closed token schema: space, motion, layer, breakpoints, type sizes; resolve().
+ * Spec: docs/theme-spec.md §1
+ * Exports: resolve, tokenPaths, SPACE, MOTION, LAYER, BREAKPOINT, TYPE_SIZE, Theme
+ * Edit guide: raw values are legal here and in themes.ts only; a new token needs the spec row first.
+ * Tests: packages/theme/test/contrast.test.ts
+ */
+
+/**
  * The token schema — the closed set a word may read.
  *
  * theme-spec.md §1. Categories split two ways, and the split is load-bearing:

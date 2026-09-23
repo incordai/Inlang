@@ -1,4 +1,13 @@
 /**
+ * @az server http
+ * Purpose: the HTTP edge: JSON bodies, cookies, CORS, security headers, rate limits, client IP.
+ * Spec: docs/backend-spec.md §5
+ * Exports: readJson, cookie, corsHeaders, clientIp, createLimiter
+ * Edit guide: trust X-Forwarded-For only by hop count; exact-origin CORS; cap limiter memory.
+ * Tests: packages/backend/test/security.test.ts
+ */
+
+/**
  * The HTTP edge — bodies, cookies, CORS, security headers, rate limits
  * (auth-spec §3.4, backend-spec §5).
  *

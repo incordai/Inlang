@@ -1,4 +1,13 @@
 /**
+ * @az module parse
+ * Purpose: tokens → statements (the AST) with the version marker checked.
+ * Spec: docs/GRAMMAR.md §3
+ * Exports: parse, Statement, Arg, AzFile, SUPPORTED_VERSION
+ * Edit guide: grammar shape changes go here and in GRAMMAR.md together; codes AZ11xx.
+ * Tests: packages/core/test/parse.test.ts
+ */
+
+/**
  * Parser — tokens to AST.
  *
  * Implements GRAMMAR.md §3.1 (core grammar) and §7 (error recovery).

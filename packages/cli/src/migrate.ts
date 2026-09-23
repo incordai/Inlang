@@ -1,4 +1,13 @@
 /**
+ * @az module migrate
+ * Purpose: az migrate: upgrade a .az file step by step to this grammar version.
+ * Spec: docs/PRD.md §5
+ * Exports: migrate, MIGRATIONS, GRAMMAR_VERSION
+ * Edit guide: a grammar change after the freeze ships as a MigrationStep here.
+ * Tests: packages/cli/test/lint-migrate.test.ts
+ */
+
+/**
  * `az migrate` — upgrade a .az file across grammar versions (PRD §5).
  *
  * Grammar 1 is the only version, so there are no steps yet and every current

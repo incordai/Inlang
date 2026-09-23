@@ -1,4 +1,13 @@
 /**
+ * @az server oidc
+ * Purpose: provider sign-in: OpenID Connect discovery and ID-token checks, plain OAuth 2.
+ * Spec: docs/auth-block-spec.md §3.4
+ * Exports: createOidc, ProviderError
+ * Edit guide: https only, no redirects on fetch, alg none refused, iss/aud/exp/nonce checked.
+ * Tests: packages/backend/test/security.test.ts
+ */
+
+/**
  * Provider sign-in — OpenID Connect and plain OAuth 2 (auth-spec §3.4,
  * backend-spec §6). Generic: every provider is configuration.
  *

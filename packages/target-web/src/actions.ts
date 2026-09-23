@@ -1,4 +1,13 @@
 /**
+ * @az module actions-web
+ * Purpose: the button primitive for the web: ctx.action / ctx.actions / ctx.submit.
+ * Spec: docs/buttons-and-sections-spec.md §1
+ * Exports: actionsFor
+ * Edit guide: hierarchy styles and the six states live here; words never build buttons themselves.
+ * Tests: packages/target-web/test/actions.test.ts, packages/words/test/actions-words.test.ts
+ */
+
+/**
  * The action primitive for the web — buttons-and-sections-spec §1.
  *
  * Words never build a button (§1.1: a button is a primitive, not a word).

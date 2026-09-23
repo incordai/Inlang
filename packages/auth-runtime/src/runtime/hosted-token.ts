@@ -1,4 +1,13 @@
 /**
+ * @az runtime hosted-token
+ * Purpose: the hosted adapter, token-endpoint profile (cloud option) with social sign-in.
+ * Spec: docs/auth-block-spec.md §3.5
+ * Exports: createTokenEndpointAdapter, mapTokenError, parseTokenResponse
+ * Edit guide: strip tokens from the address bar on landing; never map an unknown address to a distinct error.
+ * Tests: packages/auth-runtime/test/token-endpoint.test.ts
+ */
+
+/**
  * The `hosted` adapter, `token-endpoint` profile — auth-block-spec §3.5.
  *
  * For managed identity servers whose API is built around one token endpoint

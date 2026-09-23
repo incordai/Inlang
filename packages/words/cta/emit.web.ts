@@ -1,4 +1,24 @@
 /**
+ * @az word cta
+ * Purpose: the closing ask before the footer — a heading, a line and one or two actions.
+ * Spec: docs/cta-block-spec.md · terms: az explain cta
+ * Renders: section.az-cta.az-cta--{variant} >
+ *   (band, card) h2.az-cta-title? · p.az-cta-sub? · ul.az-cta-actions[data-palette]? > li > a|button
+ *   (split) div.az-cta-text > (the same three) + div.az-cta-media[data-media]? > img.az-cta-media-img
+ * Variants: band — full-bleed accent surface, inverted ink and buttons · card — inset surface card with a border ·
+ *   split — two-column grid text|media, one column below sm.
+ * Modifiers: glass — declared, not rendered yet · reveal — declared, not rendered yet.
+ * Props: title → h2.az-cta-title · sub → p.az-cta-sub · media → img.az-cta-media-img (split only) ·
+ *   describe → the image's alt; without it the image is decorative and hidden below sm.
+ * Styling: theme tokens only; band paints accent with accent-contrast ink; below.sm mobile gutter,
+ *   band padding drops a step, card inset to the gutter, split one column; band actions stack below sm.
+ * Behaviour: none; buttons by target-web/src/actions.ts (tone inverted on band).
+ * Edit guide: palette per variant → surface/ink at the top of emit(); media → splitMedia().
+ *   Keep: the band's buttons invert with it; describe is the alt, alt is the secondary button.
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/cta-media.test.ts, packages/words/test/responsive.test.ts
+ */
+
+/**
  * `cta` — web emitter.
  *
  * cta-block-spec.md §3, the inverted-palette rule, is the reason this word

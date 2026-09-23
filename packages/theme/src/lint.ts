@@ -1,4 +1,13 @@
 /**
+ * @az module lint
+ * Purpose: the theme lint: no raw colour, off-scale px, font-family, z-index or raw conditions.
+ * Spec: docs/CONVENTIONS.md §4 · docs/theme-spec.md §4
+ * Exports: lintSource, formatFindings, LintFinding
+ * Edit guide: scope is by path (word vs target); no comment-based opt-out.
+ * Tests: packages/theme/test/lint.test.ts, packages/theme/test/scope.test.ts
+ */
+
+/**
  * The theme lint — CONVENTIONS §4, "the theme rule — hard".
  *
  * Tests ASSUMPTION A7: that theme compliance is mechanically enforceable by

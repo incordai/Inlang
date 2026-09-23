@@ -1,4 +1,13 @@
 /**
+ * @az module tree
+ * Purpose: Spec blocks → emitted trees: runs each word's emitter, builds its EmitContext.
+ * Spec: docs/ARCHITECTURE.md §4.3
+ * Exports: emitPages, emitBlock, defaultChild, fillLevel
+ * Edit guide: the EmitContext every word sees is built here (contextFor); emitters are injected, never imported.
+ * Tests: packages/target-web/test/render.test.ts, packages/target-web/test/landmarks.test.ts
+ */
+
+/**
  * Spec to emitted tree.
  *
  * This is where a word's `emit.web.ts` finally runs. Everything above it is

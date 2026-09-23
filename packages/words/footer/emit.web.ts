@@ -1,4 +1,26 @@
 /**
+ * @az word footer
+ * Purpose: the site footer — link groups, a legal row and the copyright line.
+ * Spec: docs/footer-block-spec.md · terms: az explain footer
+ * Renders: footer.az-footer.az-footer--{variant} >
+ *   a.az-footer-logo? > img.az-footer-logo-img + visually hidden site name · p.az-footer-tagline? ·
+ *   nav.az-footer-nav? > div.az-footer-columns > div.az-footer-column > h2.az-footer-column-title +
+ *     ul.az-footer-column-items > li > a.az-footer-link ; ul.az-footer-loose (links and social) ·
+ *   (mega, below sm) div.az-footer-accordion > details.az-footer-group > summary.az-footer-group-summary ·
+ *   div.az-footer-bottom > p.az-footer-copyright (span[data-year] when year is dynamic) + ul.az-footer-legal
+ * Variants: minimal — logo, tagline and legal row, flattened · columns — groups as flex columns, one below sm ·
+ *   mega — grid of groups; below sm the groups become details accordions.
+ * Modifiers: glass — declared, not rendered yet.
+ * Props: logo → img.az-footer-logo-img · tagline → p.az-footer-tagline · copyright → the copyright line ·
+ *   since / year → the year in that line (dynamic: runtime updates it).
+ * Styling: theme tokens only; below.sm mobile gutter; minimal centres below sm; mega switches forms by width.
+ * Behaviour: packages/overlay runtime (wireYear) rolls a dynamic year; accordions are native details.
+ * Edit guide: link rendering → footerLink(); groups → the columns/accordion blocks; copyright → copyrightRow.
+ *   Keep: no <h1> in the footer; the logo link is named by the site; legal links sit in the bottom row.
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/nav-footer.test.ts, packages/words/test/responsive.test.ts
+ */
+
+/**
  * `footer` — web emitter.
  *
  * footer-block-spec.md §9 is specific about the structure, and the details are

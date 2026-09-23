@@ -1,4 +1,13 @@
 /**
+ * @az module spec-block
+ * Purpose: the SpecBlock type — what a word emitter receives.
+ * Spec: docs/ARCHITECTURE.md §4.3
+ * Exports: SpecBlock
+ * Edit guide: kept dependency-free so an ejected word can copy it.
+ * Tests: packages/core/test/compile.test.ts
+ */
+
+/**
  * One block of the Spec — what a word's emitter receives.
  *
  * Its own module, with no imports, so the emit contract depends on nothing

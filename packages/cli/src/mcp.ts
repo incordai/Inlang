@@ -1,4 +1,13 @@
 /**
+ * @az module mcp-cli
+ * Purpose: the CLI's operations handed to the MCP server as a toolbox.
+ * Spec: docs/mcp.md
+ * Exports: toolbox, runMcp
+ * Edit guide: each tool calls the same function its CLI command does, so they cannot drift.
+ * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/explain.test.ts
+ */
+
+/**
  * `az mcp` — the CLI's operations, handed to the MCP server.
  *
  * packages/mcp owns the protocol, the tool schemas and the root sandbox; it

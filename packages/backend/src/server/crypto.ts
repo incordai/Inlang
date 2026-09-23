@@ -1,4 +1,13 @@
 /**
+ * @az server crypto
+ * Purpose: passwords (scrypt), tokens, digests, constant-time compare, PKCE — Node crypto only.
+ * Spec: docs/backend-spec.md §5
+ * Exports: hashPassword, verifyPassword, randomToken, digest, safeEqual, pkceChallenge
+ * Edit guide: raising the scrypt cost upgrades hashes on next sign-in.
+ * Tests: packages/backend/test/backend.test.ts
+ */
+
+/**
  * Passwords, tokens and digests — Node's own crypto, no library (backend-spec §5).
  *
  * Passwords: scrypt with N=2^15, r=8, p=3 — one of the OWASP Password

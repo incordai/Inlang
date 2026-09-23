@@ -1,4 +1,13 @@
 /**
+ * @az module literals
+ * Purpose: finds credential-shaped values written into a .az file (AZ1411).
+ * Spec: docs/auth-block-spec.md §4 rule 3
+ * Exports: secretLiterals
+ * Edit guide: uses secrets.ts patterns; never echo the value in a diagnostic.
+ * Tests: packages/core/test/secrets.test.ts
+ */
+
+/**
  * A credential written into the .az file — auth-block-spec §4 rule 3, §11.
  *
  * Credentials are environment configuration, never site description: a key

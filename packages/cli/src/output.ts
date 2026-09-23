@@ -1,4 +1,13 @@
 /**
+ * @az module output
+ * Purpose: writes a build into its folder safely: generated-file manifest, stale removal, symlink refusal.
+ * Spec: docs/ARCHITECTURE.md §7
+ * Exports: writeOutput, writeProblem, MANIFEST
+ * Edit guide: never overwrite or delete a file az did not generate.
+ * Tests: packages/cli/test/hardening.test.ts
+ */
+
+/**
  * Writing a build into its output folder, safely.
  *
  * Four rules, each a finding from the core review:

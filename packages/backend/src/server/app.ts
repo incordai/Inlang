@@ -1,4 +1,13 @@
 /**
+ * @az server app
+ * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth.
+ * Spec: docs/auth-block-spec.md §3.4 · docs/backend-spec.md §5
+ * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES
+ * Edit guide: same answer for unknown account and wrong password; rate-limit before hashing; claim unverified accounts safely.
+ * Tests: packages/backend/test/backend.test.ts, packages/backend/test/security.test.ts
+ */
+
+/**
  * The routes — auth-spec §3.4, the azbackend protocol, exactly.
  *
  * Two kinds of request reach this server. FETCHES from the site (everything

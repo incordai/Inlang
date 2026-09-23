@@ -1,4 +1,13 @@
 /**
+ * @az runtime stage
+ * Purpose: the page's one WebGL renderer: scissored views, probe, ladder, eviction, teardown.
+ * Spec: docs/scene-block-spec.md §5–§8 · docs/motion-tiers-spec.md
+ * Exports: Stage, StopReason
+ * Edit guide: one renderer per page; the loop runs only while something draws; dispose everything on teardown.
+ * Tests: scripts/test-3d.mjs
+ */
+
+/**
  * The page's one WebGL renderer — scene-spec §5.
  *
  * Every 3D view on the page (a hero, up to four scenes, a backdrop, an orbit

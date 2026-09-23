@@ -1,4 +1,13 @@
 /**
+ * @az module three-web
+ * Purpose: the 3D entry for sites with a 3D view: seeds per view, lazy chunk, gate.
+ * Spec: docs/scene-block-spec.md §5 · docs/hero-block-spec.md §8
+ * Exports: seedViews, threeMain, threeCss, THREE_DIR
+ * Edit guide: 3D code ships only for sites with a data-az-3d view; the text/poster paints first.
+ * Tests: packages/target-web/test/three.test.ts
+ */
+
+/**
  * The web target's 3D wiring — scene-spec §5, hero-spec §8.
  *
  * Words describe a 3D view as data (`data-az-3d` and friends); this seeds each

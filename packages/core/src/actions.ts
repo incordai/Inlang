@@ -1,4 +1,13 @@
 /**
+ * @az module actions
+ * Purpose: the target-agnostic half of buttons: intents from destinations, hierarchies.
+ * Spec: docs/buttons-and-sections-spec.md §1 · docs/GRAMMAR.md §4.3
+ * Exports: intentOf, INTENTS, defaultHierarchy, isScriptUrl
+ * Edit guide: a new URI scheme is an allow-list entry here (unlisted schemes are AZ1404).
+ * Tests: packages/core/test/actions.test.ts
+ */
+
+/**
  * Actions — buttons-and-sections-spec §1, the target-agnostic half.
  *
  * What an action DOES is read from its destination, never declared (§1.3,

@@ -1,4 +1,13 @@
 /**
+ * @az runtime scene-gate
+ * Purpose: page-load decision: does this page get a renderer at all (signals, forced tier, reduced motion).
+ * Spec: docs/motion-tiers-spec.md §2
+ * Exports: decide3d, readGateSignals, whenViews
+ * Edit guide: three-free, so the decision costs no 3D download.
+ * Tests: scripts/test-3d.mjs
+ */
+
+/**
  * The page-load decision: does this page view get a renderer at all?
  *
  * The one 3D module a site's entry imports statically, so it is kept small

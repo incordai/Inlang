@@ -1,4 +1,13 @@
 /**
+ * @az server main
+ * Purpose: start the backend: config, migrations, store, routes, HTTP server.
+ * Spec: docs/backend-spec.md §8
+ * Exports: (none — entry point)
+ * Edit guide: refuse to start on invalid config; never let a handler rejection crash the process.
+ * Tests: packages/backend/test/backend.test.ts
+ */
+
+/**
  * Start the backend (backend-spec §8).
  *
  *     node src/main.ts        (Node 22.18 or later — it runs TypeScript directly)

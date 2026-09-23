@@ -1,4 +1,13 @@
 /**
+ * @az server env
+ * Purpose: the configuration: every key, validation, refuse to start naming bad keys.
+ * Spec: docs/backend-spec.md §4
+ * Exports: loadConfig, KEYS, urlProblem
+ * Edit guide: server keys are never AZ_PUBLIC_; defaults are safe.
+ * Tests: packages/backend/test/backend.test.ts
+ */
+
+/**
  * The backend's configuration — every key, what it means, and whether the
  * chosen setup needs it (backend-spec §4).
  *

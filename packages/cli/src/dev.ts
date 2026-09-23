@@ -1,4 +1,13 @@
 /**
+ * @az module dev
+ * Purpose: az dev: watch the source and recompile on save.
+ * Spec: docs/PRD.md §6.7
+ * Exports: dev, devLine
+ * Edit guide: watch the directory (editors rename on save); a reconcile tick catches dropped events.
+ * Tests: packages/cli/test/cli.test.ts
+ */
+
+/**
  * `az dev` — watch and recompile.
  *
  * PRD §6.7 calls sub-second recompile "the single best demo we have — the

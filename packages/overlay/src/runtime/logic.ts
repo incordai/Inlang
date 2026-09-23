@@ -1,4 +1,13 @@
 /**
+ * @az runtime behaviour-logic
+ * Purpose: the behaviour runtime's decisions as pure functions (thresholds, indices, parsing).
+ * Spec: docs/nav-block-spec.md §4 · docs/overlays-spec.md
+ * Exports: solidAfter, retractedAfter, trapIndex, safeDecode, billingFrom, rollingYear
+ * Edit guide: keep pure (no DOM); every decision here has a unit test.
+ * Tests: packages/overlay/test/logic.test.ts
+ */
+
+/**
  * The decisions the behaviour runtime makes, as pure functions.
  *
  * Kept apart from the DOM wiring so each can be tested without a browser,

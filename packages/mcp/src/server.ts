@@ -1,4 +1,13 @@
 /**
+ * @az module mcp-server
+ * Purpose: MCP over stdio: JSON-RPC framing, initialize, tools, resources.
+ * Spec: docs/mcp.md
+ * Exports: serve, handle, PROTOCOL_VERSIONS
+ * Edit guide: imports Node built-ins only; stdout is the protocol, logs go to stderr.
+ * Tests: packages/mcp/test/mcp.test.ts
+ */
+
+/**
  * `az mcp` — the Model Context Protocol over stdio.
  *
  * Newline-delimited JSON-RPC 2.0 (the MCP stdio transport): one message per

@@ -1,4 +1,13 @@
 /**
+ * @az module mcp-sandbox
+ * Purpose: the project root as a boundary: every path realpath-checked inside it.
+ * Spec: docs/mcp.md
+ * Exports: sandbox, SandboxError, shown
+ * Edit guide: symlinks are followed before the check; a missing path is judged by its nearest existing parent.
+ * Tests: packages/mcp/test/hardening.test.ts
+ */
+
+/**
  * The project root, as a boundary.
  *
  * Every path a client sends is resolved against the root and must stay

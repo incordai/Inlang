@@ -1,4 +1,13 @@
 /**
+ * @az module backend
+ * Purpose: the `backend` declaration as data: closed choices for database and email.
+ * Spec: docs/backend-spec.md §2
+ * Exports: BACKEND_SETTINGS, BACKEND_DATABASES, BACKEND_EMAIL, SpecBackend
+ * Edit guide: a new choice needs the server (packages/backend) to support it and a describe.ts row.
+ * Tests: packages/core/test/backend-decl.test.ts
+ */
+
+/**
  * The optional built-in backend — its declaration, as data (backend-spec §2).
  *
  * `backend` is a site-level structure keyword, not a block: it renders

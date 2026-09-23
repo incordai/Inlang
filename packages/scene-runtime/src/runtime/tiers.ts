@@ -1,4 +1,13 @@
 /**
+ * @az runtime tiers
+ * Purpose: motion tiers, the 8-rung ladder and the frame-rate probe (pure decision engine).
+ * Spec: docs/motion-tiers-spec.md §3–§5
+ * Exports: LADDER, TierProbe, ProbeEngine, capabilityGate, simulate
+ * Edit guide: the ratchet never promotes after arming; decisions come from drawn frames only.
+ * Tests: packages/scene-runtime/test/scene-runtime.test.ts, packages/scene-runtime/test/probe-hide.test.ts
+ */
+
+/**
  * Motion tiers, the degradation ladder and the runtime probe.
  *
  * Implements docs/motion-tiers-spec.md §1–§6. Tests ASSUMPTIONS.md A1b: that a

@@ -1,4 +1,13 @@
 /**
+ * @az module dev-backend
+ * Purpose: the real backend run locally with a dev profile: SQLite, dev secret, local mailbox.
+ * Spec: docs/backend-spec.md §2a
+ * Exports: startDevBackend, startMailbox, devBackendEnv, assertLoopback
+ * Edit guide: loopback only; dev settings never reach a production build.
+ * Tests: packages/cli/test/dev-serve.test.ts, packages/cli/test/dev-mailbox-security.test.ts
+ */
+
+/**
  * The backend for `az dev` — the real server, run with a development profile.
  *
  * `az build` + `az backend init` is the production path and is untouched.

@@ -1,4 +1,13 @@
 /**
+ * @az module spec
+ * Purpose: linked words → the Spec: defaults applied, site-scoped props carried, inheritance resolved.
+ * Spec: docs/ARCHITECTURE.md §3
+ * Exports: buildSpec, serialiseSpec, blocksFor, Spec, SpecPage
+ * Edit guide: blocksFor() is the one place page/site inheritance is decided; keep serialiseSpec key-sorted (determinism).
+ * Tests: packages/core/test/compile.test.ts, packages/core/test/inheritance.test.ts, packages/core/test/site-scope.test.ts
+ */
+
+/**
  * Spec — the contract boundary.
  *
  * ARCHITECTURE.md §3: "`Spec` is the contract boundary. It must be

@@ -1,4 +1,13 @@
 /**
+ * @az runtime seed
+ * Purpose: deterministic randomness: string seeds, PRNG, noise, vertex hashing.
+ * Spec: docs/ASSUMPTIONS.md A8b
+ * Exports: seedFrom, rng, valueNoise1D, hashFloats
+ * Edit guide: no Math.random or ambient input — determinism depends on it.
+ * Tests: packages/scene-runtime/test/scene-runtime.test.ts
+ */
+
+/**
  * Deterministic pseudo-randomness for procedural geometry.
  *
  * Tests ASSUMPTIONS.md A8b: a seeded generator must be reproducible across

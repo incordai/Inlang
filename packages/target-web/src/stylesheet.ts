@@ -1,4 +1,13 @@
 /**
+ * @az module stylesheet
+ * Purpose: every node style (base, below, states, reducedMotion) → one generated az.css with hashed classes.
+ * Spec: docs/ARCHITECTURE.md §4.3
+ * Exports: compileStyles, declarations, StyleValueError
+ * Edit guide: rule order is fixed (base, breakpoints wide→narrow, states, reduced motion); unsafe values throw.
+ * Tests: packages/target-web/test/stylesheet.test.ts
+ */
+
+/**
  * Emitted styles to one generated stylesheet.
  *
  * Words describe style as data — a base `style` plus `below`, `states` and

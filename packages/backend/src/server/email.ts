@@ -1,4 +1,13 @@
 /**
+ * @az server email
+ * Purpose: sending reset and sign-in emails over SMTP or an HTTPS email API.
+ * Spec: docs/backend-spec.md §7
+ * Exports: createMailer, resetMessage, linkMessage
+ * Edit guide: log error class only, never addresses or server replies.
+ * Tests: packages/backend/test/backend.test.ts
+ */
+
+/**
  * Sending email — SMTP, or any HTTPS email API (backend-spec §7).
  *
  * Provider-neutral by construction. SMTP is the standard every mail service
