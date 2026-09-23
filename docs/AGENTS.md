@@ -55,8 +55,9 @@ In short:
   12-point gate. The 3D props (`hero.model`, `scene.model`, `scene.camera`)
   wait on the 3D runtime port.
 - **M3** — `raw`, `slot`, `az eject`, `az lint`, `az migrate`: met.
-- **M4** — adapters and the secret-leak guard built; the real-provider login
-  and `azbackend` (PRD §11 Q2) are open.
+- **M4** — adapters (incl. `azbackend`, protocol in auth-spec §3.4) and the
+  secret-leak guard built; the real-provider login and a login against the
+  real backend are open.
 - **M5** — not started; it needs a real client brief.
 
 Every check an agent must keep green: `pnpm verify`, `pnpm verify:build`,

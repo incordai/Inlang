@@ -20,10 +20,7 @@
         "custom"
       ],
       "required": true,
-      "scope": "site",
-      "deferred": [
-        "azbackend"
-      ]
+      "scope": "site"
     },
     "title": {
       "type": "string",

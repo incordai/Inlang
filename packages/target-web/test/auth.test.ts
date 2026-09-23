@@ -89,9 +89,22 @@ test('CONTROL: a site without auth carries no auth wiring — but still the guar
   assert.match(vite, /plugins: \[secretGuard\(\)\]/);
 });
 
-test('azbackend is refused until the backend decision is made (AZ1214)', () => {
+test('§3.4: azbackend compiles and wires the backend adapter from its one PUBLIC URL', () => {
   const r = compile(site('azbackend'), { manifests });
-  assert.ok(r.diagnostics.some((d) => d.code === 'AZ1214' && /adapter 'azbackend' is not available yet/.test(d.message)));
+  assert.ok(!r.diagnostics.some((d) => d.code === 'AZ1214'), 'azbackend is available now (PRD §11 Q2 decided)');
+  const p = project(site('azbackend'));
+  const config = file(p, 'src/az-auth/config.ts');
+  assert.match(config, /createBackendAdapter\(\{ url: import\.meta\.env\.AZ_PUBLIC_BACKEND_URL \?\? "" \}\)/);
+  assert.doesNotMatch(config, /AZ_PUBLIC_AUTH_KEY|publicKey/, 'the backend takes no key');
+  const guard = file(p, 'az-vite/guard.ts');
+  assert.match(guard, /const REQUIRED: readonly string\[\] = \["AZ_PUBLIC_BACKEND_URL"\]/);
+  assert.match(guard, /import \{ backendUrlProblem \} from "\.\.\/src\/az-auth\/azbackend\.ts";/);
+  assert.match(guard, /adapter azbackend needs /);
+});
+
+test('CONTROL: the hosted guard does not import the backend check', () => {
+  const guard = file(project(site('hosted')), 'az-vite/guard.ts');
+  assert.doesNotMatch(guard, /backendUrlProblem|AZ_PUBLIC_BACKEND_URL/);
 });
 
 test('the emitted hint and the runtime enforce the same password minimum', () => {

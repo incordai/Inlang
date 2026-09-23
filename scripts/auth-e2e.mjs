@@ -18,7 +18,7 @@ import { readFile } from 'node:fs/promises';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { buildSites } from './visual/pipeline.mjs';
 
 const PUBLIC_KEY = 'pk-probe-public';
@@ -74,6 +74,64 @@ function startProvider() {
   });
   return new Promise((done) => server.listen(0, '127.0.0.1', () =>
     done({ url: `http://127.0.0.1:${server.address().port}`, calls, close: () => server.close() })));
+}
+
+/* ---- the mock backend: §3.4's protocol, on ANOTHER origin -------------- */
+
+/**
+ * The owner's backend, as §3.4 requires it to behave: routes under /auth,
+ * CORS for the site's exact origin with credentials, the session in an
+ * httpOnly cookie, and every state-changing request refused unless it
+ * carries the CSRF header. `allowed` is filled once the site's origin is
+ * known. Cookies are SameSite=Lax here because loopback ports are one site;
+ * a backend on another site needs SameSite=None; Secure (§3.4).
+ */
+function startBackend() {
+  const calls = [];
+  const sessions = new Map();
+  const allowed = { origin: '' };
+  const server = createServer(async (req, res) => {
+    const origin = req.headers.origin ?? '';
+    const cors = origin && origin === allowed.origin ? {
+      'access-control-allow-origin': origin,
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-headers': 'content-type, x-az-request',
+      'access-control-allow-methods': 'GET, POST',
+      vary: 'Origin',
+    } : {};
+    if (req.method === 'OPTIONS') { res.writeHead(origin === allowed.origin ? 204 : 403, cors).end(); return; }
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const input = body ? JSON.parse(body) : {};
+    const cookie = /(?:^|;\s*)az_session=([^;]+)/.exec(req.headers.cookie ?? '')?.[1] ?? null;
+    calls.push({ path: req.url, method: req.method, origin, csrf: req.headers['x-az-request'], cookie, input });
+    const reply = (status, data, extra = {}) => {
+      res.writeHead(status, { ...cors, 'content-type': 'application/json', ...extra }).end(JSON.stringify(data));
+    };
+    // §3.4 CSRF: a foreign origin, or a state change without the header, is refused.
+    if (origin !== allowed.origin) return reply(403, { error: 'unknown' });
+    if (req.method !== 'GET' && req.headers['x-az-request'] !== '1') return reply(403, { error: 'unknown' });
+    const user = { id: USER.id, email: USER.email };
+    const signIn = () => {
+      const id = `s-${sessions.size + 1}`;
+      sessions.set(id, user);
+      return reply(200, { session: { user } }, { 'set-cookie': `az_session=${id}; HttpOnly; Path=/; SameSite=Lax` });
+    };
+    switch (`${req.method} ${req.url}`) {
+      case 'GET /auth/session':
+        return reply(200, { session: cookie && sessions.has(cookie) ? { user: sessions.get(cookie) } : null });
+      case 'POST /auth/sign-in':
+        return input.email === USER.email && input.password === USER.password ? signIn() : reply(401, { error: 'invalid_credentials' });
+      case 'POST /auth/sign-out':
+        if (cookie) sessions.delete(cookie);
+        res.writeHead(204, { ...cors, 'set-cookie': 'az_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0' }).end();
+        return undefined;
+      default:
+        return reply(404, { error: 'unknown' });
+    }
+  });
+  return new Promise((done) => server.listen(0, '127.0.0.1', () =>
+    done({ url: `http://127.0.0.1:${server.address().port}`, calls, allowed, close: () => server.close() })));
 }
 
 /** A static host: `/login` and `/login/` serve login/index.html, as real hosts do. */
@@ -136,16 +194,27 @@ page /terms
 
 const work = mkdtempSync(join(tmpdir(), 'az-auth-e2e-'));
 const provider = await startProvider();
+const backend = await startBackend();
 process.env.AZ_PUBLIC_AUTH_URL = provider.url;
 process.env.AZ_PUBLIC_AUTH_KEY = PUBLIC_KEY;
-const sites = [{ dir: join(work, 'studio'), source: SITE }];
+process.env.AZ_PUBLIC_BACKEND_URL = backend.url;
+// The same site with `adapter azbackend`: sign-in and <Protected> only.
+const BACKEND_SITE = SITE.replace('adapter hosted', 'adapter azbackend');
+const sites = [
+  { dir: join(work, 'studio'), source: SITE },
+  { dir: join(work, 'backend'), source: BACKEND_SITE },
+];
 await buildSites(sites, work);
-const [site] = sites;
-if (!site.compiled || !site.dist) {
-  console.error(`site did not build: ${site.error ?? 'no dist'}`);
-  process.exit(1);
+for (const s of sites) {
+  if (!s.compiled || !s.dist) {
+    console.error(`site did not build: ${s.error ?? 'no dist'}`);
+    process.exit(1);
+  }
 }
+const [site, backendSite] = sites;
 const host = await startSite(normalize(site.dist));
+const backendHost = await startSite(normalize(backendSite.dist));
+backend.allowed.origin = backendHost.url;
 const browser = await chromium.launch();
 const errors = [];
 
@@ -262,10 +331,62 @@ try {
   check('reset: a valid link sets the password and signs in', provider.calls.some((c) => c.path === '/password' && c.input.token === RESET_TOKEN));
 
   check('no page error or console error in any flow', errors.length === 0, errors.slice(0, 2).join(' | '));
+
+  /* 11. azbackend (§3.4): the same forms against the owner's backend on
+         another origin, in every engine — cookie session, CORS, CSRF header. */
+  for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
+    const b = name === 'chromium' ? browser : await engine.launch();
+    const ctx = await b.newContext();
+    const p = await ctx.newPage();
+    const errs = [];
+    p.on('pageerror', (e) => errs.push(e.message));
+    const on = (path) => `${backendHost.url}${path}`;
+    const login = p.locator('form[data-flow="login"]');
+    try {
+      await p.goto(on('/account'));
+      await p.waitForURL(/\/login\?next=%2Faccount/);
+      check(`${name} azbackend: signed out, <Protected> sends you to login`, new URL(backend.url).origin !== new URL(p.url()).origin,
+        'site and backend are different origins');
+      await login.locator('input[name="email"]').fill(USER.email);
+      await login.locator('input[name="password"]').fill('wrong-password');
+      await login.getByRole('button', { name: 'Sign in' }).click();
+      await p.waitForFunction(() => /don't match/.test(document.querySelector('.az-auth-summary')?.textContent ?? ''));
+      check(`${name} azbackend: a wrong password shows invalid_credentials copy`, true);
+      await login.locator('input[name="password"]').fill(USER.password);
+      await login.getByRole('button', { name: 'Sign in' }).click();
+      await p.waitForURL(/\/account$/);
+      await p.locator('.az-session').waitFor({ state: 'visible' });
+      const cookies = await ctx.cookies(backend.url);
+      const session = cookies.find((c) => c.name === 'az_session');
+      check(`${name} azbackend: sign-in stores the backend's httpOnly cookie, never a token in the page`,
+        !!session?.httpOnly && !(await p.evaluate(() => JSON.stringify({ ...sessionStorage, ...localStorage }))).includes('s-'));
+      await p.goto(on('/account'));
+      await p.locator('.az-session').waitFor({ state: 'visible' });
+      const reads = backend.calls.filter((c) => c.path === '/auth/session' && c.cookie);
+      check(`${name} azbackend: the session survives a page load — GET /auth/session sends the cookie cross-origin`, reads.length > 0);
+      const posts = backend.calls.filter((c) => c.method === 'POST');
+      check(`${name} azbackend: every state-changing request carried the CSRF header from the site's origin`,
+        posts.length > 0 && posts.every((c) => c.csrf === '1' && c.origin === backendHost.url));
+      const forged = await p.evaluate(async (url) => (await fetch(`${url}/auth/sign-out`, { method: 'POST', credentials: 'include' })).status, backend.url);
+      check(`${name} CONTROL: a request without the CSRF header is refused by the backend`, forged === 403, `status ${forged}`);
+      await p.locator('.az-session').getByRole('button', { name: 'Sign out' }).click();
+      await p.waitForURL(/\/login$/);
+      await p.goto(on('/account'));
+      await p.waitForURL(/\/login\?next=/);
+      check(`${name} azbackend: sign-out ends the backend session`, true);
+      check(`${name} azbackend: no page errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
+      backend.calls.length = 0;
+    } finally {
+      await ctx.close();
+      if (b !== browser) await b.close();
+    }
+  }
 } finally {
   await browser.close();
   host.close();
+  backendHost.close();
   provider.close();
+  backend.close();
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED — work dir kept: ${work}`);

@@ -1,22 +1,36 @@
 /**
- * The `session` adapter — a cookie session on the site's own server.
+ * Cookie-session adapters — `session` (auth-block-spec §3.3) and, through
+ * the same routes at another origin, `azbackend` (§3.4).
  *
  * The server owns everything: it verifies credentials, sets an httpOnly
- * session cookie, and answers the same-origin routes auth-block-spec §3.3
- * defines under `/api/auth`. This file never sees a token — the browser
- * sends the cookie with each same-origin request. Only a public client id,
- * if any, is configuration here (§3's table).
+ * session cookie, and answers the routes. This file never sees a token — the
+ * browser sends the cookie with each request. Only a public URL, if any, is
+ * configuration here (§3's table).
  *
  * Copied into a generated project; imports only its sibling.
  */
 
 import {
-  toErrorCode, type AuthAdapter, type AuthField, type AuthResult, type AuthSession, type Credentials,
+  toErrorCode, type AdapterId, type AuthAdapter, type AuthField, type AuthResult, type AuthSession, type Credentials,
 } from './contract.ts';
 
 export interface SessionConfig {
   /** Where the server's routes live. Same-origin, so the cookie is sent. */
   readonly base: string;
+}
+
+/** How a cookie adapter reaches its server. */
+export interface CookieConfig {
+  readonly id: Extract<AdapterId, 'session' | 'azbackend'>;
+  /** The routes' base: same-origin for `session`, the backend's URL for `azbackend`. */
+  readonly base: string;
+  /**
+   * `same-origin` for the site's own server; `include` for a backend on
+   * another origin, so the browser sends and stores its cookie (§3.4).
+   */
+  readonly credentials: 'same-origin' | 'include';
+  /** Sent on every request — §3.4's CSRF header for a cross-origin backend. */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface SessionEnv {
@@ -36,6 +50,10 @@ function parseUser(value: unknown): AuthSession | null {
 }
 
 export function createSessionAdapter(config: SessionConfig, env: SessionEnv = { fetch: (...a) => fetch(...a) }): AuthAdapter {
+  return createCookieAdapter({ id: 'session', base: config.base, credentials: 'same-origin' }, env);
+}
+
+export function createCookieAdapter(config: CookieConfig, env: SessionEnv = { fetch: (...a) => fetch(...a) }): AuthAdapter {
   const listeners = new Set<(s: AuthSession | null) => void>();
   const base = config.base.replace(/\/+$/, '');
   let current: AuthSession | null = null;
@@ -51,8 +69,8 @@ export function createSessionAdapter(config: SessionConfig, env: SessionEnv = { 
     try {
       response = await env.fetch(`${base}${path}`, {
         method,
-        credentials: 'same-origin',
-        headers: body ? { 'content-type': 'application/json' } : {},
+        credentials: config.credentials,
+        headers: { ...config.headers, ...(body ? { 'content-type': 'application/json' } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
     } catch {
@@ -81,7 +99,7 @@ export function createSessionAdapter(config: SessionConfig, env: SessionEnv = { 
   };
 
   return {
-    id: 'session',
+    id: config.id,
     signIn: (c: Credentials) => signing('/sign-in', { email: c.email, password: c.password }),
     signUp: (c: Credentials) => signing('/sign-up', { email: c.email, password: c.password, ...(c.name ? { name: c.name } : {}) }),
     requestLink: (email) => request('POST', '/link', { email }),

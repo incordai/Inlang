@@ -49,7 +49,7 @@ Combine freely.
 
 | Property | Type | Values | Default | Constraints | Meaning |
 |---|---|---|---|---|---|
-| `adapter` | enum | `hosted` / `session` / `azbackend` / `custom` |  | required, site-level, deferred: `azbackend` | which adapter role handles the credentials; site-level, once per site |
+| `adapter` | enum | `hosted` / `session` / `azbackend` / `custom` |  | required, site-level | which adapter role handles the credentials; site-level, once per site |
 | `title` | string |  |  | ≤ 8 words | the form heading (the page's only `<h1>`) |
 | `sub` | string |  |  | ≤ 20 words | one supporting line under the title |
 | `methods` | list | `password` / `link` / `oauth` | `password` | max 3, deferred: `oauth` | sign-in methods offered: `password`, `link` (`oauth` is deferred) |
@@ -80,7 +80,7 @@ The full floor is in the spec.
 | `hosted` | `AZ_PUBLIC_AUTH_URL` (the provider's base URL) and `AZ_PUBLIC_AUTH_KEY` (its **public / anon** key) in `.env` or the environment — the build fails without them | the public key only |
 | `session` | your own server answering `/api/auth/*` (spec §3.3) and setting an httpOnly cookie | nothing secret |
 | `custom` | `impl ./auth/adapter.ts` — a module whose default export implements the adapter interface (spec §3.1) | your choice; the build rules below still apply |
-| `azbackend` | not available until the backend decision (PRD §11) is made | — |
+| `azbackend` | the site owner's own backend on its own origin — one public base URL, `AZ_PUBLIC_BACKEND_URL`; protocol in [spec §3.4](../../../docs/auth-block-spec.md) | — |
 
 **Use the public (anon) key here. Never the service key.** A service key
 bypasses row-level security and gives full database access; anything the
@@ -125,7 +125,7 @@ Known gaps:
 
 - No login has been run against a real hosted provider (needs an account);
   the flows pass against a local mock of the §3.2 protocol
-- `azbackend` is refused until PRD §11 Q2 is decided; `methods oauth` is deferred
+- `methods oauth` is deferred; `azbackend` is available (protocol: spec §3.4)
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested

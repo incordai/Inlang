@@ -258,6 +258,30 @@ try {
     check('CONTROL: the clean build (public key present) passed the same guard', existsSync(join(proj, 'dist/index.html')));
   }
 
+  /* ---- M4: `azbackend` — the build refuses a URL the cookie cannot cross -- */
+  // auth-spec §3.4: one public base URL, https (plain http only for
+  // loopback). The fixture must stay byte-identical to GRAMMAR §8, so this
+  // compiles a copy with only the adapter changed.
+  {
+    const backendSite = join(work, 'site-backend.az');
+    writeFileSync(backendSite, readFileSync(site, 'utf8').replace('adapter hosted', 'adapter azbackend'));
+    const backendProj = join(work, 'proj-backend');
+    node(CLI, ['build', backendSite, '--out', backendProj], work);
+    cpSync(join(proj, 'node_modules'), join(backendProj, 'node_modules'), { recursive: true });
+    const backendVite = [join(backendProj, 'node_modules/vite/bin/vite.js'), 'build'];
+    const plain = failing(process.execPath, backendVite, backendProj, { AZ_PUBLIC_BACKEND_URL: 'http://api.example.org' });
+    check('M4 §3.4: an azbackend build FAILS for a plain-http backend URL',
+      plain !== null && /adapter azbackend — 'http:\/\/api\.example\.org' must use https/.test(plain));
+    const unset = failing(process.execPath, backendVite, backendProj, { AZ_PUBLIC_BACKEND_URL: '' });
+    check('M4 §3.4: an azbackend build FAILS when the backend URL is not set',
+      unset !== null && /adapter azbackend needs AZ_PUBLIC_BACKEND_URL/.test(unset));
+    const good = failing(process.execPath, backendVite, backendProj, { AZ_PUBLIC_BACKEND_URL: 'https://api.example.org' });
+    check('CONTROL: the same build passes with an https backend URL, and ships it',
+      good === null && readdirSync(join(backendProj, 'dist/assets'))
+        .some((f) => f.endsWith('.js') && readFileSync(join(backendProj, 'dist/assets', f), 'utf8').includes('https://api.example.org')),
+      good?.split('\n').find((l) => /error|Error/.test(l)) ?? '');
+  }
+
   /* ---- M4: the login page's form is wired, and marked up per §6 ------- */
   {
     const login = rendered['/login'] ?? '';

@@ -21,7 +21,7 @@ import { COMPONENT_EXT } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 import { PUBLIC_ENV_PREFIX } from '../../core/src/index.ts';
 import {
-  AUTH_DIR, GUARD_DIR, HOSTED_ENV, authConfig, authCss, authPlan, authReact, guardTs, type AuthPlan,
+  AUTH_DIR, GUARD_DIR, authConfig, authCss, authPlan, authReact, guardTs, requiredEnv, type AuthPlan,
 } from './auth.ts';
 import { seedViews, threeCss, threeMain } from './three.ts';
 
@@ -614,7 +614,7 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   const files: EmittedFile[] = [
     { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme, plan) },
     // The build guard, for every site (auth-spec §4): nothing may ship a key.
-    { path: `${GUARD_DIR}/guard.ts`, content: guardTs(plan?.adapter === 'hosted' ? HOSTED_ENV : []) },
+    { path: `${GUARD_DIR}/guard.ts`, content: guardTs(requiredEnv(plan), plan?.adapter ?? null) },
     ...(plan ? [
       { path: `${AUTH_DIR}/config.ts`, content: authConfig(plan, USER_DIR.replace(/^src\//, '')) },
       { path: `${AUTH_DIR}/react.tsx`, content: authReact() },

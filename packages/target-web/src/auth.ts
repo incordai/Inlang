@@ -29,8 +29,22 @@ export const HOSTED_ENV = [`${PUBLIC_ENV_PREFIX}AUTH_URL`, `${PUBLIC_ENV_PREFIX}
 /** Where a session adapter's server routes live (§3.3). */
 export const SESSION_BASE = '/api/auth';
 
+/**
+ * The one public variable the `azbackend` adapter reads (§3.4): the owner's
+ * backend. Its own name, not the hosted adapter's, so a hosted provider's
+ * settings can never be sent to the backend by accident.
+ */
+export const BACKEND_ENV = [`${PUBLIC_ENV_PREFIX}BACKEND_URL`] as const;
+
+/** The public variables a site's adapter cannot build without. */
+export function requiredEnv(plan: AuthPlan | null): readonly string[] {
+  if (plan?.adapter === 'hosted') return HOSTED_ENV;
+  if (plan?.adapter === 'azbackend') return BACKEND_ENV;
+  return [];
+}
+
 export interface AuthPlan {
-  readonly adapter: 'hosted' | 'session' | 'custom';
+  readonly adapter: 'hosted' | 'session' | 'azbackend' | 'custom';
   /** The custom adapter module, project-relative — copied into the user dir. */
   readonly impl: string | null;
   /** The first page with `auth login` — where signed-out visitors are sent. */
@@ -39,17 +53,14 @@ export interface AuthPlan {
   readonly protect: string[];
 }
 
-/**
- * The site's auth, or null when it has none. `azbackend` never reaches
- * here: the compiler refuses it until the backend decision is made (AZ1214).
- */
+/** The site's auth, or null when it has none. */
 export function authPlan(spec: Spec): AuthPlan | null {
   const settings = spec.site.scoped.auth;
   const login = spec.pages.find((p) => p.blocks.some((b) => b.word === 'auth' && b.variant === 'login'))?.route ?? null;
   const used = settings !== undefined || spec.pages.some((p) => p.blocks.some((b) => b.word === 'auth'));
   if (!used) return null;
   const id = settings?.adapter;
-  if (id !== 'hosted' && id !== 'session' && id !== 'custom') return null;
+  if (id !== 'hosted' && id !== 'session' && id !== 'azbackend' && id !== 'custom') return null;
   const protect = (settings?.protect ?? '').split(',').map((r) => r.trim()).filter((r) => r && r !== login);
   return { adapter: id, impl: settings?.impl ?? null, login, protect: [...new Set(protect)].sort() };
 }
@@ -86,6 +97,15 @@ export const adapter: AuthAdapter = createHostedAdapter({
   url: import.meta.env.${HOSTED_ENV[0]} ?? "",
   publicKey: import.meta.env.${HOSTED_ENV[1]} ?? "",
 });`
+    : plan.adapter === 'azbackend'
+      ? `import { createBackendAdapter } from "./azbackend.ts";
+
+/**
+ * §3.4: the owner's backend, reached by its PUBLIC base URL. No key: the
+ * backend authenticates by its httpOnly cookie. The build refuses a missing
+ * or non-https URL before this file ships.
+ */
+export const adapter: AuthAdapter = createBackendAdapter({ url: import.meta.env.${BACKEND_ENV[0]} ?? "" });`
     : plan.adapter === 'session'
       ? `import { createSessionAdapter } from "./session.ts";
 
@@ -194,11 +214,14 @@ export function authCss(t: ThemeLike): string {
  * environment that build really inlines and the bundle it really writes.
  * Both failures are unsuppressible: no option or flag turns them off.
  */
-export function guardTs(required: readonly string[]): string {
+export function guardTs(required: readonly string[], adapter: string | null = null): string {
+  // azbackend: the base URL must be usable, not merely present (§3.4) — the
+  // adapter's own check, imported so the build and the site agree.
+  const backend = adapter === 'azbackend';
   return `${HEADER}import { loadEnv, type Plugin } from "vite";
 import { PUBLIC_ENV_PREFIX, bundleMessage, envMessage, scanEnv, scanText } from "./secrets.ts";
-
-/** Variables this site cannot build without (the hosted adapter's, §3.2). */
+${backend ? `import { backendUrlProblem } from "../${AUTH_DIR}/azbackend.ts";\n` : ''}
+/** Variables this site cannot build without (its auth adapter's, §3.2/§3.4). */
 const REQUIRED: readonly string[] = ${JSON.stringify(required)};
 
 export function secretGuard(): Plugin {
@@ -211,8 +234,10 @@ export function secretGuard(): Plugin {
       if (found.length > 0) throw new Error(found.map(envMessage).join("\\n"));
       const missing = REQUIRED.filter((name) => !env[name]);
       if (missing.length > 0) {
-        throw new Error("auth: adapter hosted needs " + missing.join(" and ") + " — set the provider's URL and PUBLIC key in .env or the environment");
-      }
+        throw new Error(${JSON.stringify(`auth: adapter ${adapter ?? 'hosted'} needs `)} + missing.join(" and ") + ${JSON.stringify(adapter === 'azbackend' ? " — set your backend's public base URL in .env or the environment" : " — set the provider's URL and PUBLIC key in .env or the environment")});
+      }${backend ? `
+      const problem = backendUrlProblem(env[${JSON.stringify(BACKEND_ENV[0])}] ?? "");
+      if (problem) throw new Error("auth: adapter azbackend — " + problem);` : ''}
       // The public key is meant to ship; it is the one high-entropy string allowed.
       publicValues = new Set(Object.values(env).filter(Boolean));
     },

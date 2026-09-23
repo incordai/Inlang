@@ -10,6 +10,9 @@ import {
 } from '../src/runtime/contract.ts';
 import { createHostedAdapter, type HostedEnv } from '../src/runtime/hosted.ts';
 import { createSessionAdapter } from '../src/runtime/session.ts';
+import {
+  BACKEND_AUTH_PATH, CSRF_HEADER, CSRF_VALUE, backendUrlProblem, createBackendAdapter,
+} from '../src/runtime/azbackend.ts';
 
 /* ---- contract ------------------------------------------------------------ */
 
@@ -141,4 +144,84 @@ test('session: same-origin requests with the cookie, first read via GET /session
   assert.equal(sent[0].init.credentials, 'same-origin');
   await a.signOut();
   assert.equal(a.session(), null);
+});
+
+/* ---- azbackend: the owner's backend on its own origin (§3.4) ------------- */
+
+
+/** A fetch that records each call and answers from a table keyed by path. */
+function backendFetch(answers: Record<string, { status: number; body?: unknown }>) {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ url, init });
+    const path = new URL(url).pathname;
+    const a = answers[path] ?? { status: 404, body: { error: 'unknown' } };
+    return new Response(a.status === 204 ? null : JSON.stringify(a.body ?? {}), { status: a.status });
+  }) as unknown as typeof globalThis.fetch;
+  return { fetch, calls };
+}
+
+const USER = { user: { id: 'u1', email: 'ada@studio.test' } };
+
+test('§3.4: every call is credentialed, carries the CSRF header, and hits <base>/auth', async () => {
+  const f = backendFetch({ '/auth/sign-in': { status: 200, body: { session: USER } } });
+  const a = createBackendAdapter({ url: 'https://api.studio.test/' }, { fetch: f.fetch });
+  const r = await a.signIn({ email: 'ada@studio.test', password: 'pw' });
+  assert.deepEqual(r, { ok: true, session: { user: { id: 'u1', email: 'ada@studio.test' } } });
+  assert.equal(f.calls[0].url, `https://api.studio.test${BACKEND_AUTH_PATH}/sign-in`);
+  assert.equal(f.calls[0].init.credentials, 'include', 'the browser must send and store the cookie cross-origin');
+  const headers = f.calls[0].init.headers as Record<string, string>;
+  assert.equal(headers[CSRF_HEADER], CSRF_VALUE);
+  assert.equal(headers['content-type'], 'application/json');
+  assert.deepEqual(JSON.parse(String(f.calls[0].init.body)), { email: 'ada@studio.test', password: 'pw' });
+  assert.equal(a.id, 'azbackend');
+  assert.equal(a.session()?.user.email, 'ada@studio.test');
+});
+
+test('§3.4: errors map onto the closed set; 429 is rate_limited whatever the body', async () => {
+  const f = backendFetch({
+    '/auth/sign-in': { status: 401, body: { error: 'invalid_credentials' } },
+    '/auth/sign-up': { status: 409, body: { error: 'email_taken', field: 'email' } },
+    '/auth/link': { status: 429, body: { error: 'invalid_credentials' } },
+    '/auth/password': { status: 400, body: { error: 'USER_BANNED', field: 'nonsense' } },
+  });
+  const a = createBackendAdapter({ url: 'https://api.studio.test' }, { fetch: f.fetch });
+  assert.deepEqual(await a.signIn({ email: 'a@b.co', password: 'x' }), { ok: false, code: 'invalid_credentials' });
+  assert.deepEqual(await a.signUp({ email: 'a@b.co', password: 'x' }), { ok: false, code: 'email_taken', field: 'email' });
+  assert.deepEqual(await a.requestLink('a@b.co'), { ok: false, code: 'rate_limited' });
+  assert.deepEqual(await a.setPassword('t', 'x'), { ok: false, code: 'unknown' },
+    'a code outside the set is unknown, and an unknown field is dropped');
+});
+
+test('§3.4: an unreachable backend is `network`; a malformed session is no session', async () => {
+  const down = createBackendAdapter({ url: 'https://api.studio.test' }, {
+    fetch: (async () => { throw new TypeError('Failed to fetch'); }) as unknown as typeof fetch,
+  });
+  assert.deepEqual(await down.signIn({ email: 'a@b.co', password: 'x' }), { ok: false, code: 'network' });
+  const f = backendFetch({ '/auth/session': { status: 200, body: { session: { user: { id: 7 } } } } });
+  const a = createBackendAdapter({ url: 'https://api.studio.test' }, { fetch: f.fetch });
+  await a.ready?.();
+  assert.equal(a.session(), null, 'a response is input: an id that is not a string is refused');
+  assert.equal(f.calls[0].init.method, 'GET');
+});
+
+test('SECURITY §3.4: the base URL must be https (http only for loopback), with no credentials', () => {
+  assert.equal(backendUrlProblem('https://api.studio.test'), null);
+  assert.equal(backendUrlProblem('http://localhost:8000'), null);
+  assert.equal(backendUrlProblem('http://127.0.0.1:8000'), null);
+  assert.match(backendUrlProblem('http://api.studio.test') ?? '', /must use https/);
+  assert.match(backendUrlProblem('') ?? '', /no backend URL/);
+  assert.match(backendUrlProblem('api.studio.test') ?? '', /not a URL/);
+  assert.match(backendUrlProblem('https://user:pw@api.studio.test') ?? '', /must not carry credentials/);
+  assert.match(backendUrlProblem('https://api.studio.test/?next=x') ?? '', /without \? or #/);
+  assert.throws(() => createBackendAdapter({ url: 'http://api.studio.test' }), /azbackend — .*must use https/);
+});
+
+test('CONTROL: the same-origin `session` adapter is unchanged — no CSRF header, same-origin cookies', async () => {
+  const f = backendFetch({ '/api/auth/sign-in': { status: 200, body: { session: USER } } });
+  const a = createSessionAdapter({ base: 'https://site.test/api/auth' }, { fetch: f.fetch });
+  await a.signIn({ email: 'a@b.co', password: 'x' });
+  assert.equal(f.calls[0].init.credentials, 'same-origin');
+  assert.equal((f.calls[0].init.headers as Record<string, string>)[CSRF_HEADER], undefined);
+  assert.equal(a.id, 'session');
 });

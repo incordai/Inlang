@@ -318,11 +318,14 @@ page with a signed-in bar, or sends the visitor to login with a same-origin
 `?next`. Secret leakage is refused three ways, none suppressible: AZ1411 for a
 key in the `.az` file, `az build`'s scan of the env and `.env` files, and a
 guard inside every generated build (env again, then every emitted file).
-`azbackend` is refused (AZ1214) until PRD §11 Q2 is decided. Open: the
-real-provider login.
+`azbackend` is built: PRD §11 Q2 was decided (the backend project continues),
+auth-block-spec §3.4 is the protocol the backend implements, and
+`pnpm test:auth` proves the site's side against a mock on another origin in
+three engines. Open: the real-provider login, and a login against the real
+backend once it implements §3.4.
 
 **M5 — not started.**
 
 Still outstanding and not answerable by writing code — PRD §11: open-source
-vs internal, the fate of the backend project (decides `auth azbackend`), a
-real client site for the M5 dogfood, and the licence.
+vs internal, a real client site for the M5 dogfood, and the licence. (The
+backend project continues — decided 2026-09-23.)

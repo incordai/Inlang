@@ -127,10 +127,8 @@ Only variables prefixed `AZ_PUBLIC_` are inlined into a generated site — the
 emitted Vite config sets `envPrefix` to exactly that, so a `VITE_…` variable is
 not exposed at all.
 
-`azbackend` is **not available**: it depends on PRD §11 question 2 (does the
-backend project continue). Until that is decided the compiler refuses it —
-`auth: adapter 'azbackend' is not available yet — use: hosted, session, custom`
-(AZ1214, the manifest's `deferred`).
+`azbackend` is available: PRD §11 question 2 was decided — the backend
+project continues — and §3.4 is the protocol it implements.
 
 ### 3.2 The `hosted` protocol
 
@@ -162,6 +160,78 @@ The site's own server, same origin, cookie-based: `POST /api/auth/sign-in`,
 and error shape as §3.2, and `GET /api/auth/session` → `200 { session: { user } }`
 or `200 { session: null }`. The server sets an httpOnly session cookie; the
 browser never holds a token.
+
+### 3.4 The `azbackend` protocol — what the owner's backend implements
+
+`azbackend` is the self-hoster's own backend (PRD §6.5), on its own origin.
+It speaks §3.3's cookie routes, credentialed across origins. This section is
+the contract from the site's side; any backend language can meet it.
+
+**Configuration — one public value, no key.** `AZ_PUBLIC_BACKEND_URL`, the
+backend's base URL. Its own name rather than `AZ_PUBLIC_AUTH_URL`, so a hosted
+provider's settings are never sent to the backend by accident. The site's
+build fails if it is missing, not `https` (plain `http` only for `localhost`,
+`127.0.0.1` or `[::1]`), carries credentials, or has a `?`/`#`. Nothing secret
+reaches the browser: the backend identifies the visitor by its own httpOnly
+cookie.
+
+**Routes** — all under `<base>/auth`, JSON in and out:
+
+| Request | Body | Success |
+|---|---|---|
+| `POST /auth/sign-in` | `{ email, password }` | `200 { session }` + sets the cookie |
+| `POST /auth/sign-up` | `{ email, password, name? }` | `200 { session }` + cookie, or `200 {}` when the address must be confirmed first |
+| `POST /auth/link` | `{ email }` | `200 {}` — **always**, whether or not the address has an account |
+| `POST /auth/reset` | `{ email }` | `200 {}` — **always**, same reason |
+| `POST /auth/password` | `{ token, password }` | `200 { session }` + cookie |
+| `POST /auth/sign-out` | `{}` | `204`, clearing the cookie |
+| `GET /auth/session` | — | `200 { session }` or `200 { session: null }` |
+
+`session` is `{ user: { id, email }, expiresAt? }` — `id` and `email`
+strings, `expiresAt` epoch milliseconds. **No token in any body**: the cookie
+is the credential.
+
+**Errors.** Any non-2xx with `{ error, field? }`, where `error` is one of
+§3's closed set — `invalid_credentials`, `email_taken`, `weak_password`,
+`rate_limited`, `expired_token`, `unknown` — and `field` is `email`,
+`password` or `name`. `429` reads as `rate_limited` whatever its body; a code
+outside the set reads as `unknown`; an unreachable backend is `network`.
+`invalid_credentials` must not say which of the two was wrong.
+
+**The session cookie.** `HttpOnly`, `Secure`, `Path=/`. `SameSite=Lax` when
+the backend and the site are one site (`api.example.org` beside
+`www.example.org`) — the recommended deployment. When they are different
+sites, `SameSite=None; Secure` is required, and some browsers block
+third-party cookies outright; a same-site deployment avoids that entirely.
+
+**CORS**, on every route and its `OPTIONS` preflight:
+
+- `Access-Control-Allow-Origin`: the site's exact origin — never `*`, which
+  browsers refuse with credentials anyway
+- `Access-Control-Allow-Credentials: true`
+- `Access-Control-Allow-Headers: content-type, x-az-request`
+- `Access-Control-Allow-Methods: GET, POST`
+- `Vary: Origin`
+
+**CSRF.** Every request from the site carries `x-az-request: 1`. The backend
+**must refuse** (`403`) any `POST` without it, and any request whose `Origin`
+is not an allowed site origin. A custom header cannot be sent cross-origin
+without a preflight the backend approves, so a forged form on another site
+never reaches a route.
+
+**The backend's checklist:**
+
+1. Serve the seven routes above under `/auth`, with these exact shapes.
+2. Set the session as an httpOnly, Secure cookie; never return a token.
+3. CORS: the site's exact origin, credentials allowed, the two headers, `Vary: Origin`.
+4. Refuse a `POST` without `x-az-request: 1`, and any foreign `Origin`.
+5. `/link` and `/reset` answer `200 {}` for every address.
+6. Rate-limit sign-in, link and reset; answer `429`.
+7. Map every failure onto the closed set; never send a message meant for the page.
+8. Store passwords with a slow, salted hash; row-level rules protect the data (§4.1).
+
+`pnpm test:auth` runs the site's side against a local mock that meets this
+checklist from another origin, in Chromium, Firefox and WebKit.
 
 ## 4. Secret leakage — a hard build error
 
