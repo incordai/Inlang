@@ -42,6 +42,8 @@ test('CONTROL: the scope covers every package and still excludes the theme data'
 });
 
 test('theme-spec §4: no raw theme values outside the theme data', () => {
-  const findings = BANNED.flatMap((f) => lintSource(f, readFileSync(join(ROOT, f), 'utf8')));
+  // 'package': the value rules hold here; writing conditions is the
+  // target's job (no-raw-condition is for word source).
+  const findings = BANNED.flatMap((f) => lintSource(f, readFileSync(join(ROOT, f), 'utf8'), 'package'));
   assert.deepEqual(findings, [], formatFindings(findings));
 });

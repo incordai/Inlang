@@ -129,3 +129,45 @@ test('no-font-family fires on a LITERAL but not on a token', () => {
   assert.equal(lintSource('f.ts', "fontFamily: 'Helvetica, sans-serif',").length, 1);
   assert.deepEqual(lintSource('f.ts', 'fontFamily: t.type.display,'), []);
 });
+
+/* ---- no-raw-condition: words name conditions, the target writes them ---- */
+
+const CONDITIONAL_WORD = `
+export function emit(node, ctx) {
+  return {
+    tag: 'a',
+    style: { color: ctx.theme.color.text },
+    css: '@media (max-width: 768px) { a { display: none } }',
+    hoverRule: 'a:hover { color: red }',
+    reduced: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  };
+}
+`;
+
+const CONTRACT_WORD = `
+export function emit(node, ctx) {
+  return {
+    tag: 'a',
+    style: { color: ctx.theme.color.text },
+    below: { sm: { display: 'block' } },
+    states: { hover: { color: ctx.theme.color.accent }, focusVisible: { outline: ctx.theme.color.focus } },
+    reducedMotion: { transition: 'none' },
+  };
+}
+`;
+
+test('no-raw-condition: media queries, pseudo-classes and matchMedia in a word fail', () => {
+  const rules = lintSource('words/x/emit.web.ts', CONDITIONAL_WORD).map((f) => f.rule);
+  assert.equal(rules.filter((r) => r === 'no-raw-condition').length, 4, rules.join(', '));
+});
+
+test('CONTROL: the same conditions through the contract pass', () => {
+  assert.deepEqual(lintSource('words/x/emit.web.ts', CONTRACT_WORD), []);
+});
+
+test('the compiler\'s own source may write conditions; the value rules still hold', () => {
+  const rules = lintSource('target-web/src/x.ts', CONDITIONAL_WORD, 'package').map((f) => f.rule);
+  assert.ok(!rules.includes('no-raw-condition'), rules.join(', '));
+  assert.ok(rules.includes('no-off-scale-px'), 'CONTROL: the raw 768px is still a value violation');
+  assert.equal(lintSource('target-web/src/x.ts', "color: '#ff0000'", 'package')[0]?.rule, 'no-hex');
+});

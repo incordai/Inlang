@@ -21,8 +21,19 @@ export interface LintFinding {
 /** Legal spacing values — PRD §7.3. Anything else in px is off-scale. */
 const SPACE_SCALE = new Set([0, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128]);
 
+/**
+ * What is being linted. `word` is a word pack's source — what `az lint`
+ * checks. `package` is the compiler's own source (target, core, CLI, theme
+ * logic), which obeys the value rules but is ALLOWED to write conditions:
+ * the target is the one layer that turns a named condition into CSS
+ * (ARCHITECTURE §4.2, §4.3).
+ */
+export type LintScope = 'word' | 'package';
+
 interface Rule {
   readonly name: string;
+  /** Applies to word source only (see LintScope). */
+  readonly wordOnly?: boolean;
   /** Global-flagged; each match is reported. */
   readonly pattern: RegExp;
   /** Return null to accept a match — used where a value may be legal. */
@@ -64,6 +75,17 @@ const RULES: Rule[] = [
       'a literal font family is a theme decision — use ctx.theme.type.body or type.display',
   },
   {
+    name: 'no-raw-condition',
+    wordOnly: true,
+    // A word NAMES a condition — `below.sm`, `states.focusVisible`,
+    // `reducedMotion` — and the target writes the CSS for it. A media query,
+    // a pseudo-class or matchMedia in word source is a breakpoint or state
+    // the theme and the contract do not know about (ARCHITECTURE §4.3).
+    pattern: /@media|matchMedia\s*\(|prefers-|:(?:hover|focus(?:-visible|-within)?|active)\b/g,
+    message: (m) =>
+      `'${m[0]}' is a raw condition — use the contract: below.<breakpoint>, states.<state>, reducedMotion`,
+  },
+  {
     name: 'no-raw-z-index',
     pattern: /z-?[iI]ndex\s*:\s*(-?\d+)/g,
     message: (m) =>
@@ -86,13 +108,14 @@ function isExempt(line: string): boolean {
  * CSS-in-JS or a template literal, and the values this rule bans are
  * recognisable in all three without parsing any of them.
  */
-export function lintSource(file: string, source: string): LintFinding[] {
+export function lintSource(file: string, source: string, scope: LintScope = 'word'): LintFinding[] {
   const findings: LintFinding[] = [];
   const lines = source.split(/\r?\n/);
 
   lines.forEach((line, i) => {
     if (isExempt(line)) return;
     for (const rule of RULES) {
+      if (rule.wordOnly && scope !== 'word') continue;
       rule.pattern.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = rule.pattern.exec(line)) !== null) {
