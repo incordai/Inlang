@@ -200,6 +200,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       name: 'method',
       value: method,
       noValidate: !primary,
+      // §8: below sm the submit is full-width.
+      fullWidthBelow: 'sm',
     });
 
   if (variant === 'reset') {
@@ -233,6 +235,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.surface,
       borderRadius: px(t.radius.md),
     },
+    // §8 below sm: a full-width card inside the page gutter (every flow is
+    // one column already).
+    below: { sm: { maxWidth: 'none' } },
     children: formChildren,
   });
 
@@ -264,6 +269,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.bg,
       color: t.color.text,
     },
+    // The mobile gutter below sm (theme-spec §1).
+    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
   };
 }

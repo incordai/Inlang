@@ -67,6 +67,15 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       pointerEvents: variant === 'backdrop' ? 'none' : undefined,
       height: variant === 'backdrop' ? '100svh' : undefined,
     },
+    // §10 below sm: `inline` takes the full content width. Its ratio clamp
+    // ("at most 1:1") changes nothing, because every allowed ratio is
+    // already at most square. `full` stays full-bleed with its ratio clamped
+    // to at most 4:3, so 1:1 becomes 4:3.
+    below: variant === 'inline'
+      ? { sm: { maxWidth: 'none' } }
+      : variant === 'full' && block.props.ratio === '1:1'
+        ? { sm: { aspectRatio: '4 / 3' } }
+        : undefined,
     children: [
       // §8: `static` is posters only, and until the 3D runtime lands every
       // scene is static. §9: the poster carries the same `alt` the canvas
@@ -102,6 +111,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.bg,
       color: t.color.text,
     },
+    // The mobile gutter below sm (theme-spec §1).
+    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
   };
 }

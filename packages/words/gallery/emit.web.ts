@@ -29,6 +29,12 @@ const ASPECT: Record<string, string | undefined> = {
 /** The manifest default, for a block built without one (direct emitter calls). */
 const DEFAULT_RATIO = '3:2';
 
+/** §6: between sm and md, grid and masonry cap at this many columns. */
+const MD_MAX_COLUMNS = 3;
+
+/** §6: below sm, grid and masonry are two columns, not one. */
+const SM_COLUMNS = 2;
+
 /** §7 rule 2: the first row loads eagerly; `columns` is that row's length. */
 const DEFAULT_COLUMNS = 3;
 
@@ -97,6 +103,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         borderRadius: px(t.radius.md),
         margin: `0 0 ${px(t.space[16])}`,
       },
+      // §6: below sm the ring is not mounted — the carousel replaces it —
+      // so the ring's poster goes with it.
+      below: { sm: { display: 'none' } },
     });
   }
 
@@ -139,6 +148,20 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         gap: px(t.space[16]),
         listStyle: 'none', padding: 0, margin: 0,
       },
+      // §6. Between sm and md, grid and masonry cap at three columns. Below
+      // sm: grid and masonry are TWO columns, not one (full-width photos
+      // turn a gallery into a long scroll); carousel keeps its row; orbit
+      // falls back to the carousel — a 3D ring is unreadable at 390px.
+      below: {
+        md: variant === 'grid' || variant === 'masonry'
+          ? { gridTemplateColumns: `repeat(${Math.min(Number(block.props.columns ?? DEFAULT_COLUMNS), MD_MAX_COLUMNS)}, minmax(0, 1fr))` }
+          : undefined,
+        sm: variant === 'grid' || variant === 'masonry'
+          ? { gridTemplateColumns: `repeat(${SM_COLUMNS}, minmax(0, 1fr))` }
+          : variant === 'orbit'
+            ? { display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory' }
+            : undefined,
+      },
       children: images,
     });
   }
@@ -167,6 +190,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.bg,
       color: t.color.text,
     },
+    // The mobile gutter below sm (theme-spec §1).
+    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
   };
 }
@@ -238,6 +263,11 @@ function galleryImage(
       flex: variant === 'carousel' ? `0 0 ${px(t.size['column-min'])}` : undefined,
       scrollSnapAlign: variant === 'carousel' ? 'start' : undefined,
     },
+    // §6 below sm: a slide leaves a `space.24` peek of the next one, which is
+    // what says "swipe"; orbit's fallback carousel slides the same way.
+    below: variant === 'carousel' || variant === 'orbit'
+      ? { sm: { flex: `0 0 calc(100% - ${px(t.space[24])})`, scrollSnapAlign: 'start' } }
+      : undefined,
     children: [content],
   };
 }

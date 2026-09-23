@@ -83,6 +83,9 @@ const RESTACK = {
   faq: { columns: '.az-faq-items' },           // faq-spec §6: one column, declared order
   text: { columns: '.az-text-body' },          // text-spec §7: one column below md
   feature: { default: '.az-feature-items' },   // feature-spec §6: grid is one column
+  footer: { columns: '.az-footer-columns' },   // footer-spec §8: groups in one column
+  // gallery-spec §6: grid is TWO columns on a phone, not one.
+  gallery: { default: { at: '.az-gallery-items', narrow: 2 } },
 };
 
 /**
@@ -194,7 +197,9 @@ async function checkSite(s, browsers, server) {
   mkdirSync(shots, { recursive: true });
   const tag = (scheme, width) => `${s.label}/${scheme}/${width}`;
   // A word's preview.az is keyed `default`; preview.<variant>.az by its variant.
-  const restackAt = RESTACK[s.word]?.[s.variant ?? 'default'];
+  const row = RESTACK[s.word]?.[s.variant ?? 'default'];
+  const restackAt = typeof row === 'string' ? row : row?.at;
+  const narrowColumns = typeof row === 'string' ? 1 : row?.narrow ?? 1;
   const tracks = {};
 
   const ctx = await browsers.chromium.newContext();
@@ -221,7 +226,7 @@ async function checkSite(s, browsers, server) {
       }
     }
   }
-  if (restackAt) record(s.word, 'restack', `${s.label}/light`, restacks(tracks[390], tracks[1440]));
+  if (restackAt) record(s.word, 'restack', `${s.label}/light`, restacks(tracks[390], tracks[1440], narrowColumns));
   record(s.word, 'schemes', s.label, {
     pass: bg.light !== bg.dark,
     detail: `light and dark paint the same body background (${bg.light})`,
@@ -258,6 +263,7 @@ const BAD = `<!doctype html><html lang="en"><head><title>bad</title><style>
   <a href="#m" style="position:absolute;top:0;transform:translateY(-200%)">Skip to content</a>
   <main id="m"><h1>Bad</h1>
   <div class="g" style="display:grid;grid-template-columns:1fr 1fr"><span>a</span><span>b</span></div>
+  <div class="f" style="display:flex;flex-wrap:wrap;gap:8px"><span style="width:40px">a</span><span style="width:40px">b</span></div>
   <div style="display:grid;grid-template-columns:1fr 1fr"><p class="c1">Title</p><p class="c2">Sub</p></div>
   <div style="width:800px;height:10px"></div>
   <button></button>
@@ -281,6 +287,8 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   <header><a class="skip" href="#m">Skip to content</a></header>
   <main id="m"><h1>Good</h1>
   <div class="g"><span>a</span><span>b</span></div>
+  <div class="f" style="display:flex;flex-wrap:wrap;gap:8px"><span style="width:40px">a</span><span style="width:40px">b</span></div>
+  <style>@media (width < 768px) { .f { flex-direction: column; } }</style>
   <div style="display:grid;grid-template-columns:1fr 1fr"><div><p class="c1">Title</p><p class="c2">Sub</p></div><div></div></div>
   <p class="fade">Fits.</p>
   <a href="#x">A link</a> <button>A button</button>
@@ -321,8 +329,10 @@ async function selfTest() {
     expect('item 4 axe', await axe(page), shouldPass);
     expect('item 5 keyboard', await keyboard(page), shouldPass);
     const narrow = await columnsOf(page, '.g');
+    const narrowFlex = await columnsOf(page, '.f');
     await page.setViewportSize({ width: 1440, height: 900 });
     expect('responsive table: restacks below sm', restacks(narrow, await columnsOf(page, '.g')), shouldPass);
+    expect('responsive table: a flex row stacks below sm', restacks(narrowFlex, await columnsOf(page, '.f')), shouldPass);
     expect('text shares one column', await sharedColumn(page, ['.c1', '.c2']), shouldPass);
     await page.setViewportSize({ width: 390, height: 900 });
     const bg = {};

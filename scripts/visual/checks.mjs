@@ -125,6 +125,11 @@ export const columnsOf = (page, selector) => page.evaluate((sel) => {
   if (cs.display === 'grid' || cs.display === 'inline-grid') {
     return cs.gridTemplateColumns.split(/\s+/).filter(Boolean).length;
   }
+  // A wrapping flex row (footer `columns`): its columns are the distinct
+  // left edges of its children.
+  if (cs.display === 'flex' || cs.display === 'inline-flex') {
+    return new Set([...el.children].map((c) => Math.round(c.getBoundingClientRect().left))).size;
+  }
   // CSS multi-column (text `columns` flows one body into columns).
   const count = Number(cs.columnCount);
   return Number.isFinite(count) && count > 0 ? count : 0;
@@ -136,9 +141,9 @@ export const columnsOf = (page, selector) => page.evaluate((sel) => {
  * the layout really is multi-column on a desktop, or "one column" proves
  * nothing).
  */
-export function restacks(narrow, wide) {
-  const pass = narrow === 1 && wide > 1;
-  return { pass, detail: pass ? '' : `${wide} columns at 1440, ${narrow} at 390 — expected >1 then 1` };
+export function restacks(narrow, wide, expected = 1) {
+  const pass = narrow === expected && wide > expected;
+  return { pass, detail: pass ? '' : `${wide} columns at 1440, ${narrow} at 390 — expected >${expected} then ${expected}` };
 }
 
 /**

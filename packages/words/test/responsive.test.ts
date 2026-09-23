@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compile, formatDiagnostics, type Manifest, type SpecBlock } from '../../core/src/index.ts';
+import { blocksFor, compile, formatDiagnostics, type Manifest, type SpecBlock } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import { emitBlock } from '../../target-web/src/tree.ts';
@@ -28,8 +28,8 @@ export function render(lines: string[], word: string, site: string[] = []): Emit
     'page /a', 'page /b', 'page /signup', 'page /account', 'page /legal', ''].join('\n');
   const r = compile(src, { manifests });
   assert.ok(r.ok && r.spec, formatDiagnostics(r.diagnostics, 'site.az'));
-  const page = r.spec.pages[0];
-  const block = page.blocks.find((b: SpecBlock) => b.word === word)!;
+  // Through blocksFor, so a site-level footer is found where it renders.
+  const block = blocksFor(r.spec, r.spec.pages[0]).find((b: SpecBlock) => b.word === word)!;
   return emitBlock(block, T, WEB_EMITTERS, (p) => p, { name: 'aurora' });
 }
 const walk = (n: EmittedNode | string): EmittedNode[] =>
@@ -118,4 +118,81 @@ test('theme-spec §1: sections take gutter-sm below sm', () => {
   assert.equal(render(['text prose', '    title "x"', '    body "y"'], 'text').below?.sm?.paddingInline, GUTTER);
   assert.equal(FEATURE('grid', PROSE_ITEMS).below?.sm?.paddingInline, GUTTER);
   assert.equal(FEATURE('grid', PROSE_ITEMS).style?.paddingInline, `${T.size['gutter-lg']}px`, 'CONTROL: gutter-lg on a desktop');
+});
+
+/* ---- gallery §6 --------------------------------------------------------- */
+
+const IMAGES = ['    image ./a.webp', '      alt "Bench"', '    image ./b.webp', '      alt "Welt"',
+  '    image ./c.webp', '      alt "Lasts"', '    image ./d.webp', '      alt "Hide"'];
+const GALLERY = (variant: string, ...extra: string[]) =>
+  render([`gallery ${variant}`, '    title "The workshop"', ...extra, ...IMAGES], 'gallery');
+
+test('gallery §6 grid and masonry: two columns below sm (not one), at most three below md', () => {
+  const grid = byClass(GALLERY('grid', '    columns 4'), 'az-gallery-items');
+  assert.equal(grid?.style?.gridTemplateColumns, tracks(4), 'CONTROL: four on a desktop');
+  assert.equal(grid?.below?.md?.gridTemplateColumns, tracks(3));
+  assert.equal(grid?.below?.sm?.gridTemplateColumns, tracks(2));
+  assert.equal(byClass(GALLERY('masonry'), 'az-gallery-items')?.below?.sm?.gridTemplateColumns, tracks(2));
+});
+
+test('gallery §6 orbit: falls back to a carousel below sm, and the ring poster goes', () => {
+  const out = GALLERY('orbit', '    poster ./ring.webp');
+  assert.deepEqual(byClass(out, 'az-gallery-items')?.below?.sm, { display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory' });
+  assert.deepEqual(byClass(out, 'az-gallery-poster')?.below?.sm, { display: 'none' });
+  assert.equal(byClass(out, 'az-gallery-item')?.below?.sm?.scrollSnapAlign, 'start');
+});
+
+test('gallery §6 carousel: keeps its row, slides peek space.24 of the next', () => {
+  const out = GALLERY('carousel');
+  assert.equal(byClass(out, 'az-gallery-items')?.below?.sm, undefined, 'the row itself is unchanged');
+  assert.equal(byClass(out, 'az-gallery-item')?.below?.sm?.flex, `0 0 calc(100% - ${T.space[24]}px)`);
+});
+
+/* ---- footer §8 ---------------------------------------------------------- */
+
+const FOOTER = (variant: string, ...groups: string[]) => render([], 'footer',
+  [`  footer ${variant}`, ...groups, '    legal "Privacy" /legal', '    copyright "Aurora Studio"']);
+const GROUPS = ['    group "Shop"', '      link "Shoes" /a', '      link "Bags" /b', '    group "Studio"', '      link "About" /a',
+  '      link "Journal" /b', '    group "Help"', '      link "Returns" /a', '    group "Trade"', '      link "Wholesale" /b'];
+
+test('footer §8 columns and mega: one column below sm, never two-across', () => {
+  assert.deepEqual(byClass(FOOTER('columns', ...GROUPS), 'az-footer-columns')?.below?.sm, { flexDirection: 'column' });
+  assert.deepEqual(byClass(FOOTER('mega', ...GROUPS), 'az-footer-columns')?.below?.sm, { gridTemplateColumns: ONE });
+});
+
+test('footer §8 minimal: the bottom row stacks centred', () => {
+  assert.deepEqual(byClass(FOOTER('minimal'), 'az-footer-bottom')?.below?.sm,
+    { flexDirection: 'column', alignItems: 'center', textAlign: 'center' });
+  assert.equal(byClass(FOOTER('columns', ...GROUPS), 'az-footer-bottom')?.below, undefined, 'CONTROL: only minimal centres');
+});
+
+/* ---- scene §10 ---------------------------------------------------------- */
+
+const SCENE = (variant: string, ratio: string) => render(['hero center', '    title "x"', `scene ${variant} 3d`,
+  '    poster ./p.webp', '    alt "A shoe"', `    ratio ${ratio}`], 'scene');
+
+test('scene §10 inline: full content width below sm', () => {
+  const fig = byClass(SCENE('inline', '4:3'), 'az-scene-viewport');
+  assert.equal(fig?.style?.maxWidth, `${T.size['measure-body']}ch`, 'CONTROL: the measure on a desktop');
+  assert.deepEqual(fig?.below?.sm, { maxWidth: 'none' });
+});
+
+test('scene §10 full: ratio clamped to at most 4:3 — 1:1 becomes 4:3, wider ratios stay', () => {
+  assert.deepEqual(byClass(SCENE('full', '1:1'), 'az-scene-viewport')?.below?.sm, { aspectRatio: '4 / 3' });
+  assert.equal(byClass(SCENE('full', '16:9'), 'az-scene-viewport')?.below, undefined);
+});
+
+/* ---- auth §8 ------------------------------------------------------------ */
+
+test('auth §8: a full-width card inside the gutter, with a full-width submit', () => {
+  const out = render(['auth login', '    title "Welcome back"'], 'auth', ['  auth', '    adapter session']);
+  assert.deepEqual(byClass(out, 'az-auth-form')?.below?.sm, { maxWidth: 'none' });
+  assert.deepEqual(byClass(out, 'az-action--primary')?.below?.sm, { width: '100%' });
+  assert.equal(out.below?.sm?.paddingInline, GUTTER);
+});
+
+test('theme-spec §1: gallery, footer and scene take gutter-sm below sm', () => {
+  assert.equal(GALLERY('grid').below?.sm?.paddingInline, GUTTER);
+  assert.equal(FOOTER('columns', ...GROUPS).below?.sm?.paddingInline, GUTTER);
+  assert.equal(SCENE('inline', '4:3').below?.sm?.paddingInline, GUTTER);
 });

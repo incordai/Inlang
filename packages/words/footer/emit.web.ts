@@ -147,6 +147,13 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         gap: px(t.space[32]),
         marginBottom: px(t.space[32]),
       },
+      // §8 below sm: `columns` and `mega` collapse to ONE column, groups in
+      // source order with their headings — never two-across. (mega's
+      // groups becoming <details> accordions needs a second DOM form and is
+      // deferred.)
+      below: variant === 'mega'
+        ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } }
+        : { sm: { flexDirection: 'column' } },
       children: columns,
     };
 
@@ -194,6 +201,10 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         paddingTop: px(t.space[24]),
         borderTop: `1px solid ${t.color.border}`,
       },
+      // §8: `minimal` stacks its logo, tagline and legal row centred.
+      below: variant === 'minimal'
+        ? { sm: { flexDirection: 'column', alignItems: 'center', textAlign: 'center' } }
+        : undefined,
       children: copyrightRow,
     });
   }
@@ -207,6 +218,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.surface,
       color: t.color.text,
     },
+    // The mobile gutter below sm (theme-spec §1); `minimal` centres its stack.
+    below: { sm: { paddingInline: px(t.size['gutter-sm']), textAlign: variant === 'minimal' ? 'center' : undefined } },
     children,
   };
 }
