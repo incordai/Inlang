@@ -218,3 +218,27 @@ for (const [word, emitWord, klass] of [
     assert.equal(textOf(link), 'Harbour Studio');
   });
 }
+
+/* ---- `side` is a column beside the page, a bar on phones (§10 Q2, §6) ----- */
+
+test('side: a sticky, scrollable column of full height on desktop', () => {
+  const nav = emitNav(block({ variant: 'side' }), context());
+  assert.equal(nav.style?.position, 'sticky');
+  assert.equal(nav.style?.height, '100svh');
+  assert.equal(nav.style?.overflowY, 'auto');
+  assert.equal(nav.style?.flexDirection, 'column');
+});
+
+test('side: below sm the column becomes a bar', () => {
+  const nav = emitNav(block({ variant: 'side' }), context());
+  const sm = nav.below?.sm ?? {};
+  assert.equal(sm.flexDirection, 'row');
+  assert.equal(sm.height, 'auto');
+  assert.equal(sm.width, 'auto');
+});
+
+test('CONTROL: a horizontal bar gets none of the column rules', () => {
+  const nav = emitNav(block({ variant: 'bar' }), context());
+  assert.equal(nav.style?.height, undefined);
+  assert.equal(nav.below?.sm?.flexDirection, undefined);
+});

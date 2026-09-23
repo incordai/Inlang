@@ -319,7 +319,12 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       gap: px(t.space[16]),
       // A side nav is a column of full height, not a bar: it takes width
       // instead of height (§2 — "eats 240-280px of width").
-      minHeight: layout.vertical ? '100svh' : px(t.size.nav),
+      // The column stays in view while the content beside it scrolls, and
+      // scrolls itself when its links outgrow the screen (§10 Q2: `side` is a
+      // page layout — the target puts the content beside this column).
+      minHeight: layout.vertical ? undefined : px(t.size.nav),
+      height: layout.vertical ? '100svh' : undefined,
+      overflowY: layout.vertical ? 'auto' : undefined,
       width: layout.vertical ? px(t.size['nav-side']) : undefined,
       paddingBlock: layout.vertical ? px(t.space[24]) : undefined,
       paddingInline: px(t.size['gutter-lg']),
@@ -334,7 +339,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       color: t.color.text,
       // A shrinking bar is pinned by its frame (below), which holds its
       // full height in the page; the bar itself pins otherwise.
-      position: pinned && !shrinks ? 'sticky' : 'static',
+      position: (pinned && !shrinks) || layout.vertical ? 'sticky' : 'static',
       top: 0,
       zIndex: t.layer.sticky,
       transition: hides || shrinks
@@ -353,7 +358,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // §3: `hide` "must be instant under reduced-motion" — no slide at all.
     reducedMotion: hides || shrinks ? { transition: 'none' } : undefined,
     // The mobile gutter below sm (theme-spec §1).
-    below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
+    // Below sm a side column becomes a bar: the page stacks there, and the
+    // links are in the drawer (§6).
+    below: {
+      sm: {
+        paddingInline: px(t.size['gutter-sm']),
+        ...(layout.vertical
+          ? { flexDirection: 'row', alignItems: 'center', width: 'auto', height: 'auto', minHeight: px(t.size.nav), overflowY: 'visible', paddingBlock: 0 }
+          : {}),
+      },
+    },
     children: [
       {
         // FIRST focusable element on the page. Visually hidden until focused —

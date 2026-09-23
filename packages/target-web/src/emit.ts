@@ -148,6 +148,11 @@ function stableJson(value: unknown): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
+/** Whether a page opens with a `side` nav — the page is then laid out beside it. */
+function sideLead(nodes: readonly EmittedNode[]): boolean {
+  return /(^| )az-nav--side( |$)/.test(nodes[0]?.attrs?.class ?? '');
+}
+
 /** How many of a page's leading nodes are its nav — shown while <Protected> checks. */
 function leadOf(nodes: readonly EmittedNode[]): number {
   let n = 0;
@@ -166,8 +171,12 @@ function appTsx(
   const imports = components.map((m, i) => `import U${i} from ${JSON.stringify(`./user/${m}`)};\n`).join('');
   const table = components.map((m, i) => `  ${JSON.stringify(m)}: U${i},\n`).join('');
   // Auth pages only (M4): a site without auth imports none of it.
+  // nav-spec §10 Q2: `side` is a PAGE layout. Those pages render their nav
+  // as a column and everything else in a content column beside it; the nav
+  // is then outside the content, so <Protected> needs no lead on them.
+  const side = Object.fromEntries(pages.filter((p) => sideLead(p.nodes)).map((p) => [p.route, leadOf(p.nodes)]));
   const lead = Object.fromEntries((plan?.protect ?? [])
-    .map((r) => [r, leadOf(pages.find((p) => p.route === r)?.nodes ?? [])]));
+    .map((r) => [r, r in side ? 0 : leadOf(pages.find((p) => p.route === r)?.nodes ?? [])]));
   const auth = plan ? `import { AuthRuntime, Protected } from "./az-auth/react.tsx";
 
 /** Pages wrapped in <Protected>, and how many leading nodes (the nav) show while it checks. */
@@ -180,11 +189,25 @@ const PROTECT: Record<string, number> = ${stableJson(lead)};
               </Protected>
             : page.nodes.map((node, i) => <Node key={i} node={node} />)`
     : `page.nodes.map((node, i) => <Node key={i} node={node} />)`;
+  const sided = Object.keys(side).length > 0;
+  const sideTable = sided ? `
+/** Pages laid out beside a \`side\` nav, and how many leading nodes are that nav. */
+const SIDE: Record<string, number> = ${stableJson(side)};
+` : '';
+  const plain = `<Page route={page.route}>{${content}}</Page>`;
+  const body = sided
+    ? `SIDE[page.route] !== undefined
+            ? <Page route={page.route} layout="side">
+                {page.nodes.slice(0, SIDE[page.route]).map((node, i) => <Node key={i} node={node} />)}
+                <div className="az-layout-content">{${content.split('page.nodes').join('page.nodes.slice(SIDE[page.route])')}}</div>
+              </Page>
+            : ${plain}`
+    : plain;
   return `${HEADER}import { Components, Node, NotFound, Page, Site } from "./runtime.tsx";
 import type { Custom, EmittedNode } from "./runtime.tsx";
 ${auth}${imports}
 const PAGES: { route: string; nodes: EmittedNode[] }[] = ${stableJson(pages)};
-
+${sideTable}
 /**
  * The author's own components (raw / slot, PRD §6.6), by source path, and
  * the theme they receive — the same tokens a word reads, colours as
@@ -218,7 +241,7 @@ export default function App({ route }: { route: string }) {
         pattern=${lit(spec.site.pattern)}
       >
         {page
-          ? <Page route={page.route}>{${content}}</Page>
+          ? ${body}
           : <NotFound />}${plan ? `
         <AuthRuntime />` : ''}
       </Site>
@@ -344,10 +367,11 @@ export function Node({ node }: { node: EmittedNode | string }): ReactNode {
     ...(node.children ?? []).map((c, i) => typeof c === "string" ? c : createElement(Node, { key: i, node: c })));
 }
 
-export function Page({ route, children }: { route: string; children?: ReactNode }) {
+export function Page({ route, layout, children }: { route: string; layout?: string; children?: ReactNode }) {
   // nav's skip link points here (nav-spec §7); tabIndex -1 lets focus land
-  // on the landmark without adding it to the tab order.
-  return <main id="az-content" tabIndex={-1} className="az-page" data-route={route}>{children}</main>;
+  // on the landmark without adding it to the tab order. \`layout\` is the page
+  // layout a \`side\` nav asks for (nav-spec §10 Q2): nav column + content.
+  return <main id="az-content" tabIndex={-1} className="az-page" data-route={route} data-layout={layout}>{children}</main>;
 }
 
 /** A path that is not a page of this site. */
@@ -421,6 +445,30 @@ function pinnedNavCss(spec: Spec, theme: ThemeLike): string {
 /* nav-block-spec §5: anchors land below a pinned nav, not under it. */
 :root { --az-size-nav: ${theme.size.nav}px; }
 html { scroll-padding-top: calc(var(--az-size-nav) + ${theme.space[16]}px); }
+`;
+}
+
+/**
+ * nav-block-spec §10 Q2, resolved as its recommendation: `side` is a page
+ * layout. At and above `breakpoint.sm` the nav is a column of
+ * `size.nav-side` and the page's content fills the column beside it;
+ * below, the page stacks and the nav is a bar with its drawer (§6).
+ * Written only when some page uses \`side\`.
+ */
+function sideLayoutCss(spec: Spec, theme: ThemeLike): string {
+  const isSide = (b: { word: string; variant: string | null }) => b.word === 'nav' && b.variant === 'side';
+  if (!spec.site.inherited.some(isSide) && !spec.pages.some((p) => p.blocks.some(isSide))) return '';
+  return `
+/* nav-block-spec §10 Q2: a side nav is a page layout — content sits beside it. */
+.az-page[data-layout="side"] {
+  display: grid;
+  grid-template-columns: ${theme.size['nav-side']}px minmax(0, 1fr);
+  align-items: start;
+}
+.az-layout-content { min-width: 0; }
+@media (width < ${theme.breakpoint.sm}px) {
+  .az-page[data-layout="side"] { display: block; }
+}
 `;
 }
 
@@ -625,7 +673,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${schemeCss(named)}${pinnedNavCss(spec, theme)}${plan ? authCss(theme) : ''}`,
+${schemeCss(named)}${pinnedNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}`,
     },
     {
       /**

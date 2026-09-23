@@ -378,15 +378,23 @@ export async function scrollPadding(page) {
     target.id = 'az-probe-target';
     target.textContent = 'Anchor target';
     target.style.marginTop = '2000px';
-    document.querySelector('main').append(target);
+    // Where the page's content lives: beside a `side` nav that is its own
+    // column (nav-spec §10 Q2), else <main>. Appending to a side page's
+    // <main> would auto-place the probe into the nav's column.
+    (document.querySelector('.az-layout-content') ?? document.querySelector('main')).append(target);
     location.hash = 'az-probe-target';
   });
   await page.waitForTimeout(300);
-  const r = await page.evaluate(() => ({
-    target: document.getElementById('az-probe-target').getBoundingClientRect().top,
-    bar: document.querySelector('nav[aria-label="Main"]').getBoundingClientRect().bottom,
-  }));
-  const pass = r.target >= r.bar;
+  // Obscured means the nav's box and the target's box overlap. A top bar
+  // spans the width, so that is "the target starts above the bar's bottom";
+  // a side column beside the content never covers it.
+  const r = await page.evaluate(() => {
+    const t = document.getElementById('az-probe-target').getBoundingClientRect();
+    const n = document.querySelector('nav[aria-label="Main"]').getBoundingClientRect();
+    const overlaps = t.left < n.right && n.left < t.right && t.top < n.bottom && n.top < t.bottom;
+    return { target: t.top, bar: n.bottom, overlaps };
+  });
+  const pass = !r.overlaps;
   return { pass, detail: pass ? '' : `the anchor target landed at ${Math.round(r.target)}px, under the bar ending at ${Math.round(r.bar)}px` };
 }
 
@@ -503,7 +511,12 @@ export async function lightbox(page) {
       live: dialog.querySelector('[data-az-lightbox-counter]')?.getAttribute('aria-live'),
       shownIndex: thumbAlts.indexOf(img.alt),
       next: dialog.querySelector('button[data-az-step="1"]')?.getAttribute('aria-disabled'),
-      y: window.scrollY,
+      // Where the page behind SITS on screen, not window.scrollY: the scroll
+      // lock fixes <body> at its offset, and WebKit may apply a pending
+      // focus scroll to the window after that — scrollY moves while nothing
+      // on screen does. The first thumbnail's viewport position is what a
+      // reader would see move.
+      y: Math.round(box.querySelector('button[data-az-index]').getBoundingClientRect().top),
       focusedThumb: [...box.querySelectorAll('button[data-az-index]')].indexOf(document.activeElement),
     };
   }, thumbs);

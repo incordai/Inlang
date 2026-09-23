@@ -412,6 +412,17 @@ const PINNED = (padded) => `<!doctype html><html lang="en"><head><title>pinned</
   nav { position: sticky; top: 0; height: 72px; background: white; }
 </style></head><body><nav aria-label="Main"><a href="/">Home</a></nav><main><h1>Pinned</h1></main></body></html>`;
 
+/**
+ * nav §10 Q2: a `side` column pinned beside the content. `beside` is the
+ * layout the target emits (grid: column + content) and needs no padding;
+ * `over` pins the same column on top of the content, which must fail.
+ */
+const SIDE = (beside) => `<!doctype html><html lang="en"><head><title>side</title><style>
+  main { ${beside ? 'display: grid; grid-template-columns: 256px minmax(0, 1fr); align-items: start;' : ''} }
+  nav { position: ${beside ? 'sticky' : 'fixed'}; top: 0; left: 0; width: 256px; height: 100svh; background: white; }
+</style></head><body><main><nav aria-label="Main"><a href="/">Home</a></nav>
+<div class="az-layout-content"><h1>Docs</h1></div></main></body></html>`;
+
 async function selfTest() {
   const dir = mkdtempSync(join(tmpdir(), 'az-visual-self-'));
   for (const [name, html] of [['bad', BAD], ['good', GOOD]]) {
@@ -468,6 +479,16 @@ async function selfTest() {
     const page = await ctx.newPage();
     await page.goto(server.url);
     expect(`nav §5 scroll padding (${padded ? 'good' : 'bad'} page)`, await scrollPadding(page), padded);
+    await ctx.close();
+  }
+  for (const [name, beside] of [['side-over', false], ['side-beside', true]]) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'), SIDE(beside));
+    server.serve(join(dir, name));
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto(server.url);
+    expect(`nav §10 side column (${beside ? 'beside the content' : 'over the content'})`, await scrollPadding(page), beside);
     await ctx.close();
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');

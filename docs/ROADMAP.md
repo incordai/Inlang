@@ -101,7 +101,7 @@ intents × 6 states); the 12-point gate in CI; **thumbnail emission** (1 day,
 free while snapshots exist — authoring-experience §2).
 
 **Exit criteria**
-- [ ] all 11 blocks pass the 12-point gate, in every variant
+- [x] all 11 blocks pass the 12-point gate, in every variant
 - [ ] all 5 structure keywords implemented and covered by fixtures
 - [ ] `az lint` fails a deliberately non-compliant word (tests A7)
 - [ ] 3 themes, all blocks rendering correctly in each, light and dark
@@ -256,12 +256,10 @@ fail). The browser items cover each word's previews — preview.az and any
 preview.<variant>.az — in all three themes. `pnpm gate --every-variant`
 adds every other variant (preview.az with the variant swapped in, default
 theme, light and dark, all widths and engines; 85 sites): every word and
-variant passes except nav `side`. Its 256px column takes the full viewport
-height and the page's content flows BELOW it instead of beside it, so an
-anchor lands under it (scroll-padding check, Firefox and WebKit). Putting
-content beside a sidebar is page layout — nav-spec open question 2
-("page layout that happens to contain a nav … decide before docs") — so it
-is left for that decision, and the "every variant" box stays open. CI runs
+variant passes (verified 2026-09-23, 607s). nav `side` was the last
+failure: nav-spec §10 Q2 is resolved as its recommendation — `side` is a page
+layout, so the target lays such pages out as a sticky nav column beside the
+content column, stacking below `breakpoint.sm`. CI runs
 the gate without the flag.
 `pnpm thumbnails` renders one PNG per word × variant (37; `none` renders
 nothing) into the gitignored .thumbnails/ — no doc says where thumbnails

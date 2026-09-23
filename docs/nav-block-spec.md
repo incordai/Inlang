@@ -178,9 +178,14 @@ classic stale-footer bug, one level up.
 
 1. Does `nav` own the skip link, or does `page`? *(Recommend: `nav`, since it's
    the first element — but it must still emit when a page has no nav.)*
-2. Is `side` really a nav variant, or a **page layout** that happens to contain
-   a nav? Docs pages need the sidebar to affect content width, which is beyond
-   what a block should control. *(Leaning: page layout. Decide before `docs`.)*
+2. ~~Is `side` really a nav variant, or a **page layout** that happens to contain
+   a nav?~~ **Resolved: a page layout** (the recommendation above). The author
+   still writes `nav side`; the target lays out any page whose nav is `side` as
+   two columns — the nav a sticky, scrollable column of `size.nav-side`, the
+   page's content in a column beside it — at `breakpoint.sm` and up. Below it
+   the page stacks and the nav is a bar with its drawer (§6). The block keeps
+   controlling only the nav; the page width split lives in the target, which
+   is what "beyond what a block should control" asked for.
 3. Does `mega` earn Phase 2 at all? It carries the highest a11y cost of anything
    here and serves the fewest users.
 4. Mobile-app target: nav maps to a tab bar, not a drawer — different enough
