@@ -147,11 +147,62 @@ test('methods password link — one form, the link offered as the alternative', 
   assert.equal(f.attrs?.['data-methods'], 'password link');
 });
 
-test('§12.3: methods oauth is refused until it ships (AZ1214)', () => {
-  const r = compileFile(file('    methods oauth\n'));
-  const d = r.diagnostics.find((x) => x.code === 'AZ1214');
-  assert.ok(d, r.diagnostics.map((x) => x.code).join(','));
-  assert.match(d.message, /use: password, link/);
+/** The whole emitted section of the page's auth block. */
+function section(lines: string, adapter = '    adapter session\n', variant = 'login'): EmittedNode {
+  const r = compileFile(file(lines, adapter, variant));
+  assert.ok(r.ok, r.diagnostics.map((d) => `${d.code} ${d.message}`).join('\n'));
+  return emitAuth(r.spec!.pages[0].blocks.find((b) => b.word === 'auth')!, context());
+}
+const all = (n: EmittedNode): EmittedNode[] => [n, ...kids(n).flatMap(all)];
+
+test('§12.3 overridden by the owner: methods oauth compiles on a cookie adapter', () => {
+  for (const adapter of ['    adapter session\n', '    adapter azbackend\n']) {
+    const codes = compileFile(file('    methods password oauth\n', adapter)).diagnostics.map((d) => d.code);
+    assert.ok(!codes.includes('AZ1214') && !codes.includes('AZ2005'), codes.join(','));
+  }
+});
+
+test('AZ2005: methods oauth on an adapter with no server to run the round-trip is an error', () => {
+  const r = compileFile(file('    methods oauth\n', '    adapter hosted\n'));
+  const d = r.diagnostics.find((x) => x.code === 'AZ2005');
+  assert.ok(d && d.severity === 'error', r.diagnostics.map((x) => x.code).join(','));
+  assert.match(d.message, /needs adapter azbackend or session/);
+});
+
+test('§3.4 oauth: a hidden provider container with ONE secondary template action, beside the form', () => {
+  const out = section('    methods password oauth\n');
+  const box = all(out).find((n) => n.attrs?.['data-az-oauth'] === 'providers');
+  assert.ok(box, 'the provider container is emitted');
+  assert.equal(box.attrs?.hidden, 'hidden', 'hidden until the backend lists a provider');
+  assert.equal(box.style?.display, undefined, 'no display of its own, or it would beat `hidden`');
+  const templates = all(box).filter((n) => n.attrs?.['data-az-oauth-template']);
+  assert.equal(templates.length, 1);
+  const link = all(templates[0]).find((n) => n.tag === 'a');
+  assert.match(String(link?.attrs?.class), /az-action--secondary/, 'the form submit stays the one primary');
+  assert.ok(!all(out).some((n) => n.tag === 'form' && all(n).includes(box)), 'provider links are not inside the form');
+  assert.match(String(all(out).find((n) => n.tag === 'form')?.attrs?.['data-methods']), /\boauth\b/);
+});
+
+test('CONTROL: without oauth there is no provider container', () => {
+  assert.ok(!all(section('    methods password\n')).some((n) => n.attrs?.['data-az-oauth']));
+});
+
+test('§3.4 signup: name, email, password, retype and an optional location — in that order', () => {
+  const f = form('    terms /account\n', 'signup');
+  const named = kids(f).flatMap(kids).filter((n) => n.tag === 'input');
+  assert.deepEqual(named.map((n) => n.attrs?.name), ['name', 'email', 'password', 'passwordConfirm', 'location', 'terms']);
+  const by = (name: string) => named.find((n) => n.attrs?.name === name)!;
+  assert.equal(by('passwordConfirm').attrs?.autocomplete, 'new-password', 'a manager fills both from one entry');
+  assert.equal(by('passwordConfirm').attrs?.required, 'required');
+  assert.equal(by('location').attrs?.required, undefined, 'location is optional');
+  const labels = all(f).filter((n) => n.tag === 'label').map((n) => String(n.children?.[0]));
+  assert.ok(labels.includes('Retype password') && labels.includes('Location (optional)'), labels.join(' | '));
+});
+
+test('§3.4 reset: the set-new-password form asks for the new password twice', () => {
+  const out = section('    alt "Back" /account\n', undefined, 'reset');
+  const set = all(out).find((n) => n.tag === 'form' && n.attrs?.['data-flow'] === 'reset-set')!;
+  assert.deepEqual(all(set).filter((n) => n.tag === 'input').map((n) => n.attrs?.name), ['email', 'password', 'passwordConfirm']);
 });
 
 test('CONTROL: reset always requests a link, whatever the methods', () => {

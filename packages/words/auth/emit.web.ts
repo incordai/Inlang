@@ -31,6 +31,8 @@ interface Field {
   readonly hint?: string;
   /** §7: the address on the set-new step — shown, filed, not editable. */
   readonly readonly?: boolean;
+  /** Not required; its label says so (§6: labels, not placeholders). */
+  readonly optional?: boolean;
 }
 
 /**
@@ -46,6 +48,9 @@ const EMAIL: Field = { name: 'email', label: 'Email', type: 'email', autocomplet
 const NEW_PASSWORD: Field = {
   name: 'password', label: 'Password', type: 'password', autocomplete: 'new-password', hint: NEW_PASSWORD_HINT,
 };
+// §3.4: the new password typed twice; the runtime and the server both check
+// they match. `new-password` too, so a manager fills both from one entry.
+const RETYPE: Field = { name: 'passwordConfirm', label: 'Retype password', type: 'password', autocomplete: 'new-password' };
 
 /** What each variant actually asks for. */
 const FIELDS: Record<string, Field[]> = {
@@ -57,6 +62,9 @@ const FIELDS: Record<string, Field[]> = {
     { name: 'name', label: 'Name', type: 'text', autocomplete: 'name' },
     EMAIL,
     NEW_PASSWORD,
+    RETYPE,
+    // §3.4: optional, free text — a town or a country, as the person writes it.
+    { name: 'location', label: 'Location (optional)', type: 'text', autocomplete: 'address-level2', optional: true },
   ],
   // §5's first state; the second (below) is chosen by a URL token at runtime.
   reset: [EMAIL],
@@ -66,6 +74,7 @@ const FIELDS: Record<string, Field[]> = {
 const RESET_SET: Field[] = [
   { ...EMAIL, readonly: true },
   { ...NEW_PASSWORD, label: 'New password' },
+  { ...RETYPE, label: 'Retype new password' },
 ];
 
 /**
@@ -100,7 +109,7 @@ function field(f: Field, ctx: EmitContext, prefix = 'az-auth'): EmittedNode {
           name: f.name,
           type: f.type,
           autocomplete: f.autocomplete,
-          required: 'required',
+          ...(f.optional ? {} : { required: 'required' }),
           ...(f.readonly ? { readonly: 'readonly' } : {}),
           ...(f.hint ? { 'aria-describedby': `${id}-hint` } : {}),
         },
@@ -177,15 +186,60 @@ const LINK_ALTERNATIVE = 'Email me a link instead';
  * The sign-in methods this form offers, in manifest order.
  *
  * `methods` arrives comma-joined (core's list serialisation) and defaulted to
- * `password`. Only the two methods Phase 1 ships are read: `oauth` is refused
- * by the compiler (AZ1214, auth-spec §12.3), so an emitter that met it would
- * be looking at a file that did not compile.
+ * `password`. `oauth` adds provider buttons beside the form (§3.4); the
+ * compiler has already refused it for an adapter without a server to run
+ * the provider round-trip (AZ2005).
  */
-function methodsOf(block: SpecBlock): { password: boolean; link: boolean } {
+function methodsOf(block: SpecBlock): { password: boolean; link: boolean; oauth: boolean } {
   const items = (block.props.methods ?? 'password').split(',');
   const link = items.includes('link');
-  // A list naming only unknown methods still gets a form that works.
-  return { password: items.includes('password') || !link, link };
+  const oauth = items.includes('oauth');
+  // A list naming only unknown methods still gets a form that works, and so
+  // does `oauth` alone: the form keeps the summary a failed provider
+  // sign-in reports into (§3.4), and a password to fall back on.
+  return { password: items.includes('password') || !link, link, oauth };
+}
+
+/**
+ * §3.4, `methods oauth`: "Continue with …" buttons, one per provider the
+ * backend has enabled. The providers are the backend's to configure, so the
+ * list is filled at runtime from its public endpoint: this emits a hidden
+ * container and ONE template button — a secondary action, so the form's own
+ * submit stays the primary. The runtime clones the template per provider
+ * and sets its text; it stays hidden when the backend lists none. §9: the
+ * label is text the owner's backend supplies — no mark, no logo, nothing
+ * about any provider compiled into the site.
+ */
+function providers(ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const template: SpecBlock = {
+    word: 'cta', variant: null, modifiers: [], as: null, children: [], props: {},
+    args: [{ kind: 'string', value: 'Continue with a provider' }, { kind: 'route', value: '/' }],
+  };
+  return {
+    tag: 'div',
+    // No `display` of its own: `hidden` must win until the runtime fills it.
+    attrs: { class: 'az-auth-oauth', 'data-az-oauth': 'providers', hidden: 'hidden' },
+    style: { marginTop: px(t.space[24]) },
+    children: [
+      {
+        tag: 'p',
+        attrs: { class: 'az-auth-or' },
+        style: { margin: `0 0 ${px(t.space[12])}`, fontSize: t.typeSize.sm, color: t.color.muted },
+        children: ['Or'],
+      },
+      {
+        tag: 'ul',
+        attrs: { class: 'az-auth-providers' },
+        style: { display: 'grid', gap: px(t.space[12]), listStyle: 'none', padding: 0, margin: 0 },
+        children: [{
+          tag: 'li',
+          attrs: { 'data-az-oauth-template': 'template' },
+          children: [ctx.action(template, { hierarchy: 'secondary' })],
+        }],
+      },
+    ],
+  };
 }
 
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
@@ -228,7 +282,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // shape only the two credential forms. A passwordless form asks for no
   // password at all — a field that is never used is one a manager fills and
   // a user wonders about.
-  const methods = variant === 'reset' ? { password: false, link: true } : methodsOf(block);
+  const methods = variant === 'reset' ? { password: false, link: true, oauth: false } : methodsOf(block);
   const fields = (FIELDS[variant] ?? FIELDS.login)
     .filter((f) => methods.password || f.type !== 'password');
   const formChildren: EmittedNode[] = fields.map((f) => field(f, ctx));
@@ -297,7 +351,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // The adapter is a ROLE, never a vendor name (PRD §6.5).
       'data-adapter': block.props.adapter ?? 'custom',
       'data-flow': flow,
-      'data-methods': [methods.password && 'password', methods.link && 'link']
+      'data-methods': [methods.password && 'password', methods.link && 'link', methods.oauth && 'oauth']
         .filter(Boolean).join(' '),
       // Where a successful sign-in goes. The compiler has already checked it
       // is a page of this site (AZ1215); the runtime still only follows a
@@ -320,6 +374,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   });
 
   children.push(form(variant, [...formChildren, status(ctx), ...buttons]));
+  if (methods.oauth) children.push(providers(ctx));
 
   // §5: reset's second state — set a new password, chosen by the URL token
   // the emailed link carries. Hidden until the runtime sees one; without JS

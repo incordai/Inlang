@@ -13,7 +13,7 @@
  */
 
 import {
-  ERROR_COPY, fieldOf, safeNext, validate, type AuthAdapter, type AuthResult, type FieldError,
+  ERROR_COPY, fieldOf, safeNext, toErrorCode, validate, type AuthAdapter, type AuthResult, type FieldError,
 } from './contract.ts';
 
 type Cleanup = () => void;
@@ -44,6 +44,10 @@ export function attachAuth(doc: Document, adapter: AuthAdapter, options?: Attach
 
   const forms = [...doc.querySelectorAll<HTMLFormElement>('form[data-az-behaviour="auth"]')];
   showResetState(forms, params);
+  showReturnedError(forms, params, win);
+  for (const box of doc.querySelectorAll<HTMLElement>('[data-az-oauth="providers"]')) {
+    void fillProviders(box, adapter, loc, params, ac.signal);
+  }
 
   for (const form of forms) {
     // JS validates on submit with a summary (§6); without JS the browser's own
@@ -112,10 +116,16 @@ export function attachAuth(doc: Document, adapter: AuthAdapter, options?: Attach
     const password = String(v.password ?? '');
     switch (form.dataset.flow) {
       case 'reset': return adapter.requestReset(email);
-      case 'reset-set': return adapter.setPassword(params.get('token') ?? '', password);
-      case 'signup':
-        return how === 'link' ? adapter.requestLink(email)
-          : adapter.signUp({ email, password, ...(v.name ? { name: String(v.name).trim() } : {}) });
+      case 'reset-set': return adapter.setPassword(params.get('token') ?? '', password, String(v.passwordConfirm ?? ''));
+      case 'signup': {
+        if (how === 'link') return adapter.requestLink(email);
+        const location = String(v.location ?? '').trim();
+        return adapter.signUp({
+          email, password, passwordConfirm: String(v.passwordConfirm ?? ''),
+          ...(v.name ? { name: String(v.name).trim() } : {}),
+          ...(location ? { location } : {}),
+        });
+      }
       default:
         return how === 'link' ? adapter.requestLink(email) : adapter.signIn({ email, password });
     }
@@ -144,9 +154,11 @@ function check(form: HTMLFormElement, how: string): FieldError[] {
   const v = values(form);
   const flow = form.dataset.flow;
   if (how === 'link' || flow === 'reset') return validate({ email: v.email ?? '' }, {});
-  if (flow === 'reset-set') return validate({ password: v.password ?? '' }, { password: 'new' });
+  if (flow === 'reset-set') {
+    return validate({ password: v.password ?? '', passwordConfirm: v.passwordConfirm }, { password: 'new', confirm: 'passwordConfirm' in v });
+  }
   if (flow === 'signup') {
-    return validate(v, { password: 'new', name: 'name' in v, terms: 'terms' in v });
+    return validate(v, { password: 'new', name: 'name' in v, terms: 'terms' in v, confirm: 'passwordConfirm' in v });
   }
   return validate(v, { password: 'current' });
 }
@@ -229,4 +241,52 @@ function showResetState(forms: readonly HTMLFormElement[], params: URLSearchPara
   const email = params.get('email');
   const field = set.querySelector<HTMLInputElement>('input[name="email"]');
   if (token && email && field) field.value = email;
+}
+
+/**
+ * §3.4: after a provider round-trip fails, the backend sends the visitor
+ * back with `?auth_error=<code>`. The code is shown as the closed set's copy
+ * (anything else reads as `unknown`) in the first form's summary, then
+ * dropped from the address so a reload does not show it again.
+ */
+function showReturnedError(forms: readonly HTMLFormElement[], params: URLSearchParams, win: Window | null) {
+  const code = params.get('auth_error');
+  const target = forms.find((f) => !f.hidden);
+  if (code === null || !target) return;
+  show(target, [{ field: '', message: ERROR_COPY[toErrorCode(code)] }]);
+  if (!win) return;
+  const url = new URL(win.location.href);
+  url.searchParams.delete('auth_error');
+  win.history.replaceState(win.history.state, '', url.pathname + url.search + url.hash);
+}
+
+/**
+ * §3.4, `methods oauth`: one "Continue with …" button per provider the
+ * backend lists, cloned from the emitted template. Text is set with
+ * textContent — a label is the backend's input, never markup — and the
+ * link goes to the backend's start route with a same-origin `next`. With
+ * no providers, or an adapter that has none, the container stays hidden.
+ */
+async function fillProviders(
+  box: HTMLElement, adapter: AuthAdapter, loc: Pick<Location, 'search' | 'origin'>,
+  params: URLSearchParams, signal: AbortSignal,
+) {
+  const template = box.querySelector<HTMLElement>('[data-az-oauth-template]');
+  if (!template || !adapter.providers || !adapter.oauthStart) return;
+  const list = await adapter.providers();
+  if (signal.aborted || list.length === 0) return;
+  const form = box.closest('section')?.querySelector<HTMLFormElement>('form[data-az-behaviour="auth"]');
+  const next = safeNext(params.get('next'), loc.origin) ?? form?.dataset.redirect ?? '/';
+  const parent = template.parentElement;
+  template.remove();
+  for (const p of list) {
+    const item = template.cloneNode(true) as HTMLElement;
+    item.removeAttribute('data-az-oauth-template');
+    const link = item.querySelector<HTMLAnchorElement>('a');
+    if (!link) continue;
+    link.href = adapter.oauthStart(p.id, next, loc.origin);
+    link.textContent = `Continue with ${p.label}`;
+    parent?.append(item);
+  }
+  box.hidden = false;
 }

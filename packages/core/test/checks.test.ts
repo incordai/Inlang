@@ -74,6 +74,12 @@ const CASES: Case[] = [
     bad: 'az 1\nsite probe\n  auth\n    adapter session\n    protect /account\npage /\npage /account\n',
     good: 'az 1\nsite probe\n  auth\n    adapter session\n    protect /account\npage /\npage /account\n'
       + 'page /login\n  auth login\n    alt "Create an account" /account\n' },
+  // A page rule with site-scoped props resolved: `methods oauth` needs a
+  // cookie adapter's server (auth-spec §3.4) — `hosted` has none.
+  { code: 'AZ2005', severity: 'error',
+    bad: 'az 1\nsite probe\n  auth\n    adapter hosted\npage /\n  auth login\n    methods password oauth\n'
+      + '    alt "Create an account" /signup\n' + PAGES.map((p) => `page ${p}\n`).join(''),
+    good: file('auth login\n  methods password oauth\n  alt "Create an account" /signup') },
   // ---- cta ---------------------------------------------------------------
   { code: 'AZ2020', severity: 'error', bad: file(`${HERO}\ncta band\n  title "Reserve"`),
     good: file(`${HERO}\ncta band\n  title "Reserve"\n  cta "Reserve" /reserve`) },

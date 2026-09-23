@@ -11,7 +11,8 @@
  */
 
 import {
-  toErrorCode, type AdapterId, type AuthAdapter, type AuthField, type AuthResult, type AuthSession, type Credentials,
+  AUTH_FIELDS, PROVIDER_ID, parseProviders, safeNext, toErrorCode,
+  type AdapterId, type AuthAdapter, type AuthField, type AuthResult, type AuthSession, type Credentials,
 } from './contract.ts';
 
 export interface SessionConfig {
@@ -37,17 +38,27 @@ export interface SessionEnv {
   readonly fetch: typeof fetch;
 }
 
-const FIELDS: readonly string[] = ['email', 'password', 'name'];
+const FIELDS: readonly string[] = AUTH_FIELDS;
 
+/** A server's session, validated: only the documented fields, only as strings. */
 function parseUser(value: unknown): AuthSession | null {
   if (!value || typeof value !== 'object') return null;
-  const v = value as { user?: { id?: unknown; email?: unknown }; expiresAt?: unknown };
+  const v = value as { user?: { id?: unknown; email?: unknown; name?: unknown; location?: unknown }; expiresAt?: unknown };
   if (typeof v.user?.id !== 'string' || typeof v.user.email !== 'string') return null;
   return {
-    user: { id: v.user.id, email: v.user.email },
+    user: {
+      id: v.user.id,
+      email: v.user.email,
+      ...(typeof v.user.name === 'string' ? { name: v.user.name } : {}),
+      ...(typeof v.user.location === 'string' ? { location: v.user.location } : {}),
+    },
     ...(typeof v.expiresAt === 'number' ? { expiresAt: v.expiresAt } : {}),
   };
 }
+
+/** Only the values a caller actually gave — no empty keys in a body. */
+const given = (o: Record<string, string | undefined>): Record<string, string> =>
+  Object.fromEntries(Object.entries(o).filter((e): e is [string, string] => e[1] !== undefined));
 
 export function createSessionAdapter(config: SessionConfig, env: SessionEnv = { fetch: (...a) => fetch(...a) }): AuthAdapter {
   return createCookieAdapter({ id: 'session', base: config.base, credentials: 'same-origin' }, env);
@@ -64,15 +75,19 @@ export function createCookieAdapter(config: CookieConfig, env: SessionEnv = { fe
     for (const fn of listeners) fn(s);
   };
 
+  async function send(method: 'GET' | 'POST', path: string, body?: Record<string, string>): Promise<Response> {
+    return env.fetch(`${base}${path}`, {
+      method,
+      credentials: config.credentials,
+      headers: { ...config.headers, ...(body ? { 'content-type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+  }
+
   async function request(method: 'GET' | 'POST', path: string, body?: Record<string, string>): Promise<AuthResult> {
     let response: Response;
     try {
-      response = await env.fetch(`${base}${path}`, {
-        method,
-        credentials: config.credentials,
-        headers: { ...config.headers, ...(body ? { 'content-type': 'application/json' } : {}) },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      });
+      response = await send(method, path, body);
     } catch {
       return { ok: false, code: 'network' };
     }
@@ -101,10 +116,12 @@ export function createCookieAdapter(config: CookieConfig, env: SessionEnv = { fe
   return {
     id: config.id,
     signIn: (c: Credentials) => signing('/sign-in', { email: c.email, password: c.password }),
-    signUp: (c: Credentials) => signing('/sign-up', { email: c.email, password: c.password, ...(c.name ? { name: c.name } : {}) }),
+    signUp: (c: Credentials) => signing('/sign-up', given({
+      name: c.name, email: c.email, password: c.password, passwordConfirm: c.passwordConfirm, location: c.location,
+    })),
     requestLink: (email) => request('POST', '/link', { email }),
     requestReset: (email) => request('POST', '/reset', { email }),
-    setPassword: (token, password) => signing('/password', { token, password }),
+    setPassword: (token, password, passwordConfirm) => signing('/password', given({ token, password, passwordConfirm })),
     async signOut() {
       await request('POST', '/sign-out', {});
       set(null);
@@ -118,6 +135,25 @@ export function createCookieAdapter(config: CookieConfig, env: SessionEnv = { fe
     ready() {
       loaded ??= request('GET', '/session').then((r) => set(r.ok ? r.session : null));
       return loaded;
+    },
+    /** §3.4: GET /providers — none when unreachable or malformed. */
+    async providers() {
+      try {
+        const response = await send('GET', '/providers');
+        return response.ok ? parseProviders(await response.json()) : [];
+      } catch {
+        return [];
+      }
+    },
+    /**
+     * §3.4: the provider round-trip starts at the server. `next` is kept to a
+     * same-origin path and `site` names where to come back to; the server
+     * still checks `site` against its own allow-list.
+     */
+    oauthStart(provider, next, site) {
+      if (!PROVIDER_ID.test(provider)) throw new Error(`auth: '${provider}' is not a provider id`);
+      const query = new URLSearchParams({ next: safeNext(next, site) ?? '/', site });
+      return `${base}/oauth/${provider}/start?${query}`;
     },
   };
 }

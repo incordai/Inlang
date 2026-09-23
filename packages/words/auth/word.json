@@ -41,9 +41,6 @@
       "max": 3,
       "default": [
         "password"
-      ],
-      "deferred": [
-        "oauth"
       ]
     },
     "redirect": {
@@ -162,6 +159,23 @@
         "variant": [
           "login"
         ]
+      }
+    },
+    {
+      "code": "AZ2005",
+      "kind": "pageWhen",
+      "severity": "error",
+      "message": "'methods oauth' needs adapter azbackend or session — their server runs the provider sign-in",
+      "when": {
+        "prop": "methods",
+        "includes": "oauth",
+        "also": {
+          "prop": "adapter",
+          "notIn": [
+            "azbackend",
+            "session"
+          ]
+        }
       }
     }
   ]

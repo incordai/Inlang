@@ -36,7 +36,8 @@ export type BlockCheckKind =
 
 export type PageCheckKind =
   | 'perPage'           // more than `atMost` of this word (matching `when`) on one page
-  | 'notFirst';         // this word (matching `when`) opens the page's content
+  | 'notFirst'          // this word (matching `when`) opens the page's content
+  | 'pageWhen';         // `when` holds on a block a page renders, site-scoped props resolved
 
 /**
  * SITE kinds run once per file, on the site-level declaration of a word,
@@ -59,6 +60,12 @@ export interface CheckWhen {
   readonly prop?: string;
   /** …and equals this value. */
   readonly value?: string;
+  /** …and, as a `list` prop, includes this item. */
+  readonly includes?: string;
+  /** …and is none of these (an unset prop is none of them). */
+  readonly notIn?: string[];
+  /** A second gate that must hold as well — two props in one rule. */
+  readonly also?: CheckWhen;
   /** The block is declared under a page, not at site level. */
   readonly inPage?: boolean;
 }
@@ -94,7 +101,7 @@ export const BLOCK_KINDS: ReadonlySet<string> = new Set<BlockCheckKind>([
   'count', 'when', 'childMissing', 'childEqual', 'childAllOrNone', 'childAtMostOne',
   'childUnique', 'childLabelWords', 'childLabelPattern', 'childRoute', 'propWords', 'valuePattern',
 ]);
-export const PAGE_KINDS: ReadonlySet<string> = new Set<PageCheckKind>(['perPage', 'notFirst']);
+export const PAGE_KINDS: ReadonlySet<string> = new Set<PageCheckKind>(['perPage', 'notFirst', 'pageWhen']);
 export const SITE_KINDS: ReadonlySet<string> = new Set<SiteCheckKind>(['siteNeeds']);
 
 /** One argument of a fill, as either stage holds it. */
@@ -134,10 +141,16 @@ export function holds(when: CheckWhen | undefined, s: CheckSubject): boolean {
   if (when.modifier && !s.modifiers.includes(when.modifier)) return false;
   if (when.notModifier && s.modifiers.includes(when.notModifier)) return false;
   if (when.prop !== undefined) {
-    if (!(when.prop in s.props)) return false;
-    if (when.value !== undefined && s.props[when.prop] !== when.value) return false;
+    const v = s.props[when.prop];
+    if (when.notIn !== undefined) {
+      if (v !== undefined && when.notIn.includes(v)) return false;
+    } else if (!(when.prop in s.props)) return false;
+    if (when.value !== undefined && v !== when.value) return false;
+    // A list prop is stored comma-joined (link.ts LIST_SEPARATOR).
+    if (when.includes !== undefined && !(v ?? '').split(',').includes(when.includes)) return false;
   }
   if (when.inPage && !s.inPage) return false;
+  if (when.also && !holds(when.also, s)) return false;
   return true;
 }
 
@@ -289,6 +302,10 @@ export function runPageChecks(entries: readonly PageEntry[], report: Report): vo
 
       if (c.kind === 'notFirst') {
         if (e.opensContent && holds(c.when, e.subject)) say(e.subject.pos);
+        continue;
+      }
+      if (c.kind === 'pageWhen') {
+        if (holds(c.when, e.subject)) say(e.subject.pos);
         continue;
       }
       // perPage: judged once per check per page, over every matching block.

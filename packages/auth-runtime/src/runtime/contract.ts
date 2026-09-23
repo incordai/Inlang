@@ -17,13 +17,18 @@ export type AdapterId = 'hosted' | 'session' | 'azbackend' | 'custom';
 
 /** The closed set of failures an adapter may report (§3). */
 export const AUTH_ERROR_CODES = [
-  'invalid_credentials', 'email_taken', 'weak_password', 'rate_limited', 'expired_token', 'network', 'unknown',
+  'invalid_credentials', 'email_taken', 'weak_password', 'password_mismatch', 'rate_limited', 'expired_token',
+  'oauth_failed', 'email_unverified', 'network', 'unknown',
 ] as const;
 export type AuthErrorCode = (typeof AUTH_ERROR_CODES)[number];
 
 export interface AuthUser {
   readonly id: string;
   readonly email: string;
+  /** §3.4: the name given at sign-up (or by a provider). */
+  readonly name?: string;
+  /** §3.4: optional, free text, as the person wrote it. */
+  readonly location?: string;
 }
 
 /** What the block may read about a session. The token, if any, stays inside the adapter. */
@@ -37,10 +42,28 @@ export interface Credentials {
   readonly email: string;
   readonly password: string;
   readonly name?: string;
+  /** §3.4: the retyped password — the server checks it again. */
+  readonly passwordConfirm?: string;
+  readonly location?: string;
 }
 
 /** The form fields a failure can point at. */
-export type AuthField = 'email' | 'password' | 'name';
+export type AuthField = 'email' | 'password' | 'passwordConfirm' | 'name' | 'location';
+
+/** Every AuthField, for validating a server's `field`. */
+export const AUTH_FIELDS: readonly AuthField[] = ['email', 'password', 'passwordConfirm', 'name', 'location'];
+
+/**
+ * A sign-in provider the backend has enabled (§3.4). Only these two public
+ * values reach the page; the provider's client id and secret stay in the
+ * backend's own environment.
+ */
+export interface OAuthProvider {
+  /** Lower-case letters, digits and `-`: it becomes a URL path segment. */
+  readonly id: string;
+  /** What the button says after "Continue with". Text only — no mark. */
+  readonly label: string;
+}
 
 export type AuthResult =
   | { readonly ok: true; readonly session: AuthSession | null }
@@ -60,11 +83,15 @@ export interface AuthAdapter {
   signUp(input: Credentials): Promise<AuthResult>;
   requestLink(email: string): Promise<AuthResult>;
   requestReset(email: string): Promise<AuthResult>;
-  setPassword(token: string, password: string): Promise<AuthResult>;
+  setPassword(token: string, password: string, passwordConfirm?: string): Promise<AuthResult>;
   signOut(): Promise<void>;
   session(): AuthSession | null;
   onChange(fn: (s: AuthSession | null) => void): () => void;
   ready?(): Promise<void>;
+  /** §3.4, `methods oauth`: the providers the backend has enabled. */
+  providers?(): Promise<readonly OAuthProvider[]>;
+  /** §3.4: where a provider button goes; `next` is a same-origin path. */
+  oauthStart?(provider: string, next: string, site: string): string;
 }
 
 /** Any string an adapter or provider returns, as one of the closed codes. */
@@ -81,8 +108,11 @@ export const ERROR_COPY: Readonly<Record<AuthErrorCode, string>> = {
   invalid_credentials: "That email and password don't match. Check both and try again.",
   email_taken: 'An account already uses this email. Sign in instead, or reset your password.',
   weak_password: 'Choose a stronger password — at least 12 characters.',
+  password_mismatch: "The two passwords don't match. Type the same password in both.",
   rate_limited: 'Too many attempts. Wait a minute, then try again.',
   expired_token: 'This link has expired. Request a new one.',
+  oauth_failed: "Signing in with that provider didn't finish. Try again, or use your email.",
+  email_unverified: "That provider hasn't verified your email address, so it can't sign you in here. Use your email instead.",
   network: "We couldn't reach the sign-in service. Check your connection and try again.",
   unknown: 'Something went wrong. Try again in a moment.',
 };
@@ -91,6 +121,7 @@ export const ERROR_COPY: Readonly<Record<AuthErrorCode, string>> = {
 export function fieldOf(code: AuthErrorCode): AuthField | undefined {
   if (code === 'email_taken') return 'email';
   if (code === 'weak_password') return 'password';
+  if (code === 'password_mismatch') return 'passwordConfirm';
   return undefined;
 }
 
@@ -113,6 +144,8 @@ export function validate(values: Readonly<Record<string, string | boolean | unde
   readonly password?: 'current' | 'new';
   readonly name?: boolean;
   readonly terms?: boolean;
+  /** A retyped password must equal the password (§3.4). */
+  readonly confirm?: boolean;
 }): FieldError[] {
   const errors: FieldError[] = [];
   const email = String(values.email ?? '').trim();
@@ -125,6 +158,9 @@ export function validate(values: Readonly<Record<string, string | boolean | unde
   if (kind.password === 'current' && !password) errors.push({ field: 'password', message: 'Enter your password.' });
   if (kind.password === 'new' && password.length < MIN_PASSWORD) {
     errors.push({ field: 'password', message: `Use at least ${MIN_PASSWORD} characters.` });
+  }
+  if (kind.confirm && String(values.passwordConfirm ?? '') !== password) {
+    errors.push({ field: 'passwordConfirm', message: ERROR_COPY.password_mismatch });
   }
   if (kind.terms && values.terms !== true) errors.push({ field: 'terms', message: 'Agree to the terms to continue.' });
   return errors;
@@ -146,4 +182,31 @@ export function safeNext(value: string | null | undefined, origin: string): stri
   } catch {
     return null;
   }
+}
+
+/** A provider id that is safe as a URL path segment (§3.4). */
+export const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+/** The longest provider label a button will show. */
+export const PROVIDER_LABEL_MAX = 40;
+
+/**
+ * The backend's provider list, validated: it is input like any other, and
+ * its labels become button text. Anything malformed is dropped, not shown.
+ */
+export function parseProviders(value: unknown): OAuthProvider[] {
+  const list = value !== null && typeof value === 'object' ? (value as { providers?: unknown }).providers : undefined;
+  if (!Array.isArray(list)) return [];
+  const out: OAuthProvider[] = [];
+  const seen = new Set<string>();
+  for (const p of list) {
+    if (p === null || typeof p !== 'object') continue;
+    const { id, label } = p as { id?: unknown; label?: unknown };
+    if (typeof id !== 'string' || !PROVIDER_ID.test(id) || seen.has(id)) continue;
+    if (typeof label !== 'string') continue;
+    const text = label.trim();
+    if (!text || text.length > PROVIDER_LABEL_MAX) continue;
+    seen.add(id);
+    out.push({ id, label: text });
+  }
+  return out;
 }

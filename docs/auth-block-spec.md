@@ -75,8 +75,9 @@ export interface AuthAdapter {
 
 `AuthResult` is `{ ok: true, session }` or `{ ok: false, code, field? }`, where
 `AuthErrorCode` is a **closed set owned by AZ**: `invalid_credentials` ·
-`email_taken` · `weak_password` · `rate_limited` · `expired_token` · `network` ·
-`unknown`. Each adapter maps its own errors into it and the block maps it to
+`email_taken` · `weak_password` · `password_mismatch` · `rate_limited` ·
+`expired_token` · `oauth_failed` · `email_unverified` · `network` · `unknown`
+(the three §3.4 codes added 2026-09-23). Each adapter maps its own errors into it and the block maps it to
 copy, so no generated component contains a provider-specific string — switching
 adapters is one line in the `.az` file and nothing in the output moves.
 
@@ -180,16 +181,64 @@ cookie.
 | Request | Body | Success |
 |---|---|---|
 | `POST /auth/sign-in` | `{ email, password }` | `200 { session }` + sets the cookie |
-| `POST /auth/sign-up` | `{ email, password, name? }` | `200 { session }` + cookie, or `200 {}` when the address must be confirmed first |
+| `POST /auth/sign-up` | `{ name, email, password, passwordConfirm, location? }` | `200 { session }` + cookie, or `200 {}` when the address must be confirmed first |
 | `POST /auth/link` | `{ email }` | `200 {}` — **always**, whether or not the address has an account |
 | `POST /auth/reset` | `{ email }` | `200 {}` — **always**, same reason |
-| `POST /auth/password` | `{ token, password }` | `200 { session }` + cookie |
+| `POST /auth/password` | `{ token, password, passwordConfirm }` | `200 { session }` + cookie |
 | `POST /auth/sign-out` | `{}` | `204`, clearing the cookie |
 | `GET /auth/session` | — | `200 { session }` or `200 { session: null }` |
+| `GET /auth/providers` | — | `200 { providers: [{ id, label }] }` — `[]` when none are enabled |
+| `GET /auth/oauth/{id}/start?next=&site=` | — (a top-level navigation) | `302` to the provider |
+| `GET /auth/oauth/{id}/callback` | — (the provider's redirect) | `302` back to `site` + `next`, cookie set |
 
-`session` is `{ user: { id, email }, expiresAt? }` — `id` and `email`
-strings, `expiresAt` epoch milliseconds. **No token in any body**: the cookie
-is the credential.
+`session` is `{ user: { id, email, name, location? }, expiresAt? }` — every
+field a string except `expiresAt` (epoch milliseconds); `location` is omitted
+when none was given. **No token in any body**: the cookie is the credential.
+
+**Sign-up.** `name`, `email`, `password` and `passwordConfirm` are required;
+`location` is optional free text. The form checks the retype before sending;
+**the server must check `passwordConfirm === password` again** and answer
+`400 { error: "password_mismatch", field: "passwordConfirm" }` — the form's
+check is a convenience, the server's is the rule. `password` meets the stated
+minimum (`weak_password` otherwise).
+
+**Forgot / reset.** `POST /auth/reset { email }` always answers `200 {}` and,
+when the address has an account, emails a **single-use, expiring** link to the
+site's reset page with `?token=…&email=…`. `POST /auth/password` takes the
+token with the new password twice; a used or expired token is
+`expired_token`, a retype that differs is `password_mismatch`. A used token
+must be rejected even if it has not expired.
+
+**Sign-in with a provider (`methods oauth`).** Providers are the backend's
+configuration — each an OpenID Connect issuer (discovered from its
+`/.well-known/openid-configuration`) or a plain OAuth 2 provider
+(authorize, token and userinfo URLs), with a display label, client id,
+client secret and scopes, all in the **backend's own environment**. Only
+`{ id, label }` ever reaches the page: `id` is lower-case letters, digits and
+`-` (it becomes a path segment), `label` at most 40 characters of plain text.
+The page renders one "Continue with {label}" link per provider, pointing at
+`start`.
+
+- **`start`** checks `site` against the same origin allow-list as CORS and
+  `next` is a path on it (starts with one `/`), else `400`. It creates a
+  `state`, a PKCE verifier (sent as an S256 `code_challenge`) and, for OIDC, a
+  `nonce`; binds `state` to the browser (a short-lived httpOnly cookie); and
+  redirects to the provider's authorize endpoint.
+- **`callback`** requires the `state` to match the bound one (single use),
+  exchanges the code with the verifier and the client secret, and for OIDC
+  verifies the id_token's signature, `iss`, `aud`, `exp` and `nonce`.
+- **Accounts link by verified email only.** An address the provider does not
+  mark verified never signs in to an existing account:
+  `email_unverified`. A provider may create a new account only if the backend
+  chooses to allow it.
+- **Success** sets the session cookie and redirects to `site` + `next`.
+  **Failure** redirects to `site` + `/login?auth_error=<code>` with a code
+  from the closed set (`oauth_failed`, `email_unverified`, `rate_limited`…);
+  the form shows its copy and drops the parameter from the address.
+
+`start` and `callback` are top-level navigations, not fetches, so they carry
+no `Origin` or CSRF header; `state`, PKCE, `nonce` and the `site` allow-list
+protect them instead.
 
 **Errors.** Any non-2xx with `{ error, field? }`, where `error` is one of
 §3's closed set — `invalid_credentials`, `email_taken`, `weak_password`,
@@ -221,7 +270,7 @@ never reaches a route.
 
 **The backend's checklist:**
 
-1. Serve the seven routes above under `/auth`, with these exact shapes.
+1. Serve the routes above under `/auth`, with these exact shapes.
 2. Set the session as an httpOnly, Secure cookie; never return a token.
 3. CORS: the site's exact origin, credentials allowed, the two headers, `Vary: Origin`.
 4. Refuse a `POST` without `x-az-request: 1`, and any foreign `Origin`.
@@ -229,9 +278,15 @@ never reaches a route.
 6. Rate-limit sign-in, link and reset; answer `429`.
 7. Map every failure onto the closed set; never send a message meant for the page.
 8. Store passwords with a slow, salted hash; row-level rules protect the data (§4.1).
+9. Re-check `passwordConfirm` on sign-up and on `/password`.
+10. Reset links: single use, expiring, sent only to an address with an account.
+11. Providers: configuration in the backend's environment only; `state` +
+    PKCE (+ `nonce` for OIDC) on every round-trip; link by verified email
+    only; redirect only to an allow-listed `site`.
 
 `pnpm test:auth` runs the site's side against a local mock that meets this
-checklist from another origin, in Chromium, Firefox and WebKit.
+checklist from another origin — including a mock OpenID Connect provider on a
+third — in Chromium, Firefox and WebKit.
 
 ## 4. Secret leakage — a hard build error
 
@@ -323,6 +378,8 @@ on screen as much as a screen-reader user needs it in the tree.
 | password, `login` | `current-password` | `password` |
 | password, `signup` / `reset` set-new | `new-password` | `password` |
 | name, `signup` | `name` | `text` |
+| retype password, `signup` / `reset` set-new | `new-password` | `password` |
+| location, `signup` (optional) | `address-level2` | `text` |
 | one-time code | `one-time-code` | `text`, `inputmode="numeric"` |
 
 **Inline errors, tied by id.** Each error sits in an element whose id is named
@@ -410,7 +467,11 @@ static hosts are abused this way constantly. For the word that means:
   no custom domains on free, no anonymous publishing, safe-browsing checks on
   publish, a report button, a human on the takedown path.
 
-The design consequence: **`auth` never renders another entity's name or mark.**
+The design consequence: **`auth` never renders another entity's mark, and
+compiles no other entity's name.** (Owner decision, 2026-09-23: `methods
+oauth` shows "Continue with {label}" — text the site owner's backend supplies
+at runtime from its own configuration, never a logo or a name compiled into
+the site.)
 No borrowed wordmarks, no provider logos in the theme — the author supplies
 their own, exactly as `footer` §6 requires. A generated form that cannot dress
 itself up as somebody else is harder to weaponise, and it keeps the word inside
@@ -431,7 +492,7 @@ CONVENTIONS §5.
     "title":    { "type": "string", "maxWords": 8 },
     "sub":      { "type": "string", "maxWords": 20 },
     "methods":  { "type": "list", "of": "enum", "values": ["password", "link", "oauth"],
-                  "max": 3, "default": ["password"], "deferred": ["oauth"] },
+                  "max": 3, "default": ["password"] },
     "redirect": { "type": "route" },
     "terms":    { "type": "route" },
     "impl":     { "type": "path", "ext": [".ts", ".tsx"], "scope": "site" },
@@ -477,6 +538,7 @@ CONVENTIONS §5.
 | `glass` on an auth page | warning | `auth: 'glass' reduces contrast on credential fields — use the plain surface` |
 | submit label in the denylist | warning | `auth: 'Submit' is not what the button does — name the action, e.g. "Sign in"` |
 | `<Protected>` with no `login` page (AZ2004) | warning | `auth: a protected route has nowhere to send signed-out users — add a page with 'auth login'` |
+| `methods oauth` without `azbackend`/`session` (AZ2005) | error | `auth: 'methods oauth' needs adapter azbackend or session — their server runs the provider sign-in` |
 
 **Where the two unsuppressible errors run.** Rule 1 runs twice: `az build`
 scans the environment and the project's `.env` files before it writes
@@ -506,6 +568,11 @@ in AZ is a judgement call with an escape hatch; shipping a database key is not.
    shipping. *(Recommend: defer to M5 — `password` and `link` cover the dogfood
    site, and deferring keeps the phishing surface smallest for the release where
    abuse risk is highest.)*
+   **Decided by the owner, 2026-09-23: yes — overriding the deferral.** It
+   ships provider-neutral: generic OpenID Connect and OAuth 2 providers
+   configured in the backend's environment, the round-trip run by the
+   backend (§3.4), text-only labels (§9). It needs a cookie adapter's server:
+   `adapter azbackend` or `session` (AZ2005 otherwise).
 4. **Should `<Protected>` exist at all in Phase 1**, given §5's admission that it
    protects nothing? *(Recommend: yes, with the header comment stating what it is
    not. Without it every user writes a worse one, without the warning.)*

@@ -52,7 +52,7 @@ Combine freely.
 | `adapter` | enum | `hosted` / `session` / `azbackend` / `custom` |  | required, site-level | which adapter role handles the credentials; site-level, once per site |
 | `title` | string |  |  | ≤ 8 words | the form heading (the page's only `<h1>`) |
 | `sub` | string |  |  | ≤ 20 words | one supporting line under the title |
-| `methods` | list | `password` / `link` / `oauth` | `password` | max 3, deferred: `oauth` | sign-in methods offered: `password`, `link` (`oauth` is deferred) |
+| `methods` | list | `password` / `link` / `oauth` | `password` | max 3 | sign-in methods offered: `password`, `link`, `oauth` (provider buttons from the backend; needs `azbackend` or `session`, spec §3.4) |
 | `redirect` | route |  |  |  | page to go to after success; must be a page of this site |
 | `terms` | route |  |  |  | terms page a signup must link to |
 | `impl` | path |  |  | .ts, .tsx, site-level | the file implementing the adapter when `adapter custom`; site-level |
@@ -125,7 +125,7 @@ Known gaps:
 
 - No login has been run against a real hosted provider (needs an account);
   the flows pass against a local mock of the §3.2 protocol
-- `methods oauth` is deferred; `azbackend` is available (protocol: spec §3.4)
+- `azbackend` and `methods oauth` are available (protocol: spec §3.4); `signup` asks for name, email, password, its retype and an optional location
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested

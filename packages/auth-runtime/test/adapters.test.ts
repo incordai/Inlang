@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  AUTH_ERROR_CODES, ERROR_COPY, MIN_PASSWORD, safeNext, toErrorCode, validate,
+  AUTH_ERROR_CODES, ERROR_COPY, MIN_PASSWORD, PROVIDER_LABEL_MAX, fieldOf, parseProviders, safeNext, toErrorCode, validate,
 } from '../src/runtime/contract.ts';
 import { createHostedAdapter, type HostedEnv } from '../src/runtime/hosted.ts';
 import { createSessionAdapter } from '../src/runtime/session.ts';
@@ -224,4 +224,88 @@ test('CONTROL: the same-origin `session` adapter is unchanged — no CSRF header
   assert.equal(f.calls[0].init.credentials, 'same-origin');
   assert.equal((f.calls[0].init.headers as Record<string, string>)[CSRF_HEADER], undefined);
   assert.equal(a.id, 'session');
+});
+
+/* ---- §3.4 additions: profile, retype, providers ------------------------- */
+
+test('§3.4 sign-up sends name, email, password, the retype and a location — and only what was given', async () => {
+  const f = backendFetch({ '/auth/sign-up': { status: 200, body: { session: { user: { id: 'u2', email: 'b@studio.test', name: 'Bea', location: 'Lisbon' } } } } });
+  const a = createBackendAdapter({ url: 'https://api.studio.test' }, { fetch: f.fetch });
+  const r = await a.signUp({ name: 'Bea', email: 'b@studio.test', password: 'pw-long-enough', passwordConfirm: 'pw-long-enough', location: 'Lisbon' });
+  assert.deepEqual(JSON.parse(String(f.calls[0].init.body)),
+    { name: 'Bea', email: 'b@studio.test', password: 'pw-long-enough', passwordConfirm: 'pw-long-enough', location: 'Lisbon' });
+  assert.deepEqual(r.ok && r.session?.user, { id: 'u2', email: 'b@studio.test', name: 'Bea', location: 'Lisbon' });
+  await a.signUp({ name: 'C', email: 'c@studio.test', password: 'p', passwordConfirm: 'p' });
+  assert.equal('location' in JSON.parse(String(f.calls[1].init.body)), false, 'no empty keys in a body');
+});
+
+test('§3.4 the session read carries name and location; a non-string is dropped, not trusted', async () => {
+  const f = backendFetch({ '/auth/session': { status: 200, body: { session: { user: { id: 'u', email: 'a@b.co', name: 'Ada', location: 7 } } } } });
+  const a = createBackendAdapter({ url: 'https://api.studio.test' }, { fetch: f.fetch });
+  await a.ready?.();
+  assert.deepEqual(a.session()?.user, { id: 'u', email: 'a@b.co', name: 'Ada' });
+});
+
+test('§3.4 reset: the new password is sent with its retype', async () => {
+  const f = backendFetch({ '/auth/password': { status: 200, body: { session: USER } } });
+  const a = createBackendAdapter({ url: 'https://api.studio.test' }, { fetch: f.fetch });
+  await a.setPassword('tok', 'new-password-12', 'new-password-12');
+  assert.deepEqual(JSON.parse(String(f.calls[0].init.body)), { token: 'tok', password: 'new-password-12', passwordConfirm: 'new-password-12' });
+});
+
+test('§3.4 the server re-checking the retype maps to password_mismatch on the retype field', async () => {
+  const f = backendFetch({ '/auth/sign-up': { status: 400, body: { error: 'password_mismatch', field: 'passwordConfirm' } } });
+  const a = createBackendAdapter({ url: 'https://api.studio.test' }, { fetch: f.fetch });
+  assert.deepEqual(await a.signUp({ email: 'a@b.co', password: 'x', passwordConfirm: 'y' }),
+    { ok: false, code: 'password_mismatch', field: 'passwordConfirm' });
+  assert.equal(fieldOf('password_mismatch'), 'passwordConfirm');
+});
+
+test('§3.4 validation: a retype that differs is caught before any request', () => {
+  const pw = 'x'.repeat(MIN_PASSWORD);
+  assert.deepEqual(validate({ password: pw, passwordConfirm: pw + 'y' }, { password: 'new', confirm: true }).map((e) => e.field), ['passwordConfirm']);
+  assert.deepEqual(validate({ password: pw, passwordConfirm: pw }, { password: 'new', confirm: true }), []);
+  assert.deepEqual(validate({ password: pw }, { password: 'new' }), [], 'CONTROL: no retype asked, none checked');
+});
+
+test('§3.4 providers: GET /auth/providers, validated — bad ids, long or empty labels and duplicates dropped', async () => {
+  const f = backendFetch({ '/auth/providers': { status: 200, body: { providers: [
+    { id: 'work', label: 'Work account' }, { id: 'work', label: 'Twice' }, { id: 'Bad Id', label: 'x' },
+    { id: 'long', label: 'x'.repeat(PROVIDER_LABEL_MAX + 1) }, { id: 'blank', label: '  ' }, { id: 'n', label: 3 }, null,
+    { id: 'school', label: ' School ' },
+  ] } } });
+  const a = createBackendAdapter({ url: 'https://api.studio.test' }, { fetch: f.fetch });
+  assert.deepEqual(await a.providers?.(), [{ id: 'work', label: 'Work account' }, { id: 'school', label: 'School' }]);
+  assert.equal(f.calls[0].init.method, 'GET');
+  assert.equal(f.calls[0].init.credentials, 'include');
+  assert.deepEqual(parseProviders({ providers: 'nope' }), []);
+  assert.deepEqual(parseProviders(null), []);
+});
+
+test('§3.4 providers: an unreachable or failing backend offers none', async () => {
+  const down = createBackendAdapter({ url: 'https://api.studio.test' }, {
+    fetch: (async () => { throw new TypeError('offline'); }) as unknown as typeof fetch,
+  });
+  assert.deepEqual(await down.providers?.(), []);
+  const f = backendFetch({ '/auth/providers': { status: 500, body: {} } });
+  assert.deepEqual(await createBackendAdapter({ url: 'https://api.studio.test' }, { fetch: f.fetch }).providers?.(), []);
+});
+
+test('SECURITY §3.4: the start URL carries a same-origin `next` and the site; a bad id is refused', () => {
+  const a = createBackendAdapter({ url: 'https://api.studio.test' });
+  const url = new URL(a.oauthStart!('work', '/account?tab=1', 'https://www.studio.test'));
+  assert.equal(url.origin + url.pathname, 'https://api.studio.test/auth/oauth/work/start');
+  assert.equal(url.searchParams.get('next'), '/account?tab=1');
+  assert.equal(url.searchParams.get('site'), 'https://www.studio.test');
+  const off = new URL(a.oauthStart!('work', 'https://evil.test/x', 'https://www.studio.test'));
+  assert.equal(off.searchParams.get('next'), '/', 'an off-site next is never passed on');
+  assert.throws(() => a.oauthStart!('../admin', '/', 'https://www.studio.test'), /not a provider id/);
+});
+
+test('the closed set grew by three, each with copy that names no provider', () => {
+  for (const c of ['password_mismatch', 'oauth_failed', 'email_unverified'] as const) {
+    assert.ok(AUTH_ERROR_CODES.includes(c));
+    assert.ok(ERROR_COPY[c].length > 10);
+  }
+  assert.equal(toErrorCode('email_unverified'), 'email_unverified');
 });
