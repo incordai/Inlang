@@ -46,7 +46,8 @@ export type BlockCheckKind =
 export type PageCheckKind =
   | 'perPage'           // more than `atMost` of this word (matching `when`) on one page
   | 'notFirst'          // this word (matching `when`) opens the page's content
-  | 'pageWhen';         // `when` holds on a block a page renders, site-scoped props resolved
+  | 'pageWhen'          // `when` holds on a block a page renders, site-scoped props resolved
+  | 'pageLacks';        // `when` holds, and no block the page renders is `needsWord` matching `needs`
 
 /**
  * SITE kinds run once per file, on the site-level declaration of a word,
@@ -102,15 +103,17 @@ export interface Check {
   readonly atLeast?: number;
   readonly atMost?: number;
   readonly pattern?: string;
-  /** For `siteNeeds`: what a page's block of this word must match to satisfy it. */
+  /** For `siteNeeds` / `pageLacks`: what a block must match to satisfy it. */
   readonly needs?: CheckWhen;
+  /** For `pageLacks`: the word that must be on the page (defaults to this word). */
+  readonly needsWord?: string;
 }
 
 export const BLOCK_KINDS: ReadonlySet<string> = new Set<BlockCheckKind>([
   'count', 'when', 'childMissing', 'childEqual', 'childAllOrNone', 'childAtMostOne',
   'childUnique', 'childLabelWords', 'childLabelPattern', 'childRoute', 'propWords', 'valuePattern',
 ]);
-export const PAGE_KINDS: ReadonlySet<string> = new Set<PageCheckKind>(['perPage', 'notFirst', 'pageWhen']);
+export const PAGE_KINDS: ReadonlySet<string> = new Set<PageCheckKind>(['perPage', 'notFirst', 'pageWhen', 'pageLacks']);
 export const SITE_KINDS: ReadonlySet<string> = new Set<SiteCheckKind>(['siteNeeds']);
 
 /** One argument of a fill, as either stage holds it. */
@@ -315,6 +318,12 @@ export function runPageChecks(entries: readonly PageEntry[], report: Report): vo
       }
       if (c.kind === 'pageWhen') {
         if (holds(c.when, e.subject)) say(e.subject.pos);
+        continue;
+      }
+      if (c.kind === 'pageLacks') {
+        const word = c.needsWord ?? e.subject.word;
+        const met = entries.some((x) => x.subject.word === word && holds(c.needs, x.subject));
+        if (holds(c.when, e.subject) && !met) say(e.subject.pos);
         continue;
       }
       // perPage: judged once per check per page, over every matching block.

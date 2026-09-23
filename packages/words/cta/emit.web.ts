@@ -7,7 +7,7 @@
  *   (split) div.az-cta-text > (the same three) + div.az-cta-media[data-media]? > img.az-cta-media-img
  * Variants: band — full-bleed accent surface, inverted ink and buttons · card — inset surface card with a border ·
  *   split — two-column grid text|media, one column below sm.
- * Modifiers: glass — declared, not rendered yet · reveal — declared, not rendered yet.
+ * Modifiers: glass — blurred veil on card/split (translucent) · reveal — declared, not rendered yet.
  * Props: title → h2.az-cta-title · sub → p.az-cta-sub · media → img.az-cta-media-img (split only) ·
  *   describe → the image's alt; without it the image is decorative and hidden below sm.
  * Styling: theme tokens only; band paints accent with accent-contrast ink; below.sm mobile gutter,
@@ -39,7 +39,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
@@ -142,6 +142,10 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       marginInline: variant === 'card' ? px(t.size['gutter-lg']) : undefined,
       border: variant === 'card' ? `1px solid ${t.color.border}` : undefined,
     },
+    // §5 `glass`: worth it on `card` over something behind the page (a 3D
+    // backdrop); `band` paints its own solid, so it stays solid (warning).
+    // The solid surface above is the fallback, and passes contrast on its own.
+    translucent: block.modifiers.includes('glass') && variant !== 'band' ? { style: glassSurface(t) } : undefined,
     // §6, below sm: every variant takes the mobile gutter (theme-spec §1);
     // `band` drops its vertical padding a step; `card`'s inset drops to the
     // gutter; `split` restacks — text above, media below (source order).

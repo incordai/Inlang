@@ -140,6 +140,18 @@ export interface EmittedNode {
    * instant, never "slower" (theme-spec §9.3).
    */
   readonly reducedMotion?: StyleMap;
+  /**
+   * Overrides where the page can be blurred through the element — `glass`
+   * (nav-spec §3, cta-spec §5): the browser supports `backdrop-filter` and the
+   * visitor has not asked for reduced transparency. The base style is the
+   * solid fallback and must pass contrast on its own; this only makes it
+   * translucent. `states` overrides apply the same way to a state's style
+   * (a `solid` nav turns glass, not solid, once scrolled).
+   */
+  readonly translucent?: {
+    readonly style?: StyleMap;
+    readonly states?: Readonly<Partial<Record<InteractionState, StyleMap>>>;
+  };
   readonly children?: readonly (EmittedNode | string)[];
 }
 
@@ -234,6 +246,18 @@ export const componentNode = (src: string): EmittedNode => ({ tag: COMPONENT_TAG
  * (nav-spec §7, footer-spec §9) — this is its name. Clipped rather than
  * `display: none`, which would hide it from screen readers too.
  */
+/**
+ * The `glass` surface — the style a word puts under `translucent` (nav-spec
+ * §3, cta-spec §5). The page tone as `color.veil` (the 92% veil whose
+ * contrast is proven against pure white and pure black behind it, theme-spec
+ * §3.3), blurred by the theme's `size.glass-blur`. Text contrast never rests
+ * on the blur: the veil alone passes, and the solid fallback is the base.
+ */
+export const glassSurface = (theme: ThemeLike): StyleMap => {
+  const blur = `blur(${px(theme.size['glass-blur'])})`;
+  return { background: theme.color.veil, backdropFilter: blur, WebkitBackdropFilter: blur };
+};
+
 export const visuallyHidden = (text: string): EmittedNode => ({
   tag: 'span',
   attrs: { class: 'az-visually-hidden' },

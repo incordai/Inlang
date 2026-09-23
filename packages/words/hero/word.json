@@ -15,7 +15,7 @@
       "3d": "Adds a 3D scene (procedural or model)",
       "scroll": "3D camera follows page scroll; needs 3d",
       "parallax": "Visual moves slower than the page on scroll",
-      "glass": "Blurred translucent surface (not rendered yet)"
+      "glass": "Blurs the page backdrop behind the type"
     }
   },
   "variants": [
@@ -165,6 +165,36 @@
       "when": {
         "prop": "height",
         "value": "full"
+      }
+    },
+    {
+      "code": "AZ2123",
+      "kind": "when",
+      "severity": "warning",
+      "message": "'glass' on 'full' does nothing — the scrim already carries the type",
+      "when": {
+        "variant": [
+          "full"
+        ],
+        "modifier": "glass"
+      }
+    },
+    {
+      "code": "AZ2124",
+      "kind": "pageLacks",
+      "severity": "warning",
+      "message": "'glass' has nothing to blur — add a scene backdrop behind the page",
+      "when": {
+        "modifier": "glass",
+        "notVariant": [
+          "full"
+        ]
+      },
+      "needsWord": "scene",
+      "needs": {
+        "variant": [
+          "backdrop"
+        ]
       }
     }
   ]

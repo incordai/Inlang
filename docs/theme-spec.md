@@ -94,6 +94,7 @@ Full scale and the linter rule: **§7**.
 | `size.scrim` | `Px` | height of the nav top-scrim gradient | nav-spec §4 (~120px) |
 | `size.hairline` | `Px` | 1px. A border width is not a spacing step | — |
 | `size.edge-emphasis` | `Px` | 2px. An edge that carries emphasis by weight, not colour alone — pricing-spec §7.3's highlighted plan | — |
+| `size.glass-blur` | `Px` | 16px midnight, 12px paper, 0 signal. How far `glass` blurs what is behind it (nav-spec §3, cta-spec §5); signal's glass is translucent but unblurred, true to its zero-blur rule (§5.3) | per theme |
 | `size.ring` | `Px` | focus ring width | hero-spec §9 |
 | `size.ring-offset` | `Px` | focus ring offset. **Load-bearing** — see §6.2 | — |
 

@@ -88,6 +88,7 @@ export const midnight: Theme = {
     'column-min': 240,
     'edge-emphasis': 2,
     'nav-side': 256,
+    'glass-blur': 16,
   },
   type: {
     display: 'system-ui, sans-serif',
@@ -171,6 +172,7 @@ export const paper: Theme = {
     'column-min': 240,
     'edge-emphasis': 2,
     'nav-side': 256,
+    'glass-blur': 12,
   },
   type: {
     display: 'system-ui, sans-serif',
@@ -254,6 +256,7 @@ export const signal: Theme = {
     'column-min': 240,
     'edge-emphasis': 2,
     'nav-side': 256,
+    'glass-blur': 0,
   },
   type: {
     display: 'system-ui, sans-serif',

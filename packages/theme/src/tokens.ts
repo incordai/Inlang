@@ -164,6 +164,12 @@ export interface SizeTokens {
    * word needing a sidebar must get the SAME width — theme-spec §1.
    */
   readonly 'nav-side': number;
+  /**
+   * How far `glass` blurs what is behind it, in px (nav-spec §3, cta-spec §5).
+   * Per theme, because `signal` draws every edge hard with zero blur
+   * (theme-spec §5.3): its glass is translucent and unblurred.
+   */
+  readonly 'glass-blur': number;
 }
 
 export interface TypeTokens {

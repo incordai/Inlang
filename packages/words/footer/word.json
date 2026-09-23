@@ -10,7 +10,7 @@
       "mega": "Many groups; accordions on phones"
     },
     "modifiers": {
-      "glass": "Blurred translucent surface (not rendered yet)"
+      "glass": "Blurred veil surface; solid where unsupported"
     }
   },
   "variants": [
@@ -173,6 +173,21 @@
         "social"
       ],
       "atMost": 3
+    },
+    {
+      "code": "AZ2085",
+      "kind": "pageLacks",
+      "severity": "warning",
+      "message": "'glass' has nothing to blur — the section above it is flat",
+      "when": {
+        "modifier": "glass"
+      },
+      "needsWord": "scene",
+      "needs": {
+        "variant": [
+          "backdrop"
+        ]
+      }
     }
   ],
   "requiresWhen": {

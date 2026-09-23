@@ -10,7 +10,7 @@
  *   div.az-footer-bottom > p.az-footer-copyright (span[data-year] when year is dynamic) + ul.az-footer-legal
  * Variants: minimal — logo, tagline and legal row, flattened · columns — groups as flex columns, one below sm ·
  *   mega — grid of groups; below sm the groups become details accordions.
- * Modifiers: glass — declared, not rendered yet.
+ * Modifiers: glass — blurred veil surface (translucent).
  * Props: logo → img.az-footer-logo-img · tagline → p.az-footer-tagline · copyright → the copyright line ·
  *   since / year → the year in that line (dynamic: runtime updates it).
  * Styling: theme tokens only; below.sm mobile gutter; minimal centres below sm; mega switches forms by width.
@@ -38,7 +38,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { glassSurface, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** `link "Shoes" /shoes` — one list item. */
 function footerLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
@@ -282,6 +282,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.surface,
       color: t.color.text,
     },
+    // §7 `glass` is decorative: the solid surface is the fallback and carries
+    // the contrast; where blur is supported the page shows through, blurred.
+    translucent: block.modifiers.includes('glass') ? { style: glassSurface(t) } : undefined,
     // The mobile gutter below sm (theme-spec §1); `minimal` centres its stack.
     below: { sm: { paddingInline: px(t.size['gutter-sm']), textAlign: variant === 'minimal' ? 'center' : undefined } },
     children,

@@ -17,7 +17,7 @@
       "sticky": "Stays pinned to the top while scrolling",
       "hide": "Hides scrolling down, returns scrolling up",
       "shrink": "Gets shorter after scrolling past the top",
-      "glass": "Blurred translucent surface (not rendered yet)",
+      "glass": "Blurred veil behind the bar; solid where unsupported",
       "solid": "Transparent over the hero, solid after scroll"
     },
     "children": {

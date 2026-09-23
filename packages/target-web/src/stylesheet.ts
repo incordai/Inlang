@@ -138,6 +138,8 @@ interface Canonical {
   readonly below: [BreakpointName, [string, string][]][];
   readonly states: [InteractionState, [string, string][]][];
   readonly reducedMotion: [string, string][];
+  readonly translucent: [string, string][];
+  readonly translucentStates: [InteractionState, [string, string][]][];
 }
 
 function canonical(node: EmittedNode): Canonical | null {
@@ -146,7 +148,7 @@ function canonical(node: EmittedNode): Canonical | null {
       throw new StyleValueError(`style: '${key}' is not a breakpoint — use ${BREAKPOINT_NAMES.join(', ')}`);
     }
   }
-  for (const key of Object.keys(node.states ?? {})) {
+  for (const key of [...Object.keys(node.states ?? {}), ...Object.keys(node.translucent?.states ?? {})]) {
     if (!(INTERACTION_STATES as readonly string[]).includes(key)) {
       throw new StyleValueError(`style: '${key}' is not a state — use ${INTERACTION_STATES.join(', ')}`);
     }
@@ -160,8 +162,13 @@ function canonical(node: EmittedNode): Canonical | null {
       .map((s) => [s, declarations(node.states?.[s])] as [InteractionState, [string, string][]])
       .filter(([, d]) => d.length > 0),
     reducedMotion: declarations(node.reducedMotion),
+    translucent: declarations(node.translucent?.style),
+    translucentStates: INTERACTION_STATES
+      .map((s) => [s, declarations(node.translucent?.states?.[s])] as [InteractionState, [string, string][]])
+      .filter(([, d]) => d.length > 0),
   };
-  const empty = c.base.length + c.below.length + c.states.length + c.reducedMotion.length === 0;
+  const empty = c.base.length + c.below.length + c.states.length + c.reducedMotion.length
+    + c.translucent.length + c.translucentStates.length === 0;
   return empty ? null : c;
 }
 
@@ -218,7 +225,7 @@ export function compileStyles<T>(
     // A component node is the author's own code: it styles itself.
     if (node.tag === COMPONENT_TAG) return node;
     const c = canonical(node);
-    const { style: _style, below: _below, states: _states, reducedMotion: _rm, ...rest } = node;
+    const { style: _style, below: _below, states: _states, reducedMotion: _rm, translucent: _tr, ...rest } = node;
     if (!c) return { ...rest, ...(children ? { children } : {}) };
     const key = JSON.stringify(c);
     const cls = classFor(key, rules);
@@ -254,6 +261,25 @@ export function compileStyles<T>(
       .map(([cls, d]) => block(STATE_SELECTOR[state](sel(cls)), d!, state === 'hover' ? '  ' : ''));
     if (!lines.length) continue;
     out.push(state === 'hover' ? `@media (hover: hover) {\n${lines.join('\n')}\n}` : lines.join('\n'));
+  }
+  // glass: only where the browser blurs through the element and the visitor
+  // has not asked for reduced transparency. The base rule above is the solid
+  // fallback; these come after the states so a translucent state wins its
+  // solid twin, and before reduced motion, which never touches surfaces.
+  const glass: string[] = [];
+  for (const cls of names) {
+    const { translucent } = rules.get(cls)!.c;
+    if (translucent.length) glass.push(block(sel(cls), translucent, '    '));
+  }
+  for (const state of INTERACTION_STATES) {
+    for (const cls of names) {
+      const d = rules.get(cls)!.c.translucentStates.find(([s]) => s === state)?.[1];
+      if (d) glass.push(block(STATE_SELECTOR[state](sel(cls)), d, '    '));
+    }
+  }
+  if (glass.length) {
+    out.push(`@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {\n`
+      + `  @media not (prefers-reduced-transparency: reduce) {\n${glass.join('\n')}\n  }\n}`);
   }
   const reduced = names
     .map((cls) => [cls, rules.get(cls)!.c.reducedMotion] as const)

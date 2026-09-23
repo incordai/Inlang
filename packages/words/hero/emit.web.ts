@@ -11,7 +11,7 @@
  *   full — scrim background, on-scrim type, visual absolutely behind · stack — column from the top, visual below ·
  *   minimal — centred column, larger display type (display-lg).
  * Modifiers: 3d — emits the visual box + poster for the page renderer · scroll / parallax — set data-az-camera ·
- *   glass — declared, not rendered yet.
+ *   glass — blurred veil over a backdrop (translucent.states.overBackdrop).
  * Props: eyebrow → p.az-hero-eyebrow · title → h1.az-hero-title · sub → p.az-hero-sub ·
  *   height → min-height in svh (HEIGHT table) + data-height · poster → img.az-hero-poster via ctx.asset ·
  *   describe → poster alt and the visual's aria-label · model → data-az-model via ctx.asset.
@@ -36,7 +36,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** §6 — height is a WORD, and the emitter supplies the unit. */
 const HEIGHT: Record<string, number> = {
@@ -257,6 +257,13 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // surface — every variant but `full` (already on its scrim) takes the veil.
       ...(variant === 'full' ? {} : { overBackdrop: { background: t.color.veil } }),
     },
+    // `glass`: the veil under the type, blurred (nav-spec §3's mechanism). The
+    // only thing behind a hero's type is the page's backdrop, so glass is the
+    // backdrop state's surface; `full` already sets its type on the scrim,
+    // where glass does nothing (warning AZ2123).
+    translucent: block.modifiers.includes('glass') && variant !== 'full'
+      ? { states: { overBackdrop: glassSurface(t) } }
+      : undefined,
     // §10: under 768px `split` restacks to `stack` — text above, media
     // below, which is already the source order. center, stack and minimal
     // are unchanged; full's crop and scrim wait for the 3D runtime.

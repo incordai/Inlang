@@ -11,7 +11,7 @@
  * Variants: bar · center · split · mega (links in the bar, group panels full width) · minimal (menu button at
  *   every size) · side (vertical column; the page lays out beside it) · none (renders nothing).
  * Modifiers: sticky — pinned to the top · hide — data-az-hide, retracts on scroll down · shrink — data-az-shrink,
- *   shorter past the top · solid — clear over the hero, solid after scroll · glass — declared, not rendered yet.
+ *   shorter past the top · solid — clear over the hero, solid after scroll · glass — blurred veil (translucent; solid nav: once scrolled).
  * Props: logo → img.az-nav-logo-img · inverse → the light logo while solid is clear ·
  *   mobile → data-mobile (drawer is the one built) · link / group / cta children → the items above.
  * Styling: theme tokens only; LAYOUT table per variant; below.sm links collapse into the drawer;
@@ -45,7 +45,7 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { glassSurface, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 import { closeButton, drawer, dropdown } from '../../overlay/src/index.ts';
 
 /** The drawer's id — the toggle's aria-controls points here (§6). */
@@ -323,6 +323,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const x = closeButton(t, 'Close menu');
 
   const solid = block.modifiers.includes('solid');
+  const glass = block.modifiers.includes('glass');
   const nav: EmittedNode = {
     tag: 'nav',
     attrs: {
@@ -385,6 +386,10 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     }),
     // §3: `hide` "must be instant under reduced-motion" — no slide at all.
     reducedMotion: hides || shrinks ? { transition: 'none' } : undefined,
+    // §3 `glass`: blur once content scrolls under the bar. A `solid` nav is
+    // clear at the top, so its glass is its scrolled state; any other bar is
+    // glass wherever blur is supported (flat page behind it: same tone).
+    translucent: glass ? (solid ? { states: { scrolled: glassSurface(t) } } : { style: glassSurface(t) }) : undefined,
     // The mobile gutter below sm (theme-spec §1).
     // Below sm a side column becomes a bar: the page stacks there, and the
     // links are in the drawer (§6).

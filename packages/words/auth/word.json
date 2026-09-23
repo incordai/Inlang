@@ -10,7 +10,7 @@
       "reset": "Request a reset link, then set a new password"
     },
     "modifiers": {
-      "glass": "Blurred translucent surface (not rendered yet)"
+      "glass": "Blurred form card (warned: blur near credentials)"
     }
   },
   "variants": [

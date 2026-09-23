@@ -10,7 +10,7 @@
  *   (reset) a second hidden form with az-auth-set fields · ul.az-auth-alt? > li > a
  * Variants: login — email + password · signup — name, email, password, retype, location, terms ·
  *   reset — request a link, then set a new password (second form, shown by the URL token).
- * Modifiers: glass — declared, not rendered yet.
+ * Modifiers: glass — blurred veil on the form card (translucent).
  * Props: adapter / profile / impl / protect → site level, read by target-web/src/auth.ts ·
  *   title → h1 (default per flow) · sub → p.az-auth-sub · methods → fields and buttons ·
  *   redirect → data-redirect · terms → the terms link.
@@ -44,7 +44,7 @@
 
 import type { SpecBlock } from '../../core/src/spec.ts';
 import { COUNTRIES } from './countries.ts';
-import { px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 interface Field {
   readonly name: string;
@@ -403,6 +403,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       background: t.color.surface,
       borderRadius: px(t.radius.md),
     },
+    // `glass` on the form card: rendered as asked, with the warning §8 gives
+    // (blur behind credential fields). Contrast rests on the veil, not the blur.
+    translucent: block.modifiers.includes('glass') ? { style: glassSurface(t) } : undefined,
     // §8 below sm: a full-width card inside the page gutter (every flow is
     // one column already).
     below: { sm: { maxWidth: 'none' } },

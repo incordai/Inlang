@@ -10,7 +10,7 @@
       "split": "Text beside a supporting image"
     },
     "modifiers": {
-      "glass": "Blurred translucent surface (not rendered yet)",
+      "glass": "Card blurs what is behind it; band stays solid",
       "reveal": "Fades in when scrolled into view (not rendered yet)"
     }
   },
@@ -129,6 +129,24 @@
       "severity": "warning",
       "message": "{n} CTA blocks on one page — the ask stops being an ask",
       "atMost": 2
+    },
+    {
+      "code": "AZ2024",
+      "kind": "pageLacks",
+      "severity": "warning",
+      "message": "'glass' needs an image or scene behind it — on a flat background it does nothing",
+      "when": {
+        "modifier": "glass",
+        "notVariant": [
+          "band"
+        ]
+      },
+      "needsWord": "scene",
+      "needs": {
+        "variant": [
+          "backdrop"
+        ]
+      }
     }
   ]
 }
