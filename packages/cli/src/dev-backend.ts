@@ -150,7 +150,22 @@ export function startMailbox(port: number, print: (line: string) => void, host =
   const key = randomBytes(24).toString('base64url');
   const messages: MailboxMessage[] = [];
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const path = new URL(req.url ?? '/', 'http://x').pathname;
+    // `GET //` is a request line the URL parser rejects; answered, never thrown.
+    let path: string;
+    try {
+      path = new URL(req.url ?? '/', 'http://x').pathname;
+    } catch {
+      res.writeHead(400).end();
+      return;
+    }
+    // Reads are for a browser on THIS machine at THIS address. A page on
+    // another site that rebinds its own host name to 127.0.0.1 sends its
+    // own name as Host, so anything but the loopback address is refused —
+    // otherwise it could read the reset and sign-in links listed here.
+    if (req.method === 'GET' && req.headers.host !== `${host}:${port}`) {
+      res.writeHead(403).end();
+      return;
+    }
     if (req.method === 'GET' && path === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(mailboxPage(messages));
       return;
@@ -253,12 +268,15 @@ export async function startDevBackend(
   assertLoopback(config.host);
   const db = await openSqlite(config.sqlitePath);
   await migrate(db);
-  const store = createStore(db, config.secret);
+  const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs });
   const app = createApp({
     config, store,
     mailer: await createMailer(config),
     oidc: createOidc((...a) => fetch(...a)),
     log: (line) => print(`backend: ${line}`),
+    // Cookies here go out without Secure (loopbackCookies), and the __Host- /
+    // __Secure- prefixes require it — so dev uses the bare names.
+    plainCookieNames: true,
   });
   const server = createServer((req, res) => {
     loopbackCookies(res);

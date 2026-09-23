@@ -95,5 +95,24 @@ export const MIGRATIONS: {
         ],
       },
     },
+    {
+      // Idle expiry (a session's last use) and sign-in links bound to the
+      // browser that asked for them (the binding's keyed digest).
+      version: 2,
+      sql: {
+        sqlite: [
+          'ALTER TABLE az_sessions ADD COLUMN last_seen_at INTEGER',
+          'ALTER TABLE az_tokens ADD COLUMN binding TEXT',
+        ],
+        postgres: [
+          'ALTER TABLE az_sessions ADD COLUMN last_seen_at BIGINT',
+          'ALTER TABLE az_tokens ADD COLUMN binding CHAR(64)',
+        ],
+        mysql: [
+          'ALTER TABLE az_sessions ADD COLUMN last_seen_at BIGINT',
+          'ALTER TABLE az_tokens ADD COLUMN binding CHAR(64)',
+        ],
+      },
+    },
   ],
 };

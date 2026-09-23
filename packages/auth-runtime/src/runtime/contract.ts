@@ -84,6 +84,7 @@ export interface AuthAdapter {
   requestLink(email: string): Promise<AuthResult>;
   requestReset(email: string): Promise<AuthResult>;
   setPassword(token: string, password: string, passwordConfirm?: string): Promise<AuthResult>;
+  /** Ends the session; rejects, and stays signed in, when a server-side session was not ended. */
   signOut(): Promise<void>;
   session(): AuthSession | null;
   onChange(fn: (s: AuthSession | null) => void): () => void;
@@ -110,7 +111,7 @@ export const ERROR_COPY: Readonly<Record<AuthErrorCode, string>> = {
   weak_password: 'Choose a stronger password — at least 12 characters.',
   password_mismatch: "The two passwords don't match. Type the same password in both.",
   rate_limited: 'Too many attempts. Wait a minute, then try again.',
-  expired_token: 'This link has expired. Request a new one.',
+  expired_token: 'This link has expired, or was opened in a different browser. Request a new one here.',
   oauth_failed: "Signing in with that provider didn't finish. Try again, or use your email.",
   email_unverified: "That provider hasn't verified your email address, so it can't sign you in here. Use your email instead.",
   network: "We couldn't reach the sign-in service. Check your connection and try again.",
@@ -133,7 +134,12 @@ export interface FieldError {
   readonly message: string;
 }
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * A plain address — the same rule the built-in backend applies: a dot-atom
+ * local part and a domain of at least two DNS labels. No quotes, commas,
+ * angle brackets or display names.
+ */
+const EMAIL = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
 /**
  * §6: validate on submit. `kind` says what a password field is for — a
@@ -171,13 +177,16 @@ export function validate(values: Readonly<Record<string, string | boolean | unde
  *
  * `next` arrives in the URL, so it is attacker-controlled: an open redirect
  * from a trusted login page is a phishing tool. Only a same-origin path is
- * returned — never a scheme, a host, `//host` or `/\host`.
+ * returned — never a scheme, a host, `//host` or `/\host`. The check runs on
+ * the RESOLVED path too: `/.//host`, `/..//host` and `/%2e//host` start with
+ * a single slash but resolve to `//host`, which `location.assign` would read
+ * as another host.
  */
 export function safeNext(value: string | null | undefined, origin: string): string | null {
-  if (!value || !value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return null;
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\') || /%2e/i.test(value)) return null;
   try {
     const url = new URL(value, origin);
-    if (url.origin !== origin) return null;
+    if (url.origin !== origin || url.pathname.startsWith('//') || url.pathname.startsWith('/\\')) return null;
     return url.pathname + url.search + url.hash;
   } catch {
     return null;

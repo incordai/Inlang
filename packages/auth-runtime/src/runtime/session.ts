@@ -122,8 +122,15 @@ export function createCookieAdapter(config: CookieConfig, env: SessionEnv = { fe
     requestLink: (email) => request('POST', '/link', { email }),
     requestReset: (email) => request('POST', '/reset', { email }),
     setPassword: (token, password, passwordConfirm) => signing('/password', given({ token, password, passwordConfirm })),
+    /**
+     * The session ends on the server, and only then here. Forgetting it
+     * locally after a failed request left an httpOnly cookie and a live
+     * server session behind a page that said "signed out" — on a shared
+     * machine, the next visitor's first page load signed them back in.
+     */
     async signOut() {
-      await request('POST', '/sign-out', {});
+      const r = await request('POST', '/sign-out', {});
+      if (!r.ok) throw new Error(`sign-out failed: ${r.code}`);
       set(null);
     },
     session: () => current,

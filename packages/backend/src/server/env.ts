@@ -39,7 +39,9 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_ALLOWED_ORIGINS', about: 'The site origin(s) allowed to call this server, comma-separated, exact (https://www.example.org). Also the only places a sign-in may redirect to.', when: always, required: true, example: 'http://localhost:5173' },
   { name: 'AZ_HOST', about: 'Interface to listen on. 127.0.0.1 behind a reverse proxy; 0.0.0.0 in a container.', when: always, required: false, example: '127.0.0.1' },
   { name: 'AZ_PORT', about: 'Port to listen on.', when: always, required: false, example: '8787' },
-  { name: 'AZ_TRUST_PROXY', about: '`true` only when a reverse proxy you control sets X-Forwarded-For; rate limits then use its first address.', when: always, required: false, example: 'false' },
+  { name: 'AZ_TRUST_PROXY', about: 'How many reverse proxies you control sit in front and append to X-Forwarded-For: `false` (none, the default), `true` (one) or a number. Rate limits then use the address the outermost of them appended — never the client-supplied first entry.', when: always, required: false, example: 'false' },
+  { name: 'AZ_SESSION_IDLE_MINUTES', about: 'A session unused this long ends (default 1440, a day). ASVS level 2 asks for 30.', when: always, required: false, example: '1440' },
+  { name: 'AZ_SESSION_MAX_HOURS', about: 'A session ends this long after sign-in however active (default 336, two weeks). ASVS level 2 asks for 12.', when: always, required: false, example: '336' },
   { name: 'AZ_COOKIE_SAMESITE', about: '`lax` when the site and this server share a site (recommended), `none` when they do not.', when: always, required: false, example: 'lax' },
   { name: 'AZ_SQLITE_PATH', about: 'SQLite database file. Created on first start.', when: (s) => s.database === 'sqlite', required: false, example: './data/app.db' },
   { name: 'AZ_DATABASE_URL', about: 'Database connection string, e.g. postgres://user:password@host:5432/db or mysql://user:password@host:3306/db.', when: (s) => s.database !== 'sqlite', required: true, secret: true },
@@ -82,6 +84,9 @@ export const providerKey = (id: string, suffix: string) =>
 export const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export const LABEL_MAX = 40;
 const MIN_SECRET_BYTES = 32;
+/** More trusted proxies than this is a misconfiguration, not an architecture. */
+const MAX_PROXY_HOPS = 10;
+const MINUTE_MS = 60 * 1000;
 
 export interface Provider {
   readonly id: string;
@@ -106,7 +111,10 @@ export interface Config {
   readonly allowedOrigins: readonly string[];
   readonly host: string;
   readonly port: number;
-  readonly trustProxy: boolean;
+  /** Trusted proxies in front, 0 for none (clientIp). */
+  readonly proxyHops: number;
+  readonly sessionIdleMs: number;
+  readonly sessionMaxMs: number;
   readonly sameSite: 'Lax' | 'None';
   readonly sqlitePath: string;
   readonly databaseUrl: string;
@@ -178,7 +186,18 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
   const sameSite = (get('AZ_COOKIE_SAMESITE') || 'lax').toLowerCase();
   if (sameSite !== 'lax' && sameSite !== 'none') problems.push('AZ_COOKIE_SAMESITE must be lax or none');
   const trust = (get('AZ_TRUST_PROXY') || 'false').toLowerCase();
-  if (trust !== 'true' && trust !== 'false') problems.push('AZ_TRUST_PROXY must be true or false');
+  const proxyHops = trust === 'false' ? 0 : trust === 'true' ? 1 : /^\d+$/.test(trust) ? Number(trust) : NaN;
+  if (!Number.isInteger(proxyHops) || proxyHops < 0 || proxyHops > MAX_PROXY_HOPS) {
+    problems.push(`AZ_TRUST_PROXY must be false, true or a number of proxies (0–${MAX_PROXY_HOPS})`);
+  }
+
+  const idleMinutes = Number(get('AZ_SESSION_IDLE_MINUTES') || '1440');
+  const maxHours = Number(get('AZ_SESSION_MAX_HOURS') || '336');
+  if (!Number.isInteger(idleMinutes) || idleMinutes < 1) problems.push('AZ_SESSION_IDLE_MINUTES must be a whole number of minutes, at least 1');
+  if (!Number.isInteger(maxHours) || maxHours < 1) problems.push('AZ_SESSION_MAX_HOURS must be a whole number of hours, at least 1');
+  else if (Number.isInteger(idleMinutes) && idleMinutes > maxHours * 60) {
+    problems.push('AZ_SESSION_IDLE_MINUTES cannot be longer than AZ_SESSION_MAX_HOURS');
+  }
 
   if (setup.database !== 'sqlite' && get('AZ_DATABASE_URL')) {
     const scheme = setup.database === 'postgres' ? /^postgres(ql)?:\/\//i : /^mysql:\/\//i;
@@ -262,7 +281,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
       allowedOrigins: origins.map(originOf),
       host: get('AZ_HOST') || '127.0.0.1',
       port,
-      trustProxy: trust === 'true',
+      proxyHops,
+      sessionIdleMs: idleMinutes * MINUTE_MS,
+      sessionMaxMs: maxHours * 60 * MINUTE_MS,
       sameSite: sameSite === 'none' ? 'None' : 'Lax',
       sqlitePath: get('AZ_SQLITE_PATH') || './data/app.db',
       databaseUrl: get('AZ_DATABASE_URL'),

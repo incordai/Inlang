@@ -25,7 +25,14 @@ export interface User {
 
 export type TokenKind = 'reset' | 'link';
 
-export const SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+/** A session's limits (AZ_SESSION_IDLE_MINUTES, AZ_SESSION_MAX_HOURS). */
+export interface SessionPolicy {
+  readonly idleMs: number;
+  readonly maxMs: number;
+}
+export const DEFAULT_SESSION_POLICY: SessionPolicy = { idleMs: 24 * 60 * 60 * 1000, maxMs: 14 * 24 * 60 * 60 * 1000 };
+/** Last use is recorded at most this often, so reading a session is not a write every time. */
+const TOUCH_MS = 60 * 1000;
 export const TOKEN_TTL_MS: Readonly<Record<TokenKind, number>> = { reset: 30 * 60 * 1000, link: 15 * 60 * 1000 };
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -49,7 +56,7 @@ export interface OAuthState {
   readonly site: string;
 }
 
-export function createStore(db: Db, secret: Buffer, now: () => number = Date.now) {
+export function createStore(db: Db, secret: Buffer, now: () => number = Date.now, policy: SessionPolicy = DEFAULT_SESSION_POLICY) {
   const d = (token: string) => digest(secret, token);
 
   return {
@@ -86,20 +93,45 @@ export function createStore(db: Db, secret: Buffer, now: () => number = Date.now
       await db.run('UPDATE az_users SET email_verified = 1, updated_at = ? WHERE id = ?', [now(), userId]);
     },
 
+    /**
+     * An UNVERIFIED account is being claimed by whoever just proved the
+     * mailbox (a sign-in link) or a provider that vouches for the address.
+     * Anyone could have created it: its password and every session are the
+     * creator's, not necessarily the owner's. Both go; the account becomes
+     * verified. One conditional UPDATE, so only an unverified row changes.
+     */
+    async claimUnverified(userId: string): Promise<boolean> {
+      const changed = await db.run(
+        'UPDATE az_users SET password_hash = NULL, email_verified = 1, updated_at = ? WHERE id = ? AND email_verified = 0',
+        [now(), userId]);
+      if (changed !== 1) return false;
+      await db.run('DELETE FROM az_sessions WHERE user_id = ?', [userId]);
+      return true;
+    },
+
     /** A new session. The token is returned once, for the cookie; only its digest is kept. */
     async createSession(userId: string): Promise<{ token: string; expiresAt: number }> {
       const token = randomToken();
       const t = now();
-      const expiresAt = t + SESSION_TTL_MS;
-      await db.run('INSERT INTO az_sessions (digest, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)', [d(token), userId, t, expiresAt]);
+      const expiresAt = t + policy.maxMs;
+      await db.run('INSERT INTO az_sessions (digest, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)',
+        [d(token), userId, t, expiresAt, t]);
       return { token, expiresAt };
     },
 
+    /** The session's user, if the session is within both its absolute cap and its idle limit. */
     async sessionUser(token: string): Promise<{ user: User; expiresAt: number } | null> {
+      const t = now();
       const r = await db.get(
-        'SELECT u.*, s.expires_at AS session_expires FROM az_sessions s JOIN az_users u ON u.id = s.user_id WHERE s.digest = ? AND s.expires_at > ?',
-        [d(token), now()]);
-      return r ? { user: toUser(r), expiresAt: Number(r.session_expires) } : null;
+        'SELECT u.*, s.expires_at AS session_expires, COALESCE(s.last_seen_at, s.created_at) AS session_seen'
+        + ' FROM az_sessions s JOIN az_users u ON u.id = s.user_id'
+        + ' WHERE s.digest = ? AND s.expires_at > ? AND COALESCE(s.last_seen_at, s.created_at) > ?',
+        [d(token), t, t - policy.idleMs]);
+      if (!r) return null;
+      if (t - Number(r.session_seen) >= TOUCH_MS) {
+        await db.run('UPDATE az_sessions SET last_seen_at = ? WHERE digest = ?', [t, d(token)]);
+      }
+      return { user: toUser(r), expiresAt: Number(r.session_expires) };
     },
 
     async deleteSession(token: string): Promise<void> {
@@ -111,25 +143,37 @@ export function createStore(db: Db, secret: Buffer, now: () => number = Date.now
       await db.run('DELETE FROM az_sessions WHERE user_id = ?', [userId]);
     },
 
-    async createToken(userId: string, kind: TokenKind, site: string): Promise<string> {
+    /**
+     * A single-use token. A sign-in link also takes `binding`: a value the
+     * requesting browser holds in a cookie, stored as its keyed digest, so
+     * the link works only in that browser (login CSRF, auth-spec §3.4).
+     */
+    async createToken(userId: string, kind: TokenKind, site: string, binding?: string): Promise<string> {
       const token = randomToken();
       const t = now();
       await db.run(
-        'INSERT INTO az_tokens (digest, user_id, kind, site, created_at, expires_at, used_at) VALUES (?, ?, ?, ?, ?, ?, NULL)',
-        [d(token), userId, kind, site, t, t + TOKEN_TTL_MS[kind]]);
+        'INSERT INTO az_tokens (digest, user_id, kind, site, created_at, expires_at, used_at, binding) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)',
+        [d(token), userId, kind, site, t, t + TOKEN_TTL_MS[kind], binding ? d(binding) : null]);
       return token;
     },
 
     /**
      * Spend a token: one conditional UPDATE, so it succeeds at most once.
-     * `expired` covers used, expired and unknown alike — the caller answers
-     * all three the same way (auth-spec §3.4: `expired_token`).
+     * `expired` covers used, expired, unknown and — for a link — the wrong
+     * browser alike; the caller answers all of them the same way
+     * (auth-spec §3.4: `expired_token`). A link without its binding never
+     * spends, so a stranger's click cannot burn the owner's link either.
      */
-    async spendToken(token: string, kind: TokenKind): Promise<{ userId: string; site: string } | 'expired'> {
+    async spendToken(token: string, kind: TokenKind, binding?: string): Promise<{ userId: string; site: string } | 'expired'> {
       const t = now();
-      const changed = await db.run(
-        'UPDATE az_tokens SET used_at = ? WHERE digest = ? AND kind = ? AND used_at IS NULL AND expires_at > ?',
-        [t, d(token), kind, t]);
+      if (kind === 'link' && !binding) return 'expired';
+      const changed = kind === 'link'
+        ? await db.run(
+          'UPDATE az_tokens SET used_at = ? WHERE digest = ? AND kind = ? AND used_at IS NULL AND expires_at > ? AND binding = ?',
+          [t, d(token), kind, t, d(binding as string)])
+        : await db.run(
+          'UPDATE az_tokens SET used_at = ? WHERE digest = ? AND kind = ? AND used_at IS NULL AND expires_at > ?',
+          [t, d(token), kind, t]);
       if (changed !== 1) return 'expired';
       const r = await db.get('SELECT user_id, site FROM az_tokens WHERE digest = ?', [d(token)]);
       return r ? { userId: String(r.user_id), site: String(r.site) } : 'expired';
@@ -166,7 +210,7 @@ export function createStore(db: Db, secret: Buffer, now: () => number = Date.now
     /** Drop what can never be used again. Called on a timer. */
     async prune(): Promise<void> {
       const t = now();
-      await db.run('DELETE FROM az_sessions WHERE expires_at <= ?', [t]);
+      await db.run('DELETE FROM az_sessions WHERE expires_at <= ? OR COALESCE(last_seen_at, created_at) <= ?', [t, t - policy.idleMs]);
       await db.run('DELETE FROM az_tokens WHERE expires_at <= ? OR used_at IS NOT NULL', [t]);
       await db.run('DELETE FROM az_oauth_states WHERE expires_at <= ?', [t]);
     },

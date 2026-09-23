@@ -81,7 +81,7 @@ test('digests: keyed by the secret, so the same token under another secret does 
 
 test('migrations: apply once, and are a no-op on the next start', async () => {
   const db = await openSqlite(':memory:');
-  assert.deepEqual(await migrate(db), [1]);
+  assert.deepEqual(await migrate(db), [1, 2]);
   assert.deepEqual(await migrate(db), [], 'CONTROL: nothing re-applied');
   const tables = (await db.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'az_%' ORDER BY name")).map((r) => r.name);
   assert.deepEqual(tables, ['az_oauth_accounts', 'az_oauth_states', 'az_schema_migrations', 'az_sessions', 'az_tokens', 'az_users']);
@@ -141,12 +141,12 @@ test('sign-up: the server re-checks the retype, the minimum, the name — and st
     assert.deepEqual(await (await c.post('/auth/sign-up', { ...ada, name: '  ' })).json(), { error: 'unknown', field: 'name' });
     const ok = await c.post('/auth/sign-up', ada);
     assert.equal(ok.status, 200);
-    const set = ok.headers.getSetCookie().find((x) => x.startsWith('az_session='))!;
+    const set = ok.headers.getSetCookie().find((x) => x.startsWith('__Host-az_session='))!;
     assert.match(set, /HttpOnly/);
     assert.match(set, /Secure/);
     assert.match(set, /SameSite=Lax/);
     const body = await ok.json() as { session: { user: Record<string, string> } };
-    assert.equal(JSON.stringify(body).includes(c.jar.get('az_session')!), false, 'no token in any body — the cookie is the credential');
+    assert.equal(JSON.stringify(body).includes(c.jar.get('__Host-az_session')!), false, 'no token in any body — the cookie is the credential');
     assert.deepEqual(body.session.user, { id: body.session.user.id, email: 'ada@studio.test', name: 'Ada', location: 'Lisbon' });
     const read = await (await c.get('/auth/session')).json() as { session: { user: { name: string } } };
     assert.equal(read.session.user.name, 'Ada');
@@ -205,14 +205,14 @@ test('sessions: rotated at sign-in, ended on the server at sign-out', async () =
   try {
     const c = client(h.url);
     await c.post('/auth/sign-up', ada);
-    const first = c.jar.get('az_session')!;
+    const first = c.jar.get('__Host-az_session')!;
     await c.post('/auth/sign-in', { email: ada.email, password: GOOD });
-    const second = c.jar.get('az_session')!;
+    const second = c.jar.get('__Host-az_session')!;
     assert.notEqual(first, second, 'a new session id at sign-in');
-    const stale = await fetch(`${h.url}/auth/session`, { headers: { origin: SITE, cookie: `az_session=${first}` } });
+    const stale = await fetch(`${h.url}/auth/session`, { headers: { origin: SITE, cookie: `__Host-az_session=${first}` } });
     assert.equal((await stale.json() as { session: unknown }).session, null, 'the replaced session no longer works');
     assert.equal((await c.post('/auth/sign-out', {})).status, 204);
-    const replay = await fetch(`${h.url}/auth/session`, { headers: { origin: SITE, cookie: `az_session=${second}` } });
+    const replay = await fetch(`${h.url}/auth/session`, { headers: { origin: SITE, cookie: `__Host-az_session=${second}` } });
     assert.equal((await replay.json() as { session: unknown }).session, null, 'a copied cookie is dead after sign-out');
   } finally { await h.close(); }
 });
@@ -268,15 +268,16 @@ test('sign-in link: emailed, signs in once, lands on the site; a second use fail
   const h = await startBackend({ AZ_LINK_LANDING: '/account' });
   try {
     await client(h.url).post('/auth/sign-up', ada);
-    await client(h.url).post('/auth/link', { email: ada.email });
+    // The link is bound to the browser that asked for it (login CSRF).
+    const browser = client(h.url);
+    await browser.post('/auth/link', { email: ada.email });
     await new Promise((r) => setTimeout(r, 20));
     const href = /https?:\/\/\S+/.exec(h.mail[0].text)![0];
     assert.ok(href.startsWith(`${h.url}/auth/link/verify?token=`));
-    const browser = client(h.url);
     const r = await browser.navigate(href);
     assert.equal(r.status, 302);
     assert.equal(r.headers.get('location'), `${SITE}/account`);
-    assert.ok(browser.jar.get('az_session'), 'signed in');
+    assert.ok(browser.jar.get('__Host-az_session'), 'signed in');
     const again = await client(h.url).navigate(href);
     assert.equal(again.headers.get('location'), `${SITE}/login?auth_error=expired_token`);
   } finally { await h.close(); }
@@ -331,7 +332,7 @@ test('oauth: start refuses an unlisted site or an off-site next; sends PKCE S256
     assert.equal(q.get('code_challenge_method'), 'S256');
     assert.ok(q.get('code_challenge') && q.get('nonce') && q.get('state'));
     assert.equal(q.get('redirect_uri'), `${h.url}/auth/oauth/work/callback`);
-    const stateCookie = start.headers.getSetCookie().find((c) => c.startsWith('az_oauth_state='))!;
+    const stateCookie = start.headers.getSetCookie().find((c) => c.startsWith('__Secure-az_oauth_state='))!;
     assert.match(stateCookie, /HttpOnly/);
     assert.match(stateCookie, /Path=\/auth\/oauth/);
   } finally { await h.close(); idp.close(); }
@@ -345,7 +346,7 @@ test('oauth: a verified email links to the existing account and signs in (RS256 
     const b = client(h.url);
     const r = await roundTrip(h, b);
     assert.equal(r.location, `${SITE}/account`);
-    assert.ok(b.jar.get('az_session'));
+    assert.ok(b.jar.get('__Host-az_session'));
     const s = await (await b.get('/auth/session')).json() as { session: { user: { email: string } } };
     assert.equal(s.session.user.email, 'ada@studio.test');
   } finally { await h.close(); idp.close(); }
@@ -393,7 +394,7 @@ test('SECURITY oauth: forged, wrong-audience, expired, wrong-nonce and alg-confu
       Object.assign(idp.tamper, { alg: undefined, aud: undefined, iss: undefined, exp: undefined, nonce: undefined }, t);
       const b = client(h.url);
       assert.equal((await roundTrip(h, b)).location, `${SITE}/login?auth_error=oauth_failed`, name);
-      assert.equal(b.jar.get('az_session'), undefined, `${name}: no session`);
+      assert.equal(b.jar.get('__Host-az_session'), undefined, `${name}: no session`);
     }
     Object.assign(idp.tamper, { alg: undefined, aud: undefined, iss: undefined, exp: undefined, nonce: undefined });
     assert.equal((await roundTrip(h, client(h.url))).location, `${SITE}/account`, 'CONTROL: the honest token signs in');
@@ -414,7 +415,7 @@ test('SECURITY oauth: a callback without this browser\'s state cookie, or replay
     // The attacker's refused attempt did not burn the victim's state …
     assert.equal((await victim.navigate(callback)).headers.get('location'), `${SITE}/`, 'CONTROL: the victim signs in');
     // … and a callback that did succeed cannot be replayed.
-    victim.jar.set('az_oauth_state', new URL(callback).searchParams.get('state')!);
+    victim.jar.set('__Secure-az_oauth_state', new URL(callback).searchParams.get('state')!);
     assert.equal((await victim.navigate(callback)).headers.get('location'), `${SITE}/login?auth_error=oauth_failed`,
       'single use: a replayed callback fails even with the state cookie restored');
   } finally { await h.close(); idp.close(); }

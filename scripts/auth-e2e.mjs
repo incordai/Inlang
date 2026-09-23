@@ -731,7 +731,7 @@ const freePort = () => new Promise((done) => {
     await p.waitForURL((u) => !u.pathname.startsWith('/signup'));
     // All cookies, not cookies(url): for a plain-http URL Playwright leaves Secure ones out.
     const cookies = await ctx.cookies();
-    const session = cookies.find((c) => c.name === 'az_session' && c.domain === '127.0.0.1');
+    const session = cookies.find((c) => c.name === '__Host-az_session' && c.domain === '127.0.0.1');
     check('backend: sign-up sets an httpOnly, Secure session cookie from the real server',
       !!session?.httpOnly && !!session?.secure, JSON.stringify(session && { httpOnly: session.httpOnly, secure: session.secure, sameSite: session.sameSite }));
     const profile = await p.evaluate(async (url) => (await fetch(`${url}/auth/session`, { credentials: 'include', headers: { 'x-az-request': '1' } })).json(), serverUrl);

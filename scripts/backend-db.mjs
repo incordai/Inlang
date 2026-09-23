@@ -124,7 +124,7 @@ async function suite(engine) {
     check(`${engine} HTTP: sign-up returns the profile with location`, up.status === 200 && upBody.session.user.location === 'Porto', JSON.stringify(upBody));
     const inOk = await post('/auth/sign-in', { email: 'BEA@studio.test', password: pw });
     const cookie = (inOk.headers.getSetCookie()[0] ?? '').split(';')[0];
-    check(`${engine} HTTP: sign-in (address in another case) sets the session cookie`, inOk.status === 200 && cookie.startsWith('az_session='));
+    check(`${engine} HTTP: sign-in (address in another case) sets the session cookie`, inOk.status === 200 && cookie.startsWith('__Host-az_session='));
     const read = await (await fetch(`${base}/auth/session`, { headers: { origin: SITE, cookie } })).json();
     check(`${engine} HTTP: the session reads back`, read.session?.user?.name === 'Bea');
     await post('/auth/reset', { email: 'bea@studio.test' });

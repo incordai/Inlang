@@ -6,6 +6,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isIP } from 'node:net';
 
 /** The largest request body read; auth bodies are a few hundred bytes. */
 export const BODY_LIMIT = 16 * 1024;
@@ -93,29 +94,82 @@ export function redirect(res: ServerResponse, to: string, headers: Record<string
 }
 
 /**
- * The client's address for rate limiting. X-Forwarded-For is believed only
- * when AZ_TRUST_PROXY says a proxy you control sets it — otherwise any
- * visitor could pick their own limit bucket.
+ * The client's address for rate limiting.
+ *
+ * With `hops` 0 the socket peer is the client. Behind `hops` proxies you
+ * control, the address is the one the OUTERMOST trusted proxy appended —
+ * `hops` entries from the right of X-Forwarded-For. Proxies append; they do
+ * not replace. The left-most entry is whatever the client sent, so reading
+ * it let every request pick its own limit bucket. Anything that is not an
+ * IP address falls back to the socket peer.
  */
-export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
-  if (trustProxy) {
-    const first = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-    if (first) return first;
+export function clientIp(req: IncomingMessage, hops: number): string {
+  if (hops > 0) {
+    const entries = String(req.headers['x-forwarded-for'] ?? '').split(',').map((e) => e.trim()).filter(Boolean);
+    const candidate = entries[entries.length - hops];
+    if (candidate && isIP(candidate)) return candidate;
   }
   return req.socket.remoteAddress ?? 'unknown';
 }
 
+/** The eight groups of an IPv6 address, as numbers. Only called after `isIP(...) === 6`. */
+function groups6(ip: string): number[] {
+  let s = ip.split('%')[0].toLowerCase();
+  const v4 = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s);
+  if (v4) {
+    const [a, b, c, d] = v4.slice(1).map(Number);
+    s = `${s.slice(0, v4.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head, tail] = s.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail === undefined ? [] : tail ? tail.split(':') : [];
+  const fill = tail === undefined ? [] : Array<string>(8 - h.length - t.length).fill('0');
+  return [...h, ...fill, ...t].map((g) => parseInt(g, 16));
+}
+
+/**
+ * The bucket an address counts against. A single subscriber is routinely
+ * given a whole IPv6 /64, so counting per /128 gave one attacker 2^64
+ * buckets; an IPv6 address counts as its /64. An IPv4-mapped IPv6 address
+ * is its IPv4 address.
+ */
+export function rateKey(ip: string): string {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
+  if (mapped) return mapped[1];
+  if (isIP(ip) !== 6) return ip;
+  return `${groups6(ip).slice(0, 4).map((g) => g.toString(16)).join(':')}::/64`;
+}
+
+/** The most keys one limiter holds; past it the least recently seen are dropped. */
+export const LIMITER_MAX_KEYS = 50_000;
+
 /**
  * A sliding-window limiter, in memory. One process: behind several
  * instances, each keeps its own count (backend-spec §5 says so plainly).
+ *
+ * Bounded: at `maxKeys` it first sweeps expired keys, then drops the least
+ * recently seen. Without the bound, a flood of distinct addresses grew the
+ * map by a key per request until the next sweep.
  */
-export function createLimiter(limit: number, windowMs: number, now: () => number = Date.now) {
+export function createLimiter(limit: number, windowMs: number, now: () => number = Date.now, maxKeys = LIMITER_MAX_KEYS) {
   const hits = new Map<string, number[]>();
+  const sweep = (): void => {
+    const t = now();
+    for (const [k, v] of hits) if (v.every((x) => t - x >= windowMs)) hits.delete(k);
+  };
   return {
     /** Record an attempt; false when the key is over its limit. */
     take(key: string): boolean {
       const t = now();
-      const recent = (hits.get(key) ?? []).filter((x) => t - x < windowMs);
+      const seen = hits.get(key);
+      if (!seen && hits.size >= maxKeys) {
+        sweep();
+        // Map order is insertion order, and every take re-inserts its key:
+        // the first key is the least recently seen.
+        while (hits.size >= maxKeys) hits.delete(hits.keys().next().value as string);
+      }
+      const recent = (seen ?? []).filter((x) => t - x < windowMs);
+      hits.delete(key);
       if (recent.length >= limit) {
         hits.set(key, recent);
         return false;
@@ -124,10 +178,8 @@ export function createLimiter(limit: number, windowMs: number, now: () => number
       hits.set(key, recent);
       return true;
     },
-    /** Forget old keys, so the map cannot grow without bound. */
-    sweep(): void {
-      const t = now();
-      for (const [k, v] of hits) if (v.every((x) => t - x >= windowMs)) hits.delete(k);
-    },
+    /** Forget old keys. Also called on a timer. */
+    sweep,
+    size: () => hits.size,
   };
 }

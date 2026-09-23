@@ -99,8 +99,8 @@ into SQL. PostgreSQL's `$1` numbering is generated mechanically.
 | Table | Holds |
 |---|---|
 | `az_users` | id (UUID), email (unique, lower-cased), name, password hash (null for provider-only accounts), location, email verified, created/updated |
-| `az_sessions` | token **digest**, user, created, expires (14 days) |
-| `az_tokens` | reset / sign-in-link token **digest**, user, the site it was requested from, created, expires (30 / 15 min), used |
+| `az_sessions` | token **digest**, user, created, expires (`AZ_SESSION_MAX_HOURS`, default 14 days), last used (idle expiry, `AZ_SESSION_IDLE_MINUTES`) — migration 2 |
+| `az_tokens` | reset / sign-in-link token **digest**, user, the site it was requested from, created, expires (30 / 15 min), used, and for a sign-in link the **digest** of the requesting browser's binding cookie — migration 2 |
 | `az_oauth_accounts` | provider + subject → user |
 | `az_oauth_states` | provider round-trip state **digest**, PKCE verifier, nonce, next, site, expires (10 min) |
 | `az_schema_migrations` | versions applied |
@@ -135,7 +135,9 @@ one schema for all three readers:
 | `AZ_BACKEND_PUBLIC_URL` | always | this server's public URL (https; http only on loopback) |
 | `AZ_ALLOWED_ORIGINS` | always | the exact site origin(s); also the only redirect targets |
 | `AZ_HOST`, `AZ_PORT` | optional | listen address (127.0.0.1:8787) |
-| `AZ_TRUST_PROXY` | optional | believe X-Forwarded-For for rate limits |
+| `AZ_TRUST_PROXY` | optional | `false` (default), `true` (one proxy) or the number of proxies you control; rate limits use the X-Forwarded-For entry that many places from the right |
+| `AZ_SESSION_IDLE_MINUTES` | optional | a session unused this long ends (default 1440; ASVS L2: 30) |
+| `AZ_SESSION_MAX_HOURS` | optional | a session ends this long after sign-in (default 336; ASVS L2: 12) |
 | `AZ_COOKIE_SAMESITE` | optional | `lax` (same site, default) or `none` |
 | `AZ_SQLITE_PATH` | sqlite | database file (`./data/app.db`) |
 | `AZ_DATABASE_URL`, `AZ_DATABASE_TLS` | postgres, mysql | connection string; `require` for TLS |
@@ -157,18 +159,22 @@ gives a server setting a public name (`AZ_PUBLIC_…PASSWORD`,
 |---|---|---|
 | No SQL injection | parameters only | hostile email/name/location stored literally; the table survives — SQLite, PostgreSQL, MySQL |
 | Passwords | scrypt N=2^15 r=8 p=3 (OWASP-listed, 32 MiB), 16-byte salt, parameters stored with the hash and upgraded on next sign-in; 12–1024 characters | hash format, salt, verify, rehash |
-| No enumeration | one `invalid_credentials` for unknown account and wrong password, the unknown case verifying a decoy hash for equal work; `/link` and `/reset` always `200 {}`, mail sent without awaiting | same body; comparable time; no mail for unknown addresses |
-| Rate limits | per IP and per account: sign-in 20/10 per 15 min, mail 10/3, sign-up 10/h, password 20, navigations 30/10 min | 429 after the limit; another account unaffected |
+| No enumeration | one `invalid_credentials` for unknown account and wrong password, the unknown case verifying a decoy hash for equal work; `/link` and `/reset` always `200 {}`, mail sent without awaiting. **Sign-up answers `409 email_taken`** by design (auth-spec §3's closed set): a person creating an account must be told the address is in use; it is rate-limited per address bucket like every sign-up | same body; comparable time; no mail for unknown addresses |
+| Rate limits | per address and per account: sign-in 20/10 per 15 min, mail 10/3, sign-up 10/h, password 20, navigations 30/10 min. The address is the socket peer, or behind `AZ_TRUST_PROXY` proxies the X-Forwarded-For entry they appended (the client-sent first entry is never believed); an IPv6 address counts as its /64. Each limiter holds at most 50 000 keys, dropping the least recently seen, and is swept every minute. **Lockout by design:** 10 wrong passwords per 15 min lock that account for everyone, and 3 mail requests per 15 min stop further reset/link mail to it — a nuisance an attacker can cause, bounded to the window | 429 after the limit; another account unaffected; a spoofed first entry shares the real address's bucket; one /64 is one bucket; the key budget holds under a flood |
 | CSRF | a fetch route needs an allowed `Origin`; a POST needs `x-az-request: 1` | foreign origin 403, missing header 403 |
 | CORS | exact origin, credentials, `Vary: Origin`, never `*` | preflight headers |
-| Cookies | `HttpOnly; Secure; Path=/; SameSite=Lax` (or `None`) | flags asserted at the server and in the browser |
+| Cookies | session `__Host-az_session`: `HttpOnly; Secure; Path=/; SameSite=Lax` (or `None`), no `Domain` — a sibling subdomain can neither set nor shadow it; path-scoped `__Secure-az_oauth_state` and `__Secure-az_link`. `az dev` drops `Secure` on loopback and so uses the bare names | names and flags asserted at the server and in the browser |
 | Tokens | 32 random bytes, stored as HMAC-SHA-256 under the secret; single use by one conditional UPDATE; expiry | reuse fails; expiry fails; three concurrent spends → exactly one (PostgreSQL, MySQL) |
-| Sessions | rotated at every sign-in; sign-out deletes server-side; a password change ends every session | stale and copied cookies are dead |
+| Sessions | rotated at every sign-in; sign-out deletes server-side; a password change ends every session; idle expiry and an absolute cap (ASVS 3.3.2) | stale and copied cookies are dead; idle and over-cap sessions end, activity keeps one alive |
+| Unverified accounts | anyone may create an account for any address. When the address is then proven another way — a sign-in link, or a provider vouching for it — the account is **claimed**: its password and every session are dropped (one conditional UPDATE, only while unverified). Otherwise a planter's password and session would share the owner's account | planted account → owner signs in → the planter's password and session are dead; a verified account keeps its password |
+| Sign-in links | bound to the browser that requested them: `/link` sets a random `__Secure-az_link` cookie whether or not the address has an account, the token stores its digest, and `/link/verify` spends only with it. Opened in another browser the link fails `expired_token` without being spent — so nobody can mail themselves a link and make a victim open it (login CSRF). Open the link in the browser that asked for it | another browser → not signed in, link unspent; the asking browser → signed in |
+| Addresses | a dot-atom local part and a domain of two or more DNS labels; no quotes, commas, angle brackets or display names (a mail library would read `x<victim@corp.example>` as another recipient) | header and list syntax refused |
+| Robustness | a request line the URL parser rejects (`GET //`) is answered 400; the request handler never rejects; provider values longer than their columns are `oauth_failed`, not 500 | `//`, `//?`, `//%`, `//[` → 400, server still up; a 300-character subject |
 | Retype | re-checked on sign-up and password set, before the token is spent | `password_mismatch`; a mistype does not burn the link |
 | Provider sign-in | `site` allow-listed, `next` a site path; state bound to the browser by cookie and single use; PKCE S256; OIDC nonce; id_token signature (RS256, PS256, ES256, EdDSA via JWKS; HS256 only with the client secret), `iss`, `aud`/`azp`, `exp`, `iat`; JWKS cached, refetched on an unknown `kid`; accounts link by **verified** email only; no new account unless `AZ_OAUTH_SIGNUP=allow` | `none`, algorithm confusion, wrong audience, wrong issuer, expired, wrong nonce, missing/replayed state, unverified email, key rotation |
 | Headers | `Cache-Control: no-store`, `nosniff`, `Referrer-Policy: no-referrer`, `CSP default-src 'none'`, HSTS, CORP | asserted |
 | Bodies | JSON objects only, 16 KB cap | refused otherwise |
-| Logs | route and error class only — never a password, token or secret | the browser run checks the server's log |
+| Logs | route and error class/code only — never a password, token, secret, address, or a provider's or mail server's reply text | the browser run checks the server's log; a mail failure quoting the recipient logs only its class |
 
 **Stated limits.** Rate limits are counted per process; behind several
 instances, limit at the proxy as well. Timing is equalised for sign-in; the

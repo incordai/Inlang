@@ -19,17 +19,30 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Config, Provider } from './env.ts';
 import { decoyHash, hashPassword, MAX_PASSWORD, MIN_PASSWORD, pkceChallenge, randomToken, safeEqual, verifyPassword } from './crypto.ts';
 import { linkMessage, resetMessage, type Mailer } from './email.ts';
-import { BodyError, clientIp, cookie, corsHeaders, createLimiter, readCookies, readJson, redirect, send } from './http.ts';
-import type { Oidc } from './oidc.ts';
-import { normaliseEmail, SESSION_TTL_MS, OAUTH_STATE_TTL_MS, type Store, type User } from './store.ts';
+import { BodyError, clientIp, cookie, corsHeaders, createLimiter, rateKey, readCookies, readJson, redirect, send } from './http.ts';
+import { ProviderError, type Oidc } from './oidc.ts';
+import { normaliseEmail, OAUTH_STATE_TTL_MS, TOKEN_TTL_MS, type Store, type User } from './store.ts';
 
-export const SESSION_COOKIE = 'az_session';
-export const STATE_COOKIE = 'az_oauth_state';
+/**
+ * Cookie names. In production every cookie is Secure, so the session takes
+ * the `__Host-` prefix (Secure, Path=/, no Domain — a sibling subdomain can
+ * neither set nor shadow it) and the path-scoped ones `__Secure-`. The
+ * prefixes need Secure, which `az dev` drops on loopback, so it passes
+ * `plainCookieNames` and gets the bare names.
+ */
+export const COOKIE_NAMES = {
+  secure: { session: '__Host-az_session', state: '__Secure-az_oauth_state', link: '__Secure-az_link' },
+  plain: { session: 'az_session', state: 'az_oauth_state', link: 'az_link' },
+} as const;
 const MAX_NAME = 200;
 const MAX_LOCATION = 200;
 const MAX_EMAIL = 254;
+const MAX_LOCAL = 64;
+/** The subject column's size; a longer provider id cannot be stored. */
+const MAX_SUBJECT = 255;
 const MAX_NEXT = 2048;
 const MINUTE = 60 * 1000;
+const NAV_BASE = 'https://site.invalid';
 
 export interface AppDeps {
   readonly config: Config;
@@ -37,8 +50,10 @@ export interface AppDeps {
   readonly mailer: Mailer;
   readonly oidc: Oidc;
   readonly now?: () => number;
-  /** Operational log. Never passed a password, token or secret. */
+  /** Operational log. Never passed a password, token, secret or address. */
   readonly log?: (line: string) => void;
+  /** `az dev` only: cookies go out without Secure, so they cannot carry a prefix. */
+  readonly plainCookieNames?: boolean;
 }
 
 type Json = Record<string, unknown>;
@@ -46,12 +61,62 @@ type Json = Record<string, unknown>;
 const text = (v: unknown, max: number): string | null =>
   typeof v === 'string' && v.trim().length > 0 && v.length <= max ? v.trim() : null;
 
-/** A plausible address: one @, something either side, no spaces. Delivery is the real check. */
-const isEmail = (v: string) => /^[^\s@]+@[^\s@]+$/.test(v);
+const LOCAL = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/;
+const LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 
-/** A path on the site: one leading slash, no scheme or host smuggled in. */
-export const isSitePath = (v: string) =>
-  v.length <= MAX_NEXT && v.startsWith('/') && !v.startsWith('//') && !/[\\\s]/.test(v);
+/**
+ * A plain address: a dot-atom local part, and a domain of at least two DNS
+ * labels. No quoted local parts, comments or display names — the address is
+ * handed to a mail library, which would read `x<victim@corp.example>` as a
+ * name plus a different recipient. Delivery is still the real check.
+ */
+export function isEmail(v: string): boolean {
+  if (v.length > MAX_EMAIL) return false;
+  const at = v.lastIndexOf('@');
+  if (at < 1) return false;
+  const local = v.slice(0, at);
+  const labels = v.slice(at + 1).split('.');
+  return local.length <= MAX_LOCAL && LOCAL.test(local) && labels.length >= 2 && labels.every((l) => LABEL.test(l));
+}
+
+/**
+ * A path on the site, already in its normal form. Resolved the way a
+ * browser would resolve it, it must stay on the site and come out unchanged:
+ * `/.//host`, `/..//host` and `/%2e//host` all resolve to `//host`, which a
+ * browser then reads as another host.
+ */
+export function isSitePath(v: string): boolean {
+  if (v.length > MAX_NEXT || !v.startsWith('/') || v.startsWith('//') || /[\\\s]/.test(v)) return false;
+  if (/%2e/i.test(v)) return false;
+  try {
+    const u = new URL(v, NAV_BASE);
+    return u.origin === NAV_BASE && !u.pathname.startsWith('//') && `${u.pathname}${u.search}${u.hash}` === v;
+  } catch {
+    return false;
+  }
+}
+
+/** The request's URL, or null when the URL parser rejects it (`//`, `//[`). */
+function pathOf(req: IncomingMessage): URL | null {
+  try {
+    return new URL(req.url ?? '/', 'http://backend.invalid');
+  } catch {
+    return null;
+  }
+}
+
+/** An error's class and code — never its message, which can quote an address or a provider's reply. */
+const errorClass = (e: unknown) => {
+  const err = e as { name?: unknown; code?: unknown };
+  return `${typeof err?.name === 'string' ? err.name : 'Error'}${typeof err?.code === 'string' ? ` ${err.code}` : ''}`;
+};
+
+/**
+ * A provider failure for the log. ProviderError messages are fixed text this
+ * server wrote (a host and a status at most); anything else — a JSON parse
+ * error quoting the provider's body, a network error — is logged by class.
+ */
+const providerProblem = (e: unknown) => (e instanceof ProviderError ? e.message : errorClass(e));
 
 const view = (u: User, expiresAt: number) => ({
   user: { id: u.id, email: u.email, name: u.name, ...(u.location ? { location: u.location } : {}) },
@@ -60,6 +125,7 @@ const view = (u: User, expiresAt: number) => ({
 
 export function createApp(deps: AppDeps) {
   const { config, store, mailer, oidc } = deps;
+  const names = deps.plainCookieNames ? COOKIE_NAMES.plain : COOKIE_NAMES.secure;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const allowed = new Set(config.allowedOrigins);
@@ -77,13 +143,14 @@ export function createApp(deps: AppDeps) {
   const sweep = () => { for (const l of Object.values(limits)) l.sweep(); };
 
   const sessionCookie = (token: string) =>
-    cookie(SESSION_COOKIE, token, { sameSite: config.sameSite, maxAgeSeconds: Math.floor(SESSION_TTL_MS / 1000) });
-  const clearSession = cookie(SESSION_COOKIE, '', { sameSite: config.sameSite, maxAgeSeconds: 0 });
-  const clearState = cookie(STATE_COOKIE, '', { sameSite: 'Lax', path: '/auth/oauth', maxAgeSeconds: 0 });
+    cookie(names.session, token, { sameSite: config.sameSite, maxAgeSeconds: Math.floor(config.sessionMaxMs / 1000) });
+  const clearSession = cookie(names.session, '', { sameSite: config.sameSite, maxAgeSeconds: 0 });
+  const clearState = cookie(names.state, '', { sameSite: 'Lax', path: '/auth/oauth', maxAgeSeconds: 0 });
+  const clearLink = cookie(names.link, '', { sameSite: config.sameSite, path: '/auth/link', maxAgeSeconds: 0 });
 
   /** A new session for `user`, replacing whatever session the request carried (rotation). */
   async function startSession(req: IncomingMessage, user: User): Promise<{ header: string; body: Json }> {
-    const old = readCookies(req)[SESSION_COOKIE];
+    const old = readCookies(req)[names.session];
     if (old) await store.deleteSession(old);
     const s = await store.createSession(user.id);
     return { header: sessionCookie(s.token), body: { session: view(user, s.expiresAt) } };
@@ -91,7 +158,7 @@ export function createApp(deps: AppDeps) {
 
   function sendMail(what: string, message: Parameters<Mailer['send']>[0]): void {
     // Not awaited: a known and an unknown address answer at the same speed.
-    mailer.send(message).catch((e: unknown) => log(`email (${what}) failed: ${(e as Error).message}`));
+    mailer.send(message).catch((e: unknown) => log(`email (${what}) failed: ${errorClass(e)}`));
   }
 
   /* ---- fetch routes --------------------------------------------------- */
@@ -143,16 +210,25 @@ export function createApp(deps: AppDeps) {
     return { status: 200, body: s.body, cookies: [s.header] };
   }
 
-  /** `/link` and `/reset`: the same answer for every address (§3.4 checklist 5). */
+  /**
+   * `/link` and `/reset`: the same answer for every address (§3.4 checklist 5).
+   * A link request also binds the link to THIS browser: a random value in a
+   * cookie, its digest on the token. The cookie is set whether or not the
+   * address has an account, so the answers stay identical.
+   */
   async function mailRequest(kind: 'link' | 'reset', body: Json, ip: string, site: string) {
     const email = text(body.email, MAX_EMAIL);
     if (!limits.mailIp.take(ip) || (email && !limits.mailAccount.take(`${kind}:${normaliseEmail(email)}`))) {
       return { status: 429, body: { error: 'rate_limited' } };
     }
+    const binding = kind === 'link' ? randomToken() : undefined;
+    const cookies = binding
+      ? [cookie(names.link, binding, { sameSite: config.sameSite, path: '/auth/link', maxAgeSeconds: Math.floor(TOKEN_TTL_MS.link / 1000) })]
+      : undefined;
     if (email && isEmail(email)) {
       const user = await store.userByEmail(email);
       if (user) {
-        const token = await store.createToken(user.id, kind, site);
+        const token = await store.createToken(user.id, kind, site, binding);
         if (kind === 'reset') {
           const url = new URL(config.resetPath, site);
           url.searchParams.set('token', token);
@@ -165,7 +241,7 @@ export function createApp(deps: AppDeps) {
         }
       }
     }
-    return { status: 200, body: {} };
+    return { status: 200, body: {}, ...(cookies ? { cookies } : {}) };
   }
 
   async function setPassword(req: IncomingMessage, body: Json, ip: string) {
@@ -187,7 +263,7 @@ export function createApp(deps: AppDeps) {
   }
 
   async function sessionRead(req: IncomingMessage) {
-    const token = readCookies(req)[SESSION_COOKIE];
+    const token = readCookies(req)[names.session];
     if (!token) return { status: 200, body: { session: null } };
     const found = await store.sessionUser(token);
     if (!found) return { status: 200, body: { session: null }, cookies: [clearSession] };
@@ -195,7 +271,7 @@ export function createApp(deps: AppDeps) {
   }
 
   async function signOut(req: IncomingMessage) {
-    const token = readCookies(req)[SESSION_COOKIE];
+    const token = readCookies(req)[names.session];
     if (token) await store.deleteSession(token);          // ended on the server, not just forgotten
     return { status: 204, body: undefined, cookies: [clearSession] };
   }
@@ -204,15 +280,26 @@ export function createApp(deps: AppDeps) {
 
   const failTo = (site: string, code: string) => `${site}/login?auth_error=${code}`;
 
+  /**
+   * The emailed sign-in link. It spends only with the binding cookie of the
+   * browser that asked for it — otherwise anyone could mail themselves a
+   * link and make a victim open it, signing the victim into the attacker's
+   * account (login CSRF).
+   */
   async function linkVerify(req: IncomingMessage, res: ServerResponse, url: URL) {
     const token = url.searchParams.get('token') ?? '';
-    const spent = token ? await store.spendToken(token, 'link') : 'expired';
-    if (spent === 'expired' || !allowed.has(spent.site)) return redirect(res, failTo(home, 'expired_token'));
+    const binding = readCookies(req)[names.link];
+    const spent = token && binding ? await store.spendToken(token, 'link', binding) : 'expired';
+    if (spent === 'expired' || !allowed.has(spent.site)) {
+      return redirect(res, failTo(home, 'expired_token'), { 'set-cookie': clearLink });
+    }
     const user = await store.userById(spent.userId);
-    if (!user) return redirect(res, failTo(spent.site, 'expired_token'));
-    await store.markVerified(user.id);
-    const s = await startSession(req, user);
-    return redirect(res, `${spent.site}${config.linkLanding}`, { 'set-cookie': s.header });
+    if (!user) return redirect(res, failTo(spent.site, 'expired_token'), { 'set-cookie': clearLink });
+    // The mailbox is proven: an unverified account's password and sessions,
+    // which anyone could have set up, are dropped (claimUnverified).
+    if (!user.emailVerified) await store.claimUnverified(user.id);
+    const s = await startSession(req, { ...user, emailVerified: true });
+    return redirect(res, `${spent.site}${config.linkLanding}`, { 'set-cookie': [s.header, clearLink] });
   }
 
   async function oauthStart(res: ServerResponse, p: Provider, url: URL) {
@@ -224,7 +311,7 @@ export function createApp(deps: AppDeps) {
     try {
       d = await oidc.discover(p);
     } catch (e) {
-      log(`provider ${p.id} discovery failed: ${(e as Error).message}`);
+      log(`provider ${p.id} discovery failed: ${providerProblem(e)}`);
       return redirect(res, failTo(site, 'oauth_failed'));
     }
     const state = randomToken();
@@ -241,13 +328,13 @@ export function createApp(deps: AppDeps) {
     auth.searchParams.set('code_challenge_method', 'S256');
     if (p.type === 'oidc') auth.searchParams.set('nonce', nonce);
     return redirect(res, auth.href, {
-      'set-cookie': cookie(STATE_COOKIE, state, { sameSite: 'Lax', path: '/auth/oauth', maxAgeSeconds: Math.floor(OAUTH_STATE_TTL_MS / 1000) }),
+      'set-cookie': cookie(names.state, state, { sameSite: 'Lax', path: '/auth/oauth', maxAgeSeconds: Math.floor(OAUTH_STATE_TTL_MS / 1000) }),
     });
   }
 
   async function oauthCallback(req: IncomingMessage, res: ServerResponse, p: Provider, url: URL) {
     const state = url.searchParams.get('state') ?? '';
-    const bound = readCookies(req)[STATE_COOKIE] ?? '';
+    const bound = readCookies(req)[names.state] ?? '';
     // The state must be the one THIS browser was given, and unused.
     const trip = state && bound && safeEqual(state, bound) ? await store.takeOAuthState(state) : null;
     const back = (code: string) => redirect(res, failTo(trip?.site ?? home, code), { 'set-cookie': clearState });
@@ -279,10 +366,11 @@ export function createApp(deps: AppDeps) {
         displayName = typeof profile.name === 'string' ? profile.name : '';
       }
     } catch (e) {
-      log(`provider ${p.id} sign-in failed: ${(e as Error).message}`);
+      log(`provider ${p.id} sign-in failed: ${providerProblem(e)}`);
       return back('oauth_failed');
     }
-    if (!subject) return back('oauth_failed');
+    // Values the columns cannot hold are a failed sign-in, not a server error.
+    if (!subject || subject.length > MAX_SUBJECT || email.length > MAX_EMAIL) return back('oauth_failed');
 
     let user: User | null = null;
     const linked = await store.oauthAccount(p.id, subject);
@@ -299,7 +387,10 @@ export function createApp(deps: AppDeps) {
         if (created === 'taken') return back('oauth_failed');
         user = created;
       } else if (!user.emailVerified) {
-        await store.markVerified(user.id);
+        // The provider vouches for the address; whoever created this
+        // unverified account may not own it. Their password and sessions go.
+        await store.claimUnverified(user.id);
+        user = { ...user, passwordHash: null, emailVerified: true };
       }
       await store.linkOAuth(p.id, subject, user.id);
     }
@@ -310,9 +401,11 @@ export function createApp(deps: AppDeps) {
   /* ---- dispatch ------------------------------------------------------- */
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? '/', 'http://backend.invalid');
+    // `GET //` is a valid request line the URL parser rejects; answered, not thrown.
+    const url = pathOf(req);
+    if (!url) return send(res, 400, { error: 'unknown' });
     const method = req.method ?? 'GET';
-    const ip = clientIp(req, config.trustProxy);
+    const ip = rateKey(clientIp(req, config.proxyHops));
 
     if (method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true });
 
@@ -368,8 +461,7 @@ export function createApp(deps: AppDeps) {
       try {
         await handle(req, res);
       } catch (e) {
-        const err = e as { name?: string; code?: string; message?: string };
-        log(`request ${req.method} ${new URL(req.url ?? '/', 'http://x').pathname} failed: ${err.name ?? 'Error'} ${err.code ?? ''}`.trim());
+        log(`request ${req.method} ${pathOf(req)?.pathname ?? '(unparsable)'} failed: ${errorClass(e)}`);
         if (!res.headersSent) {
           const origin = req.headers.origin ?? '';
           send(res, 500, { error: 'unknown' }, allowed.has(origin) ? corsHeaders(origin) : {});

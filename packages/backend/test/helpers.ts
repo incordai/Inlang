@@ -85,8 +85,14 @@ export interface Harness {
   close(): Promise<void>;
 }
 
-/** Start a backend over in-memory SQLite. `env` extends a valid minimal environment. */
-export async function startBackend(env: Record<string, string> = {}): Promise<Harness> {
+/**
+ * Start a backend over in-memory SQLite. `env` extends a valid minimal
+ * environment; `over` replaces the captured mailer or the silent log.
+ */
+export async function startBackend(
+  env: Record<string, string> = {},
+  over: { log?: (line: string) => void; mailer?: { send(m: Message): Promise<void> } } = {},
+): Promise<Harness> {
   const clock = { now: Date.now() };
   const loaded = loadConfig({
     AZ_SESSION_SECRET: SECRET,
@@ -106,8 +112,10 @@ export async function startBackend(env: Record<string, string> = {}): Promise<Ha
   const url = await listen(server);
   config = { ...config, publicUrl: url };
   const app = createApp({
-    config, store: createStore(db, config.secret, () => clock.now), mailer: { send: async (m) => { mail.push(m); } },
-    oidc: createOidc((...a) => fetch(...a), () => clock.now), now: () => clock.now, log: () => {},
+    config,
+    store: createStore(db, config.secret, () => clock.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }),
+    mailer: over.mailer ?? { send: async (m) => { mail.push(m); } },
+    oidc: createOidc((...a) => fetch(...a), () => clock.now), now: () => clock.now, log: over.log ?? (() => {}),
   });
   server.on('request', (req, res) => { void app.handler(req, res); });
   return { url, mail, clock, config, close: async () => { server.close(); await db.close(); } };

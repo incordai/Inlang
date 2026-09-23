@@ -108,8 +108,15 @@ site's build, which only ever inlines \`AZ_PUBLIC_*\` values.
   \`www.example.org\`) and keep \`AZ_COOKIE_SAMESITE=lax\`. On a different site
   set \`none\`; some browsers then block the cookie outright.
 - Serve it over **https** (a reverse proxy in front, or a platform that
-  terminates TLS). Set \`AZ_HOST=0.0.0.0\` inside a container, and
-  \`AZ_TRUST_PROXY=true\` only when your proxy sets X-Forwarded-For.
+  terminates TLS). Set \`AZ_HOST=0.0.0.0\` inside a container.
+- \`AZ_TRUST_PROXY\` is the number of proxies you control in front (\`true\`
+  means one). Each must APPEND the client address to X-Forwarded-For; the
+  server reads the entry that many places from the right. Leave it \`false\`
+  when the server is reached directly — otherwise any visitor chooses their
+  own rate-limit address.
+- Sessions end after \`AZ_SESSION_IDLE_MINUTES\` unused (default a day) and
+  \`AZ_SESSION_MAX_HOURS\` after sign-in (default two weeks). ASVS level 2
+  asks for 30 minutes and 12 hours.
 - \`AZ_ALLOWED_ORIGINS\` is the exact site origin(s); it is also the only
   place a sign-in may redirect to.
 - Rate limits are counted per process. With several instances, put the

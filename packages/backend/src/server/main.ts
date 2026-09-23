@@ -21,6 +21,8 @@ import { createOidc } from './oidc.ts';
 import { createStore } from './store.ts';
 
 const PRUNE_MS = 10 * 60 * 1000;
+/** Rate-limit maps are swept often; each is also bounded (createLimiter). */
+const SWEEP_MS = 60 * 1000;
 
 const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string } & Setup;
 if (existsSync('.env')) process.loadEnvFile('.env');
@@ -40,14 +42,22 @@ const db: Db = config.setup.database === 'sqlite'
 const applied = await migrate(db);
 if (applied.length > 0) process.stdout.write(`backend: applied migrations ${applied.join(', ')}\n`);
 
-const store = createStore(db, config.secret);
+const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs });
 const app = createApp({ config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)) });
-const server = createServer((req, res) => { void app.handler(req, res); });
+// The handler answers its own failures; this catch is the last line, so one
+// request can never become an unhandled rejection that ends the process.
+const server = createServer((req, res) => {
+  app.handler(req, res).catch((e: unknown) => {
+    process.stderr.write(`backend: request failed: ${(e as Error)?.name ?? 'Error'}\n`);
+    if (!res.headersSent) res.writeHead(500).end(); else res.end();
+  });
+});
 server.requestTimeout = 15_000;
 server.headersTimeout = 10_000;
 
+const sweep = setInterval(() => app.sweep(), SWEEP_MS);
+sweep.unref();
 const prune = setInterval(() => {
-  app.sweep();
   store.prune().catch((e: unknown) => process.stderr.write(`backend: prune failed: ${(e as Error).name}\n`));
 }, PRUNE_MS);
 prune.unref();
@@ -58,6 +68,7 @@ server.listen(config.port, config.host, () => {
 
 const stop = () => {
   clearInterval(prune);
+  clearInterval(sweep);
   server.close(() => { void db.close().then(() => process.exit(0)); });
 };
 process.once('SIGTERM', stop);

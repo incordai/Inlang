@@ -283,6 +283,18 @@ never reaches a route.
 11. Providers: configuration in the backend's environment only; `state` +
     PKCE (+ `nonce` for OIDC) on every round-trip; link by verified email
     only; redirect only to an allow-listed `site`.
+12. Claiming: when an UNVERIFIED account's address is proven another way (a
+    sign-in link, a provider vouching for it), drop its password and end
+    every session before signing the prover in. Anyone could have created
+    it, and linking alone would leave the creator inside the owner's account.
+13. Sign-in links are bound to the browser that requested them (a cookie set
+    by `/link`, whatever the address), and fail `expired_token` elsewhere —
+    otherwise anyone can mail themselves a link and make a victim open it
+    (login CSRF).
+14. `next` is checked after resolution: `/.//host` and `/%2e//host` resolve to
+    `//host`. The runtime's `safeNext` and the built-in server both refuse
+    them. `signOut()` rejects — and the page stays signed in — unless the
+    server confirms the session ended.
 
 **The built-in backend.** A site that declares `backend` (backend-spec.md)
 gets a generated server that implements this section exactly. It adds one
