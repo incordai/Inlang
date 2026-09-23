@@ -337,6 +337,9 @@ try {
     check('theme-spec §3.2: the built CSS defines both colour schemes',
       /--az-color-bg:/.test(css) && /prefers-color-scheme:\s*light/.test(css) && /\[data-scheme="?light"?\]/.test(css),
       cssFile ?? 'no css in dist/assets');
+    // The fixture's nav is `sticky`: nav-spec §5's one line must ship.
+    check('nav-spec §5: a pinned nav ships scroll-padding from the nav-height variable',
+      /scroll-padding-top:\s*calc\(var\(--az-size-nav\)/.test(css) && /--az-size-nav:\s*\d+px/.test(css));
   }
   check('a behaviour prop is an attribute, never prose',
     /data-mobile="drawer"/.test(html) && !/>drawer</.test(html));

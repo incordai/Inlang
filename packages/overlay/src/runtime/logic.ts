@@ -19,6 +19,34 @@ export function solidAfter(scrollY: number, solid: boolean): boolean {
 }
 
 /**
+ * nav-block-spec §3 `shrink`: the bar shrinks past a threshold. The same
+ * hysteresis as `solid` — shrunk at 80px down, full height again only at
+ * 40px up — so resting near the threshold cannot make the bar pump.
+ */
+export function shrunkAfter(scrollY: number, shrunk: boolean): boolean {
+  return solidAfter(scrollY, shrunk);
+}
+
+/**
+ * How far the reader must travel in one direction before `hide` reacts —
+ * a trackpad's settle and a touch scroll's jitter are both smaller.
+ */
+export const HIDE_TRAVEL = 8;
+
+/**
+ * nav-block-spec §3 `hide`: hides while the reader scrolls down, reveals as
+ * soon as they scroll up. Never hidden while the bar still covers its own
+ * spot at the top of the page (`barHeight`), so the page never opens with
+ * the nav missing. `fromY` is where the current run of travel began.
+ */
+export function retractedAfter(fromY: number, scrollY: number, retracted: boolean, barHeight: number): boolean {
+  if (scrollY <= barHeight) return false;
+  if (scrollY - fromY >= HIDE_TRAVEL) return true;
+  if (fromY - scrollY >= HIDE_TRAVEL) return false;
+  return retracted;
+}
+
+/**
  * Where a list-navigation key moves the active index: arrows wrap at the
  * ends, Home and End jump (nav-spec §7 dropdowns; faq-spec §8). Null means
  * the key is not a navigation key and must be left alone.

@@ -32,7 +32,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink } from './visual/checks.mjs';
 import { startServer } from './visual/serve.mjs';
-import { copy, drawer, dropdown, faq, overlayMotion, play, solid } from './visual/behaviours.mjs';
+import {
+  copy, drawer, dropdown, faq, hideShrink, navMotion, overlayMotion, play, scrollPadding, solid,
+} from './visual/behaviours.mjs';
 import { behaviourSelfTest } from './visual/behaviour-selftest.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -73,7 +75,8 @@ async function pool(items, limit, fn) {
 /* ---- results ------------------------------------------------------------ */
 
 const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'disclosure', 'skip-link',
-  'drawer', 'dropdown', 'solid', 'faq', 'copy', 'play', 'overlay-motion', 'firefox', 'webkit'];
+  'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'copy', 'play', 'overlay-motion', 'nav-motion',
+  'firefox', 'webkit'];
 
 /**
  * Responsive-table rows the gate measures, per word and variant: the
@@ -277,6 +280,9 @@ async function checkSite(s, browsers, server) {
   await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
   const still = await overlayMotion(page);
   if (still) record(s.word, 'overlay-motion', `${s.label}/light/390`, still);
+  await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
+  const barStill = await navMotion(page);
+  if (barStill) record(s.word, 'nav-motion', `${s.label}/light/390`, barStill);
   await ctx.close();
 
   // The behaviour runtime, in a fresh context per width: the drawer is the
@@ -286,7 +292,7 @@ async function checkSite(s, browsers, server) {
     const bctx = await browsers.chromium.newContext({ viewport: { width, height: 900 } });
     const bpage = await bctx.newPage();
     bpage.setDefaultTimeout(NAV_TIMEOUT_MS);
-    const checks = width === 390 ? { drawer } : { dropdown, solid, faq, copy, play };
+    const checks = width === 390 ? { drawer } : { dropdown, solid, 'hide-shrink': hideShrink, 'scroll-padding': scrollPadding, faq, copy, play };
     for (const [name, fn] of Object.entries(checks)) {
       await bpage.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
       const r = await fn(bpage);
@@ -355,6 +361,12 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   </fieldset>
   </main></body></html>`;
 
+/** nav §5: a pinned bar, with or without the scroll padding that clears it. */
+const PINNED = (padded) => `<!doctype html><html lang="en"><head><title>pinned</title><style>
+  ${padded ? 'html { scroll-padding-top: 88px; }' : ''}
+  nav { position: sticky; top: 0; height: 72px; background: white; }
+</style></head><body><nav aria-label="Main"><a href="/">Home</a></nav><main><h1>Pinned</h1></main></body></html>`;
+
 async function selfTest() {
   const dir = mkdtempSync(join(tmpdir(), 'az-visual-self-'));
   for (const [name, html] of [['bad', BAD], ['good', GOOD]]) {
@@ -401,6 +413,16 @@ async function selfTest() {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.reload();
     expect('item 6 reduced motion', await reducedMotion(page), shouldPass);
+    await ctx.close();
+  }
+  for (const [name, padded] of [['pinned-bad', false], ['pinned-good', true]]) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'), PINNED(padded));
+    server.serve(join(dir, name));
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto(server.url);
+    expect(`nav §5 scroll padding (${padded ? 'good' : 'bad'} page)`, await scrollPadding(page), padded);
     await ctx.close();
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');

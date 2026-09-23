@@ -394,6 +394,25 @@ export interface EmitOptions {
 }
 
 /** The theme the site asked for, falling back to the default. */
+/**
+ * nav-block-spec §5 — "the universal bug": a nav that stays on screen hides
+ * every anchor target under itself unless the page scrolls short of it.
+ * Written only when some page pins its nav (`sticky`, `hide`, `shrink`).
+ * The nav height is ONE variable because hero height, scroll padding and the
+ * drawer offset all derive from it (§5); it comes from the theme token.
+ */
+function pinnedNavCss(spec: Spec, theme: ThemeLike): string {
+  const pins = (b: { word: string; modifiers: string[] }) =>
+    b.word === 'nav' && b.modifiers.some((m) => m === 'sticky' || m === 'hide' || m === 'shrink');
+  const pinned = spec.site.inherited.some(pins) || spec.pages.some((p) => p.blocks.some(pins));
+  if (!pinned) return '';
+  return `
+/* nav-block-spec §5: anchors land below a pinned nav, not under it. */
+:root { --az-size-nav: ${theme.size.nav}px; }
+html { scroll-padding-top: calc(var(--az-size-nav) + ${theme.space[16]}px); }
+`;
+}
+
 function namedTheme(spec: Spec, override?: Theme): Theme {
   return override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
 }
@@ -585,7 +604,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${schemeCss(named)}${plan ? authCss(theme) : ''}`,
+${schemeCss(named)}${pinnedNavCss(spec, theme)}${plan ? authCss(theme) : ''}`,
     },
     {
       /**

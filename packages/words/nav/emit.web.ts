@@ -27,6 +27,10 @@ import { closeButton, drawer, dropdown } from '../../overlay/src/index.ts';
 /** The drawer's id — the toggle's aria-controls points here (§6). */
 const PANEL_ID = 'az-nav-panel';
 
+/** A state map, or nothing when it has no states — an empty map says nothing. */
+const orNothing = <T extends object>(states: T): T | undefined =>
+  Object.keys(states).length > 0 ? states : undefined;
+
 /** A stroke icon, decorative: the control carries its own name. */
 const glyph = (d: string): EmittedNode => ({
   tag: 'svg',
@@ -165,6 +169,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const ctas = block.children.filter((c) => c.word === 'cta');
 
   const bar: EmittedNode[] = [];
+  // §3 behaviour modifiers. `hide` and `shrink` only mean something for a bar
+  // that stays on screen, so either pins it as `sticky` does.
+  const hides = block.modifiers.includes('hide');
+  const shrinks = block.modifiers.includes('shrink');
+  const pinned = hides || shrinks || block.modifiers.includes('sticky');
 
   // The logo links to `/` and carries the site name AS TEXT. An <img> with an
   // empty alt inside a link is an unlabelled link (§7), so the text is always
@@ -176,8 +185,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     const logoImg = (src: string, state: 'top' | 'solid', waiting: boolean): EmittedNode => ({
       tag: 'img',
       attrs: { src: ctx.asset(src), alt: '', class: 'az-nav-logo-img', 'data-az-logo': state },
-      style: { display: waiting ? 'none' : 'block', height: px(t.space[32]) },
-      states: waiting ? { scrolled: { display: 'block' } } : state === 'top' ? { scrolled: { display: 'none' } } : undefined,
+      style: {
+        display: waiting ? 'none' : 'block',
+        height: px(t.space[32]),
+        transition: shrinks ? `height ${t.motion.fast}ms ${t.motion.ease}` : undefined,
+      },
+      states: orNothing({
+        ...(waiting ? { scrolled: { display: 'block' } } : state === 'top' ? { scrolled: { display: 'none' } } : {}),
+        // §3 `shrink`: the logo shrinks with the bar.
+        ...(shrinks ? { shrunk: { height: px(t.space[24]) } } : {}),
+      }),
     });
 
     // §4: a `solid` nav sits transparent over the hero, then turns solid on
@@ -277,7 +294,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const x = closeButton(t, 'Close menu');
 
   const solid = block.modifiers.includes('solid');
-  return {
+  const nav: EmittedNode = {
     tag: 'nav',
     attrs: {
       class: `az-nav az-nav--${variant}`,
@@ -285,6 +302,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       'aria-label': 'Main',
       'data-mobile': block.props.mobile ?? 'drawer',
       ...(solid ? { 'data-az-behaviour': 'solid' } : {}),
+      ...(hides ? { 'data-az-hide': '' } : {}),
+      ...(shrinks ? { 'data-az-shrink': '' } : {}),
     },
     style: {
       // `split` needs three explicit zones — logo | links | CTA — or the CTA
@@ -310,12 +329,26 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         ? `linear-gradient(to bottom, color-mix(in srgb, ${t.color.scrim} 35%, transparent), transparent)`
         : undefined,
       color: t.color.text,
-      position: block.modifiers.includes('sticky') ? 'sticky' : 'static',
+      // A shrinking bar is pinned by its frame (below), which holds its
+      // full height in the page; the bar itself pins otherwise.
+      position: pinned && !shrinks ? 'sticky' : 'static',
       top: 0,
       zIndex: t.layer.sticky,
+      transition: hides || shrinks
+        ? [hides && `transform ${t.motion.normal}ms ${t.motion.ease}`, shrinks && `min-height ${t.motion.fast}ms ${t.motion.ease}`]
+          .filter(Boolean).join(', ')
+        : undefined,
     },
-    // §4: once scrolled, solid — and the hysteresis lives in the runtime.
-    states: solid ? { scrolled: { background: t.color.bg, backgroundImage: 'none', boxShadow: t.shadow.sm } } : undefined,
+    states: orNothing({
+      // §4: once scrolled, solid — and the hysteresis lives in the runtime.
+      ...(solid ? { scrolled: { background: t.color.bg, backgroundImage: 'none', boxShadow: t.shadow.sm } } : {}),
+      // §3 `shrink`: the bar drops to its short height past the threshold.
+      ...(shrinks ? { shrunk: { minHeight: px(t.size['nav-shrink']) } } : {}),
+      // §3 `hide`: out of view while the reader scrolls down.
+      ...(hides ? { retracted: { transform: 'translateY(-100%)' } } : {}),
+    }),
+    // §3: `hide` "must be instant under reduced-motion" — no slide at all.
+    reducedMotion: hides || shrinks ? { transition: 'none' } : undefined,
     // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children: [
@@ -364,5 +397,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         ],
       } satisfies EmittedNode] : []),
     ],
+  };
+  if (!shrinks) return nav;
+  // §3 `shrink`: "reserve final height up front or you cause CLS". The frame
+  // is pinned and holds the full bar height in the page for good, so the bar
+  // shrinking inside it moves nothing below. The frame lets clicks through
+  // wherever the bar is not.
+  return {
+    tag: 'div',
+    attrs: { class: 'az-nav-frame' },
+    style: { position: 'sticky', top: 0, zIndex: t.layer.sticky, minHeight: px(t.size.nav), pointerEvents: 'none' },
+    children: [{ ...nav, style: { ...nav.style, pointerEvents: 'auto' } }],
   };
 }

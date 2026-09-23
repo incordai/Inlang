@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { copy, drawer, dropdown, faq, overlayMotion, play, solid } from './behaviours.mjs';
+import { copy, drawer, dropdown, faq, hideShrink, navMotion, overlayMotion, play, solid } from './behaviours.mjs';
 
 const RUNTIME = fileURLToPath(new URL('../../packages/overlay/src/runtime/', import.meta.url));
 
@@ -22,7 +22,11 @@ const page = ({ runtime, net }) => `<!doctype html><html lang="en"><head><title>
 [hidden]:not([hidden="until-found"]) { display: none !important; }
 dialog[data-az-overlay="drawer"] { margin: 0; height: 100%; max-height: 100%; transform: translateX(-100%); transition: transform 120ms; }
 dialog[data-az-overlay="drawer"][data-state="open"] { transform: none; transition: transform 240ms; }
-nav { position: sticky; top: 0; background: transparent; }
+.frame { position: sticky; top: 0; min-height: 72px; pointer-events: none; }
+nav { position: static; height: 72px; display: flex; align-items: center; gap: 8px; pointer-events: auto; background: transparent; transition: transform 160ms, height 120ms; }
+nav > ul { margin: 0; padding: 0; list-style: none; }
+nav[data-shrunk="true"] { height: 56px; }
+nav[data-retracted="true"] { transform: translateY(-100%); }
 nav[data-scrolled="true"] { background: rgb(250, 250, 250); }
 [data-az-logo="solid"] { display: none; }
 [data-az-logo="solid"][data-scrolled="true"] { display: inline; }
@@ -32,15 +36,15 @@ nav[data-scrolled="true"] { background: rgb(250, 250, 250); }
 button { min-width: 44px; min-height: 44px; }
 ${net ? NET : ''}
 </style></head><body>
-<nav data-az-behaviour="solid" aria-label="Main">
-  <img data-az-logo="top" alt="" src="${LOGO('#eee')}"><img data-az-logo="solid" alt="" src="${LOGO('#111')}">
+<div class="frame"><nav data-az-behaviour="solid" data-az-hide data-az-shrink aria-label="Main">
+  <a href="/">Home</a><img data-az-logo="top" alt="" src="${LOGO('#eee')}"><img data-az-logo="solid" alt="" src="${LOGO('#111')}">
   <ul><li class="group" data-az-behaviour="dropdown"><button type="button" aria-expanded="false" aria-controls="g1">Products</button>
     <ul id="g1" class="dd" hidden><li><a href="#a">Shoes</a></li><li><a href="#b">Bags</a></li></ul></li></ul>
   <button type="button" class="az-nav-toggle" aria-controls="az-nav-panel" aria-expanded="false" aria-label="Menu">Menu</button>
   <dialog id="az-nav-panel" data-az-behaviour="dialog" data-az-overlay="drawer" aria-label="Menu">
     <button type="button" data-az-close aria-label="Close menu">Close</button><a href="#one">One</a> <a href="#two">Two</a>
   </dialog>
-</nav>
+</nav></div>
 <main>
   <ul data-az-behaviour="faq" data-single="false">
     <li><h3 id="faq-first"><button type="button" id="faq-first-btn" aria-expanded="true" aria-controls="faq-first-panel" data-az-disclosure>First question?<span data-az-chevron></span></button></h3>
@@ -84,10 +88,13 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
   for (const [label, check, width] of [
     ['behaviour: drawer', drawer, 390], ['behaviour: dropdown', dropdown, 1440], ['behaviour: solid', solid, 1440],
     ['behaviour: faq', faq, 1440], ['behaviour: copy', copy, 1440], ['behaviour: play', play, 1440],
+    ['behaviour: hide and shrink', hideShrink, 1440],
   ]) {
     expect(`${label} without the runtime`, await run('none', width, check), false);
     expect(`${label} with the runtime`, await run('good', width, check), true);
   }
   expect('behaviour: overlay motion without the reduced-motion net', await run('nonet', 390, overlayMotion, 'reduce'), false);
   expect('behaviour: overlay motion with it', await run('good', 390, overlayMotion, 'reduce'), true);
+  expect('behaviour: nav motion without the reduced-motion net', await run('nonet', 1440, navMotion, 'reduce'), false);
+  expect('behaviour: nav motion with it', await run('good', 1440, navMotion, 'reduce'), true);
 }

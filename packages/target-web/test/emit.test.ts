@@ -134,6 +134,15 @@ test('SECURITY: a route cannot place an HTML file outside the project', () => {
   assert.throws(() => emit(spec, { emitters: WEB_EMITTERS }), PathEscapeError);
 });
 
+test('nav-spec §5: a pinned nav gives anchors scroll padding from the nav-height variable', () => {
+  const css = (nav: string) => fileNamed(build(`az 1\nsite aurora\n  nav ${nav}\n    link "Work" /work\npage /\n  hero center\n    title "x"\npage /work\n`), 'src/theme.css').content;
+  for (const pinned of ['bar sticky', 'bar hide', 'bar shrink']) {
+    assert.match(css(pinned), /--az-size-nav: \d+px;/, pinned);
+    assert.match(css(pinned), /html \{ scroll-padding-top: calc\(var\(--az-size-nav\) \+ \d+px\); \}/, pinned);
+  }
+  assert.doesNotMatch(css('bar'), /scroll-padding-top/, 'CONTROL: a nav that scrolls away needs none');
+});
+
 /* ---------------- determinism, CONVENTIONS §6 ---------------- */
 
 test('DETERMINISM: two emits are byte-identical', () => {

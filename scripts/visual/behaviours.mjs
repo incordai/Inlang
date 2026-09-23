@@ -257,3 +257,117 @@ export async function overlayMotion(page) {
   await page.keyboard.press('Escape');
   return { pass: sliding === 0, detail: sliding === 0 ? '' : `${sliding} transform transition(s) ran under reduced motion` };
 }
+
+/** Scroll to `y` and let scroll handlers and a transition settle. */
+const settleAt = async (page, y, ms = 400) => {
+  await page.evaluate((v) => window.scrollTo(0, v), y);
+  await page.waitForTimeout(ms);
+};
+
+/**
+ * nav §3 `shrink`: past the threshold the bar is shorter, with the same
+ * hysteresis as `solid`, and NOTHING below it moves — the final height is
+ * reserved up front. `hide`: scrolling down moves the bar out of view,
+ * scrolling up brings it back, and focus inside it brings it back too.
+ */
+export async function hideShrink(page) {
+  const sel = '[data-az-hide], [data-az-shrink]';
+  if (!(await page.$(sel))) return null;
+  await page.evaluate(() => { document.body.style.minHeight = '4000px'; });
+  const state = () => page.evaluate((s) => {
+    const nav = document.querySelector(s);
+    const r = nav.getBoundingClientRect();
+    const main = document.querySelector('main');
+    return {
+      height: r.height, top: r.top, bottom: r.bottom,
+      // Where the content below starts, in document terms: must never move.
+      mainAt: main.getBoundingClientRect().top + window.scrollY,
+      hides: nav.hasAttribute('data-az-hide'), shrinks: nav.hasAttribute('data-az-shrink'),
+    };
+  }, sel);
+  const problems = [];
+  await settleAt(page, 0);
+  const top = await state();
+  if (top.shrinks) {
+    await settleAt(page, 200);
+    const down = await state();
+    await settleAt(page, 60);
+    const between = await state();
+    await settleAt(page, 20);
+    const back = await state();
+    if (!(down.height < top.height)) problems.push(`past 80px the bar did not shrink (${top.height} -> ${down.height})`);
+    if (between.height !== down.height) problems.push('at 60px on the way up it grew back — no hysteresis');
+    if (back.height !== top.height) problems.push('near the top it did not return to full height');
+    if ([down, between, back].some((s) => s.mainAt !== top.mainAt)) {
+      problems.push(`the content below moved as the bar changed (${[top, down, between, back].map((s) => s.mainAt).join(', ')})`);
+    }
+  }
+  if (top.hides) {
+    await settleAt(page, 0, 100);
+    // A run of travel down, in steps, as a reader scrolls.
+    for (const y of [150, 300, 450, 600]) await settleAt(page, y, 60);
+    await page.waitForTimeout(400);
+    const hidden = await state();
+    if (hidden.bottom > 0) problems.push(`scrolling down did not move the bar out of view (bottom at ${hidden.bottom})`);
+    await settleAt(page, 560);
+    const shown = await state();
+    if (shown.top < 0 || shown.bottom <= 0) problems.push('scrolling up did not bring the bar back');
+    for (const y of [700, 850, 1000]) await settleAt(page, y, 60);
+    await page.waitForTimeout(400);
+    // A real link of the bar — not the skip link, which is off-screen until
+    // keyboard focus shows it. `:is()`, or the comma splits the selector.
+    await page.focus(`:is(${sel}) a[href]:not(.az-skip-link)`);
+    await page.waitForTimeout(400);
+    const focused = await state();
+    if (focused.top < 0 || focused.bottom <= 0) problems.push('focus inside the hidden bar did not bring it back');
+  }
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
+/**
+ * nav §3: `hide` "must be instant under reduced-motion" — and the shrink
+ * does not animate either. Run in a reduced-motion context.
+ */
+export async function navMotion(page) {
+  const sel = '[data-az-hide], [data-az-shrink]';
+  if (!(await page.$(sel))) return null;
+  await page.evaluate(() => { document.body.style.minHeight = '4000px'; });
+  let moving = 0;
+  for (const y of [150, 300, 450, 600]) {
+    await page.evaluate((v) => window.scrollTo(0, v), y);
+    await page.waitForTimeout(30);
+    moving += await page.evaluate((s) => document.getAnimations()
+      .filter((a) => document.querySelector(s).contains(a.effect?.target ?? null)).length, sel);
+  }
+  return { pass: moving === 0, detail: moving === 0 ? '' : `${moving} transition(s) ran on the bar under reduced motion` };
+}
+
+/**
+ * nav §5, "the universal bug": with a pinned nav, an anchor jump lands its
+ * target below the bar, not under it.
+ */
+export async function scrollPadding(page) {
+  const pinned = await page.evaluate(() => {
+    const nav = document.querySelector('nav[aria-label="Main"]');
+    if (!nav) return false;
+    const pin = (el) => el && ['sticky', 'fixed'].includes(getComputedStyle(el).position);
+    return pin(nav) || pin(nav.parentElement);
+  });
+  if (!pinned) return null;
+  await page.evaluate(() => {
+    document.body.style.minHeight = '4000px';
+    const target = document.createElement('h2');
+    target.id = 'az-probe-target';
+    target.textContent = 'Anchor target';
+    target.style.marginTop = '2000px';
+    document.querySelector('main').append(target);
+    location.hash = 'az-probe-target';
+  });
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(() => ({
+    target: document.getElementById('az-probe-target').getBoundingClientRect().top,
+    bar: document.querySelector('nav[aria-label="Main"]').getBoundingClientRect().bottom,
+  }));
+  const pass = r.target >= r.bar;
+  return { pass, detail: pass ? '' : `the anchor target landed at ${Math.round(r.target)}px, under the bar ending at ${Math.round(r.bar)}px` };
+}

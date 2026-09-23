@@ -49,6 +49,8 @@ const STATE_SELECTOR: Record<InteractionState, (cls: string) => string> = {
   expanded: (c) => `${c}[aria-expanded="true"]`,
   open: (c) => `${c}[data-state="open"]`,
   scrolled: (c) => `${c}[data-scrolled="true"]`,
+  shrunk: (c) => `${c}[data-shrunk="true"]`,
+  retracted: (c) => `${c}[data-retracted="true"]`,
   current: (c) => `${c}[aria-current="page"]`,
 };
 

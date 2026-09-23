@@ -1,0 +1,21 @@
+az 1
+
+site aurora
+  nav bar hide shrink
+    logo   ./preview-assets/assets/logo.svg
+    link   "Work"   /work
+    link   "Studio" /studio
+    cta    "Reserve" /reserve
+
+page /
+  hero center
+    title "Built in the dark"
+  text prose
+    title "Forty pairs a month"
+    body  "Every pair is cut, stitched and finished by the same two people. The workshop is small on purpose: the ceiling is the quality, not the demand."
+
+page /work
+
+page /studio
+
+page /reserve

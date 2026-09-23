@@ -12,12 +12,14 @@
  *   dialog    a <dialog> preset (drawer, popup): overlays-spec §2 and §6
  *   dropdown  a nav group: <button aria-expanded> + a plain <ul> of links
  *   solid     a nav transparent at the top, solid after scrolling (nav §4)
+ *   hide      a nav that retracts scrolling down, returns scrolling up (§3)
+ *   shrink    a nav that shrinks past a threshold (§3)
  *   faq       independent disclosures, hidden="until-found" (faq §7)
  *   copy      clipboard, announced politely (buttons §1.3)
  *   play      opens the video popup next to the button
  */
 
-import { copyText, moveIndex, solidAfter, transitionMs } from './logic.ts';
+import { copyText, moveIndex, retractedAfter, shrunkAfter, solidAfter, transitionMs } from './logic.ts';
 import { POLICY, isPreset } from './policy.ts';
 
 type Cleanup = () => void;
@@ -35,6 +37,7 @@ export function attach(doc: Document): Cleanup {
   wireDialogs(doc, on, undo);
   wireDropdowns(doc, on);
   wireSolid(doc, on, undo);
+  wireHideShrink(doc, on, undo);
   wireFaq(doc, on, undo);
   wireCopy(doc, on, undo);
 
@@ -237,6 +240,48 @@ function wireSolid(doc: Document, on: On, undo: Cleanup[]): void {
     apply();
     on(win, 'scroll', apply, { passive: true });
     undo.push(() => { for (const el of marked) el.removeAttribute('data-scrolled'); });
+  }
+}
+
+/* ---- hide and shrink ------------------------------------------------------ */
+
+function wireHideShrink(doc: Document, on: On, undo: Cleanup[]): void {
+  const win = doc.defaultView;
+  if (!win) return;
+  for (const nav of doc.querySelectorAll<HTMLElement>('[data-az-hide], [data-az-shrink]')) {
+    const hides = nav.hasAttribute('data-az-hide');
+    const shrinks = nav.hasAttribute('data-az-shrink');
+    // The logos shrink with the bar, so they carry its state too.
+    const marked = [nav, ...nav.querySelectorAll<HTMLElement>('[data-az-logo]')];
+    // Where the bar sits at rest: hiding it any earlier would open a page
+    // with the nav missing.
+    const barHeight = nav.getBoundingClientRect().height;
+    let shrunk = false;
+    let retracted = false;
+    let lastY = win.scrollY;
+    let fromY = lastY;
+    const mark = (name: string, value: boolean) => { for (const el of marked) el.setAttribute(name, String(value)); };
+    const apply = () => {
+      const y = win.scrollY;
+      // A change of direction starts a new run of travel.
+      if ((y > lastY) !== (lastY > fromY) && y !== lastY) fromY = lastY;
+      lastY = y;
+      if (shrinks) {
+        const next = shrunkAfter(y, shrunk);
+        if (next !== shrunk || !nav.hasAttribute('data-shrunk')) { shrunk = next; mark('data-shrunk', shrunk); }
+      }
+      if (hides) {
+        // Never retract while something inside the bar is open or focused:
+        // a keyboard user must not tab into an invisible nav.
+        const busy = nav.contains(doc.activeElement) || nav.querySelector('[aria-expanded="true"]') !== null;
+        const next = busy ? false : retractedAfter(fromY, y, retracted, barHeight);
+        if (next !== retracted || !nav.hasAttribute('data-retracted')) { retracted = next; mark('data-retracted', retracted); }
+      }
+    };
+    apply();
+    on(win, 'scroll', apply, { passive: true });
+    if (hides) on(nav, 'focusin', () => { retracted = false; mark('data-retracted', false); });
+    undo.push(() => { for (const el of marked) { el.removeAttribute('data-shrunk'); el.removeAttribute('data-retracted'); } });
   }
 }
 

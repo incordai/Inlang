@@ -40,10 +40,10 @@ const EXACT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const RAN = /^(chromium|firefox|webkit)-\d+(\.\d+)?$/;
 /** Items 3–7: which test:visual checks each gate item is made of. */
 const VISUAL = {
-  3: ['compile', 'overflow', 'restack', 'column', 'disclosure', 'solid', 'firefox', 'webkit'],
+  3: ['compile', 'overflow', 'restack', 'column', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'firefox', 'webkit'],
   4: ['axe', 'copy'],
   5: ['keyboard', 'skip-link', 'drawer', 'dropdown', 'faq', 'play'],
-  6: ['reduced-motion', 'overlay-motion'],
+  6: ['reduced-motion', 'overlay-motion', 'nav-motion'],
   7: ['schemes'],
 };
 const ITEMS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];

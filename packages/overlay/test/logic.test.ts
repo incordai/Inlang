@@ -4,7 +4,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SOLID_AT, TRANSPARENT_AT, copyText, moveIndex, solidAfter, transitionMs } from '../src/runtime/logic.ts';
+import {
+  HIDE_TRAVEL, SOLID_AT, TRANSPARENT_AT, copyText, moveIndex, retractedAfter, shrunkAfter, solidAfter, transitionMs,
+} from '../src/runtime/logic.ts';
 
 test('nav §4: solid at 80px down, transparent again only at 40px up', () => {
   assert.equal(solidAfter(SOLID_AT - 1, false), false);
@@ -45,4 +47,26 @@ test('the exit wait is the longest duration plus its delay, in ms', () => {
   assert.equal(transitionMs('120ms, 0.24s', '0s, 10ms'), 250);
   assert.equal(transitionMs('0s', '0s'), 0);
   assert.equal(transitionMs('', ''), 0, 'CONTROL: nothing computed, no wait');
+});
+
+test('nav §3 shrink: the same hysteresis as solid — no pumping at the threshold', () => {
+  let shrunk = false;
+  const seen: boolean[] = [];
+  for (const y of [0, 79, 80, 60, 41, 40, 60, 80]) { shrunk = shrunkAfter(y, shrunk); seen.push(shrunk); }
+  assert.deepEqual(seen, [false, false, true, true, true, false, false, true]);
+});
+
+test('nav §3 hide: retracts after a run of travel down, returns on a run up', () => {
+  const bar = 72;
+  assert.equal(retractedAfter(300, 300 + HIDE_TRAVEL, false, bar), true, 'down past the travel threshold');
+  assert.equal(retractedAfter(500, 500 - HIDE_TRAVEL, true, bar), false, 'up past it');
+  // Jitter smaller than the travel threshold changes nothing, either way.
+  assert.equal(retractedAfter(300, 300 + HIDE_TRAVEL - 1, false, bar), false);
+  assert.equal(retractedAfter(500, 500 - HIDE_TRAVEL + 1, true, bar), true);
+});
+
+test('CONTROL: the bar is never hidden while it still sits over its own spot', () => {
+  assert.equal(retractedAfter(0, 72, false, 72), false, 'at bar height, even after travel down');
+  assert.equal(retractedAfter(0, 73, false, 72), true, 'just past it, the rule applies');
+  assert.equal(retractedAfter(400, 10, true, 72), false, 'near the top it always shows');
 });
