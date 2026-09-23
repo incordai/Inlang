@@ -111,7 +111,7 @@ Get the distinction right in the auth adapters:
 |---|---|---|
 | Hosted provider **anon/public** key | **yes** | designed to be public; protected by row-level security |
 | Hosted provider **service** key | **never** | bypasses all row-level security. Full database access |
-| Auth.js secret | **never** | server-side only |
+| An auth library's server-side session-signing secret | **never** | server-side only; whoever holds it can mint sessions |
 | `AZ_SECRET` (backend adapter) | **never** | signs tokens |
 
 **Three things the compiler should do:**

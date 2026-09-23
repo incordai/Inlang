@@ -38,20 +38,31 @@ site.az  ──[az build]──>  React + Vite + R3F site
 
 ## Current state
 
-**M0 has not started.** The project is specced and entirely unbuilt — the
-repository holds documentation only: no code, no `package.json`, no lockfile,
-no git history.
+**Built out of milestone order; M0 is still not closed.** The authoritative,
+dated summary is ROADMAP.md "Current status" — read it before starting work.
+In short:
 
-The next action is **M0** (ROADMAP M0): hand-build one `hero 3d scroll` with
-all three motion tiers **and the runtime tier probe**
-(`motion-tiers-spec.md`). Do not build the compiler first.
+- **M0** — `spike-m0/` has the hand-built hero, the 8-rung tier ladder with a
+  pure decision function (§8.2 traces pass), and the procedural scene proven
+  identical across Chromium, Firefox and WebKit (A8b). Open: a genuinely slow
+  device (A1/A1b), the opt-in `.glb`/Draco path (A8), a 2021+ laptop for the
+  fps check.
+- **M1** — the compiler core, `az build`/`dev`/`spec`/`check`, CI, offline and
+  cold-compile tests: met.
+- **M2** — all 11 blocks emit with their variants, responsive tables, the
+  button primitive, generated stylesheet, light/dark schemes, validation
+  tables, the overlay engine and behaviour runtime; `pnpm gate` runs the
+  12-point gate. The 3D props (`hero.model`, `scene.model`, `scene.camera`)
+  wait on the 3D runtime port.
+- **M3** — `raw`, `slot`, `az eject`, `az lint`, `az migrate`: met.
+- **M4** — adapters and the secret-leak guard built; the real-provider login
+  and `azbackend` (PRD §11 Q2) are open.
+- **M5** — not started; it needs a real client brief.
 
-The mid-range-Android gate is cleared — tier selection is measured at runtime
-by the generated site, so A1 no longer blocks anything (`ASSUMPTIONS.md` A1).
-**A1b replaces it as the assumption that can sink M0:** that the probe can
-actually pick the right tier. If a real device turns up, run VERIFICATION §2
-and record the numbers — it is still the only way to learn where the tier
-boundary falls.
+Every check an agent must keep green: `pnpm verify`, `pnpm verify:build`,
+`pnpm gate`, `pnpm test:auth`, `node scripts/thumbnails.mjs --verify`.
+A1b remains the assumption that can sink the motion story: if a real device
+turns up, run VERIFICATION §2 and record the numbers.
 
 ## Stop conditions
 
