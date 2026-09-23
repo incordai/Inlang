@@ -95,7 +95,11 @@ async function buildAll(words, work) {
     s.dir = join(work, `${s.word}-${s.theme}`);
     mkdirSync(s.dir, { recursive: true });
     const src = join(WORDS, s.word);
-    writeFileSync(join(s.dir, 'site.az'), themed(readFileSync(join(src, 'preview.az'), 'utf8'), s.theme));
+    const preview = readFileSync(join(src, 'preview.az'), 'utf8');
+    writeFileSync(join(s.dir, 'site.az'), themed(preview, s.theme));
+    // Each page is its own HTML file, and a preview's extra pages exist only
+    // so its links resolve. The word under test is on the FIRST page declared.
+    s.path = firstRoute(preview);
     if (existsSync(join(src, 'preview-assets'))) cpSync(join(src, 'preview-assets'), join(s.dir, 'preview-assets'), { recursive: true });
   }
   // A preview that no longer compiles is a finding for that word, not a
@@ -140,6 +144,13 @@ async function buildAll(words, work) {
   return built;
 }
 
+/** The first `page <route>` of a .az source, as a URL path. */
+function firstRoute(source) {
+  const m = /^page\s+(\S+)/m.exec(source);
+  if (!m) throw new Error('preview has no page');
+  return m[1] === '/' ? '/' : `${m[1]}/`;
+}
+
 /* ---- check one site ----------------------------------------------------- */
 
 async function checkSite(s, browsers, server) {
@@ -156,7 +167,7 @@ async function checkSite(s, browsers, server) {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'no-preference' });
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto(server.url, { waitUntil: 'load' });
+      await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
       record(s.word, 'overflow', tag(scheme, width), await overflow(page));
       await page.screenshot({ path: join(shots, `${s.theme}-${scheme}-${width}.png`), fullPage: true });
       if (width !== 768) record(s.word, 'axe', tag(scheme, width), await axe(page));
@@ -173,7 +184,7 @@ async function checkSite(s, browsers, server) {
 
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(server.url, { waitUntil: 'load' });
+  await page.goto(new URL(s.path, server.url).href, { waitUntil: 'load' });
   record(s.word, 'reduced-motion', `${s.theme}/light/1440`, await reducedMotion(page));
   await ctx.close();
 
@@ -182,7 +193,7 @@ async function checkSite(s, browsers, server) {
     const other = await browsers[name].newPage({ viewport: { width, height: 900 } });
     const errors = [];
     other.on('pageerror', (e) => errors.push(e.message));
-    await other.goto(server.url, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+    await other.goto(new URL(s.path, server.url).href, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
     const o = await overflow(other);
     record(s.word, name, `${s.theme}/light/${width}`, {
       pass: o.pass && errors.length === 0,
