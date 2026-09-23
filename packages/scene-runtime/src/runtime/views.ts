@@ -252,8 +252,13 @@ export function model(url: string, cache: ModelCache, env: THREE.Texture, framin
 /** gallery-spec §9: planes around a circle, facing out. */
 const RING = { radius: 2.6, planeWidth: 1.4, turnsPerScroll: 0.5 } as const;
 
-/** gallery `orbit`: a ring of the section's own images, rotated by scroll or drag. */
-export function ring(sources: readonly string[], aspectRatio: number, env: THREE.Texture): Content {
+/**
+ * gallery `orbit`: a ring of the section's own images, rotated by scroll or
+ * drag. A ring with a missing image is not the ring: one failed image fails
+ * the view, which keeps its poster and its list (the images stay content).
+ */
+export function ring(sources: readonly string[], aspectRatio: number, env: THREE.Texture,
+  onFail: (error: unknown) => void): Content {
   const scene = new THREE.Scene();
   scene.environment = env;
   const cam = camera();
@@ -264,8 +269,13 @@ export function ring(sources: readonly string[], aspectRatio: number, env: THREE
   const materials: THREE.MeshBasicMaterial[] = [];
   const textures: THREE.Texture[] = [];
   let alive = true;
-  let settled = 0;
-  const settle = () => { settled++; };
+  let loaded = 0;
+  let failed = false;
+  const fail = (error: unknown) => {
+    if (!alive || failed) return;
+    failed = true;
+    onFail(error);
+  };
 
   sources.forEach((src, i) => {
     const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, transparent: true, opacity: 0 });
@@ -282,15 +292,15 @@ export function ring(sources: readonly string[], aspectRatio: number, env: THREE
       material.map = texture;
       material.opacity = 1;
       material.needsUpdate = true;
-      settle();
-    }, undefined, settle);
+      loaded++;
+    }, undefined, fail);
   });
 
   return {
     scene,
     camera: cam,
     // The ring replaces the poster only once every image has arrived.
-    get ready() { return settled === sources.length; },
+    get ready() { return !failed && loaded === sources.length; },
     setAspect(a) {
       cam.aspect = a;
       cam.updateProjectionMatrix();

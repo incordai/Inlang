@@ -45,3 +45,20 @@ export function decide3d(win: Window): Start | null {
   const start = startFrom(capabilityGate(readGateSignals(win)), readForced(win.location.search));
   return start.rung === STATIC_RUNG ? null : start;
 }
+
+/**
+ * Run `then` once the page has a 3D view — at once if it has one now, or as
+ * soon as one is rendered. A page behind <Protected> renders its content
+ * only after the session check, after the entry has already run.
+ */
+export function whenViews(doc: Document, then: () => void): void {
+  if (doc.querySelector('[data-az-3d]')) { then(); return; }
+  const win = doc.defaultView;
+  if (!win) return;
+  const observer = new win.MutationObserver(() => {
+    if (!doc.querySelector('[data-az-3d]')) return;
+    observer.disconnect();
+    then();
+  });
+  observer.observe(doc.body, { childList: true, subtree: true });
+}

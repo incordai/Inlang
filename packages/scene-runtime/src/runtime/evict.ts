@@ -21,6 +21,12 @@ import * as THREE from 'three';
  */
 export const SCENE_BUDGET_BYTES = 64 * 1024 * 1024;
 
+/** One GPU resource a view holds: an upload, keyed so a shared one counts once. */
+export interface Resource {
+  readonly key: string;
+  readonly bytes: number;
+}
+
 /** A view as the policy sees it. */
 export interface Resident {
   readonly id: number;
@@ -29,27 +35,55 @@ export interface Resident {
   readonly backdrop: boolean;
   /** When it was last visible (page clock); never-seen views count as oldest. */
   readonly lastVisible: number;
-  /** Its estimated GPU bytes while resident. */
-  readonly bytes: number;
+  /**
+   * What it holds on the GPU. A model shown in two views is ONE upload:
+   * releasing one of them frees nothing while the other still holds it.
+   */
+  readonly resources: readonly Resource[];
+}
+
+/** Bytes of the distinct resources the given views hold together. */
+function heldBytes(residents: readonly Resident[]): number {
+  const held = new Map<string, number>();
+  for (const r of residents) for (const res of r.resources) held.set(res.key, res.bytes);
+  let total = 0;
+  for (const b of held.values()) total += b;
+  return total;
 }
 
 /**
- * Which views to release, oldest-seen first, until the total fits.
+ * Which views to release, oldest-seen first, until what REMAINS fits.
  * Returns fewer than needed when only active views remain: those stay.
+ * Accounting is by resource, so a view whose model another view also shows
+ * is released only when that frees enough on its own or with others.
  */
 export function toEvict(residents: readonly Resident[], budget: number): number[] {
-  let total = residents.reduce((n, r) => n + r.bytes, 0);
-  if (total <= budget) return [];
+  if (heldBytes(residents) <= budget) return [];
   const paused = residents
     .filter((r) => !r.visible && !r.backdrop)
     .sort((a, b) => a.lastVisible - b.lastVisible || a.id - b.id);
-  const out: number[] = [];
+  const out = new Set<number>();
   for (const r of paused) {
-    if (total <= budget) break;
-    out.push(r.id);
-    total -= r.bytes;
+    out.add(r.id);
+    if (heldBytes(residents.filter((x) => !out.has(x.id))) <= budget) break;
   }
-  return out;
+  // Nothing freed is nothing gained: a release that frees no bytes (its
+  // resources shared with a kept view) is not made.
+  const kept = residents.filter((x) => !out.has(x.id));
+  return [...out].filter((id) => {
+    const r = residents.find((x) => x.id === id)!;
+    const others = new Set(kept.flatMap((x) => x.resources.map((res) => res.key)));
+    return r.resources.some((res) => !others.has(res.key)) || r.resources.length === 0;
+  });
+}
+
+/**
+ * When a view was last visible, after an intersection change: the moment it
+ * LEFT the warm margin counts, not the moment it entered — a view on screen
+ * from 0 to 100 is more recent than one seen from 50 to 60.
+ */
+export function seenAt(wasVisible: boolean, isVisible: boolean, last: number, now: number): number {
+  return wasVisible || isVisible ? now : last;
 }
 
 /** Texture bytes: RGBA8, plus a third for the mip chain. */
@@ -61,33 +95,31 @@ function textureBytes(t: THREE.Texture): number {
 }
 
 /**
- * The GPU bytes a scene graph holds: every geometry's buffers and every
- * material texture, each counted once across all scenes passed the same
- * `seen` set — a model shown in two views is one upload. The scene's
- * environment map is the page's, shared by every view, and is not counted.
+ * The GPU resources a scene graph holds: every geometry's buffers and every
+ * material texture, keyed by uuid — a model shown in two views yields the
+ * same keys from both. The scene's environment map is the page's, shared by
+ * every view, and is not counted.
  */
-export function sceneBytes(root: THREE.Object3D, seen: Set<string>): number {
-  let bytes = 0;
+export function sceneResources(root: THREE.Object3D): Resource[] {
+  const out = new Map<string, number>();
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     const g = mesh.geometry;
-    if (!seen.has(g.uuid)) {
-      seen.add(g.uuid);
+    if (!out.has(g.uuid)) {
+      let bytes = 0;
       for (const a of Object.values(g.attributes)) bytes += (a as THREE.BufferAttribute).array.byteLength;
       if (g.index) bytes += g.index.array.byteLength;
+      out.set(g.uuid, bytes);
     }
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const m of materials) {
       for (const value of Object.values(m)) {
-        if (value instanceof THREE.Texture && !seen.has(value.uuid)) {
-          seen.add(value.uuid);
-          bytes += textureBytes(value);
-        }
+        if (value instanceof THREE.Texture && !out.has(value.uuid)) out.set(value.uuid, textureBytes(value));
       }
     }
   });
-  return bytes;
+  return [...out].map(([key, bytes]) => ({ key, bytes }));
 }
 
 /** `?az-scene-budget=<MB>`: a smaller budget, for tests and diagnosis (whole MB only). */

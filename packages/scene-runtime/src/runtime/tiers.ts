@@ -464,5 +464,15 @@ export class TierProbe {
   /** The render loop paused (on-demand frames): the next gap is not a frame. */
   pause(): void { this.lastTs = null; }
 
+  /**
+   * The tab was hidden. Called from `visibilitychange` itself: a hidden tab
+   * gets no animation frames, so a loop waiting for its next frame would
+   * never see the page hidden (§3.3, §4's drift re-baseline).
+   */
+  hide(): void {
+    this.engine.hidden();
+    this.lastTs = null;
+  }
+
   contextLost(): void { this.engine.contextLost(); }
 }

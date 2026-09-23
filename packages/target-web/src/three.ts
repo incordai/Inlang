@@ -54,13 +54,15 @@ export function seedViews(
  * The entry of a 3D site. The page renders first and synchronously — its
  * text is the LCP element (hero-spec §8) — then the gate decides whether this
  * page view gets a renderer at all; only if it does is the 3D chunk fetched.
+ * A page behind <Protected> renders its views only after the session check,
+ * so the gate waits for the first view rather than deciding on an empty page.
  */
 export function threeMain(header: string): string {
   return `${header}import { StrictMode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import App from "./App.tsx";
-import { decide3d } from "./az3d/gate.ts";
+import { decide3d, whenViews } from "./az3d/gate.ts";
 import "./theme.css";
 import "./az.css";
 
@@ -73,13 +75,14 @@ const app = <StrictMode><App route={window.location.pathname} /></StrictMode>;
 el.firstElementChild
   ? hydrateRoot(el, app)
   : flushSync(() => createRoot(el).render(app));
-const start = decide3d(window);
-if (start) {
+whenViews(document, () => {
+  const start = decide3d(window);
+  if (!start) return;
   import("./az3d/index.ts").then(
     (m) => { m.start(document, start); },
     (error: unknown) => { console.error("3d: the renderer did not load; the posters stay", error); },
   );
-}
+});
 `;
 }
 

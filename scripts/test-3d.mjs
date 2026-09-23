@@ -20,7 +20,7 @@
 
 import { chromium, firefox, webkit } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
-import { mkdtempSync, mkdirSync, cpSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, buildSites } from './visual/pipeline.mjs';
@@ -114,6 +114,80 @@ page /
     body  "Two people, one room, and a surface under every line."
 `;
 
+const PROSE = (n) => Array.from({ length: n }, (_, i) => `  text prose
+    title "Distance ${i + 1}"
+    body  "A paragraph of distance, so the page has somewhere to scroll and the scene sits below the fold."
+`).join('');
+
+/** One scene below the fold: inside the warm margin, not on screen. */
+const BELOW = `az 1
+
+site aurora
+
+page /
+  hero center
+    title "A scene below the fold"
+${PROSE(3)}  scene inline 3d
+    poster ./assets/poster.webp
+    alt    "Strands below the fold"
+${PROSE(6)}`;
+
+/** hero-spec §8: a 3D hero drawn by a backdrop whose model will not load. */
+const HERO_BEHIND = `az 1
+
+site aurora
+  scene backdrop 3d scroll
+    model  ./assets/shoe.glb
+    poster ./assets/poster.webp
+    alt    "A shoe behind the page"
+
+page /
+  hero split 3d
+    title    "Over a backdrop"
+    describe "Strands curling upward"
+    poster   ./assets/poster.webp
+${PROSE(2)}`;
+
+/** gallery §9: an orbit ring, one of whose images will be missing. */
+const RING = `az 1
+
+site aurora
+
+page /
+  hero center
+    title "A ring of photographs"
+  gallery orbit
+    poster ./assets/poster.webp
+${[1, 2, 3, 4].map((i) => `    image ./assets/orbit-${i}.webp
+      alt "Photograph ${i}"
+`).join('')}${PROSE(2)}`;
+
+/** A protected page: its content, and its 3D, render only after the session check. */
+const PROTECTED = `az 1
+
+site aurora
+  auth
+    adapter session
+    protect /account
+
+page /login
+  auth login
+
+page /account
+  hero split 3d
+    title    "Your account"
+    describe "Strands curling upward"
+    poster   ./assets/poster.webp
+  faq list
+    title "Questions"
+    item "How long does a pair take?"
+      text "Four to six weeks from order to shipping."
+    item "Can I return them?"
+      text "Unworn pairs within thirty days."
+    item "Do you resole?"
+      text "Yes, in the studio."
+`;
+
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
@@ -127,16 +201,27 @@ const procedural = { dir: join(work, 'procedural'), source: PROCEDURAL };
 const many = { dir: join(work, 'many'), source: MANY };
 const pair = { dir: join(work, 'pair'), source: PAIR };
 const backdrop = { dir: join(work, 'backdrop'), source: BACKDROP };
+const below = { dir: join(work, 'below'), source: BELOW };
+const heroBehind = { dir: join(work, 'hero-behind'), source: HERO_BEHIND };
+const ringSite = { dir: join(work, 'ring'), source: RING };
+const protectedSite = { dir: join(work, 'protected'), source: PROTECTED };
 mkdirSync(fixture.dir, { recursive: true });
 cpSync(fixtureAssets, fixture.dir, { recursive: true });
-for (const s of [procedural, many, pair, backdrop]) {
+const sites = [procedural, many, pair, backdrop, below, heroBehind, ringSite, protectedSite];
+for (const s of sites) {
   mkdirSync(join(s.dir, 'assets'), { recursive: true });
   cpSync(join(fixtureAssets, 'assets/orbit.webp'), join(s.dir, 'assets/poster.webp'));
 }
-await buildSites([fixture, procedural, many, pair, backdrop], work);
-for (const s of [fixture, procedural, many, pair, backdrop]) {
+cpSync(join(fixtureAssets, 'assets/shoe.glb'), join(heroBehind.dir, 'assets/shoe.glb'));
+for (const i of [1, 2, 3, 4]) cpSync(join(fixtureAssets, `assets/orbit-${i}.webp`), join(ringSite.dir, `assets/orbit-${i}.webp`));
+await buildSites([fixture, ...sites], work);
+for (const s of [fixture, ...sites]) {
   if (!s.compiled) throw new Error(`3d: ${s.dir} did not compile: ${s.error}`);
 }
+// A published file that fails to load: the model behind the hero, and one
+// photograph of the ring. The build shipped them; the host lost them.
+rmSync(join(heroBehind.dist, 'assets/shoe.glb'));
+rmSync(join(ringSite.dist, 'assets', readdirSync(join(ringSite.dist, 'assets')).find((f) => /^orbit-2\./.test(f))));
 
 const server = await startServer();
 const browser = await chromium.launch({ args: GL_ARGS });
@@ -354,6 +439,212 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
     down && (await rung(page)) === '7' && (await liveViews(page)) === 0 && poster === 'visible',
     `rung ${await rung(page)}, poster ${poster}`);
   check('no page errors from the teardown', errors.length === 0, errors[0] ?? '');
+  await context.close();
+}
+
+/* ---- §7: the loop stops when nothing is on screen -------------------------- */
+{
+  // Count animation frames the page asks for: with the only view below the
+  // fold (warm, not on screen) nothing is drawn, so nothing should loop.
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => {
+    const raf = window.requestAnimationFrame.bind(window);
+    window.__azFrames = 0;
+    window.requestAnimationFrame = (fn) => { window.__azFrames++; return raf(fn); };
+  });
+  const page = await context.newPage();
+  server.serve(below.dist);
+  await page.goto(new URL('/?az-probe=off', server.url).href, { waitUntil: 'load' });
+  // Just below the fold, well inside the warm margin.
+  await page.evaluate(() => {
+    const el = document.querySelector('.az-scene-view');
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: Math.max(0, top - innerHeight - 120), behavior: 'instant' });
+  });
+  const placed = await page.evaluate(() => {
+    const r = document.querySelector('.az-scene-view').getBoundingClientRect();
+    return r.top > innerHeight && r.top < innerHeight * 2;
+  });
+  await page.waitForTimeout(SETTLE_MS * 2);
+  const before = await page.evaluate(() => window.__azFrames);
+  await page.waitForTimeout(2000);
+  const idle = (await page.evaluate(() => window.__azFrames)) - before;
+  check('§7: with nothing on screen the render loop stops (no frames for a warm, off-screen view)',
+    placed && idle < 10, `${idle} frames requested in 2s${placed ? '' : ' (view not placed below the fold)'}`);
+  // CONTROL: once it is on screen, it draws.
+  await page.locator('.az-scene-view').scrollIntoViewIfNeeded();
+  const live = await waitFor(page, () => document.querySelector('.az-scene-view[data-live="true"]'));
+  check('CONTROL: the same view on screen goes live', live);
+  await context.close();
+}
+
+/* ---- §3.3: a hidden tab is reported to the probe --------------------------- */
+{
+  const { page, context } = await open(below, '/?az-probe-trace');
+  await page.locator('.az-scene-view').scrollIntoViewIfNeeded();
+  await waitFor(page, () => document.querySelector('.az-scene-view[data-live="true"]'));
+  // A hidden tab gets no frames: freeze them, then report the tab hidden.
+  await page.evaluate(() => {
+    window.requestAnimationFrame = () => 0;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  const told = await waitFor(page, () => Number((document.documentElement.getAttribute('data-az3d-probe') ?? '0 0').split(' ')[1]) > 0);
+  check('§3.3: the probe hears the tab hid even though no frame comes', told,
+    await page.evaluate(() => document.documentElement.getAttribute('data-az3d-probe')));
+  await context.close();
+}
+
+/* ---- the back/forward cache: 3D comes back ----------------------------------- */
+{
+  const { page, context, errors } = await open(procedural, '/?az-probe=off');
+  await waitFor(page, () => document.querySelector('.az-hero-visual[data-live="true"]'));
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+  });
+  const down = await waitFor(page, () => !document.querySelector('canvas'));
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  });
+  const back = await waitFor(page, () => document.querySelectorAll('canvas.az-3d-canvas').length === 1
+    && document.querySelector('.az-hero-visual[data-live="true"]'));
+  check('a page restored from the back/forward cache starts its 3D again', down && back, `rung ${await rung(page)}`);
+  check('no page errors across the restore', errors.length === 0, errors[0] ?? '');
+  await context.close();
+}
+
+/* ---- §6.3: a modal's scroll lock does not rewind the backdrop ------------- */
+{
+  // The backdrop animates at rest, so its pixels are no witness: with
+  // ?az-probe-trace the stage publishes the scroll position it is following.
+  const { page, context } = await open(backdrop, '/?az-probe=off&az-probe-trace');
+  await page.evaluate(() => { document.body.style.minHeight = '4000px'; });
+  await page.evaluate(() => window.scrollTo({ top: 800, behavior: 'instant' }));
+  await page.waitForTimeout(SETTLE_MS);
+  const target = () => page.evaluate(() => Number(document.documentElement.getAttribute('data-az3d-backdrop') ?? 'NaN'));
+  const before = await target();
+  check('CONTROL: scrolled down, the backdrop follows the page', before > 0, String(before));
+  // The lock as the behaviour runtime makes it: body fixed at its offset,
+  // scrollY 0, the offset on the root. Nothing on screen moves.
+  await page.evaluate(() => {
+    document.documentElement.setAttribute('data-az-scroll-lock', String(window.scrollY));
+    Object.assign(document.body.style, { position: 'fixed', top: `${-window.scrollY}px`, insetInline: '0', overflow: 'hidden' });
+  });
+  await page.waitForTimeout(SETTLE_MS);
+  const during = await target();
+  check('§6.3: under a modal\'s scroll lock the backdrop holds, not rewinds to the top', during === before, `${before} -> ${during}`);
+  await context.close();
+}
+
+/* ---- hero-spec §8: a hero keeps its poster while the backdrop cannot draw -- */
+{
+  const { page, context } = await open(heroBehind, '/?az-probe=off');
+  await page.waitForTimeout(SETTLE_MS * 3);
+  const poster = await page.evaluate(() => getComputedStyle(document.querySelector('.az-hero-poster')).visibility);
+  check('a 3D hero behind a backdrop whose model failed keeps its poster', poster === 'visible', `poster ${poster}`);
+  await context.close();
+}
+
+/* ---- gallery §9: a ring with a missing photograph keeps its list ---------- */
+{
+  const { page, context, errors } = await open(ringSite, '/?az-probe=off');
+  await page.locator('[data-az-3d="orbit"]').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(SETTLE_MS * 3);
+  // Live, the ring hides the poster and moves the list out of sight; a ring
+  // with a hole in it must not.
+  const state = await page.evaluate(() => ({
+    live: document.querySelector('[data-az-3d-host]').getAttribute('data-live'),
+    poster: getComputedStyle(document.querySelector('.az-gallery-poster')).visibility,
+  }));
+  check('an orbit ring with a photograph missing stays on the poster and its list', state.live !== 'true' && state.poster === 'visible',
+    `live ${state.live}, poster ${state.poster}`);
+  check('no page errors from the failed photograph', errors.length === 0, errors[0] ?? '');
+  await context.close();
+}
+
+/* ---- scene-spec §9: an orbit drag released outside the view ends ----------- */
+{
+  const { page, context } = await open(procedural, '/?az-probe=off');
+  const view = page.locator('.az-scene-view[data-az-camera="orbit"]');
+  await view.scrollIntoViewIfNeeded();
+  await waitFor(page, () => document.querySelector('.az-scene-view[data-az-camera="orbit"][data-live="true"]'));
+  const box = await view.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2, { steps: 4 });
+  // Out of the view, then released out there.
+  await page.mouse.move(box.x + box.width + 200, box.y - 200, { steps: 4 });
+  await page.mouse.up();
+  // Back over the view with no button held — hover styles apply to both
+  // shots — and let the drag's turn finish easing in before the baseline:
+  // under software WebGL frames are slow and each eases a capped step, so
+  // it waits until two shots in a row agree (bounded).
+  await page.mouse.move(box.x + 20, box.y + box.height / 2);
+  const shot = () => page.screenshot({ clip: box });
+  let released = await shot();
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(SETTLE_MS);
+    const next = await shot();
+    if (next.equals(released)) break;
+    released = next;
+  }
+  // Hovering across the view with no button held must not turn it.
+  await page.mouse.move(box.x + box.width - 20, box.y + box.height / 2, { steps: 8 });
+  await page.waitForTimeout(SETTLE_MS * 4);
+  check('§9: a drag released outside the view ends — hovering afterwards does not turn the object', released.equals(await shot()));
+  await context.close();
+}
+
+/* ---- a renderer that cannot be made leaves nothing behind ----------------- */
+{
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  // The gate's own probe canvases still get a context; the page's renderer does not.
+  await context.addInitScript(() => {
+    const get = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+      return this.classList.contains('az-3d-canvas') ? null : get.call(this, type, attrs);
+    };
+  });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  server.serve(procedural.dist);
+  await page.goto(new URL('/?az-probe=off', server.url).href, { waitUntil: 'load' });
+  await page.waitForTimeout(SETTLE_MS * 2);
+  const state = await page.evaluate(() => ({
+    canvases: document.querySelectorAll('canvas').length,
+    rung: document.documentElement.getAttribute('data-az3d-rung'),
+    poster: getComputedStyle(document.querySelector('.az-hero-poster')).visibility,
+  }));
+  check('a renderer that fails to start leaves no canvas, says static, keeps the posters, throws nothing',
+    state.canvases === 0 && state.rung === '7' && state.poster === 'visible' && errors.length === 0,
+    `${state.canvases} canvas, rung ${state.rung}, poster ${state.poster}${errors[0] ? `; ${errors[0]}` : ''}`);
+  await context.close();
+}
+
+/* ---- a protected page: content after the session check is still wired ---- */
+{
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  // The session adapter's one read (auth-spec §3.3), answered as signed in.
+  await page.route('**/api/auth/session', (route) => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ session: { user: { id: 'u-1', email: 'reader@example.org' } } }),
+  }));
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  server.serve(protectedSite.dist);
+  await page.goto(new URL('/account/?az-probe=off', server.url).href, { waitUntil: 'load' });
+  await page.locator('.az-session').waitFor({ state: 'visible', timeout: WAIT_MS });
+  const collapsed = await waitFor(page, () => {
+    const b = [...document.querySelectorAll('[data-az-disclosure]')];
+    return b.length > 0 && b.every((x) => x.getAttribute('aria-expanded') === 'false');
+  });
+  check('a protected page\'s FAQ, rendered after the session check, is wired (answers collapse)', collapsed);
+  const live = await waitFor(page, () => document.querySelector('.az-hero-visual[data-live="true"]'));
+  check('a protected page\'s 3D, rendered after the session check, starts', live && (await canvases(page)) === 1,
+    `${await canvases(page)} canvas`);
+  check('no page errors on the protected page', errors.length === 0, errors[0] ?? '');
   await context.close();
 }
 
