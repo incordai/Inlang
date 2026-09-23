@@ -15,6 +15,7 @@ import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
 import { resolve, schemeCss, schemeReferences, THEMES, type Theme } from '../../theme/src/index.ts';
 import { emitPages, type EmitterMap } from './tree.ts';
+import { sanitizeSvg, SvgError } from './svg.ts';
 import { compileStyles } from './stylesheet.ts';
 import { COMPONENT_EXT } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
@@ -304,6 +305,10 @@ const REACT_NAME: Record<string, string> = {
   // SVG presentation attributes (the action icons): React camel-cases them.
   "clip-rule": "clipRule", "fill-rule": "fillRule", "stroke-linecap": "strokeLinecap",
   "stroke-linejoin": "strokeLinejoin", "stroke-width": "strokeWidth", viewbox: "viewBox",
+  // And the rest an inlined icon may carry (feature-spec §7, target-web svg.ts).
+  "stroke-miterlimit": "strokeMiterlimit", "stroke-dasharray": "strokeDasharray",
+  "stroke-dashoffset": "strokeDashoffset", "stroke-opacity": "strokeOpacity", "fill-opacity": "fillOpacity",
+  "stop-color": "stopColor", "stop-opacity": "stopOpacity", "clip-path": "clipPath", "vector-effect": "vectorEffect",
 };
 
 /**
@@ -391,9 +396,15 @@ export interface EmitOptions {
   readonly emitters?: EmitterMap;
   /** Overrides the theme named in the source. Used by tests and previews. */
   readonly theme?: Theme;
+  /**
+   * Reads a project file as text — the CLI's, sandboxed to the project like
+   * the assets it copies. Given it, an SVG a word asks to inline is read and
+   * sanitised (feature-spec §7); without it (tests, a playground) the word
+   * shows the file as an <img>. Null means the file does not exist.
+   */
+  readonly readText?: (projectPath: string) => string | null;
 }
 
-/** The theme the site asked for, falling back to the default. */
 /**
  * nav-block-spec §5 — "the universal bug": a nav that stays on screen hides
  * every anchor target under itself unless the page scrolls short of it.
@@ -413,6 +424,7 @@ html { scroll-padding-top: calc(var(--az-size-nav) + ${theme.space[16]}px); }
 `;
 }
 
+/** The theme the site asked for, falling back to the default. */
 function namedTheme(spec: Spec, override?: Theme): Theme {
   return override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
 }
@@ -522,10 +534,19 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     modules.add(path);
     return path;
   };
+  const readText = options.readText;
+  const inline = readText
+    ? (raw: string): EmittedNode => {
+        const path = safeAssetPath(raw);
+        const source = readText(path);
+        if (source === null) throw new SvgError(`icon: '${raw}' does not exist — add the file or fix the path`);
+        return sanitizeSvg(source, raw);
+      }
+    : undefined;
   // Every page's styles into one generated sheet (az.css): classes replace
   // inline styles, which is what lets `below` and `states` exist at all.
   const styled = compileStyles(
-    emitPages(spec, theme, options.emitters ?? {}, asset, component),
+    emitPages(spec, theme, options.emitters ?? {}, asset, component, inline),
     (ps, rewrite) => ps.map((p) => ({ ...p, nodes: p.nodes.map(rewrite) })),
     theme.breakpoint,
   );

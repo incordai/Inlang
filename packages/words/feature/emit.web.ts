@@ -56,11 +56,14 @@ function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitC
 
   const text: EmittedNode[] = [];
   if (item.props.icon) {
-    text.push({
-      tag: 'img',
-      attrs: { src: ctx.asset(item.props.icon), alt: '', 'aria-hidden': 'true', class: 'az-feature-icon' },
-      style: { display: 'block', height: px(t.space[32]), width: 'auto', marginBottom: px(t.space[16]) },
-    });
+    const style = { display: 'block', height: px(t.space[32]), width: 'auto', marginBottom: px(t.space[16]) };
+    // §7: inlined and sanitised, so it takes the theme's colour; decorative
+    // either way. Without file access the target offers no inlining, and the
+    // file is shown as an <img>, which cannot run script either.
+    const inlined = ctx.inlineSvg?.(item.props.icon);
+    text.push(inlined
+      ? { ...inlined, attrs: { ...inlined.attrs, class: 'az-feature-icon' }, style }
+      : { tag: 'img', attrs: { src: ctx.asset(item.props.icon), alt: '', 'aria-hidden': 'true', class: 'az-feature-icon' }, style });
   }
   text.push({
     tag: 'h3',

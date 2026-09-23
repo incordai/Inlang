@@ -144,6 +144,14 @@ export interface EmitContext {
    */
   readonly asset: (path: string) => string;
   /**
+   * An SVG file inlined as a sanitised node tree (feature-spec §7): no
+   * script, no outside references, paint as currentColor, decorative.
+   * Absent when the caller has no files to read — a unit test, a future
+   * in-browser playground — and a word then shows the file as an <img>,
+   * which cannot run script either.
+   */
+  readonly inlineSvg?: (path: string) => EmittedNode;
+  /**
    * One slot fill (`cta "Reserve a pair" /reserve`) rendered as an action —
    * a link or a button, chosen by its destination (buttons §1.3–1.4), with
    * all six states (§1.5). The target owns the markup; a word asks.

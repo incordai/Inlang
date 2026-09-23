@@ -21,11 +21,14 @@ page /
     sub     "Three things we refuse to compromise on."
     columns 3
     item "Hand-cut leather"
+      icon ./preview-assets/icons/knife.svg
       text "Every panel is cut by hand from a single hide."
     item "Sewn, not glued"
+      icon ./preview-assets/icons/stitch.svg
       text "A stitched welt, so the sole is replaceable."
       link "How we do it" /process
     item "Forty a month"
+      icon ./preview-assets/icons/clock.svg
       text "The workshop holds two people. That is the ceiling."
     cta "See the collection" /shop
 
@@ -83,7 +86,8 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 
 Known gaps:
 
-- Buttons render as plain links until the button primitive exists
+- Icons are inlined and sanitised at build (§7): the CLI reads the file through the asset sandbox, and a strict parser keeps only shape elements and geometry/paint attributes. Script, style, `foreignObject`, event handlers and outside references are dropped. Paint becomes `currentColor`, and the icon is `aria-hidden`. A DOCTYPE, entity, CDATA or malformed file fails the build. Without file access (unit tests) the icon renders as an `<img>`
+- `media` has no `width`/`height` from the file header yet (§7), which needs build-time image reading
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested

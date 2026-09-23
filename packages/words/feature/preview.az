@@ -10,11 +10,14 @@ page /
     sub     "Three things we refuse to compromise on."
     columns 3
     item "Hand-cut leather"
+      icon ./preview-assets/icons/knife.svg
       text "Every panel is cut by hand from a single hide."
     item "Sewn, not glued"
+      icon ./preview-assets/icons/stitch.svg
       text "A stitched welt, so the sole is replaceable."
       link "How we do it" /process
     item "Forty a month"
+      icon ./preview-assets/icons/clock.svg
       text "The workshop holds two people. That is the ceiling."
     cta "See the collection" /shop
 

@@ -16,6 +16,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile, envMessage, formatDiagnostics, scanEnv, serialiseSpec } from '../../core/src/index.ts';
 import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../target-web/src/emit.ts';
+import { SvgError } from '../../target-web/src/svg.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
@@ -60,7 +61,7 @@ export interface BuildOutcome {
  * checked before anything is written, so a failed build writes nothing.
  */
 function locateAssets(
-  projectDir: string, assets: string[], kind: 'asset' | 'component' = 'asset',
+  projectDir: string, assets: string[], kind: 'asset' | 'component' | 'icon' = 'asset',
 ): { sources: string[]; problems: string[] } {
   const root = realpathSync(projectDir);
   const sources: string[] = [];
@@ -85,6 +86,19 @@ function locateAssets(
   return { sources, problems };
 }
 
+/**
+ * A project file's text, for the target to inline (an SVG icon, feature-spec
+ * §7) — through the same sandbox as copied assets, symlinks followed. Null
+ * when the file does not exist; a path that resolves outside the project is
+ * refused outright.
+ */
+function readProjectText(projectDir: string, path: string): string | null {
+  const found = locateAssets(projectDir, [path], 'icon');
+  if (found.sources.length === 1) return readFileSync(found.sources[0], 'utf8');
+  if (!existsSync(resolve(realpathSync(projectDir), path))) return null;
+  throw new PathEscapeError(found.problems[0]);
+}
+
 /** The words one build compiles with: the set, plus the project's own. */
 const wordsFor = (options: Omit<BuildOptions, 'outDir'>) => loadWords(options.wordsDir,
   options.projectWordsDir === undefined ? resolve(dirname(options.source), 'words') : options.projectWordsDir);
@@ -105,9 +119,13 @@ export function build(options: BuildOptions): BuildOutcome {
 
   let project;
   try {
-    project = emitProject(result.spec, { emitters: words.emitters });
+    const projectDir = dirname(resolve(options.source));
+    project = emitProject(result.spec, {
+      emitters: words.emitters,
+      readText: (path) => readProjectText(projectDir, path),
+    });
   } catch (e) {
-    if (e instanceof PathEscapeError) {
+    if (e instanceof PathEscapeError || e instanceof SvgError) {
       return { ok: false, files: [], assets: [], report: `${report}\n${e.message}`.trim(), exit: EXIT.missing };
     }
     throw e;
