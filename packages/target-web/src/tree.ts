@@ -73,7 +73,12 @@ export function defaultChild(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
-  for (const c of block.children) kids.push(defaultChild(c, ctx));
+  // A fill's own children (an item's `link`) sit inside the item. They are
+  // not list items: an <li> directly inside an <li> is invalid HTML.
+  for (const c of block.children) {
+    kids.push({ tag: 'div', attrs: { class: `az-child-nested az-child--${c.word}` },
+      children: defaultChild(c, ctx).children });
+  }
 
   return {
     tag: 'li',

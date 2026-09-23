@@ -226,13 +226,15 @@ export function Node({ node }: { node: EmittedNode | string }): ReactNode {
 }
 
 export function Page({ route, children }: { route: string; children?: ReactNode }) {
-  return <main className="az-page" data-route={route}>{children}</main>;
+  // nav's skip link points here (nav-spec §7); tabIndex -1 lets focus land
+  // on the landmark without adding it to the tab order.
+  return <main id="az-content" tabIndex={-1} className="az-page" data-route={route}>{children}</main>;
 }
 
 /** A path that is not a page of this site. */
 export function NotFound() {
   return (
-    <main className="az-page az-not-found" data-route="">
+    <main id="az-content" tabIndex={-1} className="az-page az-not-found" data-route="">
       <h1>Page not found</h1>
       <p><a href="/">Go to the home page</a></p>
     </main>
