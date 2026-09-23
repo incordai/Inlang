@@ -70,7 +70,7 @@ async function pool(items, limit, fn) {
 
 /* ---- results ------------------------------------------------------------ */
 
-const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'skip-link', 'firefox', 'webkit'];
+const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'disclosure', 'skip-link', 'firefox', 'webkit'];
 
 /**
  * Responsive-table rows the gate measures, per word and variant: the
@@ -82,7 +82,10 @@ const RESTACK = {
   cta: { split: '.az-cta' },                   // cta-spec §6: text above, media below
   faq: { columns: '.az-faq-items' },           // faq-spec §6: one column, declared order
   text: { columns: '.az-text-body' },          // text-spec §7: one column below md
-  feature: { default: '.az-feature-items' },   // feature-spec §6: grid is one column
+  feature: {
+    default: '.az-feature-items',              // feature-spec §6: grid is one column
+    rows: '.az-feature-item',                  // feature-spec §6: rows stack media above text
+  },
   footer: { columns: '.az-footer-columns' },   // footer-spec §8: groups in one column
   pricing: { default: '.az-pricing-plans' },  // pricing-spec §6: cards, one column
   // gallery-spec §6: grid is TWO columns on a phone, not one.
@@ -96,6 +99,32 @@ const RESTACK = {
 const COLUMN = {
   hero: { split: ['.az-hero-title', '.az-hero-sub', '.az-hero-actions'] },   // hero-spec §2
 };
+/**
+ * Disclosure forms that replace a layout on phones, per word and variant:
+ * at 390px the accordion shows (first group open, the rest closed) and the
+ * desktop layout is hidden; at 1440px the reverse.
+ */
+const DISCLOSE = {
+  footer: { mega: { accordion: '.az-footer-accordion', desktop: '.az-footer-columns' } },  // footer-spec §8
+};
+
+/** Item 3 extension: the phone disclosure form is the one on screen. */
+async function disclosure(page, width, sel) {
+  const r = await page.evaluate(({ accordion, desktop }) => {
+    const shown = (q) => { const el = document.querySelector(q); return !!el && getComputedStyle(el).display !== 'none'; };
+    const details = [...document.querySelectorAll(`${accordion} details`)];
+    return { accordion: shown(accordion), desktop: shown(desktop), open: details.map((d) => d.open) };
+  }, sel);
+  const phone = width < 768;
+  const problems = [];
+  if (r.accordion !== phone) problems.push(`accordion ${r.accordion ? 'shown' : 'hidden'} at ${width}`);
+  if (r.desktop === phone) problems.push(`desktop layout ${r.desktop ? 'shown' : 'hidden'} at ${width}`);
+  if (phone && (r.open.length < 2 || !r.open[0] || r.open.slice(1).some(Boolean))) {
+    problems.push(`expected the first group open and the rest closed, got [${r.open.join(', ')}]`);
+  }
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
 const results = {};   // word -> check -> { pass, fail, failures: [] }
 function record(word, check, where, r) {
   const cell = ((results[word] ??= {})[check] ??= { pass: 0, fail: 0, failures: [] });
@@ -215,6 +244,10 @@ async function checkSite(s, browsers, server) {
       record(s.word, 'overflow', tag(scheme, width), await overflow(page));
       await page.screenshot({ path: join(shots, `${s.label.replace(':', '-')}-${scheme}-${width}.png`), fullPage: true });
       if (restackAt && scheme === 'light') tracks[width] = await columnsOf(page, restackAt);
+      const disclose = DISCLOSE[s.word]?.[s.variant];
+      if (disclose && scheme === 'light' && width !== 768) {
+        record(s.word, 'disclosure', tag(scheme, width), await disclosure(page, width, disclose));
+      }
       if (width === 390 && scheme === 'light' && await page.$('.az-skip-link')) {
         record(s.word, 'skip-link', tag(scheme, width), await skipLink(page));
       }

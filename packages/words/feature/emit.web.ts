@@ -16,6 +16,112 @@ const DEFAULT_COLUMNS = 3;
 /** §6: "a label of ≤3 words" — the spec-sheet exception to one column. */
 const SPEC_SHEET_MAX_WORDS = 3;
 
+/** `lead` is a flag written bare on the item: `item "Sewn, not glued" lead`. */
+const isLead = (item: SpecBlock) =>
+  'lead' in item.props || item.args.slice(1).some((a) => a.kind === 'word' && a.value === 'lead');
+
+/**
+ * One item. §7: the icon is always decorative (the title carries the
+ * meaning); `media` belongs to `rows` and `bento` and is illustration beside
+ * its title, so it is decorative too. §4: item titles are body type with
+ * weight, never the display face.
+ *
+ * §6 `rows`: media beside text, alternating sides row by row (every second
+ * row puts the media on the right); below sm media sits above the text in
+ * every row and the alternation is dropped.
+ */
+function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const rows = variant === 'rows';
+  const media = item.props.media && (rows || variant === 'bento')
+    ? {
+        tag: 'img',
+        attrs: {
+          src: ctx.asset(item.props.media),
+          alt: '',
+          class: 'az-feature-media',
+          loading: 'lazy',
+          decoding: 'async',
+        },
+        style: {
+          display: 'block',
+          width: '100%',
+          height: 'auto',
+          borderRadius: px(t.radius.md),
+          order: rows && index % 2 === 1 ? 1 : undefined,
+        },
+        below: rows && index % 2 === 1 ? { sm: { order: 0 } } : undefined,
+      } satisfies EmittedNode
+    : null;
+
+  const text: EmittedNode[] = [];
+  if (item.props.icon) {
+    text.push({
+      tag: 'img',
+      attrs: { src: ctx.asset(item.props.icon), alt: '', 'aria-hidden': 'true', class: 'az-feature-icon' },
+      style: { display: 'block', height: px(t.space[32]), width: 'auto', marginBottom: px(t.space[16]) },
+    });
+  }
+  text.push({
+    tag: 'h3',
+    attrs: { class: 'az-feature-item-title' },
+    style: {
+      fontFamily: t.type.body,
+      fontSize: t.typeSize.lg,
+      fontWeight: t.type['weight-bold'],
+      lineHeight: t.type['leading-tight'],
+      textWrap: 'balance',
+      margin: `0 0 ${px(t.space[8])}`,
+    },
+    children: [item.args[0]?.value ?? ''],
+  });
+  if (item.props.text) {
+    text.push({
+      tag: 'p',
+      attrs: { class: 'az-feature-item-text' },
+      style: {
+        fontSize: t.typeSize.base,
+        lineHeight: t.type['leading-body'],
+        color: t.color.muted,
+        textWrap: 'pretty',
+        margin: 0,
+      },
+      children: [item.props.text],
+    });
+  }
+  for (const link of item.children.filter((c) => c.word === 'link')) {
+    text.push({
+      tag: 'div',
+      attrs: { class: 'az-feature-item-link' },
+      style: { marginTop: px(t.space[12]) },
+      children: [ctx.action(link, { hierarchy: 'link' })],
+    });
+  }
+
+  const body: EmittedNode = {
+    tag: 'div',
+    attrs: { class: 'az-feature-item-body' },
+    style: { maxWidth: `${t.size['measure-body']}ch` },
+    children: text,
+  };
+
+  return {
+    tag: 'li',
+    attrs: { class: `az-feature-item${isLead(item) ? ' az-feature-item--lead' : ''}` },
+    style: rows
+      ? {
+          listStyle: 'none',
+          display: 'grid',
+          gridTemplateColumns: media ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)',
+          columnGap: px(t.space[48]),
+          alignItems: 'center',
+        }
+      : { listStyle: 'none' },
+    below: rows && media ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)', rowGap: px(t.space[24]) } } : undefined,
+    children: media ? [media, body] : [body],
+  };
+}
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'grid';
@@ -65,7 +171,10 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const columns = Number(block.props.columns ?? DEFAULT_COLUMNS);
   const tracks = (n: number) => `repeat(${n}, minmax(0, 1fr))`;
 
-  const items = ctx.slot('item');
+  // The word renders its own items: the generic slot renderer prints every
+  // prop as a paragraph, which put `icon`/`media` paths and the `lead` flag on
+  // the page as text.
+  const items = itemFills.map((c, i) => featureItem(c, i, variant, ctx));
   if (items.length > 0) {
     children.push({
       tag: 'ul',
