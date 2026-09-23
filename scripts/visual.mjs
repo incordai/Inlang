@@ -30,7 +30,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, skipLink } from './visual/checks.mjs';
+import { WIDTHS, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink } from './visual/checks.mjs';
 import { startServer } from './visual/serve.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -70,7 +70,7 @@ async function pool(items, limit, fn) {
 
 /* ---- results ------------------------------------------------------------ */
 
-const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'skip-link', 'firefox', 'webkit'];
+const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'skip-link', 'firefox', 'webkit'];
 
 /**
  * Responsive-table rows the gate measures, per word and variant: the
@@ -79,6 +79,14 @@ const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'sch
  */
 const RESTACK = {
   hero: { split: '.az-hero' },   // hero-spec §10: split restacks to stack
+};
+
+/**
+ * Elements that must share ONE column on a desktop, per word and variant —
+ * text that belongs together must not be paired across a grid's columns.
+ */
+const COLUMN = {
+  hero: { split: ['.az-hero-title', '.az-hero-sub', '.az-hero-actions'] },   // hero-spec §2
 };
 const results = {};   // word -> check -> { pass, fail, failures: [] }
 function record(word, check, where, r) {
@@ -201,6 +209,8 @@ async function checkSite(s, browsers, server) {
       }
       if (width !== 768) record(s.word, 'axe', tag(scheme, width), await axe(page));
       if (width === 1440) {
+        const column = COLUMN[s.word]?.[s.variant];
+        if (column && scheme === 'light') record(s.word, 'column', `${s.label}/light`, await sharedColumn(page, column));
         bg[scheme] = await bodyBackground(page);
         record(s.word, 'keyboard', tag(scheme, width), await keyboard(page));
       }
@@ -243,6 +253,7 @@ const BAD = `<!doctype html><html lang="en"><head><title>bad</title><style>
   <a href="#m" style="position:absolute;top:0;transform:translateY(-200%)">Skip to content</a>
   <main id="m"><h1>Bad</h1>
   <div class="g" style="display:grid;grid-template-columns:1fr 1fr"><span>a</span><span>b</span></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr"><p class="c1">Title</p><p class="c2">Sub</p></div>
   <div style="width:800px;height:10px"></div>
   <button></button>
   <button class="spin">Spin</button>
@@ -253,7 +264,9 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   body { background: white; }
   @media (prefers-color-scheme: dark) { body { background: black; color: white; } }
   @media (prefers-reduced-motion: no-preference) {
-    @keyframes fade { from { opacity: .5; } } .fade { animation: fade 1s infinite; }
+    /* transform, not opacity: a fading text's contrast depends on when axe
+       samples it, which made this page's axe verdict timing-dependent. */
+    @keyframes fade { from { transform: translateX(2px); } } .fade { animation: fade 1s infinite; }
   }
   .skip { position: absolute; top: 0; transform: translateY(-200%); }
   .skip:focus-visible { transform: none; }
@@ -263,6 +276,7 @@ const GOOD = `<!doctype html><html lang="en"><head><title>good</title><style>
   <header><a class="skip" href="#m">Skip to content</a></header>
   <main id="m"><h1>Good</h1>
   <div class="g"><span>a</span><span>b</span></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr"><div><p class="c1">Title</p><p class="c2">Sub</p></div><div></div></div>
   <p class="fade">Fits.</p>
   <a href="#x">A link</a> <button>A button</button>
   <fieldset><legend>Billing</legend>
@@ -304,6 +318,7 @@ async function selfTest() {
     const narrow = await columnsOf(page, '.g');
     await page.setViewportSize({ width: 1440, height: 900 });
     expect('responsive table: restacks below sm', restacks(narrow, await columnsOf(page, '.g')), shouldPass);
+    expect('text shares one column', await sharedColumn(page, ['.c1', '.c2']), shouldPass);
     await page.setViewportSize({ width: 390, height: 900 });
     const bg = {};
     for (const scheme of SCHEMES) {

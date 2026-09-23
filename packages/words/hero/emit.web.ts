@@ -124,6 +124,28 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
+  // §2 — `split` gives the text ONE column and the visual the other. Placing
+  // eyebrow, title, sub and actions straight into a two-column grid paired
+  // them up across the columns instead. The media column is emitted even
+  // before a poster exists: it is where the visual — poster now, the 3D
+  // canvas later — takes its 40–50% of the width.
+  const content: EmittedNode[] = variant === 'split'
+    ? [
+        {
+          tag: 'div',
+          attrs: { class: 'az-hero-text' },
+          style: { minWidth: 0 },
+          children: children.filter((c) => c.attrs?.class !== 'az-hero-poster'),
+        },
+        {
+          tag: 'div',
+          attrs: { class: 'az-hero-media' },
+          style: { minWidth: 0 },
+          children: children.filter((c) => c.attrs?.class === 'az-hero-poster'),
+        },
+      ]
+    : children;
+
   return {
     tag: 'header',
     attrs: {
@@ -161,6 +183,6 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     below: variant === 'split'
       ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)', columnGap: 0 } }
       : undefined,
-    children,
+    children: content,
   };
 }

@@ -138,6 +138,23 @@ export function restacks(narrow, wide) {
 }
 
 /**
+ * Elements that must read as ONE column: they share a left edge. A layout
+ * that drops them straight into a multi-column grid pairs them up across
+ * the columns instead (hero `split` did: title left, sub right). Measured
+ * on a desktop width, where the columns exist.
+ */
+export async function sharedColumn(page, selectors) {
+  const lefts = await page.evaluate((sels) => sels.map((sel) => {
+    const el = document.querySelector(sel);
+    return el ? Math.round(el.getBoundingClientRect().left) : null;
+  }), selectors);
+  const missing = selectors.filter((_, i) => lefts[i] === null);
+  if (missing.length) return { pass: false, detail: `missing: ${missing.join(', ')}` };
+  const pass = Math.max(...lefts) - Math.min(...lefts) <= 1;
+  return { pass, detail: pass ? '' : selectors.map((sel, i) => `${sel}@${lefts[i]}`).join(' ') };
+}
+
+/**
  * nav-spec §7: the skip link is the first thing Tab reaches, and it is
  * VISIBLE when focused — a link hidden off-screen forever is focusable but
  * useless to a sighted keyboard user.

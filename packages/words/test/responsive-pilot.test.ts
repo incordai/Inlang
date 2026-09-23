@@ -47,3 +47,22 @@ test('nav-spec §7: the skip link is off-screen until focused, and shown when fo
   assert.equal(skip?.style?.transform, 'translateY(-200%)', 'CONTROL: hidden at rest');
   assert.deepEqual(skip?.states?.focusVisible, { transform: 'none' });
 });
+
+test('hero-spec §2: split gives the text one column and the media the other', () => {
+  const out = hero({ ...block('hero', 'split', { sub: 'Handmade.', eyebrow: 'Limited run', poster: './p.webp' }),
+    modifiers: ['3d'] }, context());
+  const cols = (out.children ?? []).filter((c): c is EmittedNode => typeof c !== 'string');
+  assert.deepEqual(cols.map((c) => c.attrs?.class), ['az-hero-text', 'az-hero-media'],
+    'exactly two grid children, so nothing pairs across the columns');
+  const textClasses = walk(cols[0]).map((x) => x.attrs?.class);
+  for (const c of ['az-hero-eyebrow', 'az-hero-title', 'az-hero-sub', 'az-hero-actions']) {
+    assert.ok(textClasses.includes(c), `${c} sits in the text column`);
+  }
+  assert.ok(walk(cols[1]).some((x) => x.attrs?.class === 'az-hero-poster'), 'the poster sits in the media column');
+});
+
+test('CONTROL: single-column variants are not wrapped', () => {
+  const out = hero(block('hero', 'center', { sub: 'Handmade.' }), context());
+  const classes = (out.children ?? []).map((c) => (typeof c === 'string' ? c : c.attrs?.class));
+  assert.ok(classes.includes('az-hero-title') && !classes.includes('az-hero-text'));
+});

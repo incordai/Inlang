@@ -114,8 +114,11 @@ test('§8: the poster is not lazy and claims no fetch priority — the text is t
   const img = find(render(hero!), (e) => e.attrs?.class === 'az-hero-poster');
   assert.equal(img?.attrs?.loading, undefined);
   assert.equal(img?.attrs?.fetchpriority, undefined);
-  const h1 = kids(render(hero!)).findIndex((e) => e.tag === 'h1');
-  const poster = kids(render(hero!)).findIndex((e) => e.attrs?.class === 'az-hero-poster');
+  // Document order, whatever wraps them: split puts text and media in columns.
+  const order = (n: EmittedNode): EmittedNode[] => [n, ...kids(n).flatMap(order)];
+  const all = order(render(hero!));
+  const h1 = all.findIndex((e) => e.tag === 'h1');
+  const poster = all.findIndex((e) => e.attrs?.class === 'az-hero-poster');
   assert.ok(h1 >= 0 && h1 < poster, 'the headline comes before the media in source order');
 });
 
