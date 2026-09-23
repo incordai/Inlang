@@ -79,6 +79,12 @@ to it at \`AZ_PUBLIC_BACKEND_URL\`.
 
 ## Run it locally
 
+For development, run \`az dev site.az\` in the site's folder instead: it serves
+the site and this backend together with no .env — SQLite in .az-dev/, and
+email shown in a local mailbox rather than sent (backend-spec §2a).
+
+To run this production server itself on your machine:
+
 \`\`\`sh
 az backend init .        # writes .env with a fresh secret (once)
 # edit .env: fill every empty required value

@@ -23,6 +23,7 @@ import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
+import { serve, DEFAULT_SITE_PORT, type Served } from './serve.ts';
 import { lintWords } from './lint.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
@@ -185,7 +186,12 @@ export function build(options: BuildOptions): BuildOutcome {
       // Newline style is fixed, not inherited from the platform — otherwise
       // the same source produces different bytes on Windows and Linux and the
       // determinism claim dies quietly (CONVENTIONS §6).
-      writeFileSync(target, f.content.replace(/\r\n/g, '\n'), 'utf8');
+      const content = f.content.replace(/\r\n/g, '\n');
+      // An unchanged file is not rewritten: `az dev` rebuilds on every save,
+      // and touching an identical vite.config.ts restarts the dev server
+      // instead of hot-updating the one file that changed.
+      if (existsSync(target) && readFileSync(target, 'utf8') === content) continue;
+      writeFileSync(target, content, 'utf8');
     }
     // Vite serves `public/` at the site root and copies it into the build
     // untouched, which is what makes the page's `/assets/...` URLs resolve.
@@ -250,7 +256,9 @@ export function specOf(options: Omit<BuildOptions, 'outDir'>): string | null {
 const USAGE = `az — words to a website
 
   az build <file.az> [--out dir]   compile to a runnable project
-  az dev   <file.az> [--out dir]   build, then rebuild on every save
+  az dev   <file.az> [--port N] [--open] [--no-serve]
+                                   build, serve and reload on every save;
+                                   a site with a backend runs it locally too
   az spec  <file.az>               print the Spec as JSON
   az check <file.az>               report diagnostics only, write nothing
   az lint  [words-dir]             theme-token check of every word pack
@@ -343,6 +351,59 @@ function runMigrate(file: string): number {
   return EXIT.ok;
 }
 
+/**
+ * `az dev`: compile on every save and, unless `--no-serve`, serve the result
+ * — the site on Vite's dev server, and for a site that declares `backend`,
+ * the backend with its development profile (serve.ts, dev-backend.ts).
+ * Serving starts after the first build that succeeds; Ctrl-C stops it all.
+ */
+function runDev(file: string, outDir: string, wordsDir: string, rest: string[]): number {
+  const print = (line: string) => process.stdout.write(`${line}\n`);
+  const portFlag = rest.indexOf('--port');
+  const sitePort = portFlag >= 0 ? Number(rest[portFlag + 1]) : DEFAULT_SITE_PORT;
+  if (!Number.isInteger(sitePort) || sitePort < 1 || sitePort > 65535) {
+    process.stderr.write('az: --port needs a port number, e.g. --port 5173\n');
+    return EXIT.config;
+  }
+  const serving = !rest.includes('--no-serve');
+  /** The serving start, once begun — awaited on Ctrl-C so no child outlives us. */
+  let started: Promise<Served | null> | null = null;
+  let packageHash: string | null = null;
+
+  const handle = dev({
+    source: file,
+    outDir,
+    wordsDir,
+    onResult: (outcome, ms) => {
+      const stream = outcome.ok ? process.stdout : process.stderr;
+      stream.write(devLine(outcome, ms) + '\n');
+      if (!outcome.ok || !serving) return;
+      const pkg = outcome.files.find((f) => f.path === 'package.json')?.content ?? '';
+      if (packageHash !== null && pkg !== packageHash) {
+        print('az dev: the site\'s dependencies changed — restart az dev to install them');
+      }
+      packageHash ??= pkg;
+      if (started) return;
+      const config = outcome.files.find((f) => f.path === 'server/az.config.json');
+      const backend = config ? { siteName: (JSON.parse(config.content) as { siteName: string }).siteName } : null;
+      started = serve({ source: file, outDir, sitePort, open: rest.includes('--open'), backend, print })
+        .catch((e: unknown) => {
+          process.stderr.write(`az dev: ${(e as Error).message}\n`);
+          handle.close();
+          process.exitCode = EXIT.config;
+          return null;
+        });
+    },
+  });
+  process.once('SIGINT', () => {
+    handle.close();
+    void (started ?? Promise.resolve(null))
+      .then((s) => s?.close())
+      .then(() => process.exit(process.exitCode ?? EXIT.ok));
+  });
+  return EXIT.ok;
+}
+
 export function main(argv: string[]): number {
   const [cmd, file, ...rest] = argv;
   if (!cmd || cmd === '--help' || cmd === '-h') {
@@ -387,20 +448,7 @@ export function main(argv: string[]): number {
       return EXIT.ok;
     }
 
-    if (cmd === 'dev') {
-      // The watcher keeps the process alive; Ctrl-C closes it cleanly.
-      const handle = dev({
-        source: file,
-        outDir,
-        wordsDir,
-        onResult: (outcome, ms) => {
-          const stream = outcome.ok ? process.stdout : process.stderr;
-          stream.write(devLine(outcome, ms) + '\n');
-        },
-      });
-      process.once('SIGINT', () => handle.close());
-      return EXIT.ok;
-    }
+    if (cmd === 'dev') return runDev(file, outDir, wordsDir, rest);
 
     const outcome = build({ source: file, outDir, wordsDir, write: cmd === 'build' });
     if (outcome.report) process.stderr.write(outcome.report + '\n');

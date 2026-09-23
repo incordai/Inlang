@@ -184,7 +184,8 @@ test('CONTROL: a known command still runs through the binary', () => {
 
 test('az dev builds, rebuilds on save, and exits cleanly on SIGINT', async () => {
   const p = project(GOOD);
-  const child = spawn(process.execPath, [...process.execArgv, BIN, 'dev', p.file, '--out', p.out], {
+  // --no-serve: this is the compile-and-watch loop; serving is test:dev's.
+  const child = spawn(process.execPath, [...process.execArgv, BIN, 'dev', p.file, '--out', p.out, '--no-serve'], {
     env: { ...process.env, AZ_WORDS: WORDS },
   });
   let stdout = '';

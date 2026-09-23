@@ -56,6 +56,40 @@ names (CLDR, committed as data), as a native `<datalist>`: the browser's own
 combobox — keyboard and screen-reader support included, no script, no
 outside service — and free text still accepted, as §3.4 requires.
 
+## 2a. Local development — `az dev site.az`
+
+On your own machine there is nothing to set up:
+
+```sh
+az dev site.az            # add --open to open the browser, --port N to choose the site port
+```
+
+`az dev` compiles the site, installs its dependencies once, and serves it on
+`http://127.0.0.1:5173/` (or the next free port), reloading the open page on
+every save. For a site that declares `backend` it also runs the backend with a
+**development profile**:
+
+| | Development (`az dev`) | Production (`az build` + `az backend init`) |
+|---|---|---|
+| Database | SQLite in `.az-dev/dev.db`, whatever the site declares | the declared database, from `.env` |
+| Secret | generated once into `.az-dev/secret` (owner-only) | `.env`, from `az backend init` |
+| Addresses | everything on `127.0.0.1`, wired automatically | your https URLs in `.env` |
+| Email | **not sent**: printed in the terminal and listed at the mailbox URL `az dev` prints | SMTP or the email API |
+| Session cookie | HttpOnly, SameSite=Lax, not `Secure` — WebKit drops a Secure cookie on http://127.0.0.1 | HttpOnly, **Secure**, SameSite per `.env` |
+
+Use the address `az dev` prints (`127.0.0.1`), not `localhost`: the two are
+different sites to a browser, and the session cookie belongs to one of them.
+
+`.az-dev/` ignores itself (it holds a `.gitignore` of `*`), so none of it is
+committed. None of the development profile ships: it lives in the CLI, and
+a production build carries no mailbox, no dev secret and no loopback cookie
+mode (tested). Provider sign-in works locally once you put a provider's keys
+(the `AZ_OAUTH_…` names in §4) in `.az-dev/backend.env` and register
+`http://127.0.0.1:<backend port>/auth/oauth/<id>/callback` with the provider;
+the wired addresses, database and mailbox in that file are always overridden.
+
+`az dev --no-serve` only compiles on every save, as before.
+
 ## 3. Storage
 
 One small interface over three engines (`server/src/db.ts`). Every query is
