@@ -201,7 +201,9 @@ function renderAction(
     tag: 'a',
     attrs: {
       class: cls,
-      href: destination?.value ?? '#',
+      // A path downloads (§1): through the sandbox, so the file ships and
+      // the URL is root-relative — as written it 404'd and broke off /.
+      href: destination?.kind === 'path' ? asset(destination.value) : destination?.value ?? '#',
       ...(intent === 'external' ? { target: '_blank', rel: 'noopener noreferrer' } : {}),
       ...(intent === 'download' ? { download: '' } : {}),
     },

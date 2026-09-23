@@ -26,7 +26,8 @@ function footerLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
     style: { listStyle: 'none' },
     children: [{
       tag: 'a',
-      attrs: { class: 'az-footer-link', href: child.args[1]?.value ?? '#' },
+      // A file destination ships through the asset sandbox, root-relative.
+      attrs: { class: 'az-footer-link', href: child.args[1]?.kind === 'path' ? ctx.asset(child.args[1].value) : child.args[1]?.value ?? '#' },
       style: {
         // §9: footer link lists are the most commonly under-spaced targets in
         // the product, so the 44px minimum is enforced here rather than hoped

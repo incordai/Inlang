@@ -46,7 +46,9 @@ const glyph = (d: string): EmittedNode => ({
 function navLink(child: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const label = child.args[0]?.value ?? '';
-  const href = child.args[1]?.value ?? '#';
+  const dest = child.args[1];
+  // A file destination ships through the asset sandbox, root-relative.
+  const href = dest?.kind === 'path' ? ctx.asset(dest.value) : dest?.value ?? '#';
   return {
     tag: 'li',
     style: { listStyle: 'none' },

@@ -71,7 +71,9 @@ export const fillLevel = (section: SpecBlock): number => (section.props.title ? 
 export function defaultChild(block: SpecBlock, ctx: EmitContext, level = 3): EmittedNode {
   const t = ctx.theme;
   const label = block.args[0]?.value ?? '';
-  const href = block.args[1]?.value ?? null;
+  const dest = block.args[1];
+  // A file destination ships through the asset sandbox, root-relative.
+  const href = dest ? (dest.kind === 'path' ? ctx.asset(dest.value) : dest.value) : null;
 
   const kids: (EmittedNode | string)[] = [];
 
