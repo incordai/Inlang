@@ -45,13 +45,17 @@ export type BreakpointName = (typeof BREAKPOINT_NAMES)[number];
  * `retracted` a `hide` nav moved out of view while the reader scrolls down
  * (nav-block-spec §3). The runtime sets them; the stylesheet styles them.
  *
+ * `overBackdrop` is structural, not interactive: the element's page carries a
+ * `scene backdrop` (scene-spec §6), so a block with no surface of its own
+ * must resolve one (§6.5) — the backdrop may show any colour on any frame.
+ *
  * `live` belongs to the 3D runtime: the page's shared canvas is drawing in
  * this element's box (scene-spec §5), so the element steps aside — its
  * background clears and the poster hides — until the stage tears down.
  */
 export const INTERACTION_STATES = [
   'hover', 'focusVisible', 'focusWithin', 'active', 'disabled', 'loading', 'expanded', 'open', 'scrolled', 'shrunk',
-  'retracted', 'live', 'current',
+  'retracted', 'overBackdrop', 'live', 'current',
 ] as const;
 export type InteractionState = (typeof INTERACTION_STATES)[number];
 

@@ -159,8 +159,12 @@ export class ModelCache {
   private readonly draco = new DRACOLoader().setDecoderPath(DRACO_GLTF_CONFIG);
   private readonly loader = new GLTFLoader().setDRACOLoader(this.draco);
   private readonly pending = new Map<string, Promise<THREE.Group>>();
+  /** Live views holding each URL: §7 releases the entries none still references. */
+  private readonly refs = new Map<string, number>();
 
-  load(url: string): Promise<THREE.Group> {
+  /** Take a reference; the first loads and decodes. Pair with release(). */
+  acquire(url: string): Promise<THREE.Group> {
+    this.refs.set(url, (this.refs.get(url) ?? 0) + 1);
     let p = this.pending.get(url);
     if (!p) {
       // DRACO_GLTF_CONFIG is the glTF decoder three references with
@@ -172,11 +176,21 @@ export class ModelCache {
     return p;
   }
 
+  /** Drop a reference; the last one frees the decoded model's GPU resources. */
+  release(url: string): void {
+    const n = (this.refs.get(url) ?? 0) - 1;
+    if (n > 0) { this.refs.set(url, n); return; }
+    this.refs.delete(url);
+    this.pending.get(url)?.then(disposeTree, () => undefined);
+    this.pending.delete(url);
+  }
+
   dispose(): void {
     for (const p of this.pending.values()) {
       p.then(disposeTree, () => undefined);
     }
     this.pending.clear();
+    this.refs.clear();
     this.draco.dispose();
   }
 }
@@ -197,7 +211,7 @@ export function model(url: string, cache: ModelCache, env: THREE.Texture, framin
   let alive = true;
   let loaded = false;
 
-  cache.load(url).then(
+  cache.acquire(url).then(
     (source) => {
       if (!alive) return;
       // A clone shares geometry and materials with the cached original.
@@ -227,8 +241,10 @@ export function model(url: string, cache: ModelCache, env: THREE.Texture, framin
     },
     dispose() {
       alive = false;
-      // Shared resources belong to the cache, which disposes them once.
+      // Shared resources belong to the cache, which frees them when the last
+      // view holding this model lets go.
       group.clear();
+      cache.release(url);
     },
   };
 }

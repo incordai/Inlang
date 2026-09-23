@@ -52,6 +52,8 @@ const STATE_SELECTOR: Record<InteractionState, (cls: string) => string> = {
   scrolled: (c) => `${c}[data-scrolled="true"]`,
   shrunk: (c) => `${c}[data-shrunk="true"]`,
   retracted: (c) => `${c}[data-retracted="true"]`,
+  // The page holds a live-or-poster backdrop view (scene-spec §6.5).
+  overBackdrop: (c) => `.az-page:has([data-az-3d][data-az-variant="backdrop"]) ${c}`,
   live: (c) => `${c}[data-live="true"]`,
   current: (c) => `${c}[aria-current="page"]`,
 };

@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { THEMES, type ThemeName } from '../src/themes.ts';
-import { type Scheme } from '../src/tokens.ts';
+import { type Scheme, VEIL_PERCENT } from '../src/tokens.ts';
 
 /* ---------------- colour maths ---------------- */
 
@@ -141,4 +141,59 @@ test('the three themes are genuinely different, not hue rotations', () => {
   assert.equal(new Set(radii).size, NAMES.length, 'radius language must differ');
   const bgs = NAMES.map((n) => THEMES[n].color.dark.bg);
   assert.equal(new Set(bgs).size, NAMES.length, 'dark grounds must differ');
+});
+
+/* ---------------- scene-spec §6.5: the veil over any backdrop ---------------- */
+
+/** `color-mix(in srgb, bg P%, transparent)` over an opaque pixel — the browser's composite. */
+function overPixel(bg: string, percent: number, pixel: [number, number, number]): [number, number, number] {
+  const a = percent / 100;
+  const c = hslToRgb(bg);
+  return [0, 1, 2].map((i) => a * c[i] + (1 - a) * pixel[i]) as [number, number, number];
+}
+const ratioRgb = (fg: string, bg: [number, number, number]) => {
+  const la = luminance(hslToRgb(fg)), lb = luminance(bg);
+  return Math.floor(((Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)) * 100) / 100;
+};
+/** A live backdrop can show any colour; these two bound every luminance. */
+const EXTREMES: [string, [number, number, number]][] = [['white', [255, 255, 255]], ['black', [0, 0, 0]]];
+/** What reads on the veil: text, muted text and links at 4.5:1, outlines at 3:1 (WCAG 1.4.11). */
+const VEIL_PAIRS: [string, number][] = [['text', 4.5], ['muted', 4.5], ['accent', 4.5], ['border-strong', 3]];
+
+for (const name of NAMES) {
+  for (const scheme of SCHEMES) {
+    test(`${name}/${scheme}: the veil keeps every reading pair above its floor over any backdrop`, () => {
+      const c = THEMES[name].color[scheme] as unknown as Record<string, string>;
+      for (const [fg, floor] of VEIL_PAIRS) {
+        for (const [label, pixel] of EXTREMES) {
+          const r = ratioRgb(c[fg], overPixel(c.bg, VEIL_PERCENT, pixel));
+          assert.ok(r >= floor, `${fg} on the veil over ${label}: ${r}:1 < ${floor}:1`);
+        }
+      }
+    });
+  }
+}
+
+/** The smallest whole percent that holds everywhere; VEIL_PERCENT keeps a margin above it. */
+const VEIL_MINIMUM = 90;
+
+test('the veil keeps its margin above the smallest percent that holds', () => {
+  assert.ok(VEIL_PERCENT >= VEIL_MINIMUM + 2, `${VEIL_PERCENT}% leaves no compositing margin`);
+  // …and the minimum really does hold everywhere, or the margin is fiction.
+  for (const name of NAMES) for (const scheme of SCHEMES) {
+    const c = THEMES[name].color[scheme] as unknown as Record<string, string>;
+    for (const [fg, floor] of VEIL_PAIRS) for (const [label, px] of EXTREMES) {
+      const r = ratioRgb(c[fg], overPixel(c.bg, VEIL_MINIMUM, px));
+      assert.ok(r >= floor, `${name}/${scheme} ${fg} over ${label} at ${VEIL_MINIMUM}%: ${r}:1`);
+    }
+  }
+});
+
+test('CONTROL: one point under the minimum fails somewhere — the percentage is load-bearing', () => {
+  const thin = VEIL_MINIMUM - 1;
+  const fails = NAMES.some((name) => SCHEMES.some((scheme) => {
+    const c = THEMES[name].color[scheme] as unknown as Record<string, string>;
+    return VEIL_PAIRS.some(([fg, floor]) => EXTREMES.some(([, px]) => ratioRgb(c[fg], overPixel(c.bg, thin, px)) < floor));
+  }));
+  assert.ok(fails, `${thin}% should break at least one pair`);
 });

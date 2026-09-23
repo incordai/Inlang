@@ -329,6 +329,15 @@ scheme. This is what makes dark mode free for every word rather than a per-word
 feature, and it is why the emitted output is byte-identical regardless of the
 author's OS setting — which CONVENTIONS §6 requires.
 
+**One derived colour: `color.veil`.** Words may also read
+`var(--az-color-veil)`: the page background at `VEIL_PERCENT` (92%)
+opacity, declared once after the scheme blocks and built on
+`var(--az-color-bg)`, so it follows the scheme with no copy per scheme. It
+is the surface a block with no background of its own takes over a live
+`scene backdrop` (scene-spec §6.5), sized so every text pair still clears its
+floor against a pure-white or pure-black backdrop pixel. It is not one of the
+16 role tokens: it has no value of its own.
+
 ### 3.4 The one exception: WebGL
 
 A three.js material cannot read a CSS custom property. A `hero 3d` or `scene`

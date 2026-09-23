@@ -19,6 +19,7 @@
  */
 
 import { chromium, firefox, webkit } from 'playwright';
+import AxeBuilder from '@axe-core/playwright';
 import { mkdtempSync, mkdirSync, cpSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -58,6 +59,61 @@ page /
     alt    "The strands, growing as you scroll"
 `;
 
+/** scene-spec §7: six full-width scenes, far enough apart that the first leaves the warm margin. */
+const MANY = `az 1
+
+site aurora
+
+page /
+  hero center
+    title "A long page of scenes"
+${Array.from({ length: 6 }, (_, i) => `  scene full 3d
+    poster ./assets/poster.webp
+    alt    "Strands, study ${i + 1}"
+  text prose
+    title "Between the scenes"
+    body  "A paragraph of distance, so each scene has somewhere to scroll away to."
+`).join('')}`;
+
+/** motion-tiers-spec §5 lite: two scroll-driven scenes on screen at once. */
+const PAIR = `az 1
+
+site aurora
+
+page /
+  hero center
+    title "Two scenes"
+  scene inline 3d scroll
+    poster ./assets/poster.webp
+    alt    "Strands, the first"
+  scene inline 3d scroll
+    poster ./assets/poster.webp
+    alt    "Strands, the second"
+  text prose
+    title "After the scenes"
+    body  "Room to scroll the pair up the page."
+  text prose
+    title "More room"
+    body  "Enough that the pair can be moved past the centre."
+`;
+
+/** scene-spec §6.5: blocks with no surface of their own, over a backdrop. */
+const BACKDROP = `az 1
+
+site aurora
+  scene backdrop 3d scroll
+    poster ./assets/poster.webp
+    alt    "Slow strands behind the page"
+
+page /
+  hero center
+    title "Over the backdrop"
+    sub   "The type sits on its own surface."
+  text prose
+    title "The studio"
+    body  "Two people, one room, and a surface under every line."
+`;
+
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
@@ -68,12 +124,17 @@ const work = mkdtempSync(join(tmpdir(), 'az-3d-'));
 const fixtureAssets = join(ROOT, 'packages/core/test/fixture-assets');
 const fixture = { dir: join(work, 'fixture'), source: readFileSync(join(ROOT, 'packages/core/test/fixture-site.az'), 'utf8') };
 const procedural = { dir: join(work, 'procedural'), source: PROCEDURAL };
+const many = { dir: join(work, 'many'), source: MANY };
+const pair = { dir: join(work, 'pair'), source: PAIR };
+const backdrop = { dir: join(work, 'backdrop'), source: BACKDROP };
 mkdirSync(fixture.dir, { recursive: true });
 cpSync(fixtureAssets, fixture.dir, { recursive: true });
-mkdirSync(join(procedural.dir, 'assets'), { recursive: true });
-cpSync(join(fixtureAssets, 'assets/orbit.webp'), join(procedural.dir, 'assets/poster.webp'));
-await buildSites([fixture, procedural], work);
-for (const s of [fixture, procedural]) {
+for (const s of [procedural, many, pair, backdrop]) {
+  mkdirSync(join(s.dir, 'assets'), { recursive: true });
+  cpSync(join(fixtureAssets, 'assets/orbit.webp'), join(s.dir, 'assets/poster.webp'));
+}
+await buildSites([fixture, procedural, many, pair, backdrop], work);
+for (const s of [fixture, procedural, many, pair, backdrop]) {
   if (!s.compiled) throw new Error(`3d: ${s.dir} did not compile: ${s.error}`);
 }
 
@@ -159,6 +220,92 @@ for (const [label, path, reducedMotion] of [
   await page.waitForTimeout(SETTLE_MS);
   check('§9: arrow keys turn the object', !before.equals(await shot()));
   await context.close();
+}
+
+/* ---- the scheme changes: the scene repaints its colours ------------------- */
+{
+  const { page, context } = await open(procedural, '/?az-probe=off');
+  const view = page.locator('.az-scene-view[data-az-camera="orbit"]');
+  await view.scrollIntoViewIfNeeded();
+  await waitFor(page, () => document.querySelector('.az-scene-view[data-az-camera="orbit"][data-live="true"]'));
+  const box = await view.boundingBox();
+  // The view's own pixels only — the page around it changes with the scheme too.
+  const shot = () => page.screenshot({ clip: { x: box.x + box.width / 4, y: box.y + box.height / 4, width: box.width / 2, height: box.height / 2 } });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.waitForTimeout(SETTLE_MS);
+  const light = await shot();
+  await page.waitForTimeout(SETTLE_MS);
+  check('CONTROL: the view is pixel-stable with no scheme change', light.equals(await shot()));
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForTimeout(SETTLE_MS);
+  const dark = await shot();
+  check('theme-spec §3.4: the OS scheme flips and the scene repaints its colours', !light.equals(dark));
+  // An explicit choice wins over the OS (theme-spec §3.2), and the scene follows it.
+  await page.evaluate(() => document.documentElement.setAttribute('data-scheme', 'light'));
+  await page.waitForTimeout(SETTLE_MS);
+  check('theme-spec §3.4: data-scheme overrides the OS and the scene follows', (await shot()).equals(light));
+  await context.close();
+}
+
+/* ---- §7: paused views past the budget are released, then rebuilt ---------- */
+// GPU objects still held after visiting every scene, per run: eviction must
+// hold fewer than the control, which keeps all six resident.
+const heldAfterVisit = {};
+for (const budget of ['0', null]) {
+  const { page, context, errors } = await open(many, `/?az-probe=off${budget === null ? '' : `&az-scene-budget=${budget}`}`);
+  const views = page.locator('.az-scene-view');
+  const n = await views.count();
+  const gpu = () => page.evaluate(() => (document.documentElement.getAttribute('data-az3d-gpu') ?? '0,0').split(',').map(Number));
+  // Visit every scene, top to bottom, letting each go live.
+  for (let i = 0; i < n; i++) {
+    await views.nth(i).scrollIntoViewIfNeeded();
+    await waitFor(page, (k) => document.querySelectorAll('.az-scene-view')[k].getAttribute('data-live') === 'true', i);
+  }
+  await page.waitForTimeout(SETTLE_MS);
+  heldAfterVisit[budget ?? 'default'] = (await gpu())[0];
+  const state = await page.evaluate(() => [...document.querySelectorAll('.az-scene-view')].map((el) => ({
+    evicted: el.getAttribute('data-az-evicted') === 'true',
+    live: el.getAttribute('data-live') === 'true',
+    onScreen: (() => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })(),
+  })));
+  const evicted = state.filter((s) => s.evicted).length;
+  if (budget === null) {
+    check('CONTROL: under the default budget no scene is evicted', evicted === 0, `${evicted}/${n} evicted`);
+  } else {
+    check('§7: past the budget, far-away paused scenes are released to their posters',
+      state[0].evicted && !state[0].live && evicted > 0, `${evicted}/${n} evicted`);
+    check('§7: a scene on screen is never evicted', state.every((s) => !s.onScreen || !s.evicted));
+    await views.nth(0).scrollIntoViewIfNeeded();
+    const back = await waitFor(page, () => {
+      const el = document.querySelector('.az-scene-view');
+      return el.getAttribute('data-live') === 'true' && el.getAttribute('data-az-evicted') !== 'true';
+    });
+    check('§7: an evicted scene coming back is rebuilt and goes live', back);
+  }
+  check('no page errors while scenes are released and rebuilt', errors.length === 0, errors[0] ?? '');
+  await context.close();
+}
+check('§7: releasing frees GPU memory — fewer geometries held than with every scene resident',
+  heldAfterVisit['0'] < heldAfterVisit.default,
+  `evicting ${heldAfterVisit['0']} vs resident ${heldAfterVisit.default}`);
+
+/* ---- §6.5: over a backdrop, text sits on a surface of its own --------------- */
+{
+  const bgOf = (page, sel) => page.evaluate((s) => getComputedStyle(document.querySelector(s)).backgroundColor, sel);
+  const { page, context } = await open(backdrop, '/?az-probe=off');
+  await page.waitForTimeout(SETTLE_MS);
+  const hero = await bgOf(page, '.az-hero');
+  const text = await bgOf(page, '.az-text');
+  const veiled = (c) => /(\/|,)\s*0\.92\)$/.test(c);
+  check('§6.5: the hero and the text block take the veil over a backdrop', veiled(hero) && veiled(text), `${hero} | ${text}`);
+  const axe = await new AxeBuilder({ page }).analyze();
+  check('§6.5: axe finds no violation on the backdrop page', axe.violations.length === 0,
+    axe.violations.map((v) => `${v.id}×${v.nodes.length}`).join(', '));
+  await context.close();
+  const control = await open(procedural, '/?az-tier=static');
+  check('CONTROL: without a backdrop the hero keeps no surface', !veiled(await bgOf(control.page, '.az-hero')),
+    await bgOf(control.page, '.az-hero'));
+  await control.context.close();
 }
 
 /* ---- the model: self-hosted, one decoder, nothing cross-origin ------------ */

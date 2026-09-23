@@ -90,7 +90,8 @@
     "type.display",
     "type.body",
     "motion.*",
-    "size.ring"
+    "size.ring",
+    "color.veil"
   ],
   "deps": {
     "three": "0.186.0"

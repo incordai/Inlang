@@ -55,6 +55,18 @@ export const MOTION = {
   easeOut: 'cubic-bezier(0, 0, 0.58, 1)',
 } as const;
 
+/**
+ * How opaque `color.veil` is: the page background a block puts under its
+ * text when it sits over a live `scene backdrop` (scene-spec §6.5). The
+ * backdrop can show ANY colour on any frame, so contrast must hold against
+ * pure white and pure black behind the veil. 90 is the smallest whole
+ * percent at which every theme and scheme keeps text, muted and accent at
+ * 4.5:1 and border-strong at 3:1 (midnight and paper light sit exactly on
+ * a floor there); 92 leaves two points for the browser's own compositing.
+ * theme/test/contrast.test.ts proves both the pass and the edge.
+ */
+export const VEIL_PERCENT = 92;
+
 /** CONVENTIONS §4 bans raw z-index; overlays-spec §1 needs a layer manager. */
 export const LAYER = {
   behind: -1, base: 0, raised: 10, scrim: 20, sticky: 100, dropdown: 200,

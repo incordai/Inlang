@@ -18,16 +18,23 @@ import { LADDER, STATIC_RUNG, tierOf, TierProbe, type Rung, type Start } from '.
 import { studioEnvironment } from './env.ts';
 import { hex, onSchemeChange } from './colours.ts';
 import { ModelCache, model, ring, strands, type Content, type Framing } from './views.ts';
+import { budgetFrom, sceneBytes, toEvict } from './evict.ts';
 
 /** How the object answers the page (the element's `data-az-camera`). */
 type Motion = 'fixed' | 'scroll' | 'parallax' | 'orbit';
 
 interface View {
+  readonly id: number;
   readonly el: HTMLElement;
   readonly kind: string;
   readonly motion: Motion;
   readonly backdrop: boolean;
-  readonly content: Content;
+  /** Null while evicted (§7): the poster stands in until the view returns. */
+  content: Content | null;
+  /** Page clock when last inside the warm margin; -Infinity if never. */
+  lastVisible: number;
+  /** Counted toward the budget once its content is ready. */
+  counted: boolean;
   visible: boolean;
   target: number;
   damped: number;
@@ -78,6 +85,9 @@ export class Stage {
   private frame = 0;
   private lastTs: number | null = null;
   private stopped = false;
+  /** §7: live scene memory the page may hold before paused views are released. */
+  private readonly budget: number;
+  private accent = '';
 
   constructor(doc: Document, start: Start) {
     this.doc = doc;
@@ -85,6 +95,7 @@ export class Stage {
     if (!win) throw new Error('3d: no window');
     this.win = win;
     this.rung = start.rung;
+    this.budget = budgetFrom(win.location.search);
     this.publish();
     this.probe = start.probe
       ? new TierProbe({ rung: start.rung, ceilingRung: start.ceilingRung, promotable: start.promotable })
@@ -102,10 +113,18 @@ export class Stage {
     this.env = studioEnvironment(this.renderer);
 
     this.observer = new win.IntersectionObserver((entries) => {
+      const now = win.performance.now();
       for (const entry of entries) {
         const view = this.views.find((v) => v.el === entry.target);
-        if (view) view.visible = entry.isIntersecting;
+        if (!view) continue;
+        view.visible = entry.isIntersecting;
+        if (view.visible) {
+          view.lastVisible = now;
+          // An evicted view coming back into the warm margin is rebuilt (§7).
+          if (!view.content) this.restore(view);
+        }
       }
+      this.enforceBudget();
       this.wake();
     }, { rootMargin: WARM_MARGIN });
 
@@ -135,6 +154,7 @@ export class Stage {
     const els = [...this.doc.querySelectorAll<HTMLElement>('[data-az-3d]')];
     const backdrop = els.some((el) => el.dataset.azVariant === 'backdrop');
     const accent = hex(this.doc, 'accent');
+    this.accent = accent;
     for (const el of els) {
       // hero-spec §8: with a backdrop on the page, a 3D hero takes no
       // rectangle — its 3D is the backdrop's first scroll segment.
@@ -144,8 +164,9 @@ export class Stage {
       const motion = (['scroll', 'parallax', 'orbit'].includes(el.dataset.azCamera ?? '')
         ? el.dataset.azCamera : 'fixed') as Motion;
       const view: View = {
-        el, kind: kindOf(el), motion, backdrop: el.dataset.azVariant === 'backdrop',
-        content, visible: false, target: 0, damped: 0, yaw: 0, yawTarget: 0,
+        id: this.views.length, el, kind: kindOf(el), motion, backdrop: el.dataset.azVariant === 'backdrop',
+        content, lastVisible: -Infinity, counted: false,
+        visible: false, target: 0, damped: 0, yaw: 0, yawTarget: 0,
       };
       content.setRung(LADDER[this.rung]);
       if (motion === 'orbit') this.orbitInput(view);
@@ -222,8 +243,47 @@ export class Stage {
   private recolour(): void {
     if (this.stopped) return;
     const accent = hex(this.doc, 'accent');
-    for (const v of this.views) v.content.recolour(accent);
+    this.accent = accent;
+    for (const v of this.views) v.content?.recolour(accent);
     this.wake();
+  }
+
+  /** Rebuild an evicted view's content; its poster stays until it is ready. */
+  private restore(view: View): void {
+    const content = this.contentFor(view.el, this.accent);
+    if (!content) return;
+    content.setRung(LADDER[this.rung]);
+    view.content = content;
+    view.el.removeAttribute('data-az-evicted');
+  }
+
+  /** Release the least-recently-visible paused views while over budget (§7). */
+  private enforceBudget(): void {
+    if (this.stopped) return;
+    const seen = new Set<string>();
+    const residents = this.views
+      .filter((v) => v.content && v.counted)
+      .map((v) => ({
+        id: v.id, visible: v.visible, backdrop: v.backdrop, lastVisible: v.lastVisible,
+        bytes: sceneBytes(v.content!.scene, seen),
+      }));
+    for (const id of toEvict(residents, this.budget)) {
+      // By id, not index: mount() re-sorts the list to put the backdrop first.
+      const v = this.views.find((x) => x.id === id);
+      if (!v) continue;
+      v.content?.dispose();
+      v.content = null;
+      v.counted = false;
+      this.markLive(v.el, false);
+      v.el.setAttribute('data-az-evicted', 'true');
+    }
+    this.publishMemory();
+  }
+
+  /** GPU objects the renderer still holds — what a test sees eviction free. */
+  private publishMemory(): void {
+    const m = this.renderer.info.memory;
+    this.doc.documentElement.setAttribute('data-az3d-gpu', `${m.geometries},${m.textures}`);
   }
 
   /** Start the loop if anything is on screen; it stops itself when nothing is (§7). */
@@ -272,7 +332,7 @@ export class Stage {
     this.publish();
     if (next === STATIC_RUNG) { this.teardown(); return; }
     this.applyDpr();
-    for (const v of this.views) v.content.setRung(LADDER[next]);
+    for (const v of this.views) v.content?.setRung(LADDER[next]);
   }
 
   private draw(dt: number): void {
@@ -291,9 +351,12 @@ export class Stage {
     const centre = lite ? this.nearestCentre(h) : null;
     const scrollMax = Math.max(1, this.doc.documentElement.scrollHeight - h);
 
+    let arrived = false;
     for (const v of this.views) {
       if (!v.visible && !v.backdrop) continue;
-      if (this.failed.has(v.el) || !v.content.ready) continue;
+      const content = v.content;
+      if (!content || this.failed.has(v.el) || !content.ready) continue;
+      if (!v.counted) { v.counted = true; arrived = true; }
       const r = v.backdrop ? { left: 0, top: 0, width: w, height: h, bottom: h } : v.el.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0 || r.bottom < 0 || r.top > h) continue;
 
@@ -313,11 +376,13 @@ export class Stage {
       const y = h - r.bottom;
       this.renderer.setViewport(x, y, r.width, r.height);
       this.renderer.setScissor(x, y, r.width, r.height);
-      v.content.setAspect(r.width / r.height);
-      v.content.update({ progress: v.motion === 'parallax' ? v.damped * 0.5 : v.damped, yaw: v.yaw });
-      this.renderer.render(v.content.scene, v.content.camera);
+      content.setAspect(r.width / r.height);
+      content.update({ progress: v.motion === 'parallax' ? v.damped * 0.5 : v.damped, yaw: v.yaw });
+      this.renderer.render(content.scene, content.camera);
       if (!v.el.hasAttribute('data-live')) this.markLive(v.el, true);
     }
+    // New content has arrived on the GPU: it now counts toward the budget.
+    if (arrived) this.enforceBudget();
   }
 
   private nearestCentre(h: number): View | null {
@@ -342,7 +407,7 @@ export class Stage {
     this.observer.disconnect();
     for (const c of this.cleanups) c();
     for (const v of this.views) {
-      v.content.dispose();
+      v.content?.dispose();
       this.markLive(v.el, false);
     }
     for (const el of this.doc.querySelectorAll<HTMLElement>('[data-az-3d]')) this.markLive(el, false);

@@ -236,6 +236,21 @@ Everything in §9 applies, plus two that only a full-viewport layer raises:
   live backdrop is the same failure hero-spec §8 forbids, one level up, and the
   gate cannot catch it in a snapshot because the offending frame may be any
   frame.
+
+  **Resolved:** blocks that paint their own background already comply. The
+  two that paint none — `hero` (every variant but `full`, which is on its
+  scrim) and `text` — take **`color.veil`** on a page with a backdrop: the
+  page background at `VEIL_PERCENT` (92%) opacity, under the `overBackdrop`
+  style state. Because the backdrop may show any colour on any frame, the
+  percentage is set against the worst cases, pure white and pure black
+  behind it: 90% is the smallest whole percent at which every theme and
+  scheme keeps text, muted text and links at 4.5:1 and outlines at 3:1, and
+  92% leaves margin for the browser's compositing (theme/test/contrast.test.ts
+  proves the pass and the edge). A translucent surface rather than a scrim
+  keeps every text colour the block already uses, so nothing inside it needs
+  a second palette. The backdrop still shows — dimmed — through those blocks.
+  The §6.6 "text over a backdrop with no surface" warning is therefore
+  unreachable: the surface is applied, not requested.
 - **`prefers-reduced-motion` removes the motion, not the layer.** The backdrop
   becomes its poster — still there, still setting the tone, no movement.
 
@@ -269,7 +284,17 @@ a text section, and restarting is a single frame.
 
 **Eviction.** If live scene memory exceeds the budget, release the
 least-recently-visible **paused** scene and show its poster in its place; an
-active scene is never evicted. This is why §4's poster requirement is not
+active scene is never evicted.
+
+**Resolved — the budget:** 64MB of estimated GPU memory (geometry buffers
+plus RGBA textures with their mip chain, each counted once however many
+views share it; the page's environment map excluded). gallery-spec §9
+measures sixteen 1024² textures at ~85MB and calls it a tab crash on a
+mid-range phone; 64MB sits below that with room for the page's own
+compositing. The backdrop is never evicted (§6.4: it is on screen on every
+frame). A released view is rebuilt when it re-enters the warm margin, and a
+shared model's cache entry is freed only when no live view still holds it.
+`?az-scene-budget=<MB>` sets a smaller budget for tests and diagnosis. This is why §4's poster requirement is not
 optional — it is the fallback frame for three separate states. Also pause on
 `visibilitychange` to hidden: a backgrounded tab rendering WebGL is pure battery
 cost, and it is what a generated one-off never handles and a template always does.

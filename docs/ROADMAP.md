@@ -211,6 +211,12 @@ the runtime probe.
   the fps and memory measurements, and the two line counts. The opt-in
   `.glb`/Draco path is built and measured (2026-09-23, `pnpm test:model`):
   A8 holds for geometry, textures unmeasured.
+- §5's deferral deadline (rungs 3–7 never past 2s) was a spike scheduler
+  defect, not load: the deadline counted from when a 100ms poll first saw the
+  decision and was checked only on poll ticks. It now runs from the frame the
+  probe decided on, enforced by a timer. `test:m0`'s ≤2300ms check measured
+  2111/2148/2224/2143/2137ms over 5 runs (load average 2–7); the previous
+  scheduler measured 2227 and 2346ms (the second a failure) the same day.
 
 **M1 — compiler core built.** Lexer, parser, link, validate, Spec and the web
 target exist; `az build`, `az dev`, `az spec` and `az check` work.
@@ -237,6 +243,16 @@ entry loads the 3D chunk lazily after paint, and never at `static` or under
 reduced motion. `pnpm test:3d` checks it in Chromium (and smoke-tests
 Firefox and WebKit). Headless WebGL is software, so none of it is device
 evidence — M0's real-device checks remain open.
+Also built: §7 budget eviction (64MB of estimated GPU memory; the
+least-recently-visible paused view goes back to its poster and is rebuilt on
+return; shared models are freed only when unreferenced), and the §6.5 veil —
+over a backdrop, `hero` and `text` sit on `color.veil`, sized so contrast
+holds against any backdrop pixel. Browser-checked: eviction and its memory
+release, scheme-change repaint (OS and `data-scheme`), the veil and axe on a
+backdrop page. Open, as a spec conflict for the owner: scene-spec §8 says at
+`lite` only the scene nearest the centre animates, while motion-tiers-spec §5
+rung 6 makes `lite` a static camera for every view — so the runtime's
+nearest-centre branch can never run.
 Styling: words describe `style` plus named variants — `below.<breakpoint>`,
 `states.<state>`, `reducedMotion` (ARCHITECTURE §4.3) — and the target
 compiles every styled node into one generated class in `src/az.css`; lint

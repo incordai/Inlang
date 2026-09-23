@@ -82,6 +82,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     },
     // §7: the gutter sets the width on a phone, and it is the page's.
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
+    // scene-spec §6.5: text has no surface of its own, so over a page's
+    // backdrop it takes the veil — contrast then holds on any frame.
+    states: { overBackdrop: { background: t.color.veil } },
     children,
   };
 }

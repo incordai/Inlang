@@ -12,7 +12,7 @@
  * explicit `data-scheme` choice winning in both directions.
  */
 
-import type { ColorTokens, Scheme, ShadowTokens, Theme } from './tokens.ts';
+import { VEIL_PERCENT, type ColorTokens, type Scheme, type ShadowTokens, type Theme } from './tokens.ts';
 
 /** The per-scheme token groups — the only ones that change with the scheme. */
 const SCHEMED = ['color', 'shadow'] as const;
@@ -29,10 +29,13 @@ function references<T extends object>(group: Schemed, tokens: T): Record<keyof T
   return out;
 }
 
-/** What a word reads for the scheme-dependent groups. */
-export function schemeReferences(theme: Theme): { color: ColorTokens; shadow: ShadowTokens } {
+/** The one derived colour: see VEIL_PERCENT. Defined once, after the schemes. */
+const VEIL = property('color', 'veil');
+
+/** What a word reads for the scheme-dependent groups — the role tokens plus `veil`. */
+export function schemeReferences(theme: Theme): { color: ColorTokens & { veil: string }; shadow: ShadowTokens } {
   return {
-    color: references('color', theme.color.light),
+    color: { ...references('color', theme.color.light), veil: `var(${VEIL})` },
     shadow: references('shadow', theme.shadow.light),
   };
 }
@@ -60,5 +63,8 @@ export function schemeCss(theme: Theme): string {
     `:root[data-scheme="${other}"] {\n${declarations(theme, other, '  ')}\n}`,
     // §3.2: a transparent body borrows whatever the host paints behind it.
     `body { background: var(${property('color', 'bg')}); color: var(${property('color', 'text')}); }`,
+    // scene-spec §6.5: a block over a live backdrop resolves its own surface.
+    // Built on var(), so it follows the scheme without a copy per scheme.
+    `:root { ${VEIL}: color-mix(in srgb, var(${property('color', 'bg')}) ${VEIL_PERCENT}%, transparent); }`,
   ].join('\n\n') + '\n';
 }

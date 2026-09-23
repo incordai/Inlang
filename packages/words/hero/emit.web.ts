@@ -220,9 +220,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     },
     // §8: while the canvas draws behind a `full` hero, the flat scrim becomes
     // a gradient over the scene — never a flat layer that dims it whole.
-    states: threeD && behind
-      ? { live: { background: `linear-gradient(to top, color-mix(in srgb, ${t.color.scrim} 88%, transparent), color-mix(in srgb, ${t.color.scrim} 55%, transparent))` } }
-      : undefined,
+    states: {
+      ...(threeD && behind
+        ? { live: { background: `linear-gradient(to top, color-mix(in srgb, ${t.color.scrim} 88%, transparent), color-mix(in srgb, ${t.color.scrim} 55%, transparent))` } }
+        : {}),
+      // scene-spec §6.5: over a page's backdrop, type never sits on the live
+      // surface — every variant but `full` (already on its scrim) takes the veil.
+      ...(variant === 'full' ? {} : { overBackdrop: { background: t.color.veil } }),
+    },
     // §10: under 768px `split` restacks to `stack` — text above, media
     // below, which is already the source order. center, stack and minimal
     // are unchanged; full's crop and scrim wait for the 3D runtime.
