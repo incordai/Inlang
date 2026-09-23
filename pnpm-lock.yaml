@@ -44,6 +44,8 @@ importers:
 
   packages/core: {}
 
+  packages/mcp: {}
+
   packages/overlay: {}
 
   packages/scene-runtime: {}
