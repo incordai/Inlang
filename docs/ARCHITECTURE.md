@@ -72,7 +72,14 @@ cli      → everything
 auth-runtime → (nothing)                 (copied whole into a site that uses auth)
 scene-runtime → three                   (copied whole into a site that uses 3D)
 backend  → core (types, data)           (its server/ is node built-ins + pinned drivers only)
+mcp      → (nothing but node:*)          (the CLI injects every operation)
 ```
+
+`mcp` serves `az mcp` (docs/mcp.md): the protocol, the tool schemas and the
+root sandbox. Nothing may import from `cli`, and the tools need the CLI's
+operations, so the dependency runs the other way: `cli/src/mcp.ts` builds a
+`Toolbox` from the functions its own commands run and hands it to the
+server. A tool and its command therefore cannot drift apart.
 
 `backend` is the optional built-in server (backend-spec.md). Its `src/server/`
 imports only its siblings and `node:*` — the drivers it may load are one

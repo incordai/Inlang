@@ -191,6 +191,10 @@ spike WebGL/WebView in week 1 before committing. Mobile word emitters.
 LSP + VS Code extension. Machine-readable index + `llms.txt`. Fuzzy matcher.
 A model only after real LSP usage data exists.
 
+*Delivered early (2026-09-23):* `az mcp` exposes the word catalogue, the
+grammar and the compiler's commands to an agent over MCP — a machine-readable
+index in practice (docs/mcp.md). The LSP and `llms.txt` remain.
+
 ---
 
 ## Current status

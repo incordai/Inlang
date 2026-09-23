@@ -804,3 +804,25 @@ contingent on the owner accepting the matching verdict.
    `framer-motion`?** Both are `13.1.1`; the official upgrade guide says to
    "uninstall `framer-motion` and install `motion`" and swap imports to
    `motion/react`. Pick one name before it is written into eleven manifests.
+
+## 12. MCP server for `az mcp` — **implement the stdio protocol; no SDK dependency**
+
+Decided 2026-09-23 when `az mcp` was added (docs/mcp.md).
+
+The reference TypeScript SDK (`@modelcontextprotocol/sdk` 1.30.1, MIT,
+published 2026-09-23, Node ≥ 18) was checked on the npm registry. It declares
+17 runtime dependencies — among them an HTTP framework and a second one, CORS
+and rate-limit middleware, a JOSE library, SSE clients, two JSON-schema
+validators — plus a schema library as a peer, 4.3 MB unpacked before those.
+They serve its HTTP transports and OAuth client; a stdio tool server uses
+none of them.
+
+What `az mcp` needs is small and fully specified: newline-delimited JSON-RPC
+2.0, and six methods (`initialize`, `ping`, `tools/list`, `tools/call`,
+`resources/list`, `resources/read`). That is ~150 lines in `packages/mcp`
+with node built-ins only, tested at the protocol level against the real
+binary. Version negotiation follows the SDK's own supported list
+(2025-11-25 back to 2024-11-05).
+
+Revisit if `az mcp` ever needs an HTTP transport, sampling, or OAuth — the
+SDK's weight pays for those.

@@ -55,7 +55,7 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp'];
 
 test('every package has sources to check — CONTROL', () => {
   // Without this, an empty glob would make every rule below pass vacuously.
@@ -159,6 +159,16 @@ test('the backend package reaches core only for types and data, never a target o
 test('the secret scanner imports nothing — it is copied whole into every site (§4)', () => {
   const file = join(ROOT, 'packages/core/src/secrets.ts');
   assert.deepEqual(importsOf(file), []);
+});
+
+test('mcp imports only its siblings and node built-ins — the CLI injects every operation', () => {
+  const files = sources('packages/mcp');
+  assert.ok(files.length >= 3, 'CONTROL: the mcp sources are found');
+  for (const file of files) {
+    for (const spec of importsOf(file)) {
+      assert.ok(spec.startsWith('./') || spec.startsWith('node:'), `mcp imports '${spec}' — only siblings and node:*`);
+    }
+  }
 });
 
 test('nothing imports from cli — ARCHITECTURE §2', () => {

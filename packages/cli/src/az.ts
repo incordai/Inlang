@@ -10,7 +10,7 @@
  */
 
 import {
-  readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync, chmodSync,
+  readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, copyFileSync, realpathSync, statSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,13 +19,17 @@ import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../targe
 import { SvgError } from '../../target-web/src/svg.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
-import { backendFiles, envFile, SERVER_DIR } from '../../backend/src/emit.ts';
+import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
 import { lintWords } from './lint.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
+import { initBackendEnv } from './backend-init.ts';
+// mcp.ts imports build/wordsFor from here; the cycle is safe for the same
+// reason as dev.ts's — nothing is touched until a command runs.
+import { runMcp } from './mcp.ts';
 import { formatFindings } from '../../theme/src/lint.ts';
 
 const MB = 1024 * 1024;
@@ -106,7 +110,7 @@ function readProjectText(projectDir: string, path: string): string | null {
 }
 
 /** The words one build compiles with: the set, plus the project's own. */
-const wordsFor = (options: Omit<BuildOptions, 'outDir'>) => loadWords(options.wordsDir,
+export const wordsFor = (options: Omit<BuildOptions, 'outDir'>) => loadWords(options.wordsDir,
   options.projectWordsDir === undefined ? resolve(dirname(options.source), 'words') : options.projectWordsDir);
 
 export function build(options: BuildOptions): BuildOutcome {
@@ -253,9 +257,10 @@ const USAGE = `az — words to a website
   az migrate <file.az>             upgrade the file to this grammar version
   az eject <word> [--dir project]  take ownership of a word's source — one-way
   az backend init <server-dir>     write the backend's .env with a fresh secret
+  az mcp   [--root dir]            serve these tools to an AI agent (MCP, stdio)
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp']);
 
 /**
  * `az backend init <server-dir>` — write `.env` beside a generated server's
@@ -268,21 +273,12 @@ function runBackend(sub: string, rest: string[]): number {
     process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build)\n');
     return EXIT.config;
   }
-  const dir = resolve(rest[0]);
-  const configFile = join(dir, 'az.config.json');
-  if (!existsSync(configFile)) {
-    process.stderr.write(`az: no az.config.json in ${dir} — point at the server/ folder az build wrote\n`);
-    return EXIT.missing;
+  const r = initBackendEnv(resolve(rest[0]));
+  if (!r.ok) {
+    process.stderr.write(`az: ${r.message}\n`);
+    return r.kind === 'missing' ? EXIT.missing : EXIT.config;
   }
-  const target = join(dir, '.env');
-  if (existsSync(target)) {
-    process.stderr.write(`az: ${target} already exists — not overwritten (a new secret would sign everyone out)\n`);
-    return EXIT.config;
-  }
-  const setup = JSON.parse(readFileSync(configFile, 'utf8')) as { database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api' };
-  writeFileSync(target, envFile({ database: setup.database, email: setup.email }), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  chmodSync(target, 0o600);
-  process.stdout.write(`az: wrote ${target} (owner read/write only) with a fresh AZ_SESSION_SECRET — fill in the empty values\n`);
+  process.stdout.write(`az: wrote ${r.path} (owner read/write only) with a fresh AZ_SESSION_SECRET — fill in the empty values\n`);
   return EXIT.ok;
 }
 
@@ -360,6 +356,12 @@ export function main(argv: string[]): number {
     return EXIT.config;
   }
   if (cmd === 'lint') return runLint(file ?? process.env.AZ_WORDS ?? 'words');
+  if (cmd === 'mcp') {
+    // stdin keeps the process alive; the server ends when the client closes it.
+    const rootFlag = argv.indexOf('--root');
+    void runMcp(rootFlag >= 0 && argv[rootFlag + 1] ? argv[rootFlag + 1] : process.cwd());
+    return EXIT.ok;
+  }
   if (!file) {
     process.stderr.write(`az: ${cmd} needs a file — try: az ${cmd} site.az\n`);
     return EXIT.config;
