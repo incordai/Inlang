@@ -212,8 +212,8 @@ target exist; `az build`, `az dev`, `az spec` and `az check` work.
 nightly OS/Node matrix, and an end-to-end build that installs, builds and
 server-renders a compiled site (`pnpm verify:build`); its results on GitHub
 were not checked when this was written.
-Not yet checked against M1's exit list: the offline build and the <1s cold
-compile, as automated tests.
+The offline build (every network path poisoned) and the <1s cold compile of
+the reference fixture are automated in `packages/cli/test/m1-exit.test.ts`.
 
 **M2 — words mostly built.** All 11 blocks emit; 39/39 variants and 47/51
 props are implemented (`pnpm coverage`). Three themes exist; theme lint (A7)
@@ -224,14 +224,27 @@ decoder decisions); `auth.impl` needs M4.
 Styling: words describe `style` plus named variants — `below.<breakpoint>`,
 `states.<state>`, `reducedMotion` (ARCHITECTURE §4.3) — and the target
 compiles every styled node into one generated class in `src/az.css`; lint
-rejects raw conditions in word source. Piloted on hero (`split` restacks
-below sm, actions full-width below xs) and nav (skip link shown on focus),
-both checked in a browser by `pnpm test:visual`, which runs in CI with axe,
-keyboard, overflow, reduced-motion, scheme, restack and skip-link checks.
-The block validation tables are implemented as manifest `checks`, and
-`az lint` exists.
-Not built: the other ten words' responsive tables, the button primitive,
-the overlay engine, thumbnails, and the 12-point gate as one command.
+rejects raw conditions in word source.
+Responsive tables: every row that changes layout is implemented for all 11
+words (hero, cta, faq, text, feature, auth, scene, gallery, footer, pricing;
+nav takes only the mobile gutter), and every section takes `gutter-sm` below
+sm. Pricing `table` transposes to per-plan panels by emitting both forms
+(decision D5). Rows that change columns are checked in a browser at 390 vs
+1440 (`restack`), hero split's text column at 1440 (`column`).
+Buttons: one action primitive (buttons-and-sections §1) — words hand their
+`cta`/`alt` fills to `ctx.actions`; intent from the destination, weight from
+position or `as`, link vs button by intent, all six states, 44px targets,
+inverted tone on the cta band. feature, gallery and text had been dropping
+their section actions; they now render them.
+All of this is checked by `pnpm test:visual` in CI (axe, keyboard, overflow,
+reduced motion, schemes, restack, column, skip link; Chromium, plus Firefox
+and WebKit for overflow and page errors). Block validation tables are
+manifest `checks`; `az lint` exists.
+Not built: nav's mobile drawer and footer `mega` accordions (both need the
+overlay engine or a second DOM form), pricing's "in every plan" row
+collapse, thumbnails, and the 12-point gate as one command. The
+play/copy/video/popup behaviours emit buttons with a compile warning
+(AZ1222) until their runtime exists.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape
