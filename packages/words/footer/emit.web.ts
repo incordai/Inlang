@@ -147,19 +147,60 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         gap: px(t.space[32]),
         marginBottom: px(t.space[32]),
       },
-      // §8 below sm: `columns` and `mega` collapse to ONE column, groups in
-      // source order with their headings — never two-across. (mega's
-      // groups becoming <details> accordions needs a second DOM form and is
-      // deferred.)
+      // §8 below sm: `columns` collapses to ONE column, groups in source
+      // order with their headings — never two-across. `mega` swaps to its
+      // accordion form instead (below).
       below: variant === 'mega'
-        ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } }
+        ? { sm: { display: 'none' } }
         : { sm: { flexDirection: 'column' } },
       children: columns,
     };
 
+    // §8: on a phone `mega`'s groups become <details> accordions, all closed
+    // except the first. Two forms, switched by width (decision D5): a closed
+    // <details> cannot be forced open on desktop by CSS in every engine, and
+    // `display: none` removes the inactive form from the accessibility tree,
+    // so a reader meets each link once. No height animation (§8), and the
+    // open state is not persisted.
+    const accordion: EmittedNode[] = variant === 'mega' && columnGroups.length > 0
+      ? [{
+          tag: 'div',
+          attrs: { class: 'az-footer-accordion' },
+          style: { display: 'none', marginBottom: px(t.space[32]) },
+          below: { sm: { display: 'block' } },
+          children: [
+            ...columnGroups.map((g, i): EmittedNode => ({
+              tag: 'details',
+              attrs: { class: 'az-footer-group', ...(i === 0 ? { open: 'open' } : {}) },
+              style: { borderBottom: `1px solid ${t.color.border}` },
+              children: [
+                {
+                  tag: 'summary',
+                  attrs: { class: 'az-footer-group-summary' },
+                  style: {
+                    display: 'flex',
+                    alignItems: 'center',
+                    minHeight: px(t.size.tap),
+                    cursor: 'pointer',
+                  },
+                  children: [{
+                    tag: 'h2',
+                    attrs: { class: 'az-footer-column-title' },
+                    style: { fontSize: t.typeSize.sm, fontFamily: t.type.body, color: t.color.text, margin: 0 },
+                    children: [g.args[0]?.value ?? ''],
+                  }],
+                },
+                linkList(g.children.filter((c) => c.word === 'link'), ctx, 'az-footer-column-items'),
+              ],
+            })),
+            ...(looseAndSocial.length > 0 ? [linkList(looseAndSocial, ctx, 'az-footer-loose')] : []),
+          ],
+        }]
+      : [];
+
     children.push(bareList
       ? linkList(looseAndSocial, ctx, 'az-footer-loose')
-      : { tag: 'nav', attrs: { class: 'az-footer-nav', 'aria-label': 'Footer' }, children: [grid] });
+      : { tag: 'nav', attrs: { class: 'az-footer-nav', 'aria-label': 'Footer' }, children: [grid, ...accordion] });
   }
 
   // §5: `dynamic` emits the `since` literal as a FALLBACK and marks it for the

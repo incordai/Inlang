@@ -157,7 +157,25 @@ const GROUPS = ['    group "Shop"', '      link "Shoes" /a', '      link "Bags" 
 
 test('footer §8 columns and mega: one column below sm, never two-across', () => {
   assert.deepEqual(byClass(FOOTER('columns', ...GROUPS), 'az-footer-columns')?.below?.sm, { flexDirection: 'column' });
-  assert.deepEqual(byClass(FOOTER('mega', ...GROUPS), 'az-footer-columns')?.below?.sm, { gridTemplateColumns: ONE });
+  // mega's phone form is the accordion list (one column); its grid steps aside.
+  assert.deepEqual(byClass(FOOTER('mega', ...GROUPS), 'az-footer-columns')?.below?.sm, { display: 'none' });
+  assert.deepEqual(byClass(FOOTER('mega', ...GROUPS), 'az-footer-accordion')?.below?.sm, { display: 'block' });
+});
+
+test('footer §8 mega: groups become <details>, all closed except the first', () => {
+  const acc = byClass(FOOTER('mega', ...GROUPS), 'az-footer-accordion');
+  assert.equal(acc?.style?.display, 'none', 'hidden on desktop, so each link is met once');
+  const details = (acc?.children ?? []).filter((c): c is EmittedNode => typeof c !== 'string' && c.tag === 'details');
+  assert.equal(details.length, 4);
+  assert.deepEqual(details.map((d) => d.attrs?.open ?? null), ['open', null, null, null]);
+  for (const d of details) {
+    const summary = d.children?.[0];
+    assert.ok(typeof summary !== 'string' && summary?.tag === 'summary', 'a real <summary> first');
+  }
+});
+
+test('CONTROL: `columns` gets no accordion — only mega does', () => {
+  assert.equal(byClass(FOOTER('columns', ...GROUPS), 'az-footer-accordion'), undefined);
 });
 
 test('footer §8 minimal: the bottom row stacks centred', () => {

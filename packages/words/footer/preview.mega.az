@@ -1,0 +1,41 @@
+az 1
+
+site aurora
+  footer mega
+    tagline   "Handmade in the dark."
+    group "Shop"
+      link "Shoes"  /shoes
+      link "Bags"   /bags
+    group "Studio"
+      link "About"    /about
+      link "Journal"  /journal
+    group "Help"
+      link "Returns"  /returns
+      link "Repairs"  /repairs
+    group "Trade"
+      link "Wholesale" /wholesale
+      link "Press"     /press
+    legal  "Privacy"  /privacy
+    copyright "Aurora Studio"
+
+page /
+  hero center
+    title "Built in the dark"
+
+page /shoes
+
+page /bags
+
+page /about
+
+page /journal
+
+page /returns
+
+page /repairs
+
+page /wholesale
+
+page /press
+
+page /privacy
