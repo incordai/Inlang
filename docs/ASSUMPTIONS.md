@@ -338,8 +338,45 @@ the emitter at all). Do not fall back to code review — it will not hold.
 
 ## A8 — Draco-compressed hero models fit under 5MB
 
-**Status:** `UNVERIFIED` · **Confidence:** medium · **Scope: narrowed
-2026-08-21 — no longer on the critical path**
+**Status:** `HOLDS` for geometry · texture weight unmeasured ·
+**Measured 2026-09-23** (M0 spike, `spike-m0/scripts/model.test.ts`) ·
+**Scope: narrowed 2026-08-21 — no longer on the critical path**
+
+### Measured result
+
+The opt-in path is built in the spike (`?az-model=sample`; procedural stays
+the default): three's `GLTFLoader` + `DRACOLoader`, the glTF decoder bundled
+from three itself (same-origin, no CDN — stack-evaluation §0), `dispose()` on
+unmount, and the poster while loading or on failure.
+
+The sample is generated, not downloaded (`spike-m0/scripts/make-model.ts`): a
+shoe-like assembly — a lathed sole, a smooth upper, six laces — with
+positions, normals and UVs, built in three, exported by three's
+`GLTFExporter`, and Draco-encoded by the reference encoder through glTF Transform
+(edgebreaker, 14-bit positions, 10-bit normals, 12-bit UVs).
+
+| Triangles | Raw .glb | Draco .glb | Ratio | < 5 MB |
+|---|---|---|---|---|
+| 54,720 | 1.19 MB | 0.12 MB | 9.8× | yes |
+| 109,548 | 2.35 MB | 0.21 MB | 11.0× | yes |
+| **218,880 (shipped sample)** | 5.92 MB | **0.38 MB** | 15.7× | yes |
+| 438,736 | 11.83 MB | 0.65 MB | 18.2× | yes |
+| 875,520 | 23.54 MB | 1.13 MB | 20.9× | yes |
+
+In the browser (headless Chromium on this laptop's GPU): the model decodes to
+exactly the 218,880 triangles encoded; drawable **520–625 ms** after navigation
+from the local server and **1.32–1.54 s** on a throttled ~10 Mbps / 60 ms link
+(**proxy** — not a device measurement); heap growth over 5 mount/unmount
+cycles **0.86–1.14 MB** across runs (JS heap only); the default page fetches none of the
+model code, decoder or file; the build succeeds with the network poisoned.
+
+**Scope of `HOLDS`.** Geometry at realistic web product budgets is an order of
+magnitude under 5 MB — ~875k triangles still fits in 1.13 MB. What is **not**
+measured: textures. Draco compresses geometry only, and a real product model's
+weight is usually its maps; two or three 2K textures can pass 5 MB on their own.
+The sample is a product-shaped procedural assembly at a realistic triangle
+count, not a scanned product. The texture budget stack-evaluation §15 (question
+4) asks for is still the missing half, and A8 says nothing about it yet.
 
 **Verify:** M0, using a realistic product model, not a primitive.
 **If FAILED:** the LCP guidance in the hero spec needs revisiting, and the

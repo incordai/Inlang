@@ -6,7 +6,7 @@
  * really — counted twice, structure vs structure-plus-shader).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, Lightformer } from '@react-three/drei';
 import * as THREE from 'three';
@@ -15,10 +15,14 @@ import { createStrandMaterial } from './material.ts';
 import { CAMERA, computeFraming } from './framing.ts';
 import { resolveLayout, layoutVars, sitePreset, HERO_PRESETS } from './layout.ts';
 import { resolvePattern, patternCss } from './patterns.ts';
+import { ModelBoundary, readModelUrl, reportFailure, reportModel } from './model-url.tsx';
 import {
   LADDER, STATIC_RUNG, TierProbe, capabilityGate, readGateSignals, readForced, startFrom,
   type Rung, type ProbeSnapshot,
 } from './tiers.ts';
+
+/** Loaded only when `?az-model=` opts in — the default page never fetches it. */
+const Model = lazy(() => import('./model.tsx'));
 
 /**
  * The post-fx chain this scene renders. The spike draws straight to the
@@ -289,6 +293,21 @@ export function Hero() {
     vertices: 0, frameloop: 'none', probeCostP95Ms: 0,
   });
 
+  // The opt-in .glb path (A8). Procedural strands stay the default.
+  const modelUrl = useMemo(() => readModelUrl(), []);
+  const [modelState, setModelState] = useState<'loading' | 'ready' | 'failed'>('loading');
+  useEffect(() => {
+    if (modelUrl) reportModel({ url: modelUrl, state: 'loading', readyMs: null, triangles: 0, error: null });
+  }, [modelUrl]);
+  const onModelVertices = useCallback((n: number) => {
+    measured.current.vertices = n;
+    setModelState('ready');
+  }, []);
+  const onModelFail = useCallback((error: unknown) => {
+    if (modelUrl) reportFailure(modelUrl, error);
+    setModelState('failed');
+  }, [modelUrl]);
+
   const probe = useMemo(() => {
     if (!start.probe || start.rung === STATIC_RUNG) return null;
     return new TierProbe({ rung: start.rung, ceilingRung: start.ceilingRung, promotable: start.promotable });
@@ -411,7 +430,16 @@ export function Hero() {
             camera={{ position: CAMERA.position, fov: CAMERA.fov }}
           >
             <StudioEnv />
-            <Strands rung={rung} scroll={scroll} subscribers={subscribers} measured={measured} />
+            {modelUrl ? (
+              <ModelBoundary url={modelUrl} onFail={onModelFail}>
+                <Suspense fallback={null}>
+                  <Model url={modelUrl} rung={rung} scroll={scroll} subscribers={subscribers}
+                         onVertices={onModelVertices} onFail={onModelFail} />
+                </Suspense>
+              </ModelBoundary>
+            ) : (
+              <Strands rung={rung} scroll={scroll} subscribers={subscribers} measured={measured} />
+            )}
             <RendererWatch rung={rung} looping={looping} measured={measured}
                            subscribers={subscribers} onContextLost={onContextLost} />
             {/* An on-demand loop has no frame rate to measure: sampling its
@@ -419,8 +447,11 @@ export function Hero() {
             {probe && looping && <ProbeDriver probe={probe} measured={measured} />}
             {SYNTHETIC_LOAD_MS > 0 && <SyntheticLoad ms={SYNTHETIC_LOAD_MS} />}
           </Canvas>
-        ) : (
-          <div className="poster" role="img"
+        ) : null}
+        {/* hero-spec §8: the poster stands in while a model loads, if it
+            fails, and whenever the rung draws no canvas at all. */}
+        {(!rung.canvas || (modelUrl && modelState !== 'ready')) && (
+          <div className="poster" role="img" data-model-state={modelUrl ? modelState : undefined}
                aria-label="Static poster: the scene does not animate on this device." />
         )}
       </div>

@@ -17,9 +17,9 @@ which the owner may overrule.
 
 | # | Item | Status | One-line reason |
 |---|---|---|---|
-| 1 | `three` | **ALREADY CHOSEN · pin is stale** | docs pin `0.170.0`; current stable is `0.185.1` |
-| 2 | `@react-three/fiber` | **ALREADY CHOSEN · pin is stale, and a major** | docs pin `8.17.10` (React 18); current is `9.7.0` and needs React ≥19 |
-| 3 | `@react-three/drei` | **ALREADY CHOSEN · never pinned anywhere** | current `10.7.8`; requires R3F `^9`, so it forces the v9 decision |
+| 1 | `three` | **DECIDED 2026-09-23 · `0.186.0`** | §0; the 2026-08-21 lookup found `0.185.1` |
+| 2 | `@react-three/fiber` | **DECIDED 2026-09-23 · `9.8.0`** | §0; the v9/React-19 migration happened (open question 1) |
+| 3 | `@react-three/drei` | **DECIDED 2026-09-23 · `10.7.8`** | §0; still current, peers satisfied |
 | 4 | **Next.js** | **REJECT** | `next build` generates a fresh build ID and phones Vercel by default — it attacks determinism and principle 1 at the *build* stage. Vite's equivalent of `dynamic(…,{ssr:false})` is `<ClientOnly>` from `vite-react-ssg` |
 | 5 | **GSAP + ScrollTrigger** | **REJECT as an emitted dependency** | free, but not open source: a revocable, unilaterally amendable Webflow licence that AZ would inject into every client project |
 | 6 | **Lenis** | **REJECT for Phase 1** | genuinely good and genuinely a11y-aware, but it has no word, taxes non-3D pages, and its rAF loop is unproven against the tier probe |
@@ -28,10 +28,49 @@ which the owner may overrule.
 | 9 | **gltfjsx** | **AUTHOR-SIDE TOOL, and only via `raw`** | output determinism is undocumented; it competes with the emitter rather than feeding it |
 | 10 | **Spline** | **AUTHOR-SIDE TOOL, asset export only** | the runtime embed is a network call in the visitor's page; the GLB export is fine and the free tier exports geometry only |
 | 11 | **Blender** | **AUTHOR-SIDE TOOL — correct choice** | GLB + Draco is the right path; the official exporter is Khronos-maintained and bundled |
-| — | React major | **NEEDS DECISION** | R3F v9 pins React to `>=19 <19.3`. React is already at `19.2.8`. That ceiling is one minor away |
-| — | three ceiling | **NEEDS DECISION** | adopting post-fx caps three at `< 0.186.0`. The usable window is currently one minor wide |
+| — | React major | **DECIDED** | React 19; R3F `9.8.0` widened its peer to `>=19 <19.4`, so the pinned `19.2.8` has room (§0) |
+| — | three ceiling | **DECIDED — a moving window, reviewed with each pin bump** | `postprocessing 6.39.5` widened its peer to `three < 0.187.0`; `0.186.0` is inside it (§0) |
 
 ---
+
+## 0. Decision record — 2026-09-23 (M0 `.glb` path)
+
+Every version below was read from `registry.npmjs.org` on **2026-09-23**.
+
+| Package | Pinned | FACT (registry) |
+|---|---|---|
+| `three` | **`0.186.0`** | latest, published 2026-09-08, no peers |
+| `@types/three` | **`0.186.0`** | latest, matches `three` |
+| `@react-three/fiber` | **`9.8.0`** | latest, published 2026-09-22; peers `react >=19 <19.4`, `three >=0.156` |
+| `@react-three/drei` | **`10.7.8`** | latest; peers `react ^19`, `three >=0.159`, `@react-three/fiber ^9.0.0` |
+| `react`, `react-dom` | `19.2.8` (unchanged) | inside fiber's `>=19 <19.4`; `19.3.0` exists and is not required by anything here |
+
+**The three ceiling (§1, §8).** The ceiling was never about three: it is
+`postprocessing`'s peer range. On 2026-08-21 that was `>= 0.168.0 < 0.186.0`;
+`postprocessing 6.39.5` (2026-09-09) widened it to **`>= 0.168.0 < 0.187.0`**,
+and `@react-three/postprocessing 3.1.2` (2026-09-22) requires `three >= 0.156.0`
+and `@react-three/fiber >= 9.7.0`. So `0.186.0` sits inside the window and the
+post-fx adoption (§8) still holds. Per this document's own recommendation that
+"pinning is a commitment to a review cadence", the ceiling is recorded as a
+**moving window**: three advances only to a minor the pinned `postprocessing`
+admits, checked at each pin review — never by a routine bump alone.
+
+**Draco decoder hosting.** Self-hosted, and from `three` itself. In `0.186.0`,
+`DRACOLoader` references its decoder files with `new URL(…, import.meta.url)`
+and exports `DRACO_GLTF_CONFIG`, the glTF-only decoder (192 KB wasm). The
+bundler therefore emits the decoder into the site as same-origin assets — no
+CDN request and nothing to copy by hand. Verified in the spike: the model page
+fetches exactly one wasm from its own origin, and the build succeeds with the
+network poisoned (`spike-m0/scripts/model.test.ts`). drei's `useGLTF` is not
+used on this path: its default decoder location is a public CDN.
+
+**Author-side encoding tools (§9), spike devDependencies only:**
+`@gltf-transform/core` `4.5.0` and `@gltf-transform/extensions` `4.5.0`
+(MIT; the `KHR_draco_mesh_compression` writer), `draco3dgltf` `1.5.7`
+(Apache-2.0; the reference Draco encoder, the build three's decoder is
+paired with). `@gltf-transform/functions` is deliberately not added — its image
+dependencies are not needed to encode geometry. None of these ship in a site.
+
 
 ## 2. `three`
 

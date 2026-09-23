@@ -44,7 +44,8 @@ the full protocol in VERIFICATION §2 and record it; if not, M0 still completes.
 - [x] procedural scene reproducible: identical vertex-buffer hash across two
       builds, two runs and two browser engines (tests A8b) — this replaces the
       model budget as the critical-path 3D check
-- [ ] Draco model < 5MB **on the opt-in model path only** (tests A8)
+- [x] Draco model < 5MB **on the opt-in model path only** (tests A8) — 0.38 MB
+      for a 218,880-triangle sample, geometry only (ASSUMPTIONS A8; textures unmeasured)
 - [ ] forced-tier override works; a snapshot pinned to `lite` is reproducible
 - [ ] `ASSUMPTIONS.md` A1b, A2, A8, A8b updated to `HOLDS` or `FAILED`; A1 updated
       only if a real device was actually measured
@@ -207,9 +208,9 @@ the runtime probe.
 - Probe logic tests pass (`pnpm test:probe`); A1b stays `TESTING` until a
   deliberately throttled device is measured.
 - Still open: the throttled-device probe run, the 60s no-oscillation scroll,
-  the fps and memory measurements, the two line counts, and the opt-in
-  `.glb`/Draco path — **which the spike never built**, so A8 cannot be
-  measured yet.
+  the fps and memory measurements, and the two line counts. The opt-in
+  `.glb`/Draco path is built and measured (2026-09-23, `pnpm test:model`):
+  A8 holds for geometry, textures unmeasured.
 
 **M1 — compiler core built.** Lexer, parser, link, validate, Spec and the web
 target exist; `az build`, `az dev`, `az spec` and `az check` work.
