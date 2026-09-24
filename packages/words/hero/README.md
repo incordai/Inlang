@@ -81,13 +81,14 @@ The full floor is in the spec.
 
 Every variant renders distinctly. Properties not yet implemented (`pnpm coverage`):
 
-- `model`
+- none — every declared property changes the output
 
 Known gaps:
 
-- `model` and the 3D scene itself: `3d` renders the poster only until the runtime is ported from the M0 spike
-- Buttons render as plain links until the button primitive exists
-- Responsive (§10): `split` restacks to one column below 768px, and the actions stack full-width below 480px — both checked in a browser by `test:visual` (hero preview.split.az). `full`'s focal-point crop and stronger scrim wait for the 3D runtime; the primary does not yet look like a button (the button primitive is still to come).
+- `3d` draws through the page's single renderer (packages/scene-runtime); the poster shows until it draws and at the `static` tier
+- Actions render through the button primitive (`ctx.actions`): hierarchy, intent, six states and a 44px target
+- Responsive (§10): `split` restacks to one column below 768px and the actions stack full-width below 480px, checked in a browser by `test:visual` (preview.split.az)
+- Not built: `full`'s crop from a defined focal point (§10 table); the scrim is the gradient scrim of §8
 
 ## Tested
 

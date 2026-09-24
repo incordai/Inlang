@@ -77,7 +77,7 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 
 Known gaps:
 
-- Primary and secondary buttons render as plain links until the button primitive exists
+- Actions render through the button primitive (`ctx.actions`): hierarchy, intent, six states and a 44px target
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested

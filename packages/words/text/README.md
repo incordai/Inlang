@@ -73,7 +73,7 @@ Known gaps:
 - A `.md` body is rendered at build (§5): the CLI reads it through the project sandbox and parses CommonMark plus tables and strikethrough into elements — never an HTML string. Raw HTML is stripped with a warning; `javascript:`, `vbscript:` and `data:` links stop the build; headings shift below the title and clamp at `<h4>`; images and file links resolve relative to the file through the asset sandbox; code blocks and tables scroll in keyboard-reachable regions. §10's file checks (html, unsafe link, `#` heading, skipped level, deep outline, weak link text, wide table) are reported by `az build`
 - An image written `![](…)` is decorative (`alt=""`): markdown has no image without an alt, so §10's "no alt" row cannot fire on a file
 - Image `width`/`height` are not read from the file (needs build-time image reading)
-- Buttons render as plain links until the button primitive exists
+- Actions render through the button primitive (`ctx.actions`): hierarchy, intent, six states and a 44px target
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested

@@ -83,9 +83,9 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 
 Known gaps:
 
-- `orbit` shows its poster and image list only; the 3D ring needs the runtime port
-- `lightbox` (§8) is built: each image is a named `<button>`, and the gallery holds one `popup` dialog. ←/→ step through the images and Home/End jump to the ends, with no wrap. A polite "N of M" counter, neighbour-only preloading, swipe, and focus returning to the thumbnail on show. `carousel` has previous/next buttons that are unavailable at the ends, clipped on phones until focused (§6/§10). Both are checked in three browser engines on `preview.carousel.az`.
-- Image `width`/`height` and `srcset` are not generated (needs build-time image reading)
+- `orbit` draws a 3D image ring through the page's single renderer; its image list and poster stay in the page and are the static tier
+- `lightbox` (§8) and `carousel` arrows are built and checked in three browser engines on `preview.carousel.az`
+- Not built: image `width`/`height` and `srcset` (needs build-time image reading)
 - The validation table's missing-alt, alt-equals-caption and partial-caption warnings are implemented (AZ2106–AZ2108)
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 

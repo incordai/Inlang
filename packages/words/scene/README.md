@@ -71,12 +71,12 @@ The full floor is in the spec.
 
 Every variant renders distinctly. Properties not yet implemented (`pnpm coverage`):
 
-- `model`, `camera`
+- none — every declared property changes the output
 
 Known gaps:
 
-- `model` and `camera`: the emitter outputs a `<figure>` placeholder with the poster in a `data-poster` attribute and never creates a canvas; the 3D runtime is not ported yet
-- Because the poster is not resolved through the asset pipeline, the poster file is not copied into the build
+- `model` (a Draco `.glb` through the asset sandbox, decoder shipped with the site) and `camera` (`fixed`, `orbit` with arrow keys, `scroll`) draw through the page's single renderer (packages/scene-runtime)
+- The poster is copied into the build through the asset pipeline and carries the scene's `alt`; the view element is `role="img"` with that label, and the page's one shared canvas is `aria-hidden` (§9)
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested

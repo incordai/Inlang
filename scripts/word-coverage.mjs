@@ -94,6 +94,16 @@ for (const w of readdirSync(W).filter((d) =>
   const variants = m.variants ?? [];
   const props = Object.keys(m.props ?? {});
   const seenP = uses(src, /block\.props\.([A-Za-z][A-Za-z0-9]*)/g);
+  // A site-scoped prop is declared once for the whole site and read by the
+  // target, not the block's emitter — auth's `adapter`, `profile`, `impl` and
+  // `protect` configure target-web/src/auth.ts. Count it when that module,
+  // named after the word, reads it as `settings.<prop>`.
+  const targetModule = join(W, '..', 'target-web/src', `${w}.ts`);
+  const siteSrc = existsSync(targetModule) ? readFileSync(targetModule, 'utf8') : '';
+  const seenSite = uses(siteSrc, /settings\??\.([A-Za-z][A-Za-z0-9]*)/g);
+  for (const [name, spec] of Object.entries(m.props ?? {})) {
+    if (spec.scope === 'site' && seenSite.has(name)) seenP.add(name);
+  }
 
   // A variant counts as implemented when its OUTPUT differs from every other
   // variant of the same word — not when its name appears in the source.
