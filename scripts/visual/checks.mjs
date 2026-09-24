@@ -182,8 +182,13 @@ export async function frame(page) {
     site.appendChild(probe);
     const frameWidth = probe.getBoundingClientRect().width;
     probe.remove();
-    const vw = document.documentElement.clientWidth;
-    const left = Math.max(0, (vw - frameWidth) / 2);
+    // The frame centres in the column the block sits in: the page, or the
+    // content column beside a side nav — the same box its 100% resolves to.
+    const bounds = (block) => {
+      const p = block.parentElement.getBoundingClientRect();
+      const margin = Math.max(0, (p.width - frameWidth) / 2);
+      return [p.left + margin, p.right - margin];
+    };
     const blocks = [...document.querySelectorAll('.az-page > :not(main), main > *')]
       // Blocks are block boxes; an inline run has no inset of its own.
       .filter((el) => el.getClientRects().length > 0 && !getComputedStyle(el).display.startsWith('inline')
@@ -196,15 +201,18 @@ export async function frame(page) {
       const bare = parseFloat(cs.paddingLeft) === 0 && parseFloat(cs.paddingRight) === 0;
       return bare && el.children.length === 1 ? inner(el.firstElementChild) : el;
     };
-    const bad = blocks.map(inner).flatMap((el) => {
+    const bad = blocks.flatMap((block) => {
+      const [left, right] = bounds(block);
+      const el = inner(block);
       const r = el.getBoundingClientRect();
       const cs = getComputedStyle(el);
       const start = r.left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth);
       const end = r.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
       // 2px of slack: sub-pixel layout, and a block mid-way through a small transform.
-      return start >= left - 2 && end <= vw - left + 2 ? [] : [`${el.className.split(' ')[0] || el.tagName}: ${Math.round(start)}–${Math.round(end)}`];
+      return start >= left - 2 && end <= right + 2 ? []
+        : [`${el.className.split(' ')[0] || el.tagName}: ${Math.round(start)}–${Math.round(end)} (frame ${Math.round(left)}–${Math.round(right)})`];
     });
-    return { pass: bad.length === 0, detail: bad.length ? `frame ${Math.round(left)}–${Math.round(vw - left)}; ${bad.join(', ')}` : '' };
+    return { pass: bad.length === 0, detail: bad.join(', ') };
   });
 }
 
