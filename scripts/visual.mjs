@@ -42,6 +42,8 @@ import {
 } from './visual/behaviours.mjs';
 import { behaviourSelfTest } from './visual/behaviour-selftest.mjs';
 import { withVariant } from './thumbnails.mjs';
+import { COMPILE_MS, INSTALL_MS, PROJECT_BUILD_MS } from './visual/pipeline.mjs';
+import { Overdue, within, closeWithin, watchdog, human, slowest } from './lib/bounded.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
@@ -54,6 +56,30 @@ const BUILD_CONCURRENCY = 4;
 /** Every navigation is bounded. */
 const NAV_TIMEOUT_MS = 15_000;
 
+/*
+ * Deadlines (lib/bounded.mjs). page.evaluate has no timeout of its own, so a
+ * check whose page never answers would otherwise wait forever — one did, for
+ * 4h18m. Sized from measured runs (the slowest completions print at the end)
+ * with several times the margin, so only a stuck engine ever reaches them.
+ */
+/** One check, setup step or reload. */
+const CHECK_MS = 60_000;
+/**
+ * Every check of one site, all engines. A site takes 15–40s; the slowest,
+ * a 3D scene, took 100s on a machine running three gates at once.
+ */
+const SITE_MS = 10 * 60_000;
+/** The whole run: a base plus a share per site — about 5× a normal run. */
+const RUN_BASE_MS = 20 * 60_000;
+const RUN_PER_SITE_MS = 2 * 60_000;
+/** Closing a page, context, browser or server. */
+const CLOSE_MS = 15_000;
+/** Building every site, before the whole-run deadline is known. */
+const BUILD_ALL_MS = 60 * 60_000;
+/** The self-test: the whole of it, and its stuck page's one check. */
+const SELF_TEST_MS = 15 * 60_000;
+const SELF_TEST_CHECK_MS = 5_000;
+
 /* ---- npm and vite without a shell (see verify-build.mjs for why) -------- */
 
 const NODE_DIR = dirname(process.execPath);
@@ -64,8 +90,10 @@ const NPM_CLI = [
 if (!NPM_CLI) throw new Error(`visual: npm-cli.js not found in the node install at ${NODE_DIR}`);
 
 const execFileP = promisify(execFile);
-const node = (script, args, cwd) => execFileP(process.execPath, [script, ...args], {
+const node = (script, args, cwd, timeout) => execFileP(process.execPath, [script, ...args], {
   cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  // Bounded: a hung child is killed and its call rejects, naming the signal.
+  timeout, killSignal: 'SIGKILL',
   // AZ_BUILD_LOG quiets a project's own build (az-vite/build.mjs) to errors.
   env: { AZ_BUILD_LOG: 'error', ...process.env, AZ_WORDS: WORDS },
 });
@@ -82,7 +110,7 @@ async function pool(items, limit, fn) {
 
 /* ---- results ------------------------------------------------------------ */
 
-const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'skip-link',
+const CHECKS = ['compile', 'deadline', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'skip-link',
   'no-js', 'hydration',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
@@ -278,7 +306,7 @@ async function buildAll(words, work, everyVariant) {
   // reason to skip every other word.
   await pool(sites, BUILD_CONCURRENCY, async (s) => {
     try {
-      await node(CLI, ['build', join(s.dir, 'site.az'), '--out', join(s.dir, 'proj')], s.dir);
+      await node(CLI, ['build', join(s.dir, 'site.az'), '--out', join(s.dir, 'proj')], s.dir, COMPILE_MS);
       s.compiled = true;
       record(s.word, 'compile', s.label, { pass: true });
     } catch (e) {
@@ -303,7 +331,7 @@ async function buildAll(words, work, everyVariant) {
   for (const { dir, from } of installs.values()) {
     mkdirSync(dir);
     writeFileSync(join(dir, 'package.json'), readFileSync(join(from, 'proj/package.json')));
-    await node(NPM_CLI, ['install', '--no-audit', '--no-fund'], dir);
+    await node(NPM_CLI, ['install', '--no-audit', '--no-fund'], dir, INSTALL_MS);
   }
   console.log(`installed ${installs.size} shared node_modules`);
 
@@ -312,7 +340,7 @@ async function buildAll(words, work, everyVariant) {
     symlinkSync(join(s.install, 'node_modules'), join(proj, 'node_modules'), 'dir');
     // The project's OWN build: the client bundle, then every page
     // pre-rendered — so every check below sees the pages that ship.
-    await node(join(proj, 'az-vite/build.mjs'), [], proj);
+    await node(join(proj, 'az-vite/build.mjs'), [], proj, PROJECT_BUILD_MS);
     s.dist = join(proj, 'dist');
   });
   console.log(`built ${built.length} sites (client + pre-render)\n`);
@@ -342,6 +370,49 @@ async function open(page, path, server) {
 
 /* ---- check one site ----------------------------------------------------- */
 
+/**
+ * A page that can be thrown away and replaced: its context, its settings,
+ * and the site page it shows. When a check misses its deadline the page is
+ * presumed stuck — `reset` closes it (bounded) and opens a fresh one in the
+ * same state, so the next check runs on a live page.
+ */
+async function surface(browser, server, path, init = {}) {
+  const sf = { ctx: null, page: null, media: null, viewport: init.viewport ?? null };
+  sf.reset = async (reopen = true) => {
+    if (sf.ctx) await closeWithin(sf.ctx, CLOSE_MS, 'context.close');
+    sf.ctx = await within(CHECK_MS, 'newContext', () => browser.newContext(init));
+    sf.page = await within(CHECK_MS, 'newPage', () => sf.ctx.newPage());
+    sf.page.setDefaultTimeout(NAV_TIMEOUT_MS);
+    if (sf.viewport) await within(CHECK_MS, 'setViewportSize', () => sf.page.setViewportSize(sf.viewport));
+    if (sf.media) await within(CHECK_MS, 'emulateMedia', () => sf.page.emulateMedia(sf.media));
+    if (reopen) await within(CHECK_MS, 'reload', () => open(sf.page, path, server));
+  };
+  /** Change media and/or viewport, remembered for a reset. */
+  sf.set = async ({ media, viewport }) => {
+    if (media) { sf.media = media; await sf.page.emulateMedia(media); }
+    if (viewport) { sf.viewport = viewport; await sf.page.setViewportSize(viewport); }
+  };
+  sf.close = () => closeWithin(sf.ctx, CLOSE_MS, 'context.close');
+  await sf.reset(false);
+  return sf;
+}
+
+/**
+ * `fn(page)` within `ms`. A miss is recorded as a FAIL of `check` naming the
+ * engine and place, the page is replaced, and the result is undefined — so
+ * one stuck check costs one deadline, not the run.
+ */
+async function guardedCheck(sf, word, engine, check, where, fn, ms = CHECK_MS) {
+  try {
+    return await within(ms, `${check} @ ${engine} ${word}/${where}`, () => fn(sf.page));
+  } catch (e) {
+    if (!(e instanceof Overdue)) throw e;
+    record(word, check, where, { pass: false, detail: `${engine}: ${e.message} — page replaced` });
+    await sf.reset();
+    return undefined;
+  }
+}
+
 async function checkSite(s, browsers, server) {
   server.serve(s.dist);
   const shots = join(OUT, s.word);
@@ -353,76 +424,99 @@ async function checkSite(s, browsers, server) {
   const narrowColumns = typeof row === 'string' ? 1 : row?.narrow ?? 1;
   const tracks = {};
 
-  const ctx = await browsers.chromium.newContext();
-  const page = await ctx.newPage();
-  page.setDefaultTimeout(NAV_TIMEOUT_MS);
+  const guarded = (sf, engine, check, where, fn) => guardedCheck(sf, s.word, engine, check, where, fn);
+  const sf = await surface(browsers.chromium, server, s.path);
+  /** A chromium check whose result is recorded as returned (a null result is "not applicable"). */
+  const checked = async (check, where, fn) => {
+    const r = await guarded(sf, 'chromium', check, where, fn);
+    if (r) record(s.word, check, where, r);
+    return r;
+  };
+  /** Settings, then the page reloaded in them — one bounded step. */
+  const load = (check, where, settings) => guarded(sf, 'chromium', check, where, async (page) => {
+    await sf.set(settings);
+    await open(page, s.path, server);
+    return true;
+  });
+
   const bg = {};
   for (const scheme of SCHEMES) {
-    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'no-preference' });
     for (const width of WIDTHS) {
-      await page.setViewportSize({ width, height: 900 });
-      await open(page, s.path, server);
-      record(s.word, 'overflow', tag(scheme, width), await overflow(page));
-      await page.screenshot({ path: join(shots, `${s.label.replace(':', '-')}-${scheme}-${width}.png`), fullPage: true });
-      if (restackAt && scheme === 'light') tracks[width] = await columnsOf(page, restackAt);
+      const where = tag(scheme, width);
+      if (!await load('overflow', where, { media: { colorScheme: scheme, reducedMotion: 'no-preference' }, viewport: { width, height: 900 } })) continue;
+      await checked('overflow', where, overflow);
+      await guarded(sf, 'chromium', 'overflow', where, (page) =>
+        page.screenshot({ path: join(shots, `${s.label.replace(':', '-')}-${scheme}-${width}.png`), fullPage: true }));
+      if (restackAt && scheme === 'light') tracks[width] = await guarded(sf, 'chromium', 'restack', where, (page) => columnsOf(page, restackAt));
       const disclose = DISCLOSE[s.word]?.[s.variant];
       if (disclose && scheme === 'light' && width !== 768) {
-        record(s.word, 'disclosure', tag(scheme, width), await disclosure(page, width, disclose));
+        await checked('disclosure', where, (page) => disclosure(page, width, disclose));
       }
-      if (width === 390 && scheme === 'light' && await page.$('.az-skip-link')) {
-        record(s.word, 'skip-link', tag(scheme, width), await skipLink(page));
+      if (width === 390 && scheme === 'light' && await guarded(sf, 'chromium', 'skip-link', where, (page) => page.$('.az-skip-link'))) {
+        await checked('skip-link', where, skipLink);
       }
-      if (width !== 768) record(s.word, 'axe', tag(scheme, width), await axe(page));
+      if (width !== 768) await checked('axe', where, axe);
       if (width === 1440) {
         const column = COLUMN[s.word]?.[s.variant];
-        if (column && scheme === 'light') record(s.word, 'column', `${s.label}/light`, await sharedColumn(page, column));
-        bg[scheme] = await bodyBackground(page);
-        record(s.word, 'keyboard', tag(scheme, width), await keyboard(page));
+        if (column && scheme === 'light') await checked('column', `${s.label}/light`, (page) => sharedColumn(page, column));
+        bg[scheme] = await guarded(sf, 'chromium', 'schemes', where, bodyBackground);
+        await checked('keyboard', where, keyboard);
       }
     }
   }
-  if (restackAt) record(s.word, 'restack', `${s.label}/light`, restacks(tracks[390], tracks[1440], narrowColumns));
+  // A width whose reading missed its deadline is already a FAIL; 0 and -1 are readings.
+  if (restackAt && tracks[390] !== undefined && tracks[1440] !== undefined) record(s.word, 'restack', `${s.label}/light`, restacks(tracks[390], tracks[1440], narrowColumns));
   // PRD §6.1a: wider than the frame, every block's content sits inside it.
-  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-  await page.setViewportSize({ width: FRAME_WIDTH, height: 900 });
-  await open(page, s.path, server);
-  record(s.word, 'frame', `${s.label}/light/${FRAME_WIDTH}`, await frame(page));
-  // theme-spec §8.1: the hero's preview as written (the theme's families) and
-  // the same preview with `font` roles (the roles' stacks).
-  if (s.word === FONT_WORD && !s.variant) {
-    record(s.word, 'font', `${s.label}/light/${FRAME_WIDTH}`, await fonts(page, expectedFonts(s.theme, s.roles)));
+  const wide = `${s.label}/light/${FRAME_WIDTH}`;
+  if (await load('frame', wide, { media: { colorScheme: 'light', reducedMotion: 'no-preference' }, viewport: { width: FRAME_WIDTH, height: 900 } })) {
+    await checked('frame', wide, frame);
+    // theme-spec §8.1: the hero's preview as written (the theme's families) and
+    // the same preview with `font` roles (the roles' stacks).
+    if (s.word === FONT_WORD && !s.variant) {
+      await checked('font', wide, (page) => fonts(page, expectedFonts(s.theme, s.roles)));
+    }
+    // PRD §6.1a: the hero preview as written and with each theme setting.
+    if (s.word === FONT_WORD && !s.variant && !s.roles && s.theme === VARIANT_THEME) {
+      const reading = await guarded(sf, 'chromium', 'theme-settings', wide, themeReading);
+      if (reading) themeReadings.push({ label: s.label, patterned: Boolean(s.settings), ...reading });
+    }
   }
-  // PRD §6.1a: the hero preview as written and with each theme setting.
-  if (s.word === FONT_WORD && !s.variant && !s.roles && s.theme === VARIANT_THEME) {
-    themeReadings.push({ label: s.label, patterned: Boolean(s.settings), ...await themeReading(page) });
+  if (bg.light !== undefined && bg.dark !== undefined) {
+    record(s.word, 'schemes', s.label, {
+      pass: bg.light !== bg.dark,
+      detail: `light and dark paint the same body background (${bg.light})`,
+    });
   }
-  record(s.word, 'schemes', s.label, {
-    pass: bg.light !== bg.dark,
-    detail: `light and dark paint the same body background (${bg.light})`,
-  });
 
-  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await open(page, s.path, server);
-  record(s.word, 'reduced-motion', `${s.label}/light/1440`, await reducedMotion(page));
-  await page.setViewportSize({ width: 390, height: 900 });
-  await open(page, s.path, server);
-  const still = await overlayMotion(page);
-  if (still) record(s.word, 'overlay-motion', `${s.label}/light/390`, still);
-  await open(page, s.path, server);
-  const barStill = await navMotion(page);
-  if (barStill) record(s.word, 'nav-motion', `${s.label}/light/390`, barStill);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await open(page, s.path, server);
-  const revealStill = await revealReduced(page);
-  if (revealStill) record(s.word, 'reveal-reduced', `${s.label}/light/1440`, revealStill);
-  await ctx.close();
+  const reduced = { colorScheme: 'light', reducedMotion: 'reduce' };
+  if (await load('reduced-motion', `${s.label}/light/1440`, { media: reduced, viewport: { width: 1440, height: 900 } })) {
+    await checked('reduced-motion', `${s.label}/light/1440`, reducedMotion);
+  }
+  if (await load('overlay-motion', `${s.label}/light/390`, { viewport: { width: 390, height: 900 } })) {
+    await checked('overlay-motion', `${s.label}/light/390`, overlayMotion);
+  }
+  if (await load('nav-motion', `${s.label}/light/390`, {})) {
+    await checked('nav-motion', `${s.label}/light/390`, navMotion);
+  }
+  if (await load('reveal-reduced', `${s.label}/light/1440`, { viewport: { width: 1440, height: 900 } })) {
+    await checked('reveal-reduced', `${s.label}/light/1440`, revealReduced);
+  }
+  await sf.close();
 
   // A6: the page as shipped, read with JavaScript off; then hydrated with
-  // nothing reported — a mismatch throws the pre-rendered markup away.
+  // nothing reported — a mismatch throws the pre-rendered markup away. Each
+  // opens its own context; one that misses its deadline is left to the
+  // browser's close.
   const url = new URL(s.path, server.url).href;
-  record(s.word, 'no-js', `${s.label}/chromium/1440`, await noJs(browsers.chromium, url));
-  record(s.word, 'hydration', `${s.label}/chromium/1440`, await hydration(browsers.chromium, url, READY));
+  for (const [check, fn] of [['no-js', () => noJs(browsers.chromium, url)], ['hydration', () => hydration(browsers.chromium, url, READY)]]) {
+    const where = `${s.label}/chromium/1440`;
+    try {
+      record(s.word, check, where, await within(CHECK_MS, `${check} @ chromium ${s.word}/${where}`, fn));
+    } catch (e) {
+      if (!(e instanceof Overdue)) throw e;
+      record(s.word, check, where, { pass: false, detail: `chromium: ${e.message}` });
+    }
+  }
 
   // The behaviour runtime, in a fresh context per width: the drawer is the
   // phone menu, the dropdown the desktop one; faq, copy, play and solid are
@@ -430,31 +524,37 @@ async function checkSite(s, browsers, server) {
   // them — a behaviour that works only in Chromium is not built.
   for (const engine of ['chromium', 'firefox', 'webkit']) {
     for (const width of [390, 1440]) {
-      const bctx = await browsers[engine].newContext({ viewport: { width, height: 900 } });
-      const bpage = await bctx.newPage();
-      bpage.setDefaultTimeout(NAV_TIMEOUT_MS);
+      const bsf = await surface(browsers[engine], server, s.path, { viewport: { width, height: 900 } });
       const checks = width === 390 ? { drawer, carousel, 'sheet-drag': sheetDrag } : { dropdown, solid, 'hide-shrink': hideShrink, 'scroll-padding': scrollPadding, faq, 'faq-deep-link': faqDeepLink, carousel, lightbox, copy, play, billing, year, reveal };
       for (const [name, fn] of Object.entries(checks)) {
-        await open(bpage, s.path, server);
-        const r = await fn(bpage).catch((e) => ({ pass: false, detail: `threw: ${String(e.message).split('\n')[0]}` }));
-        if (r) record(s.word, name, `${s.label}/${engine}/light/${width}`, r);
+        const where = `${s.label}/${engine}/light/${width}`;
+        const r = await guarded(bsf, engine, name, where, async (page) => {
+          await open(page, s.path, server);
+          return fn(page).catch((e) => ({ pass: false, detail: `threw: ${String(e.message).split('\n')[0]}` }));
+        });
+        if (r) record(s.word, name, where, r);
       }
-      await bctx.close();
+      await bsf.close();
     }
   }
 
   // The smaller pass: another engine at one width, overflow and page errors.
   for (const [name, width] of [['firefox', 1440], ['webkit', 390]]) {
-    const other = await browsers[name].newPage({ viewport: { width, height: 900 } });
+    const osf = await surface(browsers[name], server, s.path, { viewport: { width, height: 900 } });
     const errors = [];
-    other.on('pageerror', (e) => errors.push(e.message));
-    await open(other, s.path, server);
-    const o = await overflow(other);
-    record(s.word, name, `${s.label}/light/${width}`, {
-      pass: o.pass && errors.length === 0,
-      detail: [o.detail, ...errors.map((e) => `page error: ${e}`)].filter(Boolean).join('; '),
+    osf.page.on('pageerror', (e) => errors.push(e.message));
+    const where = `${s.label}/light/${width}`;
+    const o = await guarded(osf, name, name, where, async (page) => {
+      await open(page, s.path, server);
+      return overflow(page);
     });
-    await other.close();
+    if (o) {
+      record(s.word, name, where, {
+        pass: o.pass && errors.length === 0,
+        detail: [o.detail, ...errors.map((e) => `page error: ${e}`)].filter(Boolean).join('; '),
+      });
+    }
+    await osf.close();
   }
 }
 
@@ -552,7 +652,49 @@ const SHIPPED = (kind) => {
   <script>${fill} document.documentElement.setAttribute('data-az-ready', '');</script></body></html>`;
 };
 
+/**
+ * A page that never answers once a check measures it: its script spins
+ * inside getBoundingClientRect, as a stuck engine spins. Loading it is fine
+ * (the ready mark is set before anything measures).
+ */
+const STUCK = `<!doctype html><html lang="en"><head><title>stuck</title><script>
+  Element.prototype.getBoundingClientRect = function () { for (;;) {} };
+  document.documentElement.setAttribute('data-az-ready', '');
+</script></head><body><main><h1>Stuck</h1></main></body></html>`;
+
+/**
+ * The deadline: a check on the stuck page must FAIL at its deadline naming
+ * the check, engine and place, and leave a live page behind. Without the
+ * deadline this check waits forever (it once held the gate for 4h18m).
+ */
+async function deadlineSelfTest(browser, server, dir, expect) {
+  mkdirSync(join(dir, 'stuck'));
+  writeFileSync(join(dir, 'stuck', 'index.html'), STUCK);
+  server.serve(join(dir, 'stuck'));
+  const sf = await surface(browser, server, '/', { viewport: { width: 390, height: 900 } });
+  await within(CHECK_MS, 'open the stuck page', () => open(sf.page, '/', server));
+  const stuckPage = sf.page;
+  const started = performance.now();
+  const r = await guardedCheck(sf, 'self-test', 'chromium', 'overflow', 'stuck/390', overflow, SELF_TEST_CHECK_MS);
+  const took = performance.now() - started;
+  const failure = results['self-test']?.overflow?.failures[0] ?? '';
+  expect('deadline: overflow on a page that never answers', {
+    pass: r !== undefined || !failure.includes('overflow @ chromium self-test/stuck/390'),
+    detail: failure,
+  }, false);
+  // The deadline, then the stuck page's bounded close and a bounded reopen.
+  const limit = SELF_TEST_CHECK_MS + CLOSE_MS + NAV_TIMEOUT_MS;
+  expect(`deadline: the FAIL comes in time (under ${human(limit)})`, { pass: took < limit, detail: `${(took / 1000).toFixed(1)}s` }, true);
+  const title = await within(SELF_TEST_CHECK_MS, 'the replaced page answers', () => sf.page.evaluate(() => document.title)).catch((e) => e.message);
+  expect('deadline: a new, live page replaces the stuck one', {
+    pass: sf.page !== stuckPage && title === 'stuck', detail: String(title),
+  }, true);
+  await sf.close();
+}
+
 async function selfTest() {
+  const progress = { last: 'starting' };
+  const run = watchdog(SELF_TEST_MS, 'test:visual --self-test', progress);
   const dir = mkdtempSync(join(tmpdir(), 'az-visual-self-'));
   for (const [name, html] of [['bad', BAD], ['good', GOOD]]) {
     mkdirSync(join(dir, name));
@@ -564,6 +706,7 @@ async function selfTest() {
   const expect = (label, r, shouldPass) => {
     const ok = r.pass === shouldPass;
     if (!ok) wrong++;
+    progress.last = label;
     console.log(`  ${ok ? 'ok  ' : 'WRONG'}  ${label}: ${r.pass ? 'PASS' : 'FAIL'}${r.detail ? ` — ${r.detail}` : ''}`);
   };
   for (const [name, shouldPass] of [['bad', false], ['good', true]]) {
@@ -669,10 +812,15 @@ async function selfTest() {
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');
   await behaviourSelfTest(browser, server, dir, expect);
-  await browser.close();
-  await server.close();
+  console.log('\ndeadline — a check on a page that never answers fails in time');
+  await deadlineSelfTest(browser, server, dir, expect);
+  const closed = (await closeWithin(browser, CLOSE_MS, 'chromium.close')) && (await closeWithin(server, CLOSE_MS, 'server.close'));
+  run.clear();
   rmSync(dir, { recursive: true, force: true });
   console.log(`\n${wrong === 0 ? 'SELF-TEST PASSED — every check fails the bad page and passes the good one' : `SELF-TEST FAILED — ${wrong} check(s) misjudged`}`);
+  // A browser that would not close is still running: ending the process is
+  // what kills it (Playwright kills what it launched on exit).
+  if (!closed) process.exit(wrong === 0 ? 0 : 1);
   return wrong === 0 ? 0 : 1;
 }
 
@@ -693,18 +841,44 @@ async function main(argv) {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
 
+  const progress = { last: 'building' };
+  const building = watchdog(BUILD_ALL_MS, 'test:visual build', progress);
   const sites = await buildAll(words, work, everyVariant);
-  const browsers = { chromium: await chromium.launch(), firefox: await firefox.launch(), webkit: await webkit.launch() };
+  building.clear();
+  // The whole run: every site at its own deadline, plus the launches and closes.
+  const runMs = RUN_BASE_MS + sites.length * RUN_PER_SITE_MS;
+  const run = watchdog(runMs, 'test:visual', progress);
+  console.log(`deadlines: check ${human(CHECK_MS)} · site ${human(SITE_MS)} · run ${human(runMs)} (${sites.length} sites)` +
+    ` · close ${human(CLOSE_MS)} · build: compile ${human(COMPILE_MS)}, install ${human(INSTALL_MS)}, project ${human(PROJECT_BUILD_MS)}\n`);
+  const launch = async () => ({
+    chromium: await within(CHECK_MS, 'chromium.launch', () => chromium.launch()),
+    firefox: await within(CHECK_MS, 'firefox.launch', () => firefox.launch()),
+    webkit: await within(CHECK_MS, 'webkit.launch', () => webkit.launch()),
+  });
+  const closeAll = async (set) => (await Promise.all(Object.entries(set).map(([k, b]) => closeWithin(b, CLOSE_MS, `${k}.close`)))).every(Boolean);
+  let browsers = await launch();
   const versions = Object.fromEntries(Object.entries(browsers).map(([k, b]) => [k, b.version()]));
   const server = await startServer();
+  let closedCleanly = true;
   try {
     for (const s of sites) {
-      await checkSite(s, browsers, server);
-      process.stdout.write(`checked ${s.word}/${s.label}\n`);
+      try {
+        await within(SITE_MS, `site ${s.word}/${s.label}`, () => checkSite(s, browsers, server));
+      } catch (e) {
+        if (!(e instanceof Overdue)) throw e;
+        // The site's own work is abandoned mid-way and may still hold the
+        // browsers: replace them, so the next site starts clean.
+        record(s.word, 'deadline', s.label, { pass: false, detail: `${e.message} — browsers relaunched` });
+        closedCleanly = (await closeAll(browsers)) && closedCleanly;
+        browsers = await launch();
+      }
+      progress.last = `checked ${s.word}/${s.label}`;
+      process.stdout.write(`${progress.last}\n`);
     }
   } finally {
-    await server.close();
-    await Promise.all(Object.values(browsers).map((b) => b.close()));
+    await closeWithin(server, CLOSE_MS, 'server.close');
+    closedCleanly = (await closeAll(browsers)) && closedCleanly;
+    run.clear();
   }
   if (sites.some((s) => s.settings)) {
     record(FONT_WORD, 'theme-settings', themeReadings.map((r) => r.label).join(' vs '), settingsDiffer(themeReadings));
@@ -723,9 +897,13 @@ async function main(argv) {
   }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify({ versions, seconds: Number(seconds), results }, null, 2) + '\n');
   console.log(`\nbrowsers: ${Object.entries(versions).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  console.log(`slowest steps: ${slowest(12)}`);
   console.log(`${failed === 0 ? 'ALL CHECKS PASSED' : `${failed} CHECK(S) FAILED`} in ${seconds}s — details in .visual-out/report.json`);
   if (failed === 0) rmSync(work, { recursive: true, force: true });
   else console.log(`work dir kept for inspection: ${work}`);
+  // A browser that would not close is still running: ending the process is
+  // what kills it (Playwright kills what it launched on exit).
+  if (!closedCleanly) process.exit(failed === 0 ? 0 : 1);
   return failed === 0 ? 0 : 1;
 }
 

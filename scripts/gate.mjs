@@ -42,7 +42,7 @@ const EXACT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const RAN = /^(chromium|firefox|webkit)-\d+(\.\d+)?$/;
 /** Items 3–7: which test:visual checks each gate item is made of. */
 const VISUAL = {
-  3: ['compile', 'overflow', 'no-js', 'hydration', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'firefox', 'webkit'],
+  3: ['compile', 'deadline', 'overflow', 'no-js', 'hydration', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'firefox', 'webkit'],
   4: ['axe', 'copy'],
   5: ['keyboard', 'skip-link', 'drawer', 'sheet-drag', 'dropdown', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'play', 'billing'],
   6: ['reduced-motion', 'overlay-motion', 'nav-motion', 'reveal', 'reveal-reduced'],
@@ -70,21 +70,35 @@ function wordsFrom(argv) {
 const results = {};   // word -> item -> { pass, detail }
 const put = (word, item, pass, detail = '') => { (results[word] ??= {})[item] = { pass, detail }; };
 
+/*
+ * Every child is bounded. tsc, lint and check finish in seconds; test:visual
+ * bounds itself (per check, per site, its build at 1h and its run at 20m +
+ * 2m a site — 4h32m for the 96 sites of --every-variant) and this is only
+ * the backstop above that, so its own deadline, which names the stuck step,
+ * comes first. SIGTERM, so test:visual's browsers are closed by Playwright's
+ * own handler.
+ */
+const CHILD_MS = 10 * 60_000;
+const VISUAL_MS = 5 * 60 * 60_000;
 const run = (cmd, args) => spawnSync(cmd, args, {
   cwd: ROOT, encoding: 'utf8', env: { ...process.env, AZ_WORDS: WORDS }, maxBuffer: 64 * 1024 * 1024,
+  timeout: CHILD_MS, killSignal: 'SIGTERM',
 });
-const lastLines = (text, n = 5) => text.trim().split('\n').slice(-n).join(' | ');
+/** A child's failure as a line: its output, or that it was stopped at its deadline. */
+const lastLines = (text, n = 5, r = null) => (r?.error?.code === 'ETIMEDOUT' || r?.signal)
+  ? `stopped after ${CHILD_MS / 60_000}m (${r.signal ?? 'timeout'})`
+  : text.trim().split('\n').slice(-n).join(' | ');
 
 /* ---- items -------------------------------------------------------------- */
 
 function typecheck(words) {
   const r = run(process.execPath, [join(ROOT, 'node_modules/typescript/bin/tsc'), '--noEmit']);
-  for (const w of words) put(w, 1, r.status === 0, r.status === 0 ? '' : lastLines(r.stdout + r.stderr));
+  for (const w of words) put(w, 1, r.status === 0, r.status === 0 ? '' : lastLines(r.stdout + r.stderr, 5, r));
 }
 
 function lint(word, dir = join(WORDS, word)) {
   const r = run(process.execPath, [CLI, 'lint', dir]);
-  put(word, 2, r.status === 0, r.status === 0 ? '' : lastLines(r.stderr));
+  put(word, 2, r.status === 0, r.status === 0 ? '' : lastLines(r.stderr, 5, r));
 }
 
 function manifestItems(word, dir = join(WORDS, word)) {
@@ -107,7 +121,7 @@ function docs(word, dir = join(WORDS, word)) {
   if (!previews.includes('preview.az')) problems.push('no preview.az');
   for (const p of previews) {
     const r = run(process.execPath, [CLI, 'check', join(dir, p)]);
-    if (r.status !== 0) problems.push(`${p}: ${lastLines(r.stderr, 2)}`);
+    if (r.status !== 0) problems.push(`${p}: ${lastLines(r.stderr, 2, r)}`);
   }
   put(word, 11, problems.length === 0, problems.join('; '));
 }
@@ -115,8 +129,13 @@ function docs(word, dir = join(WORDS, word)) {
 function visual(words) {
   const flags = process.argv.includes('--every-variant') ? ['--every-variant'] : [];
   const r = spawnSync(process.execPath, [join(ROOT, 'scripts/visual.mjs'), ...words, ...flags], {
-    cwd: ROOT, stdio: 'inherit', env: process.env,
+    cwd: ROOT, stdio: 'inherit', env: process.env, timeout: VISUAL_MS, killSignal: 'SIGTERM',
   });
+  // test:visual clears its report as it starts, so a run stopped here leaves
+  // none and every item below reads "no result" with this reason.
+  const why = r.error?.code === 'ETIMEDOUT' || r.signal
+    ? `stopped after ${VISUAL_MS / 3_600_000}h (${r.signal ?? 'timeout'})`
+    : `exit ${r.status}`;
   const reportFile = join(ROOT, '.visual-out/report.json');
   const report = existsSync(reportFile) ? JSON.parse(readFileSync(reportFile, 'utf8')).results : {};
   // A check test:visual gained that the gate does not map would otherwise
@@ -133,7 +152,7 @@ function visual(words) {
       // A check that did not run is a failure, not a pass: an empty report
       // (a crash) must not read as a clean gate.
       put(w, Number(item), ran > 0 && failures.length === 0,
-        ran === 0 ? `test:visual produced no result (exit ${r.status})` : failures.slice(0, 2).join('; '));
+        ran === 0 ? `test:visual produced no result (${why})` : failures.slice(0, 2).join('; '));
     }
   }
 }
