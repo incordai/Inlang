@@ -29,9 +29,17 @@ const NPM_CLI = [
 
 const execFileP = promisify(execFile);
 
-/** node <script> …, with the bundled words; rejects with stdout/stderr attached. */
-export const node = (script, args, cwd) => execFileP(process.execPath, [script, ...args], {
-  cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+/** Child deadlines: az build, the shared npm install, a project's own build. */
+export const COMPILE_MS = 2 * 60_000;
+export const INSTALL_MS = 10 * 60_000;
+export const PROJECT_BUILD_MS = 5 * 60_000;
+
+/**
+ * node <script> …, with the bundled words; rejects with stdout/stderr
+ * attached. Bounded: past `timeout` the child is killed and the call rejects.
+ */
+export const node = (script, args, cwd, timeout = PROJECT_BUILD_MS) => execFileP(process.execPath, [script, ...args], {
+  cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout, killSignal: 'SIGKILL',
   // AZ_BUILD_LOG quiets a project's own build (az-vite/build.mjs) to errors.
   env: { AZ_BUILD_LOG: 'error', ...process.env, AZ_WORDS: WORDS },
 });
@@ -70,7 +78,7 @@ export async function buildSites(sites, work) {
   await pool(sites, BUILD_CONCURRENCY, async (s) => {
     s.proj = join(s.dir, 'proj');
     try {
-      await node(CLI, ['build', join(s.dir, 'site.az'), '--out', s.proj], s.dir);
+      await node(CLI, ['build', join(s.dir, 'site.az'), '--out', s.proj], s.dir, COMPILE_MS);
       s.compiled = true;
     } catch (e) {
       s.compiled = false;
@@ -94,14 +102,14 @@ export async function buildSites(sites, work) {
   for (const { dir, from } of installs.values()) {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'package.json'), readFileSync(join(from, 'package.json')));
-    await node(NPM_CLI, ['install', '--no-audit', '--no-fund'], dir);
+    await node(NPM_CLI, ['install', '--no-audit', '--no-fund'], dir, INSTALL_MS);
   }
 
   await pool(built, BUILD_CONCURRENCY, async (s) => {
     symlinkSync(join(s.install, 'node_modules'), join(s.proj, 'node_modules'), 'dir');
     // The project's OWN build (`npm run build`): the client bundle, then every
     // page pre-rendered into its HTML — so every check sees what ships.
-    await node(join(s.proj, 'az-vite/build.mjs'), [], s.proj);
+    await node(join(s.proj, 'az-vite/build.mjs'), [], s.proj, PROJECT_BUILD_MS);
     s.dist = join(s.proj, 'dist');
   });
 }
