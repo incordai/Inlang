@@ -293,6 +293,18 @@ One emitter file per word **per target**: `emit.web.ts`, later `emit.mobile.ts`.
 A word with no emitter for a target is simply unavailable there — the compiler
 reports it, it is not an error in the word.
 
+**Data in a block** (`from <table>`, data-spec §10). A block whose
+`SpecBlock.from` is set gets its rows after the page, so the contract gives
+the word three helpers in `emit-contract.ts`: `fromFill(from)` — one fill of
+the slot whose mapped props are markers (`fromMark(prop)`); the word renders
+it with its OWN item function, so a row is markup the word already emits,
+styled by the same generated classes; `fromShell(from, list, skeleton, ctx)`
+— the pre-rendered shell around that template (skeleton × limit, an empty
+rows container, the hidden template list, a `role=status` line, retry and
+sign-in controls, a `<noscript>` line); and `skeletonLine` for the word's
+loading item. The overlay runtime's `rows.ts` fills copies of the template
+with text and checked attributes only, never markup. A word never fetches.
+
 ### 4.4 The theme rule
 
 A word emitter may only read design values through `ctx.theme`. Raw hex, raw px

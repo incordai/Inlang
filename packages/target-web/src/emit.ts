@@ -42,6 +42,7 @@ import {
 } from './auth.ts';
 import { DATA_DIR, dataClient } from './data-client.ts';
 import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminValuesTs } from './data-admin.ts';
+import { ROWS_FILE, fromTables, rowsTsx } from './data-rows.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
 
 /**
@@ -218,7 +219,7 @@ function layOut(page: { route: string; nodes: EmittedNode[] }): LaidOut {
 
 function appTsx(
   spec: Spec, pages: { route: string; nodes: EmittedNode[] }[], modules: string[], theme: ThemeLike,
-  plan: AuthPlan | null, admin: readonly string[] = [],
+  plan: AuthPlan | null, admin: readonly string[] = [], rows = false,
 ): string {
   // Identifiers are derived from position, never from the author's path, and
   // the path reaches the source only through JSON.stringify (CONVENTIONS §6).
@@ -241,6 +242,9 @@ const PROTECT = new Set<string>(${stableJson(plan.protect)});
 /** The generated admin routes (data-spec §11). */
 const ADMIN = new Set<string>(${stableJson(admin)});
 ` : '';
+  // `from` blocks (data-spec §10.3): only a site with one imports the runtime that fills them.
+  const rowsImport = rows ? `import { RowsRuntime } from "./data/rows.tsx";
+` : '';
   const content = plan
     ? `PROTECT.has(page.route)
               ? <Protected lead={null}>{nodes(page, page.lead, page.nodes.length - page.tail)}</Protected>
@@ -249,7 +253,7 @@ const ADMIN = new Set<string>(${stableJson(admin)});
   const laidOut = pages.map(layOut);
   return `${generated('every page of the site as data (routes, blocks, styles); rendered by runtime.tsx')}import { Components, Node, NotFound, Page, Site } from "./runtime.tsx";
 import type { Custom, EmittedNode } from "./runtime.tsx";
-${auth}${adminImport}${imports}
+${auth}${adminImport}${rowsImport}${imports}
 /**
  * Every page: its nodes, how many lead (nav, before <main>) and how many
  * tail (footer, after </main>), and its layout (nav-spec §10 Q2: \`side\`).
@@ -298,7 +302,8 @@ export default function App({ route }: { route: string }) {
               {${content}}
             </Page>
           : <NotFound />}${plan ? `
-        <AuthRuntime />` : ''}
+        <AuthRuntime />` : ''}${rows ? `
+        <RowsRuntime />` : ''}
       </Site>
     </Components.Provider>
   );
@@ -796,6 +801,12 @@ export interface EmittedProject {
   readonly auth: boolean;
   /** The site uses 3D: the caller copies the 3D runtime into THREE_DIR (scene-spec §5). */
   readonly three: boolean;
+  /**
+   * A page has a `from` block (data-spec §10.3): the caller copies the rows
+   * runtime (ROWS_RUNTIME_FILES) with the behaviour runtime. Without one it
+   * is left out, so such a site's output is exactly what it was before.
+   */
+  readonly rows: boolean;
   /** Build-time warnings the emitter found in files it read (text-spec §10), for the caller's report. */
   readonly warnings: string[];
 }
@@ -876,8 +887,10 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   // The admin pages (data-spec §11), only with tables: none of this otherwise.
   const admin = adminOf(spec);
   const adminFiles = new Set(admin.map(htmlFileFor));
+  // The tables `from` blocks read (data-spec §10.3); none, and no rows runtime is wired.
+  const rowTables = spec.site.data ? fromTables(spec) : [];
   const files: EmittedFile[] = [
-    { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme, plan, admin) },
+    { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme, plan, admin, rowTables.length > 0) },
     // The build guard, for every site (auth-spec §4): nothing may ship a key.
     { path: `${GUARD_DIR}/guard.ts`, content: guardTs(requiredEnv(plan), plan?.adapter ?? null) },
     ...(plan ? [
@@ -886,6 +899,7 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     ] : []),
     // The typed data client only with tables (data-spec §7).
     ...(spec.site.data ? [{ path: `${DATA_DIR}/client.ts`, content: dataClient(spec.site.data) }] : []),
+    ...(rowTables.length > 0 ? [{ path: ROWS_FILE, content: rowsTsx(rowTables, RUNTIME_DIR) }] : []),
     ...(spec.site.data && admin.length > 0 ? [
       { path: ADMIN_FILE, content: adminTsx() },
       { path: ADMIN_VALUES_FILE, content: adminValuesTs(spec.site.data) },
@@ -1053,6 +1067,7 @@ export default defineConfig({
         assets: [...used].sort(),
         backend: spec.site.backend ?? null,
         data: spec.site.data ?? null,
+        from: spec.pages.flatMap((p) => p.blocks.flatMap((b) => (b.from ? [{ route: p.route, word: b.word, from: b.from }] : []))),
       }),
     },
   ];
@@ -1063,6 +1078,7 @@ export default defineConfig({
     modules: moduleList,
     auth: plan !== null,
     three: seeded.used,
+    rows: rowTables.length > 0,
     warnings: [...new Set(warnings)],
   };
 }

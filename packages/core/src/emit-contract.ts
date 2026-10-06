@@ -2,7 +2,7 @@
  * @az module emit-contract
  * Purpose: the word-emitter contract: EmittedNode, EmitContext, style variants, helpers.
  * Spec: docs/ARCHITECTURE.md §4.3
- * Exports: EmittedNode, EmitContext, ThemeLike, px, visuallyHidden, componentNode
+ * Exports: EmittedNode, EmitContext, ThemeLike, px, visuallyHidden, componentNode, fromShell, fromFill, fromMark, skeletonLine
  * Edit guide: a contract change touches every emitter and target-web; update ARCHITECTURE §4.3 in the same commit.
  * Tests: packages/target-web/test/stylesheet.test.ts, packages/words/test/words.test.ts
  */
@@ -23,7 +23,7 @@
  *      pointing the right way.
  */
 
-import type { SpecBlock } from './spec-block.ts';
+import type { SpecBlock, SpecFrom } from './spec-block.ts';
 
 /** A set of style declarations: camelCase property to value; `undefined` is "not set". */
 export type StyleMap = Readonly<Record<string, string | number | undefined>>;
@@ -327,4 +327,135 @@ export const visuallyHidden = (text: string): EmittedNode => ({
     border: '0',
   },
   children: [text],
+});
+
+/* ---- data in a block: `from <table>` (data-spec §10) --------------------- */
+
+/**
+ * The marker a template fill carries where a row's value goes: the prop's
+ * name between two private-use characters. Only the template is ever read
+ * for markers, and a row's value is written as text after, so a value that
+ * happens to contain one is never read as a marker.
+ */
+export const fromMark = (prop: string): string => `\uE000${prop}\uE000`;
+
+/**
+ * The id a template fill's own ids start from (a word builds the rest from
+ * it, as `faq` does from a question). The runtime gives every row's copy
+ * its own suffix and rewrites each reference to match.
+ */
+export const FROM_ROW_ID = 'az-row';
+
+/** The fixed copy of a `from` block's shell; the runtime owns the rest. */
+export const FROM_COPY = {
+  noscript: 'Turn on JavaScript to load this list.',
+  retry: 'Try again',
+  signin: 'Sign in',
+} as const;
+
+/**
+ * One fill of the `from` slot whose every mapped prop is its marker. A word
+ * renders it with the SAME function it renders an authored fill with, so a
+ * row is markup the word already emits — styled by the same generated
+ * classes — with markers where the values go.
+ */
+export function fromFill(from: SpecFrom): SpecBlock {
+  const props: Record<string, string> = {};
+  for (const prop of Object.keys(from.map)) if (prop !== from.label) props[prop] = fromMark(prop);
+  return {
+    word: from.slot,
+    variant: null,
+    modifiers: [],
+    args: from.label ? [{ kind: 'string', value: fromMark(from.label) }] : [],
+    props,
+    as: null,
+    children: [],
+  };
+}
+
+/**
+ * The pre-rendered shell of a `from` block (data-spec §10.3). The build has
+ * no rows and never calls a network, so the page holds:
+ *
+ *   div.az-from[data-az-from=<config>][aria-busy][data-az-from-state]
+ *     <list>[aria-hidden] > `skeleton` × limit — the word's own list, sized
+ *       like the rows, so they replace it without moving the page much
+ *     div[data-az-from-rows] — empty; the runtime puts the filled list here
+ *     <list>[hidden][data-az-from-template] > one item rendered from fromFill()
+ *     p.az-from-status[role=status] — the empty copy or the error, politely
+ *     div.az-from-actions[hidden] > button "Try again" · a "Sign in"
+ *     noscript > p — what a reader without JavaScript is told
+ *
+ * `list` is the word's list node with the template item as its one child.
+ * Its `data-az-behaviour` moves to `data-az-from-behaviour` on the template,
+ * so the behaviour runtime wires each filled copy and never the template.
+ */
+export function fromShell(from: SpecFrom, list: EmittedNode, skeleton: EmittedNode, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const { 'data-az-behaviour': behaviour, ...attrs } = list.attrs ?? {};
+  // The typed client's query, as the server's allow-list takes it.
+  const query = {
+    limit: from.limit,
+    ...(from.sort ? { sort: from.sort } : {}),
+    ...(from.mine ? { mine: true } : {}),
+    ...from.filter,
+  };
+  const config = JSON.stringify({
+    table: from.table, label: from.label, query, map: from.map, types: from.types, empty: from.empty,
+  });
+  const message = {
+    margin: 0, color: t.color.muted, fontSize: t.typeSize.base, lineHeight: t.type['leading-body'],
+    maxWidth: `${t.size['measure-body']}ch`,
+  };
+  const retry = ctx.submit(FROM_COPY.retry, { hierarchy: 'secondary' });
+  const signin = from.signin
+    ? ctx.action({
+        word: 'link', variant: null, modifiers: [], props: {}, as: null, children: [],
+        args: [{ kind: 'string', value: FROM_COPY.signin }, { kind: 'route', value: from.signin }],
+      }, { hierarchy: 'primary' })
+    : null;
+  return {
+    tag: 'div',
+    attrs: { class: 'az-from', 'data-az-from': config, 'data-az-from-state': 'loading', 'aria-busy': 'true' },
+    children: [
+      {
+        ...list,
+        attrs: { ...attrs, class: `${attrs.class ?? ''} az-from-skeleton`.trim(), 'aria-hidden': 'true', 'data-az-from-skeleton': '' },
+        children: Array.from({ length: from.limit }, () => skeleton),
+      },
+      { tag: 'div', attrs: { class: 'az-from-rows', 'data-az-from-rows': '' } },
+      {
+        ...list,
+        attrs: {
+          ...attrs, ...(behaviour ? { 'data-az-from-behaviour': behaviour } : {}),
+          'data-az-from-template': '', hidden: 'hidden',
+        },
+      },
+      { tag: 'p', attrs: { class: 'az-from-status', role: 'status', 'data-az-from-status': '' }, style: message },
+      {
+        tag: 'div',
+        attrs: { class: 'az-from-actions', hidden: 'hidden', 'data-az-from-actions': '' },
+        style: { display: 'flex', flexWrap: 'wrap', gap: px(t.space[16]), marginTop: px(t.space[16]) },
+        children: [
+          { ...retry, attrs: { ...retry.attrs, type: 'button', hidden: 'hidden', 'data-az-from-retry': '' } },
+          ...(signin ? [{ ...signin, attrs: { ...signin.attrs, hidden: 'hidden', 'data-az-from-signin': '' } }] : []),
+        ],
+      },
+      { tag: 'noscript', children: [{ tag: 'p', attrs: { class: 'az-from-noscript' }, style: message, children: [FROM_COPY.noscript] }] },
+    ],
+  };
+}
+
+/**
+ * One skeleton line: a muted bar one line of the given type tall, so a
+ * skeleton row is as tall as the text it stands for. Static — no shimmer —
+ * so there is nothing for reduced motion to stop.
+ */
+export const skeletonLine = (theme: ThemeLike, size: string, leading: string | number, width: string): EmittedNode => ({
+  tag: 'span',
+  attrs: { class: 'az-from-line' },
+  style: {
+    display: 'block', width, fontSize: size, lineHeight: leading, height: '1lh',
+    background: theme.color.surface, borderRadius: px(theme.radius.sm),
+  },
 });

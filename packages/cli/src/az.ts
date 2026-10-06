@@ -27,6 +27,7 @@ import {
   compile, envMessage, explain, formatDiagnostics, formatExplained, scanEnv, serialiseSpec,
 } from '../../core/src/index.ts';
 import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../target-web/src/emit.ts';
+import { ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
 import { MarkdownError } from '../../target-web/src/markdown.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
@@ -168,7 +169,8 @@ export function build(options: BuildOptions): BuildOutcome {
   // every site too; the auth runtime only with a site that uses auth.
   const files = [
     ...project.files,
-    ...copied('../../overlay/src/runtime/', RUNTIME_DIR),
+    // Its rows module only with a `from` block (data-spec §10.3).
+    ...copied('../../overlay/src/runtime/', RUNTIME_DIR, (f) => project.rows || !ROWS_RUNTIME_FILES.includes(f)),
     ...copied('../../core/src/', GUARD_DIR, (f) => f === 'secrets.ts'),
     ...(project.auth ? copied('../../auth-runtime/src/runtime/', AUTH_DIR) : []),
     // The 3D runtime only with a site whose pages declare a 3D view (scene-spec §5).

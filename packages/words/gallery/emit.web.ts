@@ -14,7 +14,8 @@
  *   with step buttons · orbit — 3D ring of the images (poster first), carousel below sm.
  * Modifiers: lightbox — images become buttons opening the dialog · reveal — data-az-reveal on the block, data-az-reveal-item on images; the overlay runtime hides by script, once.
  * Props: title → h2 · sub → p · columns → grid tracks · ratio → aspect-ratio (ASPECT table) ·
- *   poster → orbit's still image · image src/alt/caption/focus → img, alt, figcaption, object-position.
+ *   poster → orbit's still image · image src/alt/caption/focus → img, alt, figcaption, object-position ·
+ *   from → declared (word.json) but refused at compile until image fields ship (D3, AZ1214); no shell here yet.
  * Styling: theme tokens only; responsive tracks via below; focus rings via states; lazy images after row one.
  * Behaviour: packages/overlay runtime (carousel steps, lightbox); 3D ring by packages/scene-runtime.
  * Edit guide: one image → galleryImage(); carousel → carousel(); lightbox → lightboxDialog().

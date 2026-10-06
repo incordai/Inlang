@@ -6,18 +6,22 @@
  *   ul.az-faq-items[data-az-behaviour=faq][data-single] > li.az-faq-item >
  *     h3|h2.az-faq-question#faq-{slug} > button.az-faq-toggle[aria-expanded][aria-controls] + svg chevron ·
  *     div.az-faq-answer#faq-{slug}-panel[role=region ≤6 items] > p (the answer) + more links ·
- *   script[type=application/ld+json]? (≥3 answered questions, schema on)
+ *   script[type=application/ld+json]? (≥3 answered questions, schema on) ·
+ *   with `from <table>`: div.az-from (core fromShell) in place of the list — skeleton rows, an empty
+ *     rows container, the template list (one question() row, ids from FROM_ROW_ID), status line, retry/sign-in, noscript
  * Variants: list — one column at the body measure · columns — two-column grid, one column below sm.
  * Modifiers: single — data-single=true, the runtime keeps one answer open · reveal — data-az-reveal on the block (revealed as one unit); the overlay runtime hides by script, once.
- * Props: title → h2.az-faq-title · sub → p.az-faq-sub · schema → FAQPage JSON-LD on/off ·
- *   item "question" → the question button; its text → the answer paragraph; more → link-hierarchy action.
+ * Props: title → h2.az-faq-title · sub → p.az-faq-sub · schema → FAQPage JSON-LD on/off (off with `from`) ·
+ *   item "question" → the question button; its text → the answer paragraph; more → link-hierarchy action ·
+ *   from → rows of a table fill the items after the page (data-spec §10): question ← text, text ← longtext.
  * Styling: theme tokens only; hairline dividers between rows; row padding grows below sm (tap target);
  *   focusVisible ring on the toggle; states.open rotates the chevron.
  * Behaviour: packages/overlay runtime (wireFaq) collapses answers to hidden="until-found" after load;
- *   answers ship open, so they read without JS.
- * Edit guide: question markup → question(); ids → questionIds() (stable, deterministic); JSON-LD → faqSchema().
+ *   answers ship open, so they read without JS. `from` rows: the runtime's rows.ts fills a copy of the template.
+ * Edit guide: question markup → question(); one row → faqItem(); the list → faqList(); ids → questionIds()
+ *   (stable, deterministic); JSON-LD → faqSchema(); loading row → skeletonItem() (as tall as a closed row).
  *   Keep: JSON-LD escaping of < > & U+2028/9; question ids stable across builds; no skipped heading level.
- * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/faq-schema.test.ts, packages/words/test/faq-rows.test.ts, packages/words/test/behaviour-markup.test.ts
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/faq-schema.test.ts, packages/words/test/faq-rows.test.ts, packages/words/test/behaviour-markup.test.ts, packages/words/test/from-blocks.test.ts
  */
 
 /**
@@ -30,7 +34,9 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { framed, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import {
+  FROM_ROW_ID, framed, fromFill, fromShell, px, revealed, skeletonLine, type EmitContext, type EmittedNode,
+} from '../../core/src/emit-contract.ts';
 
 /** faq-block-spec §7.5 — a two-question FAQPage is noise, so none is emitted. */
 const SCHEMA_MIN_ITEMS = 3;
@@ -164,6 +170,75 @@ function faqSchema(block: SpecBlock): EmittedNode | null {
   return { tag: 'script', attrs: { type: 'application/ld+json' }, children: [json] };
 }
 
+/**
+ * The question list. Slot fills are <li>; their container must be a list to
+ * be valid HTML.
+ */
+function faqList(block: SpecBlock, variant: string, ctx: EmitContext, items: EmittedNode[]): EmittedNode {
+  const t = ctx.theme;
+  return {
+    tag: 'ul',
+    attrs: {
+      class: 'az-faq-items',
+      // The runtime's hook; `single` opts into one open at a time (§7.2).
+      'data-az-behaviour': 'faq',
+      'data-single': String(block.modifiers.includes('single')),
+    },
+    style: {
+      listStyle: 'none',
+      padding: 0,
+      margin: 0,
+      display: variant === 'columns' ? 'grid' : 'block',
+      gridTemplateColumns: variant === 'columns' ? 'repeat(2, minmax(0, 1fr))' : 'none',
+      columnGap: px(t.space[48]),
+      maxWidth: `${t.size['measure-body']}ch`,
+    },
+    // §6: `columns` collapses to one column below sm, in declared order —
+    // row-major DOM order, so one column reads 1, 2, 3.
+    below: variant === 'columns' ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } } : undefined,
+    children: items,
+  };
+}
+
+/** One row's box. §3: rows are separated by one hairline, not boxed — dividers, not cards. */
+function faqRow(ctx: EmitContext, children: EmittedNode[], extraClass = ''): EmittedNode {
+  const t = ctx.theme;
+  return {
+    tag: 'li',
+    attrs: { class: `az-faq-item${extraClass}` },
+    style: {
+      listStyle: 'none',
+      paddingBlock: px(t.space[16]),
+      borderBottom: `1px solid ${t.color.border}`,
+    },
+    // §6: below sm the row padding GROWS (the row is the tap target), from
+    // the question padding space.16 to space.24.
+    below: { sm: { paddingBlock: px(t.space[24]) } },
+    children,
+  };
+}
+
+const faqItem = (item: SpecBlock, id: string, region: boolean, ctx: EmitContext, heading: 'h2' | 'h3'): EmittedNode =>
+  faqRow(ctx, question(item, id, region, ctx, heading));
+
+/**
+ * A loading row (data-spec §10.3): one question line in a box the height of
+ * the toggle, then the collapsed answer's top padding — a panel hidden
+ * until found keeps its padding — so it is as tall as the closed row that
+ * replaces it.
+ */
+function skeletonItem(ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  return faqRow(ctx, [
+    {
+      tag: 'div',
+      style: { display: 'flex', alignItems: 'center', minHeight: px(t.size.tap) },
+      children: [skeletonLine(t, t.typeSize.lg, t.type['leading-tight'], '60%')],
+    },
+    { tag: 'div', style: { paddingTop: px(t.space[8]) } },
+  ], ' az-from-skeleton-item');
+}
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'list';
@@ -203,46 +278,20 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
+  const heading = block.props.title ? 'h3' : 'h2';
+  if (block.from) {
+    // data-spec §10: questions load from a table after the page. The
+    // template is one question rendered by question() itself; regions follow
+    // the most rows a load can bring (§7.1), and there is no FAQPage data.
+    const template = faqItem(fromFill(block.from), FROM_ROW_ID, block.from.limit <= REGION_MAX_ITEMS, ctx, heading);
+    children.push(fromShell(block.from, faqList(block, variant, ctx, [template]), skeletonItem(ctx), ctx));
+  }
+
   const questions = block.children.filter((c) => c.word === 'item');
   const ids = questionIds(questions.map((q) => q.args[0]?.value ?? ''));
   const region = questions.length <= REGION_MAX_ITEMS;
   if (questions.length > 0) {
-    // Slot fills are <li>; their container must be a list to be valid HTML.
-    children.push({
-      tag: 'ul',
-      attrs: {
-        class: 'az-faq-items',
-        // The runtime's hook; `single` opts into one open at a time (§7.2).
-        'data-az-behaviour': 'faq',
-        'data-single': String(block.modifiers.includes('single')),
-      },
-      style: {
-        listStyle: 'none',
-        padding: 0,
-        margin: 0,
-        display: variant === 'columns' ? 'grid' : 'block',
-        gridTemplateColumns: variant === 'columns' ? 'repeat(2, minmax(0, 1fr))' : 'none',
-        columnGap: px(t.space[48]),
-        maxWidth: `${t.size['measure-body']}ch`,
-      },
-      // §6: `columns` collapses to one column below sm, in declared order —
-      // row-major DOM order, so one column reads 1, 2, 3.
-      below: variant === 'columns' ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)' } } : undefined,
-      // §3: rows are separated by one hairline, not boxed — dividers, not
-      // cards. §6: below sm the row padding GROWS (the row is the tap
-      // target), from the question padding space.16 to space.24.
-      children: questions.map((q, i): EmittedNode => ({
-        tag: 'li',
-        attrs: { class: 'az-faq-item' },
-        style: {
-          listStyle: 'none',
-          paddingBlock: px(t.space[16]),
-          borderBottom: `1px solid ${t.color.border}`,
-        },
-        below: { sm: { paddingBlock: px(t.space[24]) } },
-        children: question(q, ids[i], region, ctx, block.props.title ? 'h3' : 'h2'),
-      })),
-    });
+    children.push(faqList(block, variant, ctx, questions.map((q, i) => faqItem(q, ids[i], region, ctx, heading))));
   }
 
   const schema = faqSchema(block);

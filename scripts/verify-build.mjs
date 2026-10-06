@@ -191,15 +191,19 @@ try {
   // first and can find each page by its data-route.
   const html = routes.map((r) => rendered[r]).join('');
 
-  // The behaviour runtime ships with the site, byte for byte from its source.
+  // The behaviour runtime ships with the site, byte for byte from its source;
+  // its rows module only with a `from` block (data-spec §10.3), which this
+  // fixture has none of.
   {
     const runtimeDir = join(ROOT, 'packages/overlay/src/runtime');
-    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts'));
+    const ROWS = ['rows.ts', 'rows-logic.ts'];
+    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts') && !ROWS.includes(f));
     check('behaviour runtime shipped verbatim into src/az/',
       shipped.length > 0 && shipped.every((f) =>
         existsSync(join(proj, 'src/az', f)) &&
         readFileSync(join(proj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8')),
       shipped.join(' '));
+    check('a site without a from block ships no rows runtime', ROWS.every((f) => !existsSync(join(proj, 'src/az', f))));
   }
   // The 3D runtime ships only with a 3D site — this fixture is one — verbatim.
   {

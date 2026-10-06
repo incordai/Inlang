@@ -11,7 +11,9 @@ import type { EmittedNode } from '../../core/src/emit-contract.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 import { generatedMd } from './generated.ts';
 import type { SpecTable } from '../../core/src/data.ts';
+import type { SpecFrom } from '../../core/src/spec-block.ts';
 import { DATA_DIR } from './data-client.ts';
+import { ROWS_FILE } from './data-rows.ts';
 
 export interface MapInput {
   readonly site: string;
@@ -34,6 +36,8 @@ export interface MapInput {
   readonly backend: { readonly database: string; readonly email: string } | null;
   /** The data tables (data-spec §4), or null without any. */
   readonly data: readonly SpecTable[] | null;
+  /** Blocks with `from <table>` (data-spec §10), in page order; empty without any. */
+  readonly from: readonly { readonly route: string; readonly word: string; readonly from: SpecFrom }[];
 }
 
 /** `header.az-hero.az-hero--center.az-s-1a2b` — how a root element looks in the DOM. */
@@ -163,6 +167,26 @@ export function azMd(m: MapInput): string {
     out.push(`- \`${DATA_DIR}/admin.tsx\` — the pages; \`${DATA_DIR}/admin-values.ts\` — the tables as data, inputs ↔ API values, codes → sentences`);
     out.push(`- \`${DATA_DIR}/client.ts\` — \`admin.tables()\`, \`list\`, \`get\`, \`create\`, \`update\`, \`remove\`, \`audit\``);
     out.push('- `server/src/data-api.ts` — the `/admin` routes (`handleAdmin`) and the audit; `.az-admin-*` styles are in `src/theme.css`');
+  }
+  if (m.from.length > 0) {
+    out.push('', '## Data in blocks', '');
+    out.push('Blocks with `from <table>` (data-spec §10) fill their items from a table after the page loads, AS THE VISITOR:');
+    out.push('the table\'s `allow` lines apply to them. The build never calls the server, so each block ships a shell — a skeleton');
+    out.push('sized from `limit`, an empty rows container, a hidden template item (the word\'s own item markup), a status line,');
+    out.push('Try again and Sign in controls, a `<noscript>` line. Rows are not in the pre-rendered HTML.', '');
+    out.push('| Page | Block | Table | Items from | Query |', '|---|---|---|---|---|');
+    for (const b of m.from) {
+      const mapping = Object.entries(b.from.map).map(([prop, field]) => `${prop} ← ${field}`).join(', ');
+      const query = [`limit ${b.from.limit}`, ...(b.from.sort ? [`sort ${b.from.sort}`] : []),
+        ...Object.entries(b.from.filter).map(([k, v]) => `${k} = ${v}`), ...(b.from.mine ? ['mine'] : [])].join(', ');
+      out.push(`| \`${b.route}\` | ${b.word} | \`${b.from.table}\` | ${mapping} | ${query} |`);
+    }
+    out.push('');
+    out.push(`- \`${ROWS_FILE}\` — hands each table's typed \`list\` to the runtime; App renders \`<RowsRuntime />\``);
+    out.push(`- \`${m.dirs.runtime}/rows.ts\` — finds \`[data-az-from]\`, loads, fills copies of the template with text and checked`);
+    out.push(`  attributes only, never HTML (a URL must be http(s)); \`${m.dirs.runtime}/rows-logic.ts\` — its pure rules`);
+    out.push('- State: `data-az-from-state` is loading, rows, empty, signin or error; `aria-busy` while loading; the status line');
+    out.push('  (`role=status`) says the `empty` copy or the error, politely. Copy and limits change in the .az source; rebuild.');
   }
   return out.join('\n') + '\n';
 }

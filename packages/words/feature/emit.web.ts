@@ -6,19 +6,22 @@
  *   ul.az-feature-items > li.az-feature-item(.az-feature-item--lead) > img.az-feature-media? (rows, bento) ·
  *     div.az-feature-item-body > svg|img.az-feature-icon? · h3|h2.az-feature-item-title ·
  *     p.az-feature-item-text? · div.az-feature-item-link? ·
- *   ul.az-feature-actions? > li > a|button
+ *   ul.az-feature-actions? > li > a|button ·
+ *   with `from <table>`: div.az-from (core fromShell) in place of the item list — skeleton items, an empty
+ *     rows container, the template list (one featureItem()), status line, retry/sign-in, noscript
  * Variants: grid — columns tracks (default 3), two below md, one below sm (two for a spec sheet) ·
  *   rows — one per row, media alternates sides on desktop, above text below sm ·
  *   bento — uneven tiles; the lead item gets the larger tile.
  * Modifiers: reveal — data-az-reveal on the block, data-az-reveal-item on items; the overlay runtime hides by script, once.
  * Props: title → h2.az-feature-title · sub → p.az-feature-sub · columns → grid tracks ·
- *   item title/text/icon/media/lead → the item parts above; item link → div.az-feature-item-link.
+ *   item title/text/icon/media/lead → the item parts above; item link → div.az-feature-item-link ·
+ *   from → rows of a table fill the items after the page (data-spec §10): title ← text, text ← text/longtext.
  * Styling: theme tokens only; row gap larger than column gap; below.md / below.sm track counts;
  *   icons inlined and sanitised (ctx.inlineSvg) so they take the text colour.
- * Behaviour: none; section buttons by target-web/src/actions.ts.
- * Edit guide: one item → featureItem(); grid tracks → the ul's style/below.
+ * Behaviour: none; section buttons by target-web/src/actions.ts; `from` rows by the overlay runtime's rows.ts.
+ * Edit guide: one item → featureItem(); grid tracks → featureList(); loading item → skeletonItem().
  *   Keep: items render their own props (never the generic slot renderer); no skipped heading level.
- * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/feature-items.test.ts, packages/words/test/responsive.test.ts
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/feature-items.test.ts, packages/words/test/responsive.test.ts, packages/words/test/from-blocks.test.ts
  */
 
 /**
@@ -31,7 +34,9 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { framed, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import {
+  framed, fromFill, fromShell, px, revealed, skeletonLine, type EmitContext, type EmittedNode,
+} from '../../core/src/emit-contract.ts';
 
 /** The manifest's `columns` default. */
 const DEFAULT_COLUMNS = 3;
@@ -148,6 +153,48 @@ function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitC
   };
 }
 
+/** The item list: `columns` tracks for grid and bento, one column for rows. */
+function featureList(variant: string, columns: number, specSheet: boolean, ctx: EmitContext, items: EmittedNode[]): EmittedNode {
+  const t = ctx.theme;
+  const tracks = (n: number) => `repeat(${n}, minmax(0, 1fr))`;
+  return {
+    tag: 'ul',
+    attrs: { class: 'az-feature-items' },
+    style: {
+      display: 'grid',
+      // `columns` counts items, so a number is honest here — PRD §6.1a.
+      gridTemplateColumns: variant === 'rows'
+        ? '1fr'
+        : tracks(columns),
+      // Row gap exceeds column gap, or a grid of items reads as columns of
+      // text instead of a set.
+      columnGap: px(t.space[32]),
+      rowGap: px(t.space[48]),
+      listStyle: 'none', padding: 0, margin: 0,
+    },
+    below: variant === 'rows' ? undefined : {
+      md: { gridTemplateColumns: tracks(Math.min(columns, 2)) },
+      sm: { gridTemplateColumns: variant === 'grid' && specSheet ? tracks(2) : tracks(1) },
+    },
+    children: items,
+  };
+}
+
+/**
+ * A loading item (data-spec §10.3): a title line and two lines of text, in
+ * the item's own box, so the skeleton is about as tall as the rows.
+ */
+function skeletonItem(variant: string, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const text = (width: string) => skeletonLine(t, t.typeSize.base, t.type['leading-body'], width);
+  return {
+    tag: 'li',
+    attrs: { class: 'az-feature-item az-from-skeleton-item' },
+    style: { listStyle: 'none', display: 'grid', rowGap: px(t.space[8]), maxWidth: variant === 'rows' ? `${t.size['measure-body']}ch` : undefined },
+    children: [skeletonLine(t, t.typeSize.lg, t.type['leading-tight'], '60%'), text('100%'), text('80%')],
+  };
+}
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'grid';
@@ -195,7 +242,6 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const specSheet = itemFills.length > 0 && itemFills.every((c) =>
     !!c.props.icon && !c.props.text && (c.args[0]?.value ?? '').trim().split(/\s+/).length <= SPEC_SHEET_MAX_WORDS);
   const columns = Number(block.props.columns ?? DEFAULT_COLUMNS);
-  const tracks = (n: number) => `repeat(${n}, minmax(0, 1fr))`;
 
   // The word renders its own items: the generic slot renderer prints every
   // prop as a paragraph, which put `icon`/`media` paths and the `lead` flag on
@@ -204,30 +250,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // <h2> title, and <h2> themselves when there is no title (feature-spec
   // §10; faq and pricing specs: no skipped level).
   const heading = block.props.title ? 'h3' : 'h2';
-  const items = itemFills.map((c, i) => featureItem(c, i, variant, ctx, heading));
-  if (items.length > 0) {
-    children.push({
-      tag: 'ul',
-      attrs: { class: 'az-feature-items' },
-      style: {
-        display: 'grid',
-        // `columns` counts items, so a number is honest here — PRD §6.1a.
-        gridTemplateColumns: variant === 'rows'
-          ? '1fr'
-          : tracks(columns),
-        // Row gap exceeds column gap, or a grid of items reads as columns of
-        // text instead of a set.
-        columnGap: px(t.space[32]),
-        rowGap: px(t.space[48]),
-        listStyle: 'none', padding: 0, margin: 0,
-      },
-      below: variant === 'rows' ? undefined : {
-        md: { gridTemplateColumns: tracks(Math.min(columns, 2)) },
-        sm: { gridTemplateColumns: variant === 'grid' && specSheet ? tracks(2) : tracks(1) },
-      },
-      children: items,
-    });
+  if (block.from) {
+    // data-spec §10: items load from a table after the page. The template is
+    // one item rendered by featureItem() itself, so a row is an item.
+    const template = featureItem(fromFill(block.from), 0, variant, ctx, heading);
+    children.push(fromShell(block.from, featureList(variant, columns, false, ctx, [template]), skeletonItem(variant, ctx), ctx));
   }
+  const items = itemFills.map((c, i) => featureItem(c, i, variant, ctx, heading));
+  if (items.length > 0) children.push(featureList(variant, columns, specSheet, ctx, items));
 
   // Section actions (spec §5/§6): the button primitive — one primary `cta`,
   // one `alt` — after the section's content, never inside an item.
@@ -256,5 +286,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
-  }, 'az-feature-item');
+    // Rows arrive after the reveal is set up, so a `from` block rises as one
+    // unit rather than staggering a skeleton the rows then replace.
+  }, block.from ? undefined : 'az-feature-item');
 }

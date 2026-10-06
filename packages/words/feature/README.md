@@ -69,6 +69,47 @@ Combine freely.
 - `cta`: one primary button
 - `alt`: one secondary action
 
+## Data from a table
+
+Items can come from a data table instead of being written (data-spec §10):
+
+```
+feature grid
+  title "In the shop"
+  from products
+    title  name
+    text   blurb
+    sort   created desc
+    limit  6
+    filter status live
+    empty  "Nothing here yet — check back soon"
+```
+
+| Line | Takes | Meaning |
+|---|---|---|
+| `title` | a `text` field (required) | each item's heading |
+| `text` | a `text` or `longtext` field | each item's paragraph; a longtext keeps its paragraphs |
+| `media` | an `image` field | not available until image uploads ship (D3): AZ1214 |
+| `sort` | `created`, `updated` or a required field, then `asc`/`desc` | row order |
+| `limit` | 1–12, default 6 | rows shown; the skeleton shows this many |
+| `filter` | a `choice` or `flag` field and a value, at most two | only matching rows |
+| `mine` | — | only the signed-in visitor's own rows |
+| `empty` | a quoted sentence | what the block says with no rows |
+
+A block with `from` declares no `item` (AZ1263). Each row is rendered by the
+same code as a written item, so it looks exactly like one.
+
+States, for every `from` block: the pre-rendered page holds a skeleton sized
+from `limit` (static, so reduced motion has nothing to stop), the block is
+`aria-busy` while it loads, and a polite status line says the `empty` copy
+or one fixed error line with **Try again**. A `mine` block, or a table only
+signed-in visitors read, shows **Sign in** to a signed-out visitor. Rows are
+text only — a value is never parsed as HTML. Rows are not in the
+pre-rendered HTML, so they are not indexed. Without JavaScript the skeleton
+stays and a `<noscript>` line says so. The block's own count rules (at least 2 items; bento 3–7; rows ≤ 5)
+do not apply: the number of rows is known only after the page loads.
+Diagnostics: AZ1260–AZ1267, AZ1269 (`az explain feature from` for the terms).
+
 ## Accessibility
 
 - `title` is an `<h2>`, item titles are `<h3>`; never an `<h1>`

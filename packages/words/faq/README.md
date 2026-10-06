@@ -57,6 +57,42 @@ Combine freely.
 
 - `item`: a question (1–12), whose `text` is the answer and optional `more` link
 
+## Data from a table
+
+Questions can come from a data table instead of being written (data-spec §10):
+
+```
+faq
+  title "Questions"
+  from questions
+    question question
+    text     answer
+    sort     created asc
+    limit    6
+```
+
+| Line | Takes | Meaning |
+|---|---|---|
+| `question` | a `text` field (required) | each question |
+| `text` | a `longtext` field (required) | each answer, its paragraphs kept |
+| `sort`, `limit` (1–12, default 6), `filter`, `mine`, `empty` | as for `feature` | |
+
+No FAQPage structured data is emitted for a `from` faq — it is only useful in
+the pre-rendered page, which has no rows; `schema on` is warning AZ1265. Each
+row is a real disclosure: collapsed by the behaviour runtime, answers still
+found by find-in-page. Each answer is a `region` when `limit` is 6 or fewer.
+
+States, for every `from` block: the pre-rendered page holds a skeleton sized
+from `limit` (static, so reduced motion has nothing to stop), the block is
+`aria-busy` while it loads, and a polite status line says the `empty` copy
+or one fixed error line with **Try again**. A `mine` block, or a table only
+signed-in visitors read, shows **Sign in** to a signed-out visitor. Rows are
+text only — a value is never parsed as HTML. Rows are not in the
+pre-rendered HTML, so they are not indexed. Without JavaScript the skeleton
+stays and a `<noscript>` line says so. The block's own count rules (no questions; 1–2 is a paragraph; 13+ is a help centre)
+do not apply: the number of rows is known only after the page loads.
+Diagnostics: AZ1260–AZ1267, AZ1269 (`az explain faq from` for the terms).
+
 ## Accessibility
 
 - `<h2>` for the title, `<h3>` per question with the toggle `<button>` inside it

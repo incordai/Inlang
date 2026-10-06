@@ -8,6 +8,13 @@
  *
  *     pnpm test:data
  *
+ * Blocks with `from <table>` (data-spec §10, D4) are checked here too: the
+ * pre-rendered shell with no rows and a <noscript> line; public rows filled
+ * as text (an HTML payload stays text); FAQ rows that open; the empty copy;
+ * an error with a retry that recovers; `mine` signed out (the sign-in link)
+ * and signed in (only the visitor's rows, on a protected page whose content
+ * arrives late); axe on every state.
+ *
  * Chromium and Firefox run the signed-in flows. WebKit drops a Secure cookie
  * on plain-http loopback (dev-backend.ts notes the same), so against this
  * production server it runs the signed-out flows only.
@@ -36,6 +43,7 @@ const SITE = `az 1
 site notebook
   auth
     adapter azbackend
+    protect /private
   backend
     database sqlite
     email smtp
@@ -49,6 +57,14 @@ site notebook
   data messages
     email   email    required private
     allow anyone   create
+  data questions
+    question text     required
+    answer   longtext required
+    allow anyone   read
+    allow signedin create
+  data quotes
+    line    text     required
+    allow anyone   read
 
 page /
   hero center
@@ -71,6 +87,53 @@ page /terms
 
 page /notes
   raw ./custom/Notes.tsx
+
+page /board
+  hero center
+    title "Board"
+  feature grid
+    title "From the notebook"
+    from notes
+      title title
+      text  body
+      sort  created asc
+      empty "No notes yet"
+  faq
+    title "Asked here"
+    from questions
+      question question
+      text     answer
+      sort     created asc
+      limit    3
+
+page /quotes
+  hero center
+    title "Quotes"
+  feature grid
+    title "Quotes"
+    from quotes
+      title line
+      empty "Nothing quoted yet"
+
+page /mine
+  hero center
+    title "Mine"
+  feature grid
+    title "Your notes"
+    from notes
+      title title
+      mine
+      empty "Sign in to see your notes"
+
+page /private
+  hero center
+    title "Private"
+  feature grid
+    title "Private notes"
+    from notes
+      title title
+      mine
+      empty "You have no notes yet"
 `;
 
 /** The author's component: the typed client, as a site uses it today. */
@@ -391,6 +454,197 @@ async function adminFlow(b, name, owner) {
   await ctx.close();
 }
 
+/* ---- from <table> in blocks (data-spec §10, D4) -------------------------- */
+
+/** A note title that is markup: it must arrive as text, in every browser. */
+const PAYLOAD = '<img src=x onerror="window.azXss=1">Bold <b>claim</b>';
+const SEEDED = ['First seeded note', PAYLOAD];
+const QUESTIONS = [
+  ['How long does it take?', 'About a week.\n\nSometimes two,\nif the post is slow.'],
+  ['Can I change my order?', 'Yes, until it ships.'],
+  ['Do you ship abroad?', 'To most countries.'],
+];
+
+/** POST a row as the signed-in page: the browser's own cookie, CORS and CSRF header. */
+const insert = (page, table, body) => page.evaluate(async ([base, t, b]) => (await fetch(`${base}/data/${t}`, {
+  method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', 'x-az-request': '1' },
+  body: JSON.stringify(b),
+})).status, [serverUrl, table, body]);
+
+/** One block's `from` shell on the page, by the word it sits in. */
+const fromHost = (page, word) => page.locator(`section.az-${word} [data-az-from]`);
+
+/** Wait until a block leaves loading, then read its state, status line and controls. */
+async function settled(page, word) {
+  await page.waitForFunction((w) => {
+    const el = document.querySelector(`section.az-${w} [data-az-from]`);
+    return el !== null && el.getAttribute('data-az-from-state') !== 'loading';
+  }, word);
+  return fromHost(page, word).evaluate((el) => {
+    const signin = el.querySelector('[data-az-from-signin]');
+    return {
+      state: el.getAttribute('data-az-from-state'),
+      busy: el.getAttribute('aria-busy'),
+      status: el.querySelector('[data-az-from-status]')?.textContent ?? '',
+      skeletonHidden: el.querySelector('[data-az-from-skeleton]')?.hidden === true,
+      retry: el.querySelector('[data-az-from-retry]')?.hidden === false,
+      signin: signin && !signin.hidden ? signin.getAttribute('href') : null,
+    };
+  });
+}
+
+/**
+ * Seed the board once, as a signed-in account: two notes (one an HTML
+ * payload) and three questions. The server allows ten sign-ups an hour from
+ * one address, and the flows below already use them, so the first browser's
+ * owner seeds.
+ */
+async function seedBoard(page) {
+  const made = [];
+  for (const [i, title] of SEEDED.entries()) {
+    made.push(await insert(page, 'notes', { title, body: i === 0 ? 'One paragraph.\n\nAnd a second,\nwith a break.' : null }));
+  }
+  for (const [question, answer] of QUESTIONS) made.push(await insert(page, 'questions', { question, answer }));
+  check('from: the board is seeded through the API as a signed-in account', made.every((s) => s === 201), made.join(' '));
+}
+
+/** Signed out, in one browser: the shell without JS, rows, FAQ, empty, error + retry, mine. */
+async function fromSignedOut(b, name) {
+  // The shell as it ships: no rows in the HTML, a skeleton, the noscript line.
+  if (name === 'chromium') {
+    const html = await (await fetch(`${host.url}/board/`)).text();
+    check('from: /board ships a shell — skeleton, busy, noscript line, no row in the HTML',
+      html.includes('data-az-from-skeleton') && html.includes('aria-busy="true"') && html.includes('Turn on JavaScript to load this list.')
+        && !html.includes('First seeded note') && !html.includes('How long does it take?'), String(html.length));
+  }
+  const off = await b.newContext({ javaScriptEnabled: false });
+  const still = await off.newPage();
+  await still.goto(`${host.url}/board`);
+  const noscript = await still.locator('.az-from-noscript').first().isVisible();
+  const skeletonShown = await still.locator('section.az-feature [data-az-from-skeleton]').isVisible();
+  check(`${name} from: without JavaScript the skeleton and the noscript line show`, noscript && skeletonShown);
+  await off.close();
+
+  const ctx = await b.newContext();
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`${name} from: ${e.message}`));
+  // A hydration mismatch is a console error, not a page error: React
+  // recovers by rendering again, which the rows runtime must not cause.
+  const consoleErrors = [];
+  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+  await page.goto(`${host.url}/board`);
+  const feature = await settled(page, 'feature');
+  const faq = await settled(page, 'faq');
+  check(`${name} from: the board hydrates and fills with no console error`, consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '));
+  check(`${name} from: public rows load for a signed-out visitor; not busy; skeleton hidden`,
+    feature.state === 'rows' && faq.state === 'rows' && feature.busy === 'false' && feature.skeletonHidden && faq.skeletonHidden,
+    JSON.stringify({ feature, faq }));
+  const items = page.locator('section.az-feature [data-az-from-rows] .az-feature-item');
+  const titles = await items.locator('.az-feature-item-title').allTextContents();
+  check(`${name} from: each row is the word's own item, its title as text`, SEEDED.every((t) => titles.includes(t)), titles.join(' | '));
+  const xss = await page.evaluate(() => ({
+    ran: 'azXss' in window,
+    img: document.querySelectorAll('[data-az-from-rows] img, [data-az-from-rows] b').length,
+  }));
+  check(`${name} from: an HTML payload in a row stays text — no element made, nothing ran`, !xss.ran && xss.img === 0, JSON.stringify(xss));
+  const first = items.filter({ hasText: 'First seeded note' });
+  const paras = await first.locator('.az-feature-item-text').evaluateAll((ps) => ps.map((p) => ({ text: p.textContent, br: p.querySelectorAll('br').length })));
+  check(`${name} from: a longtext keeps its paragraphs and line breaks, as elements not markup`,
+    paras.length === 2 && paras[0].text === 'One paragraph.' && paras[1].br === 1, JSON.stringify(paras));
+  const payloadRow = items.filter({ hasText: 'Bold' });
+  check(`${name} from: a row whose optional field is empty has no text paragraph`, await payloadRow.locator('.az-feature-item-text').count() === 0);
+
+  const questions = page.locator('section.az-faq [data-az-from-rows] .az-faq-item');
+  const asked = await questions.locator('.az-faq-toggle').allTextContents();
+  check(`${name} from: the faq shows the three questions in order`, JSON.stringify(asked) === JSON.stringify(QUESTIONS.map((q) => q[0])), asked.join(' | '));
+  const toggle = questions.first().locator('.az-faq-toggle');
+  check(`${name} from: faq rows arrive collapsed by the behaviour runtime`, await toggle.getAttribute('aria-expanded') === 'false');
+  await toggle.click();
+  const panel = page.locator(`[id="${await toggle.getAttribute('aria-controls')}"]`);
+  check(`${name} from: a faq row opens; its answer keeps its paragraphs`,
+    await toggle.getAttribute('aria-expanded') === 'true' && await panel.isVisible() && await panel.locator('p').count() === 2);
+  const duplicates = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('[id]')].map((e) => e.id);
+    return all.length - new Set(all).size;
+  });
+  check(`${name} from: every id on the page is unique (each row's are suffixed)`, duplicates === 0, String(duplicates));
+  await toggle.click();
+  // No layout jump: the faq skeleton (limit 3) is the height of three closed rows.
+  const heights = await page.evaluate(() => {
+    const el = document.querySelector('section.az-faq [data-az-from]');
+    const skeleton = el.querySelector('[data-az-from-skeleton]');
+    const rows = el.querySelector('[data-az-from-rows]');
+    skeleton.hidden = false;
+    const s = skeleton.getBoundingClientRect().height;
+    skeleton.hidden = true;
+    return { skeleton: s, rows: rows.getBoundingClientRect().height };
+  });
+  check(`${name} from: the faq skeleton is as tall as the rows that replace it`, Math.abs(heights.skeleton - heights.rows) <= 1, JSON.stringify(heights));
+  const boardAxe = await axeViolations(page);
+  check(`${name} from: axe finds nothing on the board with its rows`, boardAxe.length === 0, boardAxe.join(', '));
+
+  // The empty copy, politely.
+  await page.goto(`${host.url}/quotes`);
+  const quotes = await settled(page, 'feature');
+  check(`${name} from: no rows shows the block's empty copy, nothing to retry`,
+    quotes.state === 'empty' && quotes.status === 'Nothing quoted yet' && !quotes.retry, JSON.stringify(quotes));
+  const emptyAxe = await axeViolations(page);
+  check(`${name} from: axe finds nothing in the empty state`, emptyAxe.length === 0, emptyAxe.join(', '));
+
+  // An error and a retry that recovers: the API unreachable, then back.
+  const blocked = `${serverUrl}/data/notes**`;
+  await page.route(blocked, (r) => r.abort());
+  await page.goto(`${host.url}/board`);
+  const failed = await settled(page, 'feature');
+  check(`${name} from: an unreachable API shows one fixed line and Try again`,
+    failed.state === 'error' && failed.status === 'This list could not load. Check the connection, then try again.' && failed.retry, JSON.stringify(failed));
+  const errorAxe = await axeViolations(page);
+  check(`${name} from: axe finds nothing in the error state`, errorAxe.length === 0, errorAxe.join(', '));
+  await page.unroute(blocked);
+  await fromHost(page, 'feature').getByRole('button', { name: 'Try again' }).click();
+  const recovered = await settled(page, 'feature');
+  const focused = await fromHost(page, 'feature').evaluate((el) => document.activeElement === el);
+  check(`${name} from: Try again loads the rows; focus stays on the block, not the page`, recovered.state === 'rows' && focused, JSON.stringify(recovered));
+
+  // `mine`, signed out: the empty copy and the way to sign in.
+  await page.goto(`${host.url}/mine`);
+  const mine = await settled(page, 'feature');
+  check(`${name} from: mine signed out says so and links to sign in`,
+    mine.state === 'signin' && mine.status === 'Sign in to see your notes' && mine.signin === '/login', JSON.stringify(mine));
+  const signinAxe = await axeViolations(page);
+  check(`${name} from: axe finds nothing in the sign-in state`, signinAxe.length === 0, signinAxe.join(', '));
+  await ctx.close();
+}
+
+/**
+ * Signed in: `mine` lists exactly the rows the API says are the visitor's —
+ * and not a row another account made — on a page and behind <Protected>,
+ * whose content arrives after the session check (late content).
+ */
+async function fromSignedIn(page, name) {
+  await page.goto(`${host.url}/notes`);
+  const own = await use(page, 'create', { title: `${name} own note` });
+  const mineRows = await use(page, 'list', { mine: true, sort: 'created' });
+  const everyone = await use(page, 'list', { sort: 'created' });
+  const expected = mineRows.ok ? mineRows.items.map((n) => n.title) : [];
+  const foreign = everyone.ok ? everyone.items.filter((n) => !n.mine).map((n) => n.title) : [];
+  for (const route of ['/mine', '/private']) {
+    await page.goto(`${host.url}${route}`);
+    const state = await settled(page, 'feature');
+    const titles = await page.locator('section.az-feature [data-az-from-rows] .az-feature-item-title').allTextContents();
+    check(`${name} from: ${route} signed in lists exactly this account's rows`,
+      own.ok === true && state.state === 'rows' && titles.includes(`${name} own note`)
+        && JSON.stringify([...titles].sort()) === JSON.stringify([...expected].sort()) && !titles.some((t) => foreign.includes(t)),
+      `${JSON.stringify(state)} ${titles.join(' | ')}`);
+  }
+  // The first browser's owner seeded the board, so only a later browser has another account's rows to leave out.
+  if (name !== 'chromium') {
+    check(`${name} from: some public row belongs to another account, so mine filtered something`, foreign.length > 0, String(foreign.length));
+  }
+  await page.goto(`${host.url}/notes`);
+  await use(page, 'remove', own.item.id);
+}
+
 const errors = [];
 try {
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
@@ -409,13 +663,19 @@ try {
       await visitor.goto(`${host.url}/admin/notes`);
       await visitor.waitForURL((u) => u.pathname === '/login');
       check(`${name}: signed out, /admin/notes goes to the login page with next`, new URL(visitor.url()).searchParams.get('next') === '/admin/notes', visitor.url());
-      if (name === 'webkit') continue;
+      if (name === 'webkit') {
+        await fromSignedOut(b, name);
+        continue;
+      }
 
       const ownerCtx = await b.newContext();
       const owner = await ownerCtx.newPage();
       owner.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
       await signUp(owner, `Ada${name}`);
       await owner.goto(`${host.url}/notes`);
+      if (name === 'chromium') await seedBoard(owner);
+      await fromSignedOut(b, name);
+      await fromSignedIn(owner, name);
       const made = await use(owner, 'create', { title: `${name} note`, body: 'Two\nlines', contact: SECRET_CONTACT });
       check(`${name}: signed in, create returns the row, marked mine, owner never named`,
         made.ok === true && made.item.mine === true && made.item.title === `${name} note` && !('owner' in made.item), JSON.stringify(made).slice(0, 160));
