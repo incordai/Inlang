@@ -439,6 +439,20 @@ function field(table: string, line: DataLine, err: Report): SpecField | null {
       }
     }
   }
+  // A unique field answers "taken" (409) for anyone's row, so on a private
+  // field a create or edit would test other accounts' hidden values one guess
+  // at a time — data-spec §5.1: a private value is never a yes/no oracle.
+  if (mods.private && mods.unique) {
+    err('AZ1236', `data ${table}: '${name}' is private, so it can't be unique — a 'taken' answer would reveal others' values`, line.pos);
+    return null;
+  }
+  // Every row that omits the field gets the default, so the second such row
+  // collides — and adding the field to a table with rows fills them all with
+  // one value, which the unique index then refuses.
+  if (mods.unique && def !== undefined) {
+    err('AZ1236', `data ${table}: '${name}' is unique, so it can't have a default — every row would share it`, line.pos);
+    return null;
+  }
   if (mods.private && mods.search) {
     err('AZ1236', `data ${table}: '${name}' is private, so it can't be searched by others — remove 'search'`, line.pos);
     return null;

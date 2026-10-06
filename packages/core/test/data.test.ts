@@ -112,6 +112,9 @@ const CASES: [string, string, string][] = [
   ['AZ1236', 'locked on a ref', site('  data notes\n    parent ref notes locked\n')],
   ['AZ1236', 'an unknown modifier', site('  data notes\n    body text shiny\n')],
   ['AZ1236', 'private and search together', site('  data notes\n    body text private search\n')],
+  ['AZ1236', 'unique and private together (a "taken" oracle)', site('  data notes\n    email email unique private\n')],
+  ['AZ1236', 'unique with a default (every row shares it)', site('  data notes\n    code text unique default "x"\n')],
+  ['AZ1236', 'unique with a number default', site('  data notes\n    n number unique default 0\n')],
   ['AZ1236', 'locked and required with no default', site('  data notes\n    stock number locked required\n')],
   ['AZ1237', 'a default that is not a number', site('  data notes\n    n number default ten\n')],
   ['AZ1237', 'a default outside the choices', site('  data notes\n    s choice a b default c\n')],
@@ -156,6 +159,10 @@ test('warnings: no allow lines (AZ1246), strangers create (AZ1247), a readable e
 test('CONTROL: a private email on a public table does not warn', () => {
   const r = run(site('  data notes\n    contact email private\n    allow anyone read\n'));
   assert.ok(!r.diagnostics.some((d) => d.code === 'AZ1248'));
+});
+
+test('CONTROL: unique alone, private alone and a default alone each compile', () => {
+  assert.deepEqual(errors(site('  data notes\n    email email unique\n    secret text private\n    code text default "x"\n    allow anyone read\n')), []);
 });
 
 test('an image field compiles, private and locked allowed (data-spec §4.5, §8)', () => {
