@@ -156,6 +156,9 @@ function authClaim(db: Db, version: number): ClaimStore {
       (await db.run('UPDATE az_schema_migrations SET applied_at = ? WHERE version = ? AND applied_at = ?', [-to, version, -from])) === 1,
     finish: async (held, at) =>
       (await db.run('UPDATE az_schema_migrations SET applied_at = ? WHERE version = ? AND applied_at = ?', [at, version, -held])) === 1,
+    release: async (held) => {
+      await db.run('DELETE FROM az_schema_migrations WHERE version = ? AND applied_at = ?', [version, -held]);
+    },
   };
 }
 

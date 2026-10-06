@@ -7,7 +7,10 @@
 import { createServer, type Server } from 'node:http';
 import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { createApp } from '../src/server/app.ts';
-import { migrate, openSqlite } from '../src/server/db.ts';
+import { migrate, openSqlite, type Db } from '../src/server/db.ts';
+import { createData } from '../src/server/data-api.ts';
+import { migrateData, type DataStep } from '../src/server/data-migrate.ts';
+import type { Table } from '../src/server/data-values.ts';
 import { loadConfig, type Config } from '../src/server/env.ts';
 import { createOidc } from '../src/server/oidc.ts';
 import { createStore } from '../src/server/store.ts';
@@ -82,16 +85,22 @@ export interface Harness {
   readonly mail: Message[];
   readonly clock: { now: number };
   readonly config: Config;
+  readonly db: Db;
   close(): Promise<void>;
 }
 
 /**
  * Start a backend over in-memory SQLite. `env` extends a valid minimal
- * environment; `over` replaces the captured mailer or the silent log.
+ * environment; `over` replaces the captured mailer or the silent log, and
+ * `data` gives it tables (their steps applied, the /data routes mounted).
  */
 export async function startBackend(
   env: Record<string, string> = {},
-  over: { log?: (line: string) => void; mailer?: { send(m: Message): Promise<void> } } = {},
+  over: {
+    log?: (line: string) => void;
+    mailer?: { send(m: Message): Promise<void> };
+    data?: { tables: readonly Table[]; steps: readonly DataStep[] };
+  } = {},
 ): Promise<Harness> {
   const clock = { now: Date.now() };
   const loaded = loadConfig({
@@ -106,6 +115,7 @@ export async function startBackend(
   if (!loaded.ok) throw new Error(loaded.problems.join('\n'));
   const db = await openSqlite(':memory:');
   await migrate(db);
+  if (over.data) await migrateData(db, over.data.steps, { confirm: Infinity });
   const mail: Message[] = [];
   let config = loaded.config;
   const server = createServer();
@@ -116,9 +126,10 @@ export async function startBackend(
     store: createStore(db, config.secret, () => clock.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }),
     mailer: over.mailer ?? { send: async (m) => { mail.push(m); } },
     oidc: createOidc((...a) => fetch(...a), () => clock.now), now: () => clock.now, log: over.log ?? (() => {}),
+    ...(over.data ? { data: createData({ db, tables: over.data.tables, now: () => clock.now }) } : {}),
   });
   server.on('request', (req, res) => { void app.handler(req, res); });
-  return { url, mail, clock, config, close: async () => { server.close(); await db.close(); } };
+  return { url, mail, clock, config, db, close: async () => { server.close(); await db.close(); } };
 }
 
 /** A tiny cookie-keeping client, as a browser on SITE would be. */
@@ -140,6 +151,19 @@ export function client(base: string, origin = SITE) {
         method: 'POST', redirect: 'manual',
         headers: { origin, 'content-type': 'application/json', 'x-az-request': '1', cookie: cookieHeader(), ...headers },
         body: JSON.stringify(body),
+      });
+      keep(r);
+      return r;
+    },
+    /** Any method, as the site's fetch would send it: JSON, the CSRF header, cookies. */
+    async request(method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
+      const r = await fetch(`${base}${path}`, {
+        method, redirect: 'manual',
+        headers: {
+          origin, 'x-az-request': '1', cookie: cookieHeader(),
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers,
+        },
+        ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
       });
       keep(r);
       return r;

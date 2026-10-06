@@ -22,14 +22,14 @@ export const BODY_LIMIT = 16 * 1024;
 
 export class BodyError extends Error {}
 
-/** A JSON object body, or throws. Only `application/json` is read. */
-export async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+/** A JSON object body, or throws. Only `application/json` is read, at most `limit` bytes. */
+export async function readJson(req: IncomingMessage, limit: number = BODY_LIMIT): Promise<Record<string, unknown>> {
   if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) throw new BodyError('not json');
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > BODY_LIMIT) throw new BodyError('too large');
+    if (size > limit) throw new BodyError('too large');
     chunks.push(chunk as Buffer);
   }
   let parsed: unknown;
@@ -75,13 +75,16 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'cross-origin-resource-policy': 'same-site',
 };
 
-/** CORS for one exact allowed origin — never `*`, which credentials forbid anyway. */
-export function corsHeaders(origin: string): Record<string, string> {
+/**
+ * CORS for one exact allowed origin — never `*`, which credentials forbid
+ * anyway. The auth routes allow GET and POST; /data passes its wider set.
+ */
+export function corsHeaders(origin: string, methods = 'GET, POST'): Record<string, string> {
   return {
     'access-control-allow-origin': origin,
     'access-control-allow-credentials': 'true',
     'access-control-allow-headers': 'content-type, x-az-request',
-    'access-control-allow-methods': 'GET, POST',
+    'access-control-allow-methods': methods,
     'access-control-max-age': '600',
     vary: 'Origin',
   };

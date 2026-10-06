@@ -94,7 +94,19 @@ test('an owner whose claim was taken over while it worked is told so, not silent
     claim: async (at) => { claimedAt = at; return true; },
     refresh: async () => false,
     finish: async () => false,
+    release: async () => { claimedAt = 0; },
   };
   let t = 1;
   await assert.rejects(runClaimed(store, async () => { await new Promise((r) => setTimeout(r, 80)); }, 'unit', () => (t += 1), FAST), MigrationBusy);
+});
+
+test('work that fails gives its claim back, so a restart retries at once', async () => {
+  const db = await openSqlite(file());
+  await db.run(MIGRATIONS.table.sqlite);
+  await db.run('CREATE VIEW az_sessions AS SELECT 1 AS x');
+  // The probe sees no TABLE az_sessions, so version 1 runs its CREATE TABLE,
+  // which fails on the view's name — and the claim must not stay behind.
+  await assert.rejects(migrate(db, Date.now, FAST));
+  assert.equal((await db.all('SELECT version FROM az_schema_migrations')).length, 0);
+  await db.close();
 });

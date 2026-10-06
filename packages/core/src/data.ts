@@ -450,6 +450,11 @@ function field(table: string, line: DataLine, err: Report): SpecField | null {
     err('AZ1236', `data ${table}: '${name}' is private, so it can't be searched by others — remove 'search'`, line.pos);
     return null;
   }
+  // Only admins set a locked field, so a new row's value can only be its default.
+  if (mods.locked && mods.required && def === undefined) {
+    err('AZ1236', `data ${table}: '${name}' is locked and required, so new rows need its default — add: default …`, line.pos);
+    return null;
+  }
 
   return {
     name, type,
@@ -514,7 +519,8 @@ function defaultHint(name: string, type: DataType, choices: readonly string[] | 
 
 /** One line of text (or paragraphs for longtext), no control characters, within the cap. */
 export function textOk(v: string, max: number, paragraphs: boolean): boolean {
-  if (v.trim().length === 0 || v.length > max) return false;
+  // Characters as the databases count them: code points, not UTF-16 units.
+  if (v.trim().length === 0 || [...v].length > max) return false;
   const control = paragraphs ? /[\u0000-\u0008\u000b-\u001f\u007f]/ : /[\u0000-\u001f\u007f]/;
   return !control.test(v);
 }

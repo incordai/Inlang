@@ -54,6 +54,8 @@ export interface ClaimStore {
   refresh(from: number, to: number): Promise<boolean>;
   /** Mark it applied, only if this instance still holds the claim made at `held`. */
   finish(held: number, at: number): Promise<boolean>;
+  /** Give up a claim whose work failed, so a restart retries at once instead of waiting it out. */
+  release(held: number): Promise<void>;
 }
 
 /**
@@ -109,12 +111,18 @@ export async function runClaimed(
       }
     });
   }, timing.heartbeatMs);
-  try {
-    await work();
-  } finally {
+  const stop = async () => {
     clearInterval(beat);
     await beating;
+  };
+  try {
+    await work();
+  } catch (e) {
+    await stop();
+    if (!lost) await store.release(held);
+    throw e;
   }
+  await stop();
   if (lost || !(await store.finish(held, Math.max(now(), held + 1)))) {
     throw new MigrationBusy(`${label}: this instance's claim was taken over while it worked — start it again`);
   }

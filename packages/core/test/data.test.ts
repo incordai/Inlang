@@ -112,6 +112,7 @@ const CASES: [string, string, string][] = [
   ['AZ1236', 'locked on a ref', site('  data notes\n    parent ref notes locked\n')],
   ['AZ1236', 'an unknown modifier', site('  data notes\n    body text shiny\n')],
   ['AZ1236', 'private and search together', site('  data notes\n    body text private search\n')],
+  ['AZ1236', 'locked and required with no default', site('  data notes\n    stock number locked required\n')],
   ['AZ1237', 'a default that is not a number', site('  data notes\n    n number default ten\n')],
   ['AZ1237', 'a default outside the choices', site('  data notes\n    s choice a b default c\n')],
   ['AZ1237', 'an impossible date default', site('  data notes\n    d date default 2023-02-29\n')],
@@ -176,6 +177,7 @@ test('validators: dates are real days, text has no control characters', () => {
   assert.ok(isDate('2024-02-29') && !isDate('2023-02-29') && !isDate('2024-13-01') && !isDate('0000-01-01'));
   assert.ok(textOk('a line', 200, false) && !textOk('two\nlines', 200, false) && textOk('two\nlines', 200, true));
   assert.ok(!textOk('   ', 200, false) && !textOk('x'.repeat(201), 200, false));
+  assert.ok(textOk('😀'.repeat(200), 200, false), 'characters, not UTF-16 units: 200 emoji fit 200');
 });
 
 test('the currency table carries minor-unit digits', () => {

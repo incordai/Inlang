@@ -1,10 +1,10 @@
 /**
  * @az server app
- * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth.
- * Spec: docs/auth-block-spec.md §3.4 · docs/backend-spec.md §5
- * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES
+ * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth; the /data edge.
+ * Spec: docs/auth-block-spec.md §3.4 · docs/backend-spec.md §5 · docs/data-spec.md §5.4
+ * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES, DataRequest, DataRoutes
  * Edit guide: same answer for unknown account and wrong password; rate-limit before hashing; claim unverified accounts safely.
- * Tests: packages/backend/test/backend.test.ts, packages/backend/test/security.test.ts
+ * Tests: packages/backend/test/backend.test.ts, packages/backend/test/security.test.ts, packages/backend/test/data-api.test.ts
  */
 
 /**
@@ -53,11 +53,34 @@ const MAX_NEXT = 2048;
 const MINUTE = 60 * 1000;
 const NAV_BASE = 'https://site.invalid';
 
+/** A /data request as the data routes see it (data-api.ts); the edge checks are done. */
+export interface DataRequest {
+  readonly method: string;
+  readonly url: URL;
+  /** The rate-limit key of the client's address. */
+  readonly ip: string;
+  /** The signed-in account's id, or null. */
+  user(): Promise<string | null>;
+  /** The JSON body, at most `limit` bytes; throws BodyError. */
+  body(limit: number): Promise<Record<string, unknown>>;
+}
+
+/** The data tables' routes — present only when the site declares data. */
+export interface DataRoutes {
+  handle(req: DataRequest): Promise<{ status: number; body?: unknown }>;
+  sweep(): void;
+}
+
+/** data-spec §5.4: /data is a fetch route with the wider method set. */
+const DATA_METHODS = 'GET, POST, PATCH, PUT, DELETE';
+
 export interface AppDeps {
   readonly config: Config;
   readonly store: Store;
   readonly mailer: Mailer;
   readonly oidc: Oidc;
+  /** The /data routes (data-spec §5); absent, /data is 404 like any unknown path. */
+  readonly data?: DataRoutes;
   readonly now?: () => number;
   /** Operational log. Never passed a password, token, secret or address. */
   readonly log?: (line: string) => void;
@@ -149,7 +172,10 @@ export function createApp(deps: AppDeps) {
     passwordIp: createLimiter(20, 15 * MINUTE, now),
     navigationIp: createLimiter(30, 10 * MINUTE, now),
   };
-  const sweep = () => { for (const l of Object.values(limits)) l.sweep(); };
+  const sweep = () => {
+    for (const l of Object.values(limits)) l.sweep();
+    deps.data?.sweep();
+  };
 
   const sessionCookie = (token: string) =>
     cookie(names.session, token, { sameSite: config.sameSite, maxAgeSeconds: Math.floor(config.sessionMaxMs / 1000) });
@@ -426,6 +452,28 @@ export function createApp(deps: AppDeps) {
       const provider = config.providers.find((p) => p.id === nav[1]);
       if (!provider) return redirect(res, failTo(home, 'oauth_failed'));
       return nav[2] === 'start' ? oauthStart(res, provider, url) : oauthCallback(req, res, provider, url);
+    }
+
+    const data = deps.data;
+    if (data && (url.pathname === '/data' || url.pathname.startsWith('/data/'))) {
+      // A fetch route like /auth: an allowed origin always, and the CSRF
+      // header on EVERY method that can change something (data-spec §5.4).
+      const origin = req.headers.origin ?? '';
+      if (!allowed.has(origin)) return send(res, 403, { error: 'unknown' });
+      const cors = corsHeaders(origin, DATA_METHODS);
+      if (method === 'OPTIONS') return send(res, 204, undefined, cors);
+      if (method !== 'GET' && req.headers['x-az-request'] !== '1') return send(res, 403, { error: 'unknown' }, cors);
+      const result = await data.handle({
+        method,
+        url,
+        ip,
+        user: async () => {
+          const token = readCookies(req)[names.session];
+          return token ? (await store.sessionUser(token))?.user.id ?? null : null;
+        },
+        body: (limit) => readJson(req, limit),
+      });
+      return send(res, result.status, result.body, cors);
     }
 
     if (!url.pathname.startsWith('/auth/')) return send(res, 404, { error: 'unknown' });
