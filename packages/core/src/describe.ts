@@ -7,7 +7,7 @@
  * Tests: packages/core/test/describe.test.ts, packages/words/test/descriptions.test.ts
  */
 
-import { SITE_WIDTHS, type Manifest, type PropSpec } from './link.ts';
+import { FONT_FAMILIES, SITE_WIDTHS, type Manifest, type PropSpec } from './link.ts';
 import { BACKEND_SETTINGS } from './backend.ts';
 import {
   ACTION_DESCRIPTIONS, MODIFIER_DESCRIPTIONS, TYPE_DESCRIPTIONS, WHO_DESCRIPTIONS,
@@ -53,6 +53,7 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
       body: 'Family style for running text',
       mono: 'Family style for code and figures',
     },
+    values: { display: FONT_FAMILIES, body: FONT_FAMILIES, mono: FONT_FAMILIES },
   },
   page: { description: 'One page of the site; its value is the route' },
   raw: { description: 'Mount your own component file in page or block' },

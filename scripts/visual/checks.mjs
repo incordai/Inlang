@@ -173,6 +173,24 @@ export const FRAME_WIDTH = 1920;
  * `--az-frame`, resolved to px by a probe element. A side-nav column is not
  * a section and is skipped.
  */
+/**
+ * theme-spec §8.1: the families the page actually renders — the computed
+ * font-family of the <h1> (type.display) and of <body> (type.body) — equal
+ * the stacks the site asked for. `expected` holds `{ display, body }`.
+ */
+export async function fonts(page, expected) {
+  const got = await page.evaluate(() => ({
+    display: getComputedStyle(document.querySelector('h1') ?? document.body).fontFamily,
+    body: getComputedStyle(document.body).fontFamily,
+  }));
+  const norm = (s) => s.replace(/["']/g, '').split(',').map((p) => p.trim()).join(', ');
+  const wrong = Object.keys(expected).filter((k) => norm(got[k]) !== norm(expected[k]));
+  return {
+    pass: wrong.length === 0,
+    detail: wrong.map((k) => `${k} is "${got[k]}", expected "${expected[k]}"`).join('; '),
+  };
+}
+
 export async function frame(page) {
   return page.evaluate(() => {
     const site = document.querySelector('.az-site');

@@ -167,6 +167,19 @@ export const SITE_WIDTHS: Readonly<Record<string, string>> = {
   reading: 'One text column at the body measure',
 };
 
+/**
+ * The families a `font` role may name — theme-spec §8.1. Generic CSS
+ * families only, so no face is downloaded and the build stays offline; the
+ * theme package maps each to its stack (FONT_STACKS). Closed: an unknown
+ * family would otherwise compile and silently keep the theme's face.
+ */
+export const FONT_FAMILIES: Readonly<Record<string, string>> = {
+  sans: 'Sans-serif system face',
+  serif: 'Serif system face',
+  mono: 'Monospaced system face',
+  rounded: 'Rounded system face; plain sans where unavailable',
+};
+
 /** Properties those keywords accept — PRD §6.1a. */
 export const STRUCTURE_PROPS: Record<string, ReadonlySet<string>> = {
   site: new Set(['width', 'theme', 'font']),
@@ -528,6 +541,44 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     return raw(s);
   }
 
+  /**
+   * `font`'s role lines (GRAMMAR font-decl): each a known role naming a
+   * known family, once. Bad lines are reported and dropped; good ones become
+   * the children spec.ts reads into `site.fonts`.
+   */
+  function fontRoles(s: Statement): LinkedWord[] {
+    const roles = [...STRUCTURE_PROPS.font];
+    const families = Object.keys(FONT_FAMILIES);
+    if (s.children.length === 0) {
+      err('AZ1205', `font: no roles — write, indented: display ${families.join('|')}`, s.pos);
+    }
+    const seen = new Set<string>();
+    const out: LinkedWord[] = [];
+    for (const c of s.children) {
+      if (!roles.includes(c.word)) {
+        err('AZ1405', `font: '${shown(c.word)}' is not a font role — use ${roles.join(', ')}`, c.pos);
+        continue;
+      }
+      const value = c.args[0];
+      if (!value) {
+        err('AZ1205', `font: '${c.word}' has no value — write: ${c.word} ${families.join('|')}`, c.pos);
+        continue;
+      }
+      if (!Object.hasOwn(FONT_FAMILIES, value.value)) {
+        err('AZ1416', `font: '${shown(value.value)}' is not a family — use ${families.join(', ')}`, value.pos);
+        continue;
+      }
+      if (seen.has(c.word)) {
+        warn('AZ1203', `font: '${c.word}' repeated — once is enough`, c.pos);
+        continue;
+      }
+      seen.add(c.word);
+      out.push({ word: c.word, variant: null, modifiers: [], args: [value], props: {}, as: null,
+                 children: [], pos: c.pos });
+    }
+    return out;
+  }
+
   function resolve(s: Statement, parent: Manifest | undefined, parentWord: string | null): LinkedWord | null {
     if (s.word === 'backend') return backendDecl(s, parentWord);
     if (s.word === 'data') return dataDecl(s, parentWord);
@@ -550,8 +601,11 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
           err('AZ1414', `site: width '${shown(value.value)}' is not one of: ${choices.join(', ')}`, value.pos);
         }
       }
+      // `font` carries its roles as children (GRAMMAR font-decl); returning
+      // none here dropped every role, so `font` never reached the Spec.
+      const children = parentWord === 'site' && s.word === 'font' ? fontRoles(s) : [];
       return { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as,
-               children: [], pos: s.pos };
+               children, pos: s.pos };
     }
 
     // A SLOT fill. `hero` declares slots { cta: max 2 }, `footer` declares

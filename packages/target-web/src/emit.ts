@@ -22,7 +22,7 @@
 
 import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
-import { resolve, schemeCss, schemeReferences, THEMES, type Theme } from '../../theme/src/index.ts';
+import { FONT_STACKS, resolve, schemeCss, schemeReferences, THEMES, type Theme } from '../../theme/src/index.ts';
 import { generated, generatedJson } from './generated.ts';
 import { azMd } from './azmd.ts';
 import { emitPages, type EmitterMap } from './tree.ts';
@@ -581,17 +581,32 @@ function namedTheme(spec: Spec, override?: Theme): Theme {
 }
 
 /**
+ * `font` roles as type-token overrides — theme-spec §8.1: `display serif`
+ * replaces `type.display` with the serif stack. The compiler has already
+ * refused unknown roles (AZ1405) and families (AZ1416); anything else here is
+ * skipped, never passed through as a raw family name.
+ */
+function fontOverrides(fonts: Readonly<Record<string, string>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const role of ['display', 'body', 'mono'] as const) {
+    const family = fonts[role];
+    if (family && Object.hasOwn(FONT_STACKS, family)) out[role] = FONT_STACKS[family as keyof typeof FONT_STACKS];
+  }
+  return out;
+}
+
+/**
  * What words read. Colour and shadow are `var(--az-…)` references, resolved
  * by the browser per scheme (theme-spec §3.3); every other group is the same
  * in both schemes, so either resolution gives it.
  */
-function themeFor(named: Theme): ThemeLike {
+function themeFor(named: Theme, fonts: Readonly<Record<string, string>> = {}): ThemeLike {
   const t = resolve(named, named.defaultScheme ?? 'light');
   const schemed = schemeReferences(named);
   return {
     color: schemed.color as unknown as Record<string, string>,
     size: t.size as unknown as Record<string, number>,
-    type: t.type as unknown as Record<string, string | number>,
+    type: { ...t.type, ...fontOverrides(fonts) } as unknown as Record<string, string | number>,
     radius: t.radius as unknown as Record<string, number>,
     shadow: schemed.shadow as unknown as Record<string, string>,
     space: t.space as unknown as Record<string, number>,
@@ -750,7 +765,7 @@ export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
 
 export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProject {
   const named = namedTheme(spec, options.theme);
-  const theme = themeFor(named);
+  const theme = themeFor(named, spec.site.fonts);
   const used = new Set<string>();
   const asset = (raw: string): string => {
     const path = safeAssetPath(raw);
@@ -863,6 +878,11 @@ ${styled.css}`,
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
 body { margin: 0; }
+/* type.body for every text a word does not style itself (theme-spec §8.1,
+   overridable by \`font body …\`). Without it running text fell back to the
+   browser's default face. Form controls do not inherit a font on their own. */
+body { font-family: ${theme.type.body}; }
+button, input, select, textarea { font: inherit; }
 .az-page { min-height: 100svh; }
 ul, ol { margin: 0; padding: 0; }
 img, video, canvas { max-width: 100%; height: auto; display: block; }
@@ -969,6 +989,8 @@ export default defineConfig({
       path: 'AZ.md',
       content: azMd({
         site: spec.site.name,
+        theme: named.name,
+        fonts: spec.site.fonts,
         pages: pages.map((p) => ({ route: p.route, file: htmlFileFor(p.route), nodes: p.nodes })),
         dirs: { runtime: RUNTIME_DIR, user: USER_DIR, auth: AUTH_DIR, guard: GUARD_DIR, three: THREE_DIR },
         auth: plan && { adapter: plan.adapter, profile: plan.profile, protect: plan.protect },

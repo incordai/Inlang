@@ -415,6 +415,14 @@ try {
   check('the CONTAINER carries no measure — hero-spec §3',
     !!hero && ruleOf(hero) !== '' && !/max-width/.test(ruleOf(hero)));
   check('hero uses svh, not vh — hero-spec §6', /min-height: \d+svh/.test(ruleOf(hero)));
+  // theme-spec §8.1: the fixture writes `font` / `display serif` / `body sans`.
+  // The role overrides type.display, so the h1's rule carries the serif
+  // stack; theme.css gives the page the body family, so text a word does
+  // not style itself no longer falls back to the browser's default face.
+  check('font: `display serif` reaches the <h1>', /font-family: ui-serif, serif/.test(ruleOf(title)),
+    (ruleOf(title).match(/font-family: [^;]+/) ?? ['none'])[0]);
+  check('font: theme.css sets the page body family (`body sans`)',
+    readFileSync(join(proj, 'src/theme.css'), 'utf8').includes('body { font-family: system-ui, sans-serif; }'));
   // The pilot of the style contract: a responsive row and a state, as CSS.
   const classOf = (element) => /\baz-s-[0-9a-z]+/.exec(element ?? '')?.[0] ?? 'none';
   const sm = azCss.slice(azCss.indexOf('@media (width < 768px) {'));

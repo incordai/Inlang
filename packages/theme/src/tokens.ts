@@ -105,6 +105,19 @@ export const TYPE_SIZE = {
   'display-lg': 'clamp(3rem, 2rem + 5vw, 7rem)',
 } as const;
 
+/**
+ * What a `font` role's family resolves to — theme-spec §8.1, overriding the
+ * theme's `type.display` / `type.body` / `type.mono`. System faces only, each
+ * ending in a generic family: nothing is downloaded, so builds stay offline
+ * and no face licence is involved. Keys match core's FONT_FAMILIES (tested).
+ */
+export const FONT_STACKS = {
+  sans: 'system-ui, sans-serif',
+  serif: 'ui-serif, serif',
+  mono: 'ui-monospace, monospace',
+  rounded: 'ui-rounded, system-ui, sans-serif',
+} as const;
+
 /* ---------------- per theme ---------------- */
 
 /** The colour roles. Named by ROLE, never by appearance — theme-spec §2. */

@@ -34,7 +34,8 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, frame } from './visual/checks.mjs';
+import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, frame, fonts } from './visual/checks.mjs';
+import { FONT_STACKS, THEMES as THEME_TOKENS } from '../packages/theme/src/index.ts';
 import { startServer } from './visual/serve.mjs';
 import {
   billing, carousel, copy, drawer, dropdown, faq, faqDeepLink, hideShrink, lightbox, navMotion, overlayMotion, play, reveal, revealReduced, scrollPadding, sheetDrag, solid, year,
@@ -81,7 +82,7 @@ async function pool(items, limit, fn) {
 
 /* ---- results ------------------------------------------------------------ */
 
-const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'disclosure', 'skip-link',
+const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'font', 'disclosure', 'skip-link',
   'no-js', 'hydration',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
@@ -158,6 +159,33 @@ function themed(source, theme) {
   return lines.join('\n');
 }
 
+/**
+ * theme-spec §8.1, checked on the hero (it carries the page's <h1>): the
+ * preview as written must render the theme's own families, and the same
+ * preview with these `font` roles must render the role's stacks — in every
+ * theme. The roles differ from every theme's own stacks, so a site that
+ * ignored `font` cannot pass both.
+ */
+const FONT_WORD = 'hero';
+const FONT_ROLES = { display: 'serif', body: 'mono' };
+
+/** preview.az with a `font` block as the site's first child. */
+function withFonts(source) {
+  const lines = source.split('\n');
+  const at = lines.findIndex((l) => /^site\b/.test(l));
+  lines.splice(at + 1, 0, '  font', ...Object.entries(FONT_ROLES).map(([r, f]) => `    ${r} ${f}`));
+  return lines.join('\n');
+}
+
+/** The families a site should render: its theme's, with any role overridden. */
+function expectedFonts(theme, roles = {}) {
+  const t = THEME_TOKENS[theme].type;
+  return {
+    display: roles.display ? FONT_STACKS[roles.display] : t.display,
+    body: roles.body ? FONT_STACKS[roles.body] : t.body,
+  };
+}
+
 /** The reserved variant that renders nothing (GRAMMAR §5.2) — nothing to check. */
 const RENDERS_NOTHING = 'none';
 
@@ -201,8 +229,15 @@ async function buildAll(words, work, everyVariant) {
   const sites = words.flatMap((word) => previewsOf(word, everyVariant).flatMap((p) =>
     p.themes.map((theme) => ({ word, theme, variant: p.variant, file: p.file, source: p.source,
       label: p.variant ? `${theme}:${p.variant}` : theme }))));
+  if (words.includes(FONT_WORD)) {
+    const preview = readFileSync(join(WORDS, FONT_WORD, 'preview.az'), 'utf8');
+    for (const theme of THEMES) {
+      sites.push({ word: FONT_WORD, theme, variant: null, file: 'preview.az + font', source: withFonts(preview),
+        label: `${theme}:font`, roles: FONT_ROLES });
+    }
+  }
   for (const s of sites) {
-    s.dir = join(work, `${s.word}-${s.variant ?? 'default'}-${s.theme}`);
+    s.dir = join(work, `${s.word}-${s.variant ?? 'default'}-${s.theme}${s.roles ? '-font' : ''}`);
     mkdirSync(s.dir, { recursive: true });
     const src = join(WORDS, s.word);
     const preview = s.source ?? readFileSync(join(src, s.file), 'utf8');
@@ -325,6 +360,11 @@ async function checkSite(s, browsers, server) {
   await page.setViewportSize({ width: FRAME_WIDTH, height: 900 });
   await open(page, s.path, server);
   record(s.word, 'frame', `${s.label}/light/${FRAME_WIDTH}`, await frame(page));
+  // theme-spec §8.1: the hero's preview as written (the theme's families) and
+  // the same preview with `font` roles (the roles' stacks).
+  if (s.word === FONT_WORD && !s.variant) {
+    record(s.word, 'font', `${s.label}/light/${FRAME_WIDTH}`, await fonts(page, expectedFonts(s.theme, s.roles)));
+  }
   record(s.word, 'schemes', s.label, {
     pass: bg.light !== bg.dark,
     detail: `light and dark paint the same body background (${bg.light})`,
@@ -529,6 +569,21 @@ async function selfTest() {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.reload();
     expect('item 6 reduced motion', await reducedMotion(page), shouldPass);
+    await ctx.close();
+  }
+  // theme-spec §8.1: a page that sets the families it was asked for, and one
+  // left to the browser's default face — the bug `font` used to ship.
+  for (const [name, styled] of [['fonts-bad', false], ['fonts-good', true]]) {
+    mkdirSync(join(dir, name));
+    const css = styled ? `body { font-family: ${FONT_STACKS.mono}; } h1 { font-family: ${FONT_STACKS.serif}; }` : '';
+    writeFileSync(join(dir, name, 'index.html'),
+      `<!doctype html><html lang="en"><head><title>fonts</title><style>${css}</style></head><body><main><h1>Fonts</h1><p>Body.</p></main></body></html>`);
+    server.serve(join(dir, name));
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto(server.url);
+    expect(`theme-spec §8.1 font roles render (${styled ? 'good' : 'bad'} page)`,
+      await fonts(page, { display: FONT_STACKS.serif, body: FONT_STACKS.mono }), styled);
     await ctx.close();
   }
   for (const [name, padded] of [['pinned-bad', false], ['pinned-good', true]]) {
