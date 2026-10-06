@@ -23,7 +23,7 @@ import { dataSteps } from '../packages/backend/src/data-ddl.ts';
 import { DestructivePending, GuardFailed, migrateData } from '../packages/backend/src/server/data-migrate.ts';
 import { createData } from '../packages/backend/src/server/data-api.ts';
 import { loadTables } from '../packages/backend/src/server/data-values.ts';
-import { isUniqueViolation } from '../packages/backend/src/server/db.ts';
+import { isUniqueViolation, QueryTimeout } from '../packages/backend/src/server/db.ts';
 import { selectList, parseQuery } from '../packages/backend/src/server/data-query.ts';
 
 /** A database connection that will not close is abandoned after this (rule 13: bound every wait). */
@@ -203,6 +203,17 @@ export async function dataSuite(engine, db, openAgain, check, info) {
   check(`${engine} API: a literal % matches only %`, (await hits('0%')).join() === '100% wool');
   info(`${engine} INFERENCE: search 'äbc' finds 'ÄBC wool': ${(await hits('äbc')).length === 1 ? 'yes — LOWER folds beyond ASCII here' : 'no — LOWER is ASCII-only here'}`);
   check(`${engine} API: an unknown parameter is a 400 naming it`, (await call('GET', '/data/items?owner=x', null)).body.field === 'owner');
+  // The list deadline (data-spec §18): the DATABASE cancels a read past it,
+  // and the pool is fine afterwards. A cross join stands in for a costly search.
+  const heavy = engine === 'postgres'
+    ? 'SELECT COUNT(*) AS n FROM generate_series(1, 100000000) a'
+    : 'SELECT COUNT(*) AS n FROM information_schema.columns a, information_schema.columns b, information_schema.columns c';
+  const started = Date.now();
+  const cancelled = await db.allWithin(heavy, [], 200).then(() => null, (e) => e);
+  const took = Date.now() - started;
+  check(`${engine} DEADLINE: a read past its deadline is cancelled by the database`, cancelled instanceof QueryTimeout && took < 5_000, `${cancelled?.name ?? 'finished'} after ${took} ms`);
+  const after = await db.allWithin('SELECT 1 AS n', [], 2_000);
+  check(`${engine} DEADLINE: CONTROL — the next read on the pool answers`, Number(after[0]?.n) === 1, JSON.stringify(after));
 
   // ---- the admin routes (data-spec §11), on this engine -----------------
   const boss = randomUUID();

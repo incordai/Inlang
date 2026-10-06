@@ -61,7 +61,17 @@ const BASE = '  data products\n    name text required\n    price money usd\n    
 
 test('the lock holds storage only: rules, private, locked and default are not in it', () => {
   const [t] = storageOf(tablesOf('  data notes\n    body text required private locked default "x"\n    allow anyone read\n'));
-  assert.deepEqual(t, { name: 'notes', fields: [{ name: 'body', type: 'text', required: true, unique: false, index: false }] });
+  assert.deepEqual(t, { name: 'notes', fields: [{ name: 'body', type: 'text', required: true, unique: false, index: true }] }, 'index: required text is sortable, so indexed');
+});
+
+test('every field the API sorts by is indexed, recorded in the lock (review #3, data-spec §4.5)', () => {
+  const [t] = storageOf(tablesOf('  data notes\n    title text required\n    n number required\n    note text\n    flagged flag\n    code text required unique\n    allow anyone read\n'));
+  assert.deepEqual(t.fields.map((f) => [f.name, f.index]), [['title', true], ['n', true], ['note', false], ['flagged', false], ['code', false]],
+    'required sortable fields; not optional ones (never sortable), not a unique one (its own index)');
+  // A lock written before this rule plans the index as a safe step.
+  const old = [{ version: 1, ops: [{ op: 'createTable' as const, table: 'notes', fields: [{ name: 'title', type: 'text' as const, required: true, unique: false, index: false }] }] }];
+  const p = plan(replay(old), tablesOf('  data notes\n    title text required\n    allow anyone read\n'), NO);
+  assert.deepEqual([codes(p), kinds(p), p.changes[0].text], [[], ['safe'], 'notes.title gains its index']);
 });
 
 test('CONTROL: an unchanged file plans nothing', () => {
@@ -97,7 +107,7 @@ test('AZ1705: an existing field made required with no default; with a default it
   assert.deepEqual(codes(step(BASE, after)), ['AZ1705']);
   const ok = step(BASE, BASE.replace('price money usd', 'price money usd required default 0'));
   assert.deepEqual(codes(ok), []);
-  assert.deepEqual(ok.ops, [{ op: 'setField', table: 'products', field: { name: 'price', type: 'money', currency: 'usd', required: true, unique: false, index: false }, fill: 0 }]);
+  assert.deepEqual(ok.ops, [{ op: 'setField', table: 'products', field: { name: 'price', type: 'money', currency: 'usd', required: true, unique: false, index: true }, fill: 0 }]);
 });
 
 test('AZ1702: a dropped field needs --drop; with it the drop is destructive', () => {
@@ -153,8 +163,8 @@ test('AZ1707: a field becoming unique needs --unique; dropping unique is safe', 
   const after = BASE.replace('name text required', 'name text required unique');
   assert.deepEqual(codes(step(BASE, after)), ['AZ1707']);
   const p = step(BASE, after, flags({ unique: ['products.name'] }));
-  assert.deepEqual([codes(p), kinds(p)], [[], ['destructive']]);
-  assert.deepEqual(kinds(step(after, BASE)), ['safe']);
+  assert.deepEqual([codes(p), kinds(p)], [[], ['destructive', 'safe']], 'unique, and its sort index becomes the unique one');
+  assert.deepEqual(kinds(step(after, BASE)), ['safe', 'safe']);
 });
 
 test('a cycle between new tables is created, then closed with an added field', () => {

@@ -26,7 +26,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { DataRequest, DataResult, DataRoutes } from './app.ts';
-import { isUniqueViolation, type Db, type Value } from './db.ts';
+import { isUniqueViolation, QueryTimeout, type Db, type Value } from './db.ts';
 import { BodyError, createLimiter } from './http.ts';
 import { adminCount, adminSelectList, adminSelectOne, cursorOf, LIMIT_DEFAULT, LIMIT_MAX, parseQuery, QueryError, selectList, selectOne } from './data-query.ts';
 import { isEmail } from './app.ts';
@@ -37,6 +37,14 @@ import { ImageError, type Images, type StoredImage } from './data-images.ts';
 export const DATA_BODY_LIMIT = 64 * 1024;
 
 const MINUTE = 60 * 1000;
+/**
+ * A public list or search the database cancels past this (Db.allWithin):
+ * `q` is a LIKE over up to four columns and a filter may be on a column with
+ * no index, so a request's cost is bounded by time, not by its shape. Past
+ * it the answer is `429 rate_limited` — the server is at capacity for that
+ * request, as with an image upload queue that is full (data-spec §18).
+ */
+export const LIST_DEADLINE_MS = 2_000;
 /** data-spec §5.5 — fixed in v1, per process. */
 export const DATA_LIMITS = {
   readsPerAddress: [600, 10 * MINUTE],
@@ -234,7 +242,16 @@ export function createData(deps: DataDeps): DataApi {
     }
     if (lq.mine && user === null) return fail(401, 'signin_required');
     const s = selectList(d, t, lq, user, g.ownerOnly);
-    const rows = await db.all(s.sql, s.params);
+    let rows;
+    try {
+      rows = await db.allWithin(s.sql, s.params, LIST_DEADLINE_MS);
+    } catch (e) {
+      if (e instanceof QueryTimeout) {
+        log(`data: a list of ${t.name} ran past ${LIST_DEADLINE_MS} ms and was cancelled`);
+        return fail(429, 'rate_limited');
+      }
+      throw e;
+    }
     const page = rows.slice(0, lq.limit);
     return {
       status: 200,

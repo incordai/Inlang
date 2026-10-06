@@ -16,7 +16,7 @@
  */
 
 import type { Diagnostic, Pos } from './lex.ts';
-import { DATA_TYPES, type DataType, type SpecTable } from './data.ts';
+import { DATA_TYPES, sortable, type DataType, type SpecTable } from './data.ts';
 
 export const LOCK_FORMAT = 1;
 
@@ -66,13 +66,18 @@ export class LockError extends Error {}
 /* Storage schema                                                      */
 /* ------------------------------------------------------------------ */
 
-/** The storage-relevant part of the file's tables, in the lock's field shape. */
+/**
+ * The storage-relevant part of the file's tables, in the lock's field shape.
+ * `index` is what the database holds: written, or implied because the API
+ * sorts by the field (data-spec §4.5, §5.1) — a unique field already has its
+ * own index.
+ */
 export function storageOf(tables: readonly SpecTable[]): LockTable[] {
   return tables.map((t) => ({
     name: t.name,
     fields: t.fields.map((f) => lockField({
       name: f.name, type: f.type, currency: f.currency, choices: f.choices, ref: f.ref,
-      required: f.required, unique: f.unique, index: f.index,
+      required: f.required, unique: f.unique, index: f.index || (sortable(f) && !f.unique),
     })),
   }));
 }

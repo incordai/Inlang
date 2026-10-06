@@ -11,7 +11,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { client, SITE, startBackend, type Harness } from './helpers.ts';
 import { dataOf } from './data-fixture.ts';
-import { isForeignKeyViolation } from '../src/server/data-api.ts';
+import { createData, isForeignKeyViolation, LIST_DEADLINE_MS } from '../src/server/data-api.ts';
+import { SORTABLE } from '../src/server/data-query.ts';
+import { QueryTimeout, openSqlite, type Db } from '../src/server/db.ts';
+import { SORT_TYPES } from '../../core/src/data.ts';
 
 const GOOD = 'a-long-enough-password';
 const MINUTE = 60 * 1000;
@@ -270,8 +273,32 @@ test('SECURITY unbounded queries: limit 1–100 (default 20); keyset pages have 
     } while (next);
     assert.equal(new Set(seen).size, seen.length, 'no repeats');
     assert.equal(seen.filter((s) => !s.endsWith('aa')).length, 45, 'no gaps');
-    for (const bad of ['xyz', Buffer.from('[1]').toString('base64url'), Buffer.from('[1,"not-a-uuid"]').toString('base64url'), 'A'.repeat(700)]) {
+    for (const bad of ['xyz', Buffer.from('[1]').toString('base64url'), Buffer.from('[1,"not-a-uuid"]').toString('base64url'), 'A'.repeat(2000)]) {
       assert.equal((await client(h.url).get(`/data/products?sort=price&after=${bad}`)).status, 400, `cursor ${bad.slice(0, 20)}`);
+    }
+  } finally { await h.close(); }
+});
+
+test('every cursor the server issues is accepted back: 200-character CJK and emoji sort values (review #5)', async () => {
+  const { h, a } = await shop();
+  try {
+    // Four bytes per character in UTF-8 (emoji), three (CJK), one (ASCII).
+    const names = ['😀'.repeat(200), '界'.repeat(200), `${'😀'.repeat(199)}"`, 'a'.repeat(200)];
+    for (const [i, name] of names.entries()) {
+      await a.c.request('POST', '/data/products', { name, price: i });
+      await a.c.request('POST', '/data/products', { name, price: i + 10 });
+    }
+    for (const sort of ['name', '-name']) {
+      const seen: string[] = [];
+      let next = null as string | null;
+      do {
+        const r: Response = await client(h.url).get(`/data/products?sort=${sort}&limit=1${next ? `&after=${next}` : ''}`);
+        assert.equal(r.status, 200, `${sort}: cursor of ${next?.length ?? 0} characters accepted`);
+        const body = await json(r);
+        seen.push(...(body.items as { id: string }[]).map((x) => x.id));
+        next = body.next as string | null;
+      } while (next);
+      assert.equal(new Set(seen).size, names.length * 2, `${sort}: every row once`);
     }
   } finally { await h.close(); }
 });
@@ -466,4 +493,37 @@ test('CONTROL: a backend without data answers /data exactly as before (404 unkno
     const r = await client(h.url).get('/data/products');
     assert.deepEqual([r.status, await r.json()], [404, { error: 'unknown' }]);
   } finally { await h.close(); }
+});
+
+test('a public list runs under the database deadline; one the database cancels is 429, logged without values (review #3)', async () => {
+  const db = await openSqlite(':memory:');
+  const { tables } = dataOf(SHOP);
+  await db.run('CREATE TABLE azd_products (id TEXT, owner TEXT, created INTEGER, updated INTEGER, name TEXT, blurb TEXT, price INTEGER, stock INTEGER, status TEXT, sku TEXT, contact TEXT, link TEXT, due TEXT, featured INTEGER)');
+  const deadlines: number[] = [];
+  let cancel = false;
+  const watched: Db = Object.create(db, {
+    allWithin: { value: (sql: string, p: never[], ms: number) => {
+      deadlines.push(ms);
+      return cancel ? Promise.reject(new QueryTimeout('cancelled')) : db.allWithin(sql, p, ms);
+    } },
+  });
+  const lines: string[] = [];
+  const api = createData({ db: watched, tables, log: (l) => lines.push(l) });
+  const ask = (query: string) => api.handle({
+    method: 'GET', url: new URL(`http://x/data/products${query}`), ip: 'a',
+    user: async () => null, account: async () => null,
+    body: async () => ({}), upload: async () => {},
+  });
+  assert.equal((await ask('?q=chair')).status, 200, 'CONTROL: in time');
+  cancel = true;
+  const slow = await ask('?q=secret-term');
+  assert.deepEqual([slow.status, slow.body], [429, { error: 'rate_limited' }]);
+  assert.deepEqual(deadlines, [LIST_DEADLINE_MS, LIST_DEADLINE_MS], 'every public list carries the deadline');
+  assert.equal(lines.length, 1);
+  assert.ok(!lines[0].includes('secret-term'), lines[0]);
+  await db.close();
+});
+
+test('the server sorts by exactly the types the compiler indexes (review #3)', () => {
+  assert.deepEqual([...SORTABLE].sort(), [...SORT_TYPES].sort());
 });

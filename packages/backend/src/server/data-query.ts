@@ -2,7 +2,7 @@
  * @az server data-query
  * Purpose: a list request's query string, allow-listed, as one parameterised SELECT with keyset paging and escaped search.
  * Spec: docs/data-spec.md §5.1, §4.7
- * Exports: parseQuery, ListQuery, QueryError, selectList, selectOne, readable, cursorOf, adminSelectList, adminSelectOne, adminCount, LIMIT_DEFAULT, LIMIT_MAX
+ * Exports: parseQuery, ListQuery, QueryError, SORTABLE, selectList, selectOne, readable, cursorOf, adminSelectList, adminSelectOne, adminCount, LIMIT_DEFAULT, LIMIT_MAX
  * Edit guide: an unknown or malformed parameter is a 400 naming it, never ignored; values only as parameters.
  * Tests: packages/backend/test/data-api.test.ts
  */
@@ -12,7 +12,12 @@
  * `400 bad_query` naming it — a misspelt filter silently ignored would
  * return the wrong rows and look like it worked. Paging is keyset only
  * (`after` is the last row's sort value and id), at most 100 rows, never a
- * count or an offset, so no request is an unbounded scan.
+ * count or an offset. Every sort key is indexed (core storageOf: a
+ * sortable field is indexed automatically), so a sort never sorts the
+ * table. A filter on a column with no index, and `q` (a LIKE that no index
+ * serves), can still read every row to fill a page: their cost is bounded
+ * by time instead — the database cancels a public list past
+ * LIST_DEADLINE_MS (data-api.ts, Db.allWithin).
  *
  * Copied into a generated server only when the site declares data; imports
  * only its siblings and node built-ins.
@@ -20,20 +25,28 @@
 
 import type { Value } from './db.ts';
 import type { Database } from './env.ts';
-import { chars, checkValue, fieldColumns, isDate, isUuid, physical, q, type Field, type FieldType, type Table } from './data-values.ts';
+import { chars, checkValue, fieldColumns, isDate, isUuid, physical, q, TEXT_LIMITS, type Field, type FieldType, type Table } from './data-values.ts';
 
 export const LIMIT_DEFAULT = 20;
 export const LIMIT_MAX = 100;
 const IN_MAX = 20;
 const Q_MIN = 2;
 const Q_MAX = 100;
-/** A cursor is two short values; anything longer is not one this server wrote. */
-const CURSOR_MAX = 600;
+/** The longest value a sort can carry: a text field (choices are shorter). */
+const SORT_TEXT_MAX = TEXT_LIMITS.text;
+/**
+ * The longest cursor this server writes, derived rather than guessed: a
+ * text sort value at its cap in the costliest JSON spelling (a lone
+ * surrogate, `\udXXX`, six bytes — more than any UTF-8 character), and an
+ * id, as base64url. Anything longer is not one of ours.
+ */
+const CURSOR_MAX = Math.ceil(Buffer.byteLength(JSON.stringify(['\ud800'.repeat(SORT_TEXT_MAX), '00000000-0000-4000-8000-000000000000'])) * 4 / 3);
 
 const EQUALITY: ReadonlySet<FieldType> = new Set(['number', 'money', 'flag', 'date', 'datetime', 'choice', 'ref', 'email']);
 const RANGE: ReadonlySet<FieldType> = new Set(['number', 'money', 'date', 'datetime']);
 const IN: ReadonlySet<FieldType> = new Set(['choice', 'ref']);
-const SORTABLE: ReadonlySet<FieldType> = new Set(['text', 'number', 'money', 'date', 'datetime', 'choice']);
+/** Equal to core's SORT_TYPES, whose required fields are indexed (a test keeps them equal). */
+export const SORTABLE: ReadonlySet<FieldType> = new Set(['text', 'number', 'money', 'date', 'datetime', 'choice']);
 const OPS = { lt: '<', lte: '<=', gt: '>', gte: '>=' } as const;
 
 export class QueryError extends Error {
@@ -164,7 +177,7 @@ export function parseQuery(t: Table, params: URLSearchParams, ownerOnly: boolean
     const [value] = decoded;
     const ok = sort.kind === 'number'
       ? Number.isSafeInteger(value)
-      : typeof value === 'string' && chars(value) <= 200 && (sort.kind !== 'date' || isDate(value));
+      : typeof value === 'string' && chars(value) <= SORT_TEXT_MAX && (sort.kind !== 'date' || isDate(value));
     if (!ok) throw new QueryError('after');
     after = [value as Value, decoded[1] as string];
   }

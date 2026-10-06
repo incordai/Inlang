@@ -2,7 +2,7 @@
  * @az server db
  * Purpose: one small interface over SQLite, PostgreSQL and MySQL, plus migrations.
  * Spec: docs/backend-spec.md §3
- * Exports: openSqlite, openPostgres, openMysql, migrate, Db
+ * Exports: openSqlite, openPostgres, openMysql, migrate, Db, QueryTimeout, isUniqueViolation
  * Edit guide: parameterised queries only; unnamed statements (pooler-safe).
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/claim.test.ts
  */
@@ -34,6 +34,16 @@ export type Row = Record<string, unknown>;
 export interface Db {
   readonly dialect: Database;
   all(sql: string, params?: readonly Value[]): Promise<Row[]>;
+  /**
+   * A read the DATABASE abandons past `ms` — it cancels the statement, not
+   * just stops waiting — throwing QueryTimeout. PostgreSQL: `SET LOCAL
+   * statement_timeout` inside one read-only transaction on one connection;
+   * MySQL: the `MAX_EXECUTION_TIME` hint on the SELECT. Neither leaves
+   * session state, so both are pooler-safe. SQLite runs in this process and
+   * node:sqlite has no way to interrupt a statement: there it is `all`, and
+   * the bound is the table's size (data-spec §18).
+   */
+  allWithin(sql: string, params: readonly Value[], ms: number): Promise<Row[]>;
   get(sql: string, params?: readonly Value[]): Promise<Row | undefined>;
   run(sql: string, params?: readonly Value[]): Promise<number>;
   close(): Promise<void>;
@@ -43,6 +53,15 @@ export interface Db {
 export function numbered(sql: string): string {
   let n = 0;
   return sql.replace(/\?/g, () => `$${++n}`);
+}
+
+/** The database cancelled a read that ran past its deadline (Db.allWithin). */
+export class QueryTimeout extends Error {}
+
+/** A deadline in whole milliseconds: written into SQL text, so checked here, never request input. */
+function deadline(ms: number): number {
+  if (!Number.isSafeInteger(ms) || ms < 1 || ms > 600_000) throw new Error(`allWithin: deadline ${ms} out of range`);
+  return ms;
 }
 
 /** A unique-constraint violation, whichever engine raised it. */
@@ -61,8 +80,14 @@ interface SqliteStatement {
   run(...p: Value[]): { changes: number | bigint };
 }
 interface SqliteDb { exec(sql: string): void; prepare(sql: string): SqliteStatement; close(): void }
+interface PgClient {
+  query(sql: string, params?: readonly Value[]): Promise<{ rows: Row[]; rowCount: number | null }>;
+  /** `true` destroys the connection instead of returning it to the pool. */
+  release(destroy?: boolean): void;
+}
 interface PgPool {
   query(sql: string, params: readonly Value[]): Promise<{ rows: Row[]; rowCount: number | null }>;
+  connect(): Promise<PgClient>;
   end(): Promise<void>;
 }
 interface MysqlPool {
@@ -80,6 +105,10 @@ export async function openSqlite(path: string): Promise<Db> {
   return {
     dialect: 'sqlite',
     all: async (sql, p = []) => db.prepare(sql).all(...p),
+    allWithin: async (sql, p, ms) => {
+      deadline(ms);
+      return db.prepare(sql).all(...p);
+    },
     get: async (sql, p = []) => db.prepare(sql).get(...p),
     run: async (sql, p = []) => Number(db.prepare(sql).run(...p).changes),
     close: async () => db.close(),
@@ -107,6 +136,31 @@ export async function openPostgres(url: string, tls: boolean, ca?: string): Prom
   return {
     dialect: 'postgres',
     all: async (sql, p = []) => (await pool.query(numbered(sql), p)).rows,
+    allWithin: async (sql, p, ms) => {
+      const limit = deadline(ms);
+      const c = await pool.connect();
+      let broken = false;
+      try {
+        // One transaction on one connection: a transaction-mode pooler keeps
+        // it on one server connection, and SET LOCAL ends with it.
+        await c.query('BEGIN READ ONLY');
+        await c.query(`SET LOCAL statement_timeout = ${limit}`);
+        const { rows } = await c.query(numbered(sql), p);
+        await c.query('COMMIT');
+        return rows;
+      } catch (e) {
+        try {
+          await c.query('ROLLBACK');
+        } catch {
+          broken = true;
+        }
+        // 57014 query_canceled: the statement_timeout fired.
+        if ((e as { code?: unknown })?.code === '57014') throw new QueryTimeout(`read cancelled after ${limit} ms`);
+        throw e;
+      } finally {
+        c.release(broken);
+      }
+    },
     get: async (sql, p = []) => (await pool.query(numbered(sql), p)).rows[0],
     run: async (sql, p = []) => (await pool.query(numbered(sql), p)).rowCount ?? 0,
     close: () => pool.end(),
@@ -123,6 +177,17 @@ export async function openMysql(url: string, tls: boolean, ca?: string): Promise
   return {
     dialect: 'mysql',
     all: async (sql, p = []) => (await pool.execute(sql, p))[0] as Row[],
+    allWithin: async (sql, p, ms) => {
+      const limit = deadline(ms);
+      if (!/^SELECT /.test(sql)) throw new Error('allWithin: only a SELECT takes a deadline');
+      try {
+        return (await pool.execute(`SELECT /*+ MAX_EXECUTION_TIME(${limit}) */ ${sql.slice('SELECT '.length)}`, p))[0] as Row[];
+      } catch (e) {
+        // 3024 ER_QUERY_TIMEOUT: maximum statement execution time exceeded.
+        if ((e as { errno?: unknown })?.errno === 3024) throw new QueryTimeout(`read cancelled after ${limit} ms`);
+        throw e;
+      }
+    },
     get: async (sql, p = []) => ((await pool.execute(sql, p))[0] as Row[])[0],
     run: async (sql, p = []) => ((await pool.execute(sql, p))[0] as { affectedRows: number }).affectedRows,
     close: () => pool.end(),

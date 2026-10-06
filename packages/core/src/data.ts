@@ -2,7 +2,7 @@
  * @az module data
  * Purpose: `data <table>` declarations: fields, types, modifiers, allow rules → SpecTable, with every check.
  * Spec: docs/data-spec.md §4, §12
- * Exports: buildTables, typeName, writeEcho, DATA_TYPES, DATA_MODIFIERS, WHO, ACTIONS, TEXT_LIMITS, SpecTable, SpecField, SpecRules, Who, Action, DataType
+ * Exports: buildTables, typeName, writeEcho, sortable, SORT_TYPES, DATA_TYPES, DATA_MODIFIERS, WHO, ACTIONS, TEXT_LIMITS, SpecTable, SpecField, SpecRules, Who, Action, DataType
  * Edit guide: the vocabulary is closed; a new type needs ddl (packages/backend/src/data-ddl.ts), the server's validator and a description.
  * Tests: packages/core/test/data.test.ts
  */
@@ -115,6 +115,15 @@ const FIELD_LEN = { min: 1, max: 30 };
 const VALUE = /^[a-z0-9][a-z0-9-]*$/;
 /** A calendar date the three engines sort as text. */
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Types `?sort=` accepts (data-spec §5.1); the server's list is data-query.ts SORTABLE, kept equal by a test. */
+export const SORT_TYPES: ReadonlySet<DataType> = new Set(['text', 'number', 'money', 'date', 'datetime', 'choice']);
+/**
+ * A field the API sorts by: required (the engines order NULLs differently,
+ * which would break keyset paging) and of a sortable type. Every such field
+ * is indexed automatically (§4.5), so no sort is a scan.
+ */
+export const sortable = (f: { readonly required: boolean; readonly type: DataType }) => f.required && SORT_TYPES.has(f.type);
 
 const UNIQUE_TYPES: ReadonlySet<DataType> = new Set(['text', 'email', 'number', 'date']);
 const INDEX_TYPES: ReadonlySet<DataType> = new Set(['text', 'number', 'money', 'flag', 'date', 'datetime', 'choice', 'ref', 'email']);
