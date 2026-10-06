@@ -14,6 +14,7 @@
     "test:probe": "node --experimental-strip-types scripts/probe.test.ts",
     "test:decision": "node --experimental-strip-types scripts/decision.test.ts",
     "test:m0": "node --experimental-strip-types scripts/m0.test.ts",
+    "test:snapshot": "node --experimental-strip-types scripts/snapshot.test.ts",
     "test:model": "node --experimental-strip-types scripts/model.test.ts",
     "test:browser": "node --experimental-strip-types scripts/browser.test.ts",
     "shoot": "node --experimental-strip-types scripts/shoot.ts",

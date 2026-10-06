@@ -60,6 +60,9 @@ page /
     alt    "The strands, growing as you scroll"
 `;
 
+/** The same page under another site name: another seed (scene-spec §11.1), another scene. */
+const RESEEDED = PROCEDURAL.replace('site aurora', 'site borealis');
+
 /** scene-spec §7: six full-width scenes, far enough apart that the first leaves the warm margin. */
 const MANY = `az 1
 
@@ -213,6 +216,7 @@ const work = mkdtempSync(join(tmpdir(), 'az-3d-'));
 const fixtureAssets = join(ROOT, 'packages/core/test/fixture-assets');
 const fixture = { dir: join(work, 'fixture'), source: readFileSync(join(ROOT, 'packages/core/test/fixture-site.az'), 'utf8') };
 const procedural = { dir: join(work, 'procedural'), source: PROCEDURAL };
+const reseeded = { dir: join(work, 'reseeded'), source: RESEEDED };
 const many = { dir: join(work, 'many'), source: MANY };
 const pair = { dir: join(work, 'pair'), source: PAIR };
 const backdrop = { dir: join(work, 'backdrop'), source: BACKDROP };
@@ -222,7 +226,7 @@ const ringSite = { dir: join(work, 'ring'), source: RING };
 const protectedSite = { dir: join(work, 'protected'), source: PROTECTED };
 mkdirSync(fixture.dir, { recursive: true });
 cpSync(fixtureAssets, fixture.dir, { recursive: true });
-const sites = [procedural, many, pair, backdrop, below, heroBehind, ringSite, protectedSite];
+const sites = [procedural, reseeded, many, pair, backdrop, below, heroBehind, ringSite, protectedSite];
 for (const s of sites) {
   mkdirSync(join(s.dir, 'assets'), { recursive: true });
   cpSync(join(fixtureAssets, 'assets/orbit.webp'), join(s.dir, 'assets/poster.webp'));
@@ -320,6 +324,42 @@ for (const [label, path, reducedMotion] of [
   await page.waitForTimeout(SETTLE_MS);
   check('§9: arrow keys turn the object', !before.equals(await shot()));
   await context.close();
+}
+
+/* ---- ROADMAP M0: a snapshot pinned to `lite` is reproducible ------------- */
+// motion-tiers-spec §6.1: `?az-tier=lite` pins the ladder's lite rung (a
+// static camera), so with the page at rest nothing moves. SwiftShader
+// rasterises on the CPU, which makes exact bytes a fair demand. Two fresh
+// contexts and a browser restart must agree; another seed must not.
+{
+  const LITE = '/?az-tier=lite&az-probe=off';
+  const snapshot = async (b, site) => {
+    server.serve(site.dist);
+    const context = await b.newContext({
+      viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light', reducedMotion: 'no-preference',
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(new URL(LITE, server.url).href, { waitUntil: 'load' });
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      const live = await waitFor(page, () => document.querySelector('.az-hero [data-az-3d][data-live="true"]'));
+      await page.waitForTimeout(SETTLE_MS);
+      const png = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+      return { live, rung: await rung(page), png };
+    } finally {
+      await closeWithin(context, CLOSE_MS, 'lite snapshot context.close');
+    }
+  };
+  const a = await snapshot(browser, procedural);
+  const b = await snapshot(browser, procedural);
+  const other = await snapshot(browser, reseeded);
+  const restarted = await chromium.launch({ args: GL_ARGS });
+  let c;
+  try { c = await snapshot(restarted, procedural); } finally { await closeWithin(restarted, CLOSE_MS, 'restarted chromium.close'); }
+  check('M0: `?az-tier=lite` pins the lite rung and the hero draws live', a.live && a.rung === '6', `rung ${a.rung}`);
+  check('M0: a lite snapshot is byte-identical in two fresh contexts', a.png.equals(b.png), `${a.png.length} bytes`);
+  check('M0: a lite snapshot is byte-identical after a browser restart', a.png.equals(c.png));
+  check('CONTROL: another site name (another seed) renders different bytes', other.live && !other.png.equals(a.png));
 }
 
 /* ---- the scheme changes: the scene repaints its colours ------------------- */
