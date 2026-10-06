@@ -71,17 +71,45 @@ export async function closeWithin(target, ms, label) {
   }
 }
 
+/** How long a child asked to stop (SIGTERM) gets before it is killed (SIGKILL). */
+export const KILL_GRACE_MS = 3_000;
+
+const exited = (child) => child.exitCode !== null || child.signalCode !== null;
+
+/**
+ * Stop a child process: SIGTERM, then SIGKILL if it has not exited within
+ * `graceMs`. Resolves once it has exited or been sent SIGKILL — never waits
+ * longer than the grace. A child that ignores SIGTERM cannot outlive the run.
+ */
+export async function stopChild(child, graceMs = KILL_GRACE_MS) {
+  if (exited(child)) return;
+  const gone = new Promise((done) => child.once('exit', done));
+  child.kill('SIGTERM');
+  let timer;
+  const late = new Promise((done) => { timer = setTimeout(() => done('late'), graceMs); });
+  try {
+    if ((await Promise.race([gone, late])) === 'late' && !exited(child)) {
+      process.stderr.write(`bounded: child ${child.pid} ignored SIGTERM for ${human(graceMs)} — SIGKILL\n`);
+      child.kill('SIGKILL');
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * The whole-run deadline. Past it the run is stuck somewhere no other
  * deadline caught: print what it was doing and end the process — which also
  * kills every browser Playwright launched. `progress.last` names the last
  * step that completed. What the run started itself (a server process, a
  * dev watcher, a container) is not Playwright's: `progress.cleanup`, a
- * synchronous function, stops it before the exit. Unref'd, so it never
- * holds a finished run open.
+ * synchronous function, stops it before the exit, and every child process
+ * in `progress.children` is stopped with SIGTERM, then SIGKILL after
+ * `graceMs` — the exit waits at most that long. Unref'd, so it never holds
+ * a finished run open.
  */
-export function watchdog(ms, label, progress = {}) {
-  const timer = setTimeout(() => {
+export function watchdog(ms, label, progress = {}, graceMs = KILL_GRACE_MS) {
+  const timer = setTimeout(async () => {
     process.stderr.write(`\nFAIL  ${label}: still running after ${(ms / 1000).toFixed(0)}s, the run deadline` +
       ` — last step: ${progress.last ?? 'none'}\n`);
     try {
@@ -89,6 +117,7 @@ export function watchdog(ms, label, progress = {}) {
     } catch (e) {
       process.stderr.write(`${label}: cleanup at the run deadline failed — ${e.message}\n`);
     }
+    await Promise.all([...(progress.children ?? [])].map((c) => stopChild(c, graceMs)));
     process.exit(124);
   }, ms);
   timer.unref();

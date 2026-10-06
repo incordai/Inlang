@@ -755,7 +755,7 @@ const freePort = () => new Promise((done) => {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  progress.cleanup = () => child.kill('SIGTERM');
+  progress.children = [child];
   let serverLog = '';
   child.stdout.on('data', (c) => { serverLog += c; });
   child.stderr.on('data', (c) => { serverLog += c; });

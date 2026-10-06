@@ -124,6 +124,7 @@ const az = spawn(process.execPath, [CLI, 'dev', source, '--out', join(dir, '.az-
 });
 // Ctrl-C is how az dev shuts down with its own children.
 progress.cleanup = () => az.kill('SIGINT');
+progress.children = [az];
 az.stdout.setEncoding('utf8');
 az.stderr.setEncoding('utf8');
 az.stdout.on('data', (c) => { out += c; });

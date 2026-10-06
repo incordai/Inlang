@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.28.2",
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/overlay/tsconfig.json && tsc --noEmit -p packages/auth-runtime/tsconfig.json && tsc --noEmit -p packages/scene-runtime/tsconfig.json",
-    "test": "node --experimental-strip-types --test packages/core/test/*.test.ts packages/theme/test/*.test.ts packages/words/test/*.test.ts packages/target-web/test/*.test.ts packages/cli/test/*.test.ts packages/overlay/test/*.test.ts packages/auth-runtime/test/*.test.ts packages/scene-runtime/test/*.test.ts packages/backend/test/*.test.ts packages/mcp/test/*.test.ts",
+    "test": "node --experimental-strip-types --test packages/core/test/*.test.ts packages/theme/test/*.test.ts packages/words/test/*.test.ts packages/target-web/test/*.test.ts packages/cli/test/*.test.ts packages/overlay/test/*.test.ts packages/auth-runtime/test/*.test.ts packages/scene-runtime/test/*.test.ts packages/backend/test/*.test.ts packages/mcp/test/*.test.ts scripts/lib/*.test.mjs",
     "verify": "pnpm typecheck && pnpm test",
     "verify:build": "node scripts/verify-build.mjs",
     "coverage": "node scripts/word-coverage.mjs",
