@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attributeValue, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, safeUrl,
+  attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, safeUrl,
 } from '../src/runtime/rows-logic.ts';
 
 const MARK = (prop: string) => `\u{E000}${prop}\u{E000}`;
@@ -64,6 +64,26 @@ test('a template attribute takes a row value as text; URL attributes only a safe
   assert.equal(attributeValue('style', MARK('alt'), valueOf, base), null);
   assert.equal(attributeValue('srcset', MARK('ok'), valueOf, base), null);
   assert.equal(attributeValue('aria-label', `See ${MARK('missing')}`, valueOf, base), 'See ');
+});
+
+test('an empty URL value drops the attribute — it never resolves to the page itself', () => {
+  const base = 'https://site.test/board';
+  for (const empty of ['', ' ', '\t\n']) assert.equal(safeUrl(empty, base), null, JSON.stringify(empty));
+  const valueOf = (p: string) => ({ blank: '   ', ok: 'a.webp' } as Record<string, string>)[p] ?? null;
+  // A row without the value: no src, no href — not the page, not the template's remainder.
+  assert.equal(attributeValue('src', MARK('missing'), valueOf, base), null);
+  assert.equal(attributeValue('href', MARK('missing'), valueOf, base), null);
+  assert.equal(attributeValue('src', MARK('blank'), valueOf, base), null);
+  assert.equal(attributeValue('href', `/notes/${MARK('missing')}`, valueOf, base), null, 'a partial URL is no URL');
+  assert.equal(attributeValue('src', `/media/${MARK('ok')}`, valueOf, base), 'https://site.test/media/a.webp', 'CONTROL: every marker filled');
+  assert.equal(attributeValue('alt', MARK('missing'), valueOf, base), '', 'CONTROL: a text attribute may be empty');
+});
+
+test('an image without its source is dropped whole; other elements only lose the attribute', () => {
+  assert.equal(emptyWithout('IMG', 'src'), true);
+  assert.equal(emptyWithout('img', 'SRC'), true);
+  assert.equal(emptyWithout('A', 'href'), false, 'CONTROL: a link keeps its text');
+  assert.equal(emptyWithout('IMG', 'alt'), false, 'CONTROL: only the source empties an image');
 });
 
 test('a longtext is paragraphs of lines; blank lines split, single newlines break', () => {

@@ -32,7 +32,7 @@
  * Imports only its siblings.
  */
 
-import { attributeValue, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, type RowsConfig } from './rows-logic.ts';
+import { attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, type RowsConfig } from './rows-logic.ts';
 
 /** What a table's list answers: the generated client's DataResult, narrowed to what this needs. */
 export type RowsResult =
@@ -166,8 +166,12 @@ function fillRow(doc: Document, item: Element, row: unknown, config: RowsConfig,
     for (const attr of [...el.attributes]) {
       if (!attr.value.includes('\uE000')) continue;
       const v = attributeValue(attr.name, attr.value, valueOf, base);
-      if (v === null) el.removeAttribute(attr.name);
-      else el.setAttribute(attr.name, v);
+      if (v !== null) el.setAttribute(attr.name, v);
+      else if (el !== copy && emptyWithout(el.tagName, attr.name)) {
+        // A row without its image: no image at all, never one of the page.
+        el.remove();
+        break;
+      } else el.removeAttribute(attr.name);
     }
   }
   suffixIds(copy, suffix);

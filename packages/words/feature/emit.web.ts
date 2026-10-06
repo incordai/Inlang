@@ -144,12 +144,16 @@ function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitC
       ? {
           listStyle: 'none',
           display: 'grid',
-          gridTemplateColumns: media ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)',
+          // One equal column per child: media and text side by side, and a
+          // row from a table that has no image (its <img> dropped) takes the
+          // whole width with its text alone.
+          gridAutoFlow: 'column',
+          gridAutoColumns: 'minmax(0, 1fr)',
           columnGap: px(t.space[48]),
           alignItems: 'center',
         }
       : { listStyle: 'none' },
-    below: rows && media ? { sm: { gridTemplateColumns: 'minmax(0, 1fr)', rowGap: px(t.space[24]) } } : undefined,
+    below: rows && media ? { sm: { gridAutoFlow: 'row', rowGap: px(t.space[24]) } } : undefined,
     children: media ? [media, body] : [body],
   };
 }

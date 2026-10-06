@@ -163,6 +163,16 @@ page /photos
       alt     title
       empty   "No photos yet"
 
+page /stories
+  hero center
+    title "Stories"
+  feature rows
+    title "Stories"
+    from notes
+      title title
+      media photo
+      empty "No stories yet"
+
 page /private
   hero center
     title "Private"
@@ -416,6 +426,33 @@ async function imageFlow(name, owner, other) {
       && pics[0].nw === 320 && pics[0].src === up.item.photo.url, JSON.stringify({ gallery, pics }));
   const galleryAxe = await axeViolations(owner);
   check(`${name}: axe finds nothing on the from gallery`, galleryAxe.length === 0, galleryAxe.join(', '));
+  // A `from` rows block with media (data-spec §10): a row without an image
+  // has no <img> at all — never one whose source is the page — and its text
+  // takes the item's one column; a row with one keeps media beside text.
+  const pageAsImage = [];
+  const onRequest = (r) => { if (r.resourceType() === 'image' && new URL(r.url()).pathname.startsWith('/stories')) pageAsImage.push(r.url()); };
+  owner.on('request', onRequest);
+  await owner.goto(`${host.url}/stories`);
+  const stories = await settled(owner, 'feature');
+  // An <img> of the page itself never decodes: bounded, so that is a FAIL below, not a hang.
+  const decoded = await owner.waitForFunction(() => [...document.querySelectorAll('section.az-feature [data-az-from-rows] img')].every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 10_000 })
+    .then(() => true, () => false);
+  const storyRows = await owner.locator('section.az-feature [data-az-from-rows] .az-feature-item').evaluateAll((lis) => lis.map((li) => ({
+    title: li.querySelector('.az-feature-item-title')?.textContent ?? '',
+    imgs: [...li.querySelectorAll('img')].map((i) => i.getAttribute('src')),
+    tracks: getComputedStyle(li).gridTemplateColumns.split(' ').length,
+  })));
+  owner.off('request', onRequest);
+  const pictured = storyRows.filter((r) => r.title === `${name} with photo`);
+  const bare = storyRows.filter((r) => r.title !== `${name} with photo`);
+  check(`${name}: a from rows block — a row without an image has no <img> and one column; no image request is the page`,
+    stories.state === 'rows' && decoded && bare.length > 0 && bare.every((r) => r.imgs.length === 0 && r.tracks === 1) && pageAsImage.length === 0,
+    JSON.stringify({ stories, decoded, bare, pageAsImage }));
+  check(`${name}: CONTROL — the row with an image shows it from the server, media beside text in two columns`,
+    pictured.length === 1 && pictured[0].imgs.length === 1 && pictured[0].imgs[0] === up.item.photo.url && pictured[0].tracks === 2,
+    JSON.stringify(pictured));
+  const storiesAxe = await axeViolations(owner);
+  check(`${name}: axe finds nothing on the from rows block`, storiesAxe.length === 0, storiesAxe.join(', '));
   await owner.goto(`${host.url}/notes`);
   const svg = await uploadVia(owner, made.item.id, SVG);
   check(`${name}: an SVG sent as a photo is refused as unsupported_type`, svg.ok === false && svg.code === 'unsupported_type' && svg.field === 'photo', JSON.stringify(svg));

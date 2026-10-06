@@ -49,14 +49,18 @@ const ROWS = [
 test('§6 rows: media beside text, alternating sides row by row', () => {
   const items = byClass(feature('rows', ROWS), 'az-feature-item');
   assert.equal(items.length, 3);
-  for (const it of items) assert.equal(it.style?.gridTemplateColumns, 'repeat(2, minmax(0, 1fr))');
+  // One equal column per child: two with media, one when a table row's image is dropped.
+  for (const it of items) {
+    assert.deepEqual([it.style?.gridAutoFlow, it.style?.gridAutoColumns, it.style?.gridTemplateColumns],
+      ['column', 'minmax(0, 1fr)', undefined]);
+  }
   const order = items.map((it) => byClass(it, 'az-feature-media')[0]?.style?.order);
   assert.deepEqual(order, [undefined, 1, undefined], 'every second row puts its media on the right');
 });
 
 test('§6 rows below sm: one column, media above the text, alternation dropped', () => {
   const items = byClass(feature('rows', ROWS), 'az-feature-item');
-  for (const it of items) assert.equal(it.below?.sm?.gridTemplateColumns, 'minmax(0, 1fr)');
+  for (const it of items) assert.equal(it.below?.sm?.gridAutoFlow, 'row', 'children stack in the one auto column');
   assert.equal(byClass(items[1], 'az-feature-media')[0]?.below?.sm?.order, 0);
   assert.equal(walk(items[1]).findIndex((n) => n.tag === 'img') < walk(items[1]).findIndex((n) => n.tag === 'h3'), true,
     'media comes first in the DOM, so it sits above the text');

@@ -2,7 +2,7 @@
  * @az runtime rows-logic
  * Purpose: the decisions of a `from` block's runtime as pure functions: its config, values, links, copy.
  * Spec: docs/data-spec.md §10.3, §13 (stored XSS, dangerous links)
- * Exports: parseRowsConfig, rowText, rowImage, safeUrl, attributeValue, paragraphs, problemCopy, markerProp, RowsConfig
+ * Exports: parseRowsConfig, rowText, rowImage, safeUrl, attributeValue, emptyWithout, paragraphs, problemCopy, markerProp, RowsConfig
  * Edit guide: keep pure (no DOM); every decision here has a unit test; never turn a value into markup.
  * Tests: packages/overlay/test/rows.test.ts
  */
@@ -105,9 +105,12 @@ export function rowImage(row: unknown, field: string): { url: string; width: num
  * links", the GRAMMAR §4.3 rule applied at runtime. The URL parser does the
  * browser's own normalisation first (case, tabs and newlines, leading
  * spaces), so `JaVa\tscript:` is seen as what the browser would follow. A
- * relative value resolves against the page, so it stays on the site.
+ * relative value resolves against the page, so it stays on the site. An
+ * empty value is no URL: resolved, it would be the page itself, and an image
+ * of the page is a request for the page's HTML.
  */
 export function safeUrl(value: string, base: string): string | null {
+  if (value.trim() === '') return null;
   let url: URL;
   try {
     url = new URL(value, base);
@@ -154,7 +157,9 @@ const URL_ATTRIBUTES: ReadonlySet<string> = new Set(['src', 'href', 'poster', 'a
 
 /**
  * A template attribute with its markers replaced by a row's values, or null
- * to drop the attribute. A URL attribute keeps only a safe URL (safeUrl);
+ * to drop the attribute. A URL attribute keeps only a safe URL (safeUrl), and
+ * only when every marker in it has a value — a row without its image or link
+ * has none, rather than the template's remainder (the page, or a base path);
  * an event handler, `style` or `srcset` never takes a row's value at all —
  * no emitter writes a marker there, and none ever should.
  */
@@ -163,9 +168,23 @@ export function attributeValue(
 ): string | null {
   const lower = name.toLowerCase();
   if (lower.startsWith('on') || lower === 'style' || lower === 'srcset') return null;
-  const filled = template.replace(/\uE000([a-z][a-z0-9]*)\uE000/g, (_, prop: string) => valueOf(prop) ?? '');
-  if (URL_ATTRIBUTES.has(lower)) return safeUrl(filled, base);
+  let missing = false;
+  const filled = template.replace(/\uE000([a-z][a-z0-9]*)\uE000/g, (_, prop: string) => {
+    const value = valueOf(prop);
+    if (value === null || value.trim() === '') missing = true;
+    return value ?? '';
+  });
+  if (URL_ATTRIBUTES.has(lower)) return missing ? null : safeUrl(filled, base);
   return filled;
+}
+
+/**
+ * Whether an element shows nothing once `attr` is dropped from it — an image
+ * without its source — so the row's copy loses the element rather than keep
+ * an empty box (the word lays an item without media out as its own case).
+ */
+export function emptyWithout(tagName: string, attr: string): boolean {
+  return tagName.toLowerCase() === 'img' && attr.toLowerCase() === 'src';
 }
 
 /** The prop a text node stands for, when it is exactly one template marker. */
