@@ -10,6 +10,8 @@
  *   5  keyboard: everything reachable, visible focus, no trap
  *   6  prefers-reduced-motion: nothing animates
  *   7  light and dark actually differ (+ screenshots for human review)
+ * and, from the gallery spec (§7 rule 1), that images held back and then
+ * released move nothing on the page (`image-shift`, CLS 0).
  * Chromium runs everything; Firefox and WebKit run a smaller pass (overflow
  * and page errors at one width each), so browser claims rest on real runs.
  *
@@ -32,9 +34,10 @@ import {
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { crc32, deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, frame, fonts, themeReading, settingsDiffer } from './visual/checks.mjs';
+import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer } from './visual/checks.mjs';
 import { FONT_STACKS, THEMES as THEME_TOKENS } from '../packages/theme/src/index.ts';
 import { startServer } from './visual/serve.mjs';
 import {
@@ -111,7 +114,7 @@ async function pool(items, limit, fn) {
 /* ---- results ------------------------------------------------------------ */
 
 const CHECKS = ['compile', 'deadline', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'skip-link',
-  'no-js', 'hydration',
+  'no-js', 'hydration', 'image-shift',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
   'firefox', 'webkit'];
@@ -508,7 +511,12 @@ async function checkSite(s, browsers, server) {
   // opens its own context; one that misses its deadline is left to the
   // browser's close.
   const url = new URL(s.path, server.url).href;
-  for (const [check, fn] of [['no-js', () => noJs(browsers.chromium, url)], ['hydration', () => hydration(browsers.chromium, url, READY)]]) {
+  // gallery-spec §7 rule 1: images held, then released — nothing moves.
+  for (const [check, fn] of [
+    ['no-js', () => noJs(browsers.chromium, url)],
+    ['hydration', () => hydration(browsers.chromium, url, READY)],
+    ['image-shift', () => imageShift(browsers.chromium, url, READY)],
+  ]) {
     const where = `${s.label}/chromium/1440`;
     try {
       record(s.word, check, where, await within(CHECK_MS, `${check} @ chromium ${s.word}/${where}`, fn));
@@ -651,6 +659,39 @@ const SHIPPED = (kind) => {
   <div id="root">${root}</div>
   <script>${fill} document.documentElement.setAttribute('data-az-ready', '');</script></body></html>`;
 };
+
+/**
+ * gallery-spec §7 rule 1: a photo above the text and one far below the fold
+ * (lazy), as a word emits them — with the file's width/height, or without.
+ */
+const SHIFT = (sized) => {
+  const img = (lazy) => `<img src="/photo.png" alt="A photo"${sized ? ' width="320" height="200"' : ''}${lazy ? ' loading="lazy"' : ''}
+    style="display:block;width:100%;height:auto">`;
+  return `<!doctype html><html lang="en"><head><title>shift</title></head><body><main><h1>Shift</h1>
+  ${img(false)}<p>Text under the photo.</p><div style="height:3000px"></div>${img(true)}<p>The end.</p></main>
+  <script>document.documentElement.setAttribute('data-az-ready', '');</script></body></html>`;
+};
+
+/** A real PNG of one colour, made here so no binary is checked in. */
+function solidPng(width, height) {
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc32(body) >>> 0, body.length + 4);
+    return out;
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);                           // 8-bit RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0x80)]);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))), chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
 
 /**
  * A page that never answers once a check measures it: its script spins
@@ -809,6 +850,15 @@ async function selfTest() {
     expect(`A6 reads with JS off (${shipped} page)`, await noJs(browser, server.url), shouldPass);
     // The partial page's markup is all there; only its hydration is clean.
     expect(`A6 hydrates cleanly (${shipped} page)`, await hydration(browser, server.url, READY), shipped !== 'empty');
+  }
+  // gallery-spec §7 rule 1: the same image, with and without its size.
+  for (const [name, sized] of [['shift-unsized', false], ['shift-sized', true]]) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'), SHIFT(sized));
+    writeFileSync(join(dir, name, 'photo.png'), solidPng(320, 200));
+    server.serve(join(dir, name));
+    expect(`§7 rule 1 a late image moves nothing (${sized ? 'sized' : 'unsized'} page)`,
+      await within(CHECK_MS, 'image-shift self-test', () => imageShift(browser, server.url, READY)), sized);
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');
   await behaviourSelfTest(browser, server, dir, expect);

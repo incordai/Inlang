@@ -389,3 +389,81 @@ export async function hydration(browser, url, readySelector) {
     await ctx.close();
   }
 }
+
+/** An image request: held back by imageShift until the page has settled. */
+const IMAGE_URL = /\.(?:webp|png|jpe?g|avif|gif|svg)(?:[?#]|$)/i;
+/** How long the released images get to arrive; they come from a local server. */
+const IMAGES_ARRIVE_MS = 15_000;
+
+/**
+ * gallery-spec §7 rule 1 — CLS 0: an image arriving late moves nothing.
+ *
+ * Every image response is HELD until the page has rendered and hydrated with
+ * none of them, as on a slow network; lazy images are made eager so the ones
+ * below the fold are tested too. Then all are released at once, and two
+ * things are read across their arrival:
+ *   - each <img>'s box, before and after: an image without width/height is
+ *     a 0×0 (or alt-text) box until its bytes land, then its file's size —
+ *     measured for every image, on screen or not
+ *   - the browser's own layout-shift entries (CLS) from release to the end
+ * Either one moving fails. A page with no image passes as not applicable.
+ * Opens its own context: the hold is a route on it.
+ */
+export async function imageShift(browser, url, readySelector) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
+  let release = () => {};
+  const released = new Promise((done) => { release = done; });
+  try {
+    await ctx.route(IMAGE_URL, async (route) => {
+      await released;
+      await route.continue().catch(() => {});   // the context may already be closing
+    });
+    const page = await ctx.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector(readySelector, { state: 'attached' });
+    await page.waitForTimeout(SCROLL_SETTLE_MS);
+    const before = await page.evaluate(() => {
+      window.__azShift = { score: 0, moved: [] };
+      // Not buffered: only shifts from the release on count.
+      new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (e.hadRecentInput) continue;
+          window.__azShift.score += e.value;
+          for (const s of e.sources ?? []) {
+            const n = s.node;
+            window.__azShift.moved.push(n && n.nodeType === 1 ? `${n.tagName.toLowerCase()}.${(n.className || '').toString().split(/\s+/)[0]}` : '#text');
+          }
+        }
+      }).observe({ type: 'layout-shift' });
+      return [...document.images].map((img) => {
+        img.loading = 'eager';
+        const r = img.getBoundingClientRect();
+        return { src: img.getAttribute('src') ?? '', w: r.width, h: r.height };
+      });
+    });
+    if (before.length === 0) return { pass: true, detail: 'no images' };
+    release();
+    const arrived = await page.waitForFunction(() => [...document.images].every((i) => i.complete), null, { timeout: IMAGES_ARRIVE_MS })
+      .then(() => true, () => false);
+    // Two frames and a settle, so the observer has delivered every entry.
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    await page.waitForTimeout(SCROLL_SETTLE_MS);
+    const after = await page.evaluate(() => ({
+      boxes: [...document.images].map((img) => { const r = img.getBoundingClientRect(); return { w: r.width, h: r.height }; }),
+      shift: window.__azShift,
+    }));
+    const resized = before
+      .map((b, i) => ({ ...b, a: after.boxes[i] }))
+      .filter((x) => x.a && (Math.abs(x.a.w - x.w) > 0.5 || Math.abs(x.a.h - x.h) > 0.5))
+      .map((x) => `${x.src} ${Math.round(x.w)}×${Math.round(x.h)} → ${Math.round(x.a.w)}×${Math.round(x.a.h)}`);
+    const problems = [
+      ...(arrived ? [] : [`images still loading after ${IMAGES_ARRIVE_MS / 1000}s`]),
+      ...resized.map((r) => `resized on arrival: ${r}`),
+      ...(after.shift.score > 0 ? [`layout shift ${after.shift.score.toFixed(4)} (moved: ${[...new Set(after.shift.moved)].join(', ') || '?'})`] : []),
+    ];
+    return { pass: problems.length === 0, detail: problems.length ? problems.join('; ') : `${before.length} images, CLS 0` };
+  } finally {
+    release();
+    await ctx.close();
+  }
+}
