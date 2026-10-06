@@ -38,6 +38,13 @@ function entries(m: any): [string, string | undefined][] {
   };
   props(m.name, m.props);
   slots(m.name, m.slots);
+  // `from <table>` (data-spec §10): the entry and every mapping it offers.
+  if (m.from) {
+    out.push([`${m.name} from`, m.from.description]);
+    for (const [k, f] of Object.entries(m.from.map ?? {}) as [string, { description?: string }][]) {
+      out.push([`${m.name} from ${k}`, f.description]);
+    }
+  }
   return out;
 }
 
@@ -46,7 +53,7 @@ const words = readdirSync(WORDS).filter((d) => existsSync(join(WORDS, d, 'word.j
 test('CONTROL: the walk finds every kind of entry', () => {
   const all = words.flatMap((w) => entries(JSON.parse(readFileSync(join(WORDS, w, 'word.json'), 'utf8'))));
   assert.ok(all.length >= 200, `only ${all.length} entries found`);
-  for (const kind of [' variant ', ' modifier ', ' prop ', ' slot ', ' value ', ' child ']) {
+  for (const kind of [' variant ', ' modifier ', ' prop ', ' slot ', ' value ', ' child ', ' from ']) {
     assert.ok(all.some(([p]) => p.includes(kind)), `no ${kind.trim()} entries walked`);
   }
 });

@@ -132,6 +132,37 @@
       "description": "Secondary action beside the primary"
     }
   },
+  "from": {
+    "slot": "image",
+    "description": "Images load from a data table after the page",
+    "limit": {
+      "default": 12,
+      "max": 100
+    },
+    "map": {
+      "src": {
+        "types": [
+          "image"
+        ],
+        "required": true,
+        "label": true,
+        "description": "The picture, from an image field"
+      },
+      "alt": {
+        "types": [
+          "text"
+        ],
+        "required": true,
+        "description": "What the image shows, from a text field"
+      },
+      "caption": {
+        "types": [
+          "text"
+        ],
+        "description": "Visible caption, from a text field"
+      }
+    }
+  },
   "requires": {
     "orbit": [
       "poster"

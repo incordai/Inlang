@@ -99,6 +99,37 @@
       "description": "Secondary action beside the primary"
     }
   },
+  "from": {
+    "slot": "item",
+    "description": "Items load from a data table after the page",
+    "limit": {
+      "default": 6,
+      "max": 12
+    },
+    "map": {
+      "title": {
+        "types": [
+          "text"
+        ],
+        "required": true,
+        "label": true,
+        "description": "Item heading, from a text field"
+      },
+      "text": {
+        "types": [
+          "text",
+          "longtext"
+        ],
+        "description": "Item description, from a text or longtext field"
+      },
+      "media": {
+        "types": [
+          "image"
+        ],
+        "description": "Item picture, from an image field (rows, bento)"
+      }
+    }
+  },
   "requires": {},
   "themeReads": [
     "color.text",

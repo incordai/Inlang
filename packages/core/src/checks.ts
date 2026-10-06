@@ -143,6 +143,11 @@ export interface CheckSubject {
   readonly children: readonly CheckChild[];
   readonly inPage: boolean;
   readonly pos: Pos;
+  /**
+   * A slot whose fills load from a table after the page (data-spec §10.2):
+   * how many there will be is unknown at build, so no `count` row on it runs.
+   */
+  readonly filled?: string | null;
 }
 
 export function holds(when: CheckWhen | undefined, s: CheckSubject): boolean {
@@ -210,6 +215,7 @@ export function runBlockChecks(
 
     switch (c.kind as BlockCheckKind) {
       case 'count': {
+        if (s.filled && (c.slots ?? []).includes(s.filled)) break;
         const n = c.prop ? inSlot.filter((k) => carries(k, c.prop!, c.value)).length : inSlot.length;
         if (n >= (c.atLeast ?? 0) && n <= (c.atMost ?? Infinity)) say(c, s.pos, { n });
         break;

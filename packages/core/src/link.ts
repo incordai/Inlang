@@ -28,6 +28,7 @@ import { HIERARCHIES } from './emit-contract.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { Arg, Statement, AzFile } from './parse.ts';
 import { routePath, runBlockChecks, type Check, type CheckChild } from './checks.ts';
+import { fromWords, type FromManifest } from './from.ts';
 
 export interface PropSpec {
   readonly type: string;
@@ -123,6 +124,11 @@ export interface Manifest {
    * bounds: its message is the spec's, so the generic min/max stays silent.
    */
   readonly checks?: Check[];
+  /**
+   * `from <table>` (data-spec §10): the slot rows fill and what each slot
+   * prop may be mapped from. Only a word with this entry takes `from`.
+   */
+  readonly from?: FromManifest;
 }
 
 /**
@@ -457,11 +463,16 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     }
   }
 
-  /** Slot fills above a slot's max or below its min. */
+  /**
+   * Slot fills above a slot's max or below its min. `filled` is a slot whose
+   * fills come from `from` at runtime: how many there will be is not known
+   * here (data-spec §10.2), so its bounds are not checked.
+   */
   function checkSlotBounds(
-    word: string, m: Manifest | undefined, children: LinkedWord[], pos: Pos,
+    word: string, m: Manifest | undefined, children: LinkedWord[], pos: Pos, filled: string | null = null,
   ) {
     for (const [slot, def] of Object.entries(m?.slots ?? {})) {
+      if (slot === filled) continue;
       const { min, max } = slotBounds(def);
       const used = children.filter((c) => c.word === slot).length;
       if (max !== undefined && used > max && !countOwned(m, slot, 'max')) {
@@ -762,6 +773,13 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
 
     if (s.word === 'raw' || s.word === 'slot') return escapeHatch(s, parent, parentWord);
 
+    // `from` reached here: the enclosing word's manifest takes none (a word
+    // that does keeps it in the block's own child loop below).
+    if (s.word === 'from' && !manifests.has('from')) {
+      err('AZ1201', `${parentWord ?? 'from'}: takes no 'from' — rows load into ${fromWords(manifests).join(', ')}`, s.pos);
+      return null;
+    }
+
     const m = manifests.get(s.word);
     const structural = STRUCTURE.has(s.word);
 
@@ -805,7 +823,22 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     // A `list` prop keeps every item with its own position, so a bad item is
     // reported where it was written, not at the start of the line.
     const listItems: Record<string, Arg[]> = {};
+    // `from <table>` (data-spec §10), kept as written like `data`: the spec
+    // stage checks it against the tables, which it alone sees.
+    let from: LinkedWord | null = null;
     for (const c of s.children) {
+      if (c.word === 'from' && m?.from) {
+        if (from) err('AZ1504', `${s.word}: 'from' set twice — keep one`, c.pos);
+        else {
+          const raw = (st: Statement): LinkedWord => ({
+            word: st.word, variant: null, modifiers: [], args: st.args, props: {}, as: st.as,
+            children: st.children.map(raw), pos: st.pos,
+          });
+          from = raw(c);
+          children.push(from);
+        }
+        continue;
+      }
       // A child that names a prop of THIS word carries its value.
       if (m?.props && Object.prototype.hasOwnProperty.call(m.props, c.word)) {
         if (c.args.length > 0 && m.props[c.word].type === 'list') {
@@ -826,8 +859,14 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
       if (linked) children.push(linked);
     }
 
+    // ---- data in the block: rows replace the slot's fills (data-spec §10.2)
+    const filled = from && m?.from ? m.from.slot : null;
+    if (filled && children.some((c) => c.word === filled)) {
+      err('AZ1263', `${s.word}: has ${filled}s and 'from' — use one`, from!.pos);
+    }
+
     // ---- slot limits, ARCHITECTURE §4.1 ---------------------------------
-    checkSlotBounds(s.word, m, children, s.pos);
+    checkSlotBounds(s.word, m, children, s.pos, filled);
 
     // ---- requires, ARCHITECTURE §4.1 ------------------------------------
     for (const [trigger, needed] of Object.entries(m?.requires ?? {})) {
@@ -979,6 +1018,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
         children: fills,
         inPage: parentWord === 'page',
         pos: s.pos,
+        filled,
       }, routes, (d) => diagnostics.push(d));
     }
 

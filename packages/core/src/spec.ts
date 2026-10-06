@@ -27,8 +27,9 @@ import type { BackendDatabase, BackendEmail, SpecBackend } from './backend.ts';
 import { buildTables, type SpecTable } from './data.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { SpecBlock } from './spec-block.ts';
-import type { LinkedWord } from './link.ts';
+import { LIST_SEPARATOR, type LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
+import { buildFrom, type FromContext } from './from.ts';
 import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
 
 /**
@@ -130,15 +131,29 @@ function siteScopedProps(kids: LinkedWord[], manifests: Map<string, Manifest>): 
   return out;
 }
 
-function toBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteScoped = new Map()): SpecBlock {
-  const block = buildBlock(w, manifests, site);
+/** Where a page's block sits, for its `from` line: the page's route and the tables. */
+interface OnPage {
+  readonly route: string;
+  readonly data: FromContext;
+}
+
+function toBlock(
+  w: LinkedWord, manifests: Map<string, Manifest>, site: SiteScoped = new Map(), page: OnPage | null = null,
+): SpecBlock {
+  const block = buildBlock(w, manifests, site, page);
   written.set(block, w.pos);
   return block;
 }
 
-function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteScoped): SpecBlock {
+function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteScoped, page: OnPage | null): SpecBlock {
   const m = manifests.get(w.word);
   const props: Record<string, string> = {};
+  // `from <table>` (data-spec §10): link.ts kept it only on a word whose
+  // manifest takes it, as written; it is checked here, against the tables.
+  const fromLine = m?.from ? w.children.find((c) => c.word === 'from') : undefined;
+  const from = fromLine && m?.from && page
+    ? buildFrom(w.word, w.props, fromLine, m.from, page.route, page.data)
+    : null;
 
   for (const [key, arg] of Object.entries(w.props)) props[key] = arg.value;
 
@@ -150,6 +165,9 @@ function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteS
     if (key in props) continue;
     if (spec.default !== undefined) props[key] = String(spec.default);
   }
+
+  // What `from` decides overrides what was written (AZ1265 warned).
+  if (fromLine) Object.assign(props, m?.from?.props ?? {});
 
   // Stable key order — CONVENTIONS §6. Object insertion order is what
   // JSON.stringify emits, so sorting here is what makes the bytes stable.
@@ -167,7 +185,8 @@ function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteS
       .map((a) => ({ kind: a.kind, value: a.value })),
     props: ordered,
     as: w.as,
-    children: w.children.map((c) => toBlock(c, manifests, site)),
+    children: w.children.filter((c) => c !== fromLine).map((c) => toBlock(c, manifests, site)),
+    ...(from ? { from } : {}),
   };
 }
 
@@ -296,10 +315,6 @@ export function buildSpec(
     .map((w) => toBlock(w, manifests));
 
   const site = siteScopedProps(kids, manifests);
-  const pages: SpecPage[] = pageWords.map((p) => ({
-    route: p.args[0]?.value ?? '/',
-    blocks: p.children.map((c) => toBlock(c, manifests, site)),
-  }));
 
   // A word's own first argument is its value: `width wide` -> "wide".
   // Read from `args`, because a structure keyword has no manifest and so no
@@ -341,6 +356,19 @@ export function buildSpec(
       }
     }
   }
+
+  // ---- pages, after the tables: a block's `from` is checked against them -
+  // The auth settings that decide what a signed-out visitor meets: the
+  // routes behind <Protected>, and the page that signs them in (the first
+  // with `auth login`, as the target's auth plan finds it).
+  const protect = new Set((site.get('auth')?.protect ?? '').split(LIST_SEPARATOR).map((r) => r.trim()).filter(Boolean));
+  const login = pageWords.find((p) => p.children.some((c) => c.word === 'auth'
+    && (c.variant ?? manifests.get('auth')?.variants?.[0]) === 'login'))?.args[0]?.value ?? null;
+  const data: FromContext = { tables, protect, login, report: (d) => diagnostics.push(d) };
+  const pages: SpecPage[] = pageWords.map((p) => {
+    const route = p.args[0]?.value ?? '/';
+    return { route, blocks: p.children.map((c) => toBlock(c, manifests, site, { route, data })) };
+  });
 
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');
   const patternWord = themeWord?.children.find((w) => w.word === 'pattern');

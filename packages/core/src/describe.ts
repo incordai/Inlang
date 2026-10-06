@@ -15,6 +15,8 @@ import { BACKEND_SETTINGS } from './backend.ts';
 import {
   ACTION_DESCRIPTIONS, MODIFIER_DESCRIPTIONS, TYPE_DESCRIPTIONS, WHO_DESCRIPTIONS,
 } from './data.ts';
+import { FROM_SETTINGS } from './from.ts';
+import { closest } from './suggest.ts';
 
 /** The owner's limit: short enough for an AI to read every one cheaply. */
 export const DESCRIPTION_MAX = 60;
@@ -120,32 +122,6 @@ export interface Explained {
   readonly unknown: { readonly term: string; readonly suggestion: string | null }[];
 }
 
-/** Levenshtein distance, for a did-you-mean. */
-function distance(a: string, b: string): number {
-  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    let prev = row[0];
-    row[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      const tmp = row[j];
-      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
-      prev = tmp;
-    }
-  }
-  return row[b.length];
-}
-
-function closest(term: string, candidates: Iterable<string>): string | null {
-  let best: string | null = null;
-  let score = Infinity;
-  for (const c of candidates) {
-    const d = distance(term, c);
-    if (d < score) { score = d; best = c; }
-  }
-  // Only a plausible typo is suggested: at most a third of the term changed.
-  return best !== null && score <= Math.max(1, Math.floor(term.length / 3)) ? best : null;
-}
-
 const own = <T>(o: Readonly<Record<string, T>> | undefined, k: string): T | undefined =>
   o && Object.hasOwn(o, k) ? o[k] : undefined;
 
@@ -212,6 +188,7 @@ function membersOf(s: Scope): string[] {
   const d = s.slotDef ?? (m ? { props: m.props, slots: m.slots as Record<string, unknown> | undefined } : undefined);
   return [
     ...(m && !s.slotDef ? [...(m.variants ?? []), ...(m.modifiers ?? []), ...(m.children ?? [])] : []),
+    ...(m?.from && !s.slotDef ? ['from'] : []),
     ...Object.keys(d?.props ?? {}),
     ...Object.keys(d?.slots ?? {}),
     ...Object.keys(s.keyword?.settings ?? {}),
@@ -244,6 +221,16 @@ function resolve(s: Scope, term: string): { line: ExplainedLine; next?: Scope } 
     if (modifier !== undefined) return { line: { term, kind: 'modifier', of: s.name, text: modifier }, next: keep };
     const child = own(m.descriptions?.children, term);
     if (child !== undefined) return { line: { term, kind: 'child', of: s.name, text: child }, next: keep };
+    // `feature from` (data-spec §10): its lines are the mappings the word
+    // declares and the shared settings, explained like a keyword's.
+    if (term === 'from' && m.from) {
+      const settings: Record<string, string> = { ...FROM_SETTINGS };
+      for (const [key, f] of Object.entries(m.from.map)) settings[key] = f.description;
+      return {
+        line: { term, kind: 'child', of: s.name, text: m.from.description },
+        next: { name: `${s.name}.from`, keyword: { description: m.from.description, settings } },
+      };
+    }
   }
 
   const props = s.slotDef ? s.slotDef.props : m?.props;

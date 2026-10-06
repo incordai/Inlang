@@ -68,6 +68,34 @@
       "description": "One question; its label is the question text"
     }
   },
+  "from": {
+    "slot": "item",
+    "description": "Questions load from a data table after the page",
+    "limit": {
+      "default": 6,
+      "max": 12
+    },
+    "map": {
+      "question": {
+        "types": [
+          "text"
+        ],
+        "required": true,
+        "label": true,
+        "description": "The question, from a text field"
+      },
+      "text": {
+        "types": [
+          "longtext"
+        ],
+        "required": true,
+        "description": "The answer, from a longtext field"
+      }
+    },
+    "props": {
+      "schema": "off"
+    }
+  },
   "requires": {},
   "themeReads": [
     "color.surface",
