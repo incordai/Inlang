@@ -20,6 +20,7 @@
 
 import {
   readFileSync, readdirSync, writeFileSync, existsSync, realpathSync, statSync,
+  openSync, fstatSync, readSync, closeSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -125,6 +126,30 @@ function readProjectText(projectDir: string, path: string): string | null {
   throw new PathEscapeError(found.problems[0]);
 }
 
+/** How much of an image is read for its size: past any EXIF, ICC or XMP a header carries. */
+const IMAGE_HEAD_BYTES = 1024 * 1024;
+
+/**
+ * The start of a project file, for the target to read an image's size from
+ * its header (gallery-spec §7) — the same sandbox as readProjectText, and
+ * never more than IMAGE_HEAD_BYTES, however large the file.
+ */
+function readProjectHead(projectDir: string, path: string): Uint8Array | null {
+  const found = locateAssets(projectDir, [path]);
+  if (found.sources.length === 1) {
+    const fd = openSync(found.sources[0], 'r');
+    try {
+      const head = Buffer.alloc(Math.min(IMAGE_HEAD_BYTES, fstatSync(fd).size));
+      const n = readSync(fd, head, 0, head.length, 0);
+      return head.subarray(0, n);
+    } finally {
+      closeSync(fd);
+    }
+  }
+  if (!existsSync(resolve(realpathSync(projectDir), path))) return null;
+  throw new PathEscapeError(found.problems[0]);
+}
+
 /**
  * The words one build compiles with: the set, plus the project's own. With
  * `code: false` the project's emitters are not loaded — manifests only, for a
@@ -154,6 +179,7 @@ export function build(options: BuildOptions): BuildOutcome {
     project = emitProject(result.spec, {
       emitters: words.emitters,
       readText: (path) => readProjectText(projectDir, path),
+      readBytes: (path) => readProjectHead(projectDir, path),
     });
   } catch (e) {
     if (e instanceof PathEscapeError || e instanceof SvgError || e instanceof MarkdownError) {

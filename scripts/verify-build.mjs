@@ -388,6 +388,27 @@ try {
     check(`asset shipped: dist/${a}`, existsSync(join(proj, 'dist', a)));
     check(`asset linked from the site root: /${a}`, html.includes(`src="/${a}"`));
   }
+  // gallery-spec §7 rule 1: every image the build copied ships with its
+  // file's width and height, so the browser reserves its box (CLS 0).
+  {
+    const attr = (tag, name) => new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1];
+    const imgs = [...html.matchAll(/<img\b[^>]*>/g)].map((m) => m[0])
+      .filter((t) => attr(t, 'src')?.startsWith('/assets/'));
+    const unsized = imgs.filter((t) => !/^[1-9]\d*$/.test(attr(t, 'width') ?? '') || !/^[1-9]\d*$/.test(attr(t, 'height') ?? ''));
+    check('§7 rule 1: every shipped <img> of a project file carries width and height',
+      imgs.length >= 7 && unsized.length === 0,
+      `${imgs.length} imgs; unsized: ${unsized.map((t) => attr(t, 'src')).join(' ')}`);
+    const logo = imgs.find((t) => attr(t, 'src') === '/assets/logo.svg') ?? '';
+    check('§7 rule 1: the size is the file\'s own — logo.svg is 96×32',
+      attr(logo, 'width') === '96' && attr(logo, 'height') === '32', logo);
+    // A logo's CSS fixes its height only; width:auto keeps the attribute
+    // from drawing it at its file's width (image-dims.ts).
+    const logoClass = /\baz-s-[0-9a-z]+/.exec(logo)?.[0] ?? 'none';
+    const logoRule = new RegExp(`^\\.${logoClass} \\{ ([^}]*) \\}`, 'm')
+      .exec(readFileSync(join(proj, 'src/az.css'), 'utf8'))?.[1] ?? '';
+    check('§7 rule 1: a height-only logo gets width:auto, so the attribute cannot stretch it',
+      /(^|; )width: auto(;|$)/.test(logoRule), logoRule);
+  }
 
   /* ---- structure: every <li> is inside a list --------------------------- */
   // Slot fills render as <li>; a container that is not a list makes invalid

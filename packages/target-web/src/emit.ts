@@ -44,6 +44,7 @@ import { DATA_DIR, dataClient } from './data-client.ts';
 import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminValuesTs } from './data-admin.ts';
 import { ROWS_FILE, fromTables, rowsTsx } from './data-rows.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
+import { imageSizes, sizeImages } from './image-dims.ts';
 
 /**
  * Where the author's `raw` / `slot` modules go in the generated project.
@@ -507,6 +508,13 @@ export interface EmitOptions {
    * shows the file as an <img>. Null means the file does not exist.
    */
   readonly readText?: (projectPath: string) => string | null;
+  /**
+   * Reads the start of a project file as bytes, through the same sandbox —
+   * enough for an image's header. Given it, every <img> the build ships gets
+   * its file's width and height (gallery-spec §7 rule 1); without it the
+   * attributes are left off. Null means the file does not exist.
+   */
+  readonly readBytes?: (projectPath: string) => Uint8Array | null;
 }
 
 /**
@@ -820,9 +828,12 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   const pattern = sitePattern(spec, named);
   const theme = themeFor(named, spec.site.fonts, pattern !== null);
   const used = new Set<string>();
+  // Each URL the sandbox handed out → its project path, for sizing images.
+  const srcs = new Map<string, string>();
   const asset = (raw: string): string => {
     const path = safeAssetPath(raw);
     used.add(path);
+    srcs.set(`/${path}`, path);
     return `/${path}`;
   };
   const modules = new Set<string>();
@@ -872,7 +883,13 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   // inline styles, which is what lets `below` and `states` exist at all.
   // Ids and radio groups unique per page: words name them from their own
   // content, so two blocks of a kind on one page collided (ids.ts).
-  const unique = seeded.pages.map((p) => ({ ...p, nodes: uniqueIds(p.nodes) }));
+  // gallery-spec §7 rule 1: each image's size from its header, so the page
+  // reserves the box before the file arrives. One read per file.
+  const sizeOf = imageSizes(options.readBytes, srcs, warnings);
+  const unique = seeded.pages.map((p) => ({
+    ...p,
+    nodes: uniqueIds(sizeOf ? p.nodes.map((n) => sizeImages(n, sizeOf)) : p.nodes),
+  }));
   const styled = compileStyles(
     unique,
     (ps, rewrite) => ps.map((p) => ({ ...p, nodes: p.nodes.map(rewrite) })),
