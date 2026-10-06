@@ -55,7 +55,7 @@ test('feature: the shell carries the checked query, the skeleton sized from limi
     table: 'notes', label: 'title', query: { limit: 4, sort: '-created' },
     map: { text: 'body', title: 'title' }, types: { text: 'longtext', title: 'text' }, empty: 'No notes yet',
   });
-  assert.equal(host.attrs!['aria-busy'], 'true');
+  assert.equal(has(host, 'aria-busy'), false, 'never busy as shipped: with JavaScript off it would stay busy; the runtime sets it');
   assert.equal(host.attrs!['data-az-from-state'], 'loading');
   const skeleton = part(out, 'data-az-from-skeleton')!;
   assert.equal(skeleton.attrs!['aria-hidden'], 'true');

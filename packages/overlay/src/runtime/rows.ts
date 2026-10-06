@@ -268,6 +268,7 @@ export function attachRows(doc: Document, sources: Readonly<Record<string, RowSo
     // Back to the shell as it shipped, so attaching again loads again.
     for (const [host, { shell }] of wired) {
       show(shell, 'loading');
+      host.removeAttribute('aria-busy');
       host.removeAttribute('tabindex');
     }
     wired.clear();

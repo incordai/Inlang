@@ -379,7 +379,9 @@ export function fromFill(from: SpecFrom): SpecBlock {
  * The pre-rendered shell of a `from` block (data-spec §10.3). The build has
  * no rows and never calls a network, so the page holds:
  *
- *   div.az-from[data-az-from=<config>][aria-busy][data-az-from-state]
+ *   div.az-from[data-az-from=<config>][data-az-from-state] — no aria-busy:
+ *     the runtime sets it while it loads; with JavaScript off nothing ever
+ *     loads, and a block busy forever would be skipped by a screen reader
  *     <list>[aria-hidden] > `skeleton` × limit — the word's own list, sized
  *       like the rows, so they replace it without moving the page much
  *     div[data-az-from-rows] — empty; the runtime puts the filled list here
@@ -418,7 +420,7 @@ export function fromShell(from: SpecFrom, list: EmittedNode, skeleton: EmittedNo
     : null;
   return {
     tag: 'div',
-    attrs: { class: 'az-from', 'data-az-from': config, 'data-az-from-state': 'loading', 'aria-busy': 'true' },
+    attrs: { class: 'az-from', 'data-az-from': config, 'data-az-from-state': 'loading' },
     children: [
       {
         ...list,
