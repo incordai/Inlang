@@ -212,8 +212,8 @@ export async function dataSuite(engine, db, openAgain, check, info) {
   const cancelled = await db.allWithin(heavy, [], 200).then(() => null, (e) => e);
   const took = Date.now() - started;
   check(`${engine} DEADLINE: a read past its deadline is cancelled by the database`, cancelled instanceof QueryTimeout && took < 5_000, `${cancelled?.name ?? 'finished'} after ${took} ms`);
-  const after = await db.allWithin('SELECT 1 AS n', [], 2_000);
-  check(`${engine} DEADLINE: CONTROL — the next read on the pool answers`, Number(after[0]?.n) === 1, JSON.stringify(after));
+  const control = await db.allWithin('SELECT 1 AS n', [], 2_000);
+  check(`${engine} DEADLINE: CONTROL — the next read on the pool answers`, Number(control[0]?.n) === 1, JSON.stringify(control));
 
   // ---- the admin routes (data-spec §11), on this engine -----------------
   const boss = randomUUID();
