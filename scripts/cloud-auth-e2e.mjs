@@ -27,6 +27,7 @@ import { dirname, extname, join, normalize, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 
 const readFile = promisify(readFileCb);
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -47,18 +48,32 @@ const READY_TIMEOUT_MS = 120_000;
 const START_ATTEMPTS = 3;
 const MAIL_TIMEOUT_MS = 20_000;
 const PASSWORD = 'a-long-enough-password';
+/*
+ * Deadlines: a docker command (an image pull the slowest), a build step, a
+ * quick probe, a close — and the whole run, past which the watchdog names the
+ * last check that finished, removes the containers and ends the process.
+ */
+const DOCKER_MS = 10 * 60_000;
+const BUILD_MS = 10 * 60_000;
+const PROBE_MS = 30_000;
+const CLOSE_MS = 15_000;
+const RUN_MS = 30 * 60_000;
+const progress = { last: 'starting' };
+const deadline = watchdog(RUN_MS, 'cloud-auth', progress);
+console.log(`deadlines: docker ${human(DOCKER_MS)} · build ${human(BUILD_MS)} · run ${human(RUN_MS)}`);
 
 const DOCKER = ['docker', '/Applications/Docker.app/Contents/Resources/bin/docker', '/usr/local/bin/docker']
-  .find((d) => spawnSync(d, ['info'], { stdio: 'ignore' }).status === 0);
+  .find((d) => spawnSync(d, ['info'], { stdio: 'ignore', timeout: PROBE_MS }).status === 0);
 if (!DOCKER) {
   console.error('cloud-auth: Docker is not available — start it, or run this where it is');
   process.exit(2);
 }
-const docker = (...args) => execFileSync(DOCKER, args, { encoding: 'utf8' }).trim();
+const docker = (...args) => execFileSync(DOCKER, args, { encoding: 'utf8', timeout: DOCKER_MS, killSignal: 'SIGKILL' }).trim();
 
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
+  progress.last = name;
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? `   ${detail}` : ''}`);
 };
 
@@ -204,8 +219,14 @@ const secret = randomBytes(32).toString('hex');
 const dbPassword = randomBytes(12).toString('hex');
 const network = `az-cloud-auth-${randomBytes(4).toString('hex')}`;
 const containers = [];
+let closed = true;
 const cleanups = [];
 const work = mkdtempSync(join(tmpdir(), 'az-cloud-auth-'));
+// At the run deadline: the containers and network, as the finally below.
+progress.cleanup = () => {
+  for (const id of [...containers].reverse()) { try { docker('rm', '-f', id); } catch { /* already gone */ } }
+  try { docker('network', 'rm', network); } catch { /* never created */ }
+};
 
 try {
   const smtp = await startSmtpCapture();
@@ -231,7 +252,7 @@ try {
     '-v', `${join(work, 'init.sql')}:/docker-entrypoint-initdb.d/init.sql:ro`, SERVER.database.image);
   containers.push(db);
   await until(async () => {
-    const r = spawnSync(DOCKER, ['exec', db, 'pg_isready', '-U', 'postgres'], { stdio: 'ignore' });
+    const r = spawnSync(DOCKER, ['exec', db, 'pg_isready', '-U', 'postgres'], { stdio: 'ignore', timeout: PROBE_MS });
     if (r.status !== 0) throw new Error('pg_isready');
   }, 'postgres');
 
@@ -252,11 +273,12 @@ try {
   // Compile and build the site with the PUBLIC values only.
   writeFileSync(join(work, 'site.az'), SITE);
   const env = { ...process.env, AZ_WORDS: join(ROOT, 'packages/words'), AZ_PUBLIC_AUTH_URL: authUrl, AZ_PUBLIC_AUTH_KEY: anon };
-  execFileSync(process.execPath, [CLI, 'build', join(work, 'site.az'), '--out', join(work, 'proj')], { env, stdio: 'pipe' });
+  const bounded = { timeout: BUILD_MS, killSignal: 'SIGKILL' };
+  execFileSync(process.execPath, [CLI, 'build', join(work, 'site.az'), '--out', join(work, 'proj')], { env, stdio: 'pipe', ...bounded });
   const npmCli = [join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), join(dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js')]
     .find((c) => existsSync(c));
-  execFileSync(process.execPath, [npmCli, 'install', '--no-audit', '--no-fund'], { cwd: join(work, 'proj'), env, stdio: 'pipe' });
-  execFileSync(process.execPath, [join(work, 'proj/node_modules/vite/bin/vite.js'), 'build', '--logLevel', 'error'], { cwd: join(work, 'proj'), env, stdio: 'pipe' });
+  execFileSync(process.execPath, [npmCli, 'install', '--no-audit', '--no-fund'], { cwd: join(work, 'proj'), env, stdio: 'pipe', ...bounded });
+  execFileSync(process.execPath, [join(work, 'proj/node_modules/vite/bin/vite.js'), 'build', '--logLevel', 'error'], { cwd: join(work, 'proj'), env, stdio: 'pipe', ...bounded });
   const site = await startSite(join(work, 'proj/dist'), sitePort);
   cleanups.push(() => site.close());
 
@@ -277,7 +299,7 @@ try {
   }
 
   const browser = await chromium.launch();
-  cleanups.unshift(() => browser.close());
+  cleanups.unshift(async () => { closed = await closeWithin(browser, CLOSE_MS, 'chromium.close'); });
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -380,3 +402,7 @@ try {
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exitCode = failures === 0 ? 0 : 1;
+deadline.clear();
+// A browser that would not close is still running: ending the process is
+// what kills it (Playwright kills what it launched on exit).
+if (!closed) process.exit();

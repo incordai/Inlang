@@ -27,6 +27,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { watchdog, human } from './lib/bounded.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 /** PRD §9: "Bundle, non-3D pages < 150KB gz". */
@@ -66,12 +67,26 @@ if (!NPM_CLI) {
  */
 const PUBLIC_AUTH = { AZ_PUBLIC_AUTH_URL: 'https://auth.invalid', AZ_PUBLIC_AUTH_KEY: '<PLACEHOLDER>' };
 
+/*
+ * Deadlines: every child is killed past COMMAND_MS (the slowest, an npm
+ * install, takes about a minute), and the whole run past RUN_MS — the
+ * watchdog names the last check that finished.
+ */
+const COMMAND_MS = 10 * 60_000;
+const RUN_MS = 15 * 60_000;
+const progress = { last: 'starting' };
+const deadline = watchdog(RUN_MS, 'verify:build', progress);
+console.log(`deadlines: command ${human(COMMAND_MS)} · run ${human(RUN_MS)}`);
+/** A child stopped at its deadline: never read as an expected failure. */
+const stopped = (e) => e.code === 'ETIMEDOUT' || Boolean(e.signal);
+
 const run = (file, args, cwd, env = {}) =>
   execFileSync(file, args, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH, ...env },
+    timeout: COMMAND_MS, killSignal: 'SIGKILL',
   });
 
 /** A command that must FAIL: its combined output, or null if it succeeded. */
@@ -80,6 +95,7 @@ const failing = (file, args, cwd, env = {}) => {
     run(file, args, cwd, env);
     return null;
   } catch (e) {
+    if (stopped(e)) throw e;
     return `${e.stdout ?? ''}${e.stderr ?? ''}`;
   }
 };
@@ -93,7 +109,9 @@ function shippedBuild(proj, env = {}) {
   const r = spawnSync(process.execPath, [join(proj, 'az-vite/build.mjs')], {
     cwd: proj, encoding: 'utf8',
     env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH, AZ_BUILD_LOG: 'error', ...env },
+    timeout: COMMAND_MS, killSignal: 'SIGKILL',
   });
+  if (r.error || r.signal) throw new Error(`the project build was stopped: ${r.error?.message ?? r.signal}`);
   if (r.status !== 0) throw new Error(`the project build failed:\n${r.stderr}`);
   return r.stderr;
 }
@@ -133,6 +151,7 @@ const vite = (args, cwd) => node(join(cwd, 'node_modules/vite/bin/vite.js'), arg
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
+  progress.last = name;
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? '   ' + detail : ''}`);
 };
 
@@ -599,3 +618,4 @@ try {
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exitCode = failures === 0 ? 0 : 1;
+deadline.clear();

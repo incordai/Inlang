@@ -33,12 +33,28 @@ import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
-import { CLI, ROOT, WORDS, buildSites } from './visual/pipeline.mjs';
+import { CLI, COMPILE_MS, ROOT, WORDS, buildSites } from './visual/pipeline.mjs';
 import { metadataFindings, phoneJpeg, plainJpeg, SVG } from '../packages/backend/test/image-fixtures.ts';
+import { closeWithin, watchdog, human } from './lib/bounded.mjs';
+
+/*
+ * Deadlines (lib/bounded.mjs): page.evaluate and close() have no timeout of
+ * their own. A normal run takes under a minute. Past RUN_MS (15× that) the
+ * run is stuck: the watchdog names the last check that finished, stops what
+ * this run started, and ends the process (which kills the browsers). Each
+ * close is bounded on its own.
+ */
+const RUN_MS = 15 * 60_000;
+const CLOSE_MS = 15_000;
+const progress = { last: 'starting' };
+const run = watchdog(RUN_MS, 'test:data', progress);
+console.log(`deadlines: run ${human(RUN_MS)} · close ${human(CLOSE_MS)}`);
+let closed = true;
 
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
+  progress.last = name;
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? `   ${detail}` : ''}`);
 };
 
@@ -249,7 +265,9 @@ const site = { dir: join(work, 'notebook'), source: SITE };
 mkdirSync(join(site.dir, 'custom'), { recursive: true });
 writeFileSync(join(site.dir, 'site.az'), SITE);
 writeFileSync(join(site.dir, 'custom/Notes.tsx'), NOTES_COMPONENT);
-execFileSync(process.execPath, [CLI, 'backend', 'schema', join(site.dir, 'site.az')], { env: { ...process.env, AZ_WORDS: WORDS }, encoding: 'utf8' });
+execFileSync(process.execPath, [CLI, 'backend', 'schema', join(site.dir, 'site.az')], {
+  env: { ...process.env, AZ_WORDS: WORDS }, encoding: 'utf8', timeout: COMPILE_MS, killSignal: 'SIGKILL',
+});
 await buildSites([site], work);
 check('the data site compiles and builds with its lock', Boolean(site.compiled && site.dist), site.error ?? '');
 if (!site.dist) {
@@ -288,6 +306,7 @@ const child = spawn(process.execPath, ['src/main.ts'], {
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
+progress.cleanup = () => child.kill('SIGTERM');
 let serverLog = '';
 child.stdout.on('data', (c) => { serverLog += c; });
 child.stderr.on('data', (c) => { serverLog += c; });
@@ -576,7 +595,7 @@ async function adminFlow(b, name, owner) {
     const direct = await other.evaluate(async (base) => (await fetch(`${base}/admin/data/notes`, { credentials: 'include' })).status, serverUrl);
     check(`${name}: ${who} sees the refusal; the server answers it 403`, direct === 403, String(direct));
   }
-  await ctx.close();
+  closed = (await closeWithin(ctx, CLOSE_MS, `${name} context.close`)) && closed;
 }
 
 /* ---- from <table> in blocks (data-spec §10, D4) -------------------------- */
@@ -738,7 +757,7 @@ async function fromSignedOut(b, name) {
     mine.state === 'signin' && mine.status === 'Sign in to see your notes' && mine.signin === '/login', JSON.stringify(mine));
   const signinAxe = await axeViolations(page);
   check(`${name} from: axe finds nothing in the sign-in state`, signinAxe.length === 0, signinAxe.join(', '));
-  await ctx.close();
+  closed = (await closeWithin(ctx, CLOSE_MS, `${name} from context.close`)) && closed;
 }
 
 /**
@@ -832,7 +851,7 @@ try {
       await imageFlow(name, owner, other);
       await adminFlow(b, name, owner);
     } finally {
-      await b.close();
+      closed = (await closeWithin(b, CLOSE_MS, `${name}.close`)) && closed;
     }
   }
   check('no page errors in any browser', errors.length === 0, errors.slice(0, 2).join(' | '));
@@ -847,3 +866,7 @@ try {
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED — work dir kept: ${work}`);
 if (failures === 0) rmSync(work, { recursive: true, force: true });
 process.exitCode = failures === 0 ? 0 : 1;
+run.clear();
+// A browser that would not close is still running: ending the process is
+// what kills it (Playwright kills what it launched on exit).
+if (!closed) process.exit();

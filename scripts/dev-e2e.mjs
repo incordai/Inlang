@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
+import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const CLI = join(ROOT, 'packages/cli/bin/az.js');
@@ -31,10 +32,28 @@ const WORDS = join(ROOT, 'packages/words');
 const READY_TIMEOUT_MS = 180_000;
 const STEP_TIMEOUT_MS = 20_000;
 const EXIT_TIMEOUT_MS = 15_000;
+/** A production `az build`, and a quick local command (pgrep, grep). */
+const BUILD_TIMEOUT_MS = 2 * 60_000;
+const COMMAND_TIMEOUT_MS = 30_000;
+
+/*
+ * Deadlines (lib/bounded.mjs): page.evaluate and close() have no timeout of
+ * their own. A normal run takes under a minute (READY_TIMEOUT_MS covers a
+ * first npm install). Past RUN_MS (15× that) the run is stuck: the watchdog
+ * names the last check that finished, stops what this run started, and ends
+ * the process (which kills the browsers). Each close is bounded on its own.
+ */
+const RUN_MS = 15 * 60_000;
+const CLOSE_MS = 15_000;
+const progress = { last: 'starting' };
+const run = watchdog(RUN_MS, 'test:dev', progress);
+console.log(`deadlines: run ${human(RUN_MS)} · close ${human(CLOSE_MS)}`);
+let closed = true;
 
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
+  progress.last = name;
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? `   ${detail}` : ''}`);
 };
 
@@ -87,7 +106,7 @@ const freePort = () => new Promise((done) => {
 const portOpen = (port) => fetch(`http://127.0.0.1:${port}/`).then(() => true, () => false);
 /** Direct children of a process (macOS and Linux both have pgrep -P). */
 const childrenOf = (pid) => {
-  const r = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' });
+  const r = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS });
   return r.stdout.split('\n').filter(Boolean).map(Number);
 };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -103,6 +122,8 @@ const az = spawn(process.execPath, [CLI, 'dev', source, '--out', join(dir, '.az-
   env: { ...process.env, AZ_WORDS: WORDS },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
+// Ctrl-C is how az dev shuts down with its own children.
+progress.cleanup = () => az.kill('SIGINT');
 az.stdout.setEncoding('utf8');
 az.stderr.setEncoding('utf8');
 az.stdout.on('data', (c) => { out += c; });
@@ -199,7 +220,7 @@ try {
     } catch (e) {
       check(`${name}: signs in over http://127.0.0.1 and reaches the protected page`, false, e.message.split('\n')[0]);
     } finally {
-      await p.close();
+      closed = (await closeWithin(p, CLOSE_MS, `${name} page.close`)) && closed;
     }
   };
   await signIn(chromium, 'chromium');
@@ -221,7 +242,7 @@ try {
 } catch (e) {
   check('the browser run completed', false, e.message.split('\n')[0]);
 } finally {
-  await Promise.all(browsers.map((b) => b.close()));
+  closed = (await Promise.all(browsers.map((b) => closeWithin(b, CLOSE_MS, `${b.browserType().name()}.close`)))).every(Boolean) && closed;
 }
 
 /* the dev profile never reaches a production build */
@@ -229,9 +250,10 @@ try {
   const prod = join(dir, 'prod');
   execFileSync(process.execPath, [CLI, 'build', source, '--out', prod], {
     cwd: dir, env: { ...process.env, AZ_WORDS: WORDS, AZ_PUBLIC_BACKEND_URL: 'https://api.example.org' }, stdio: 'ignore',
+    timeout: BUILD_TIMEOUT_MS, killSignal: 'SIGKILL',
   });
   // Code markers only: the server README may point at `az dev` in prose.
-  const grep = spawnSync('grep', ['-rlE', 'startMailbox|startDevBackend|withoutSecure|messages\\.json|az dev mailbox', prod], { encoding: 'utf8' });
+  const grep = spawnSync('grep', ['-rlE', 'startMailbox|startDevBackend|withoutSecure|messages\\.json|az dev mailbox', prod], { encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS });
   check('a production az build carries no dev mailbox or dev profile', grep.stdout.trim() === '', grep.stdout.trim());
 }
 
@@ -256,3 +278,7 @@ if (failures === 0) rmSync(dir, { recursive: true, force: true });
 else console.log(`\nwork dir kept: ${dir}\n--- az dev output ---\n${out.slice(-1500)}`);
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exitCode = failures === 0 ? 0 : 1;
+run.clear();
+// A browser that would not close is still running: ending the process is
+// what kills it (Playwright kills what it launched on exit).
+if (!closed) process.exit();

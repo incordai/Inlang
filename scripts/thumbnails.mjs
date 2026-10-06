@@ -26,6 +26,7 @@ import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
 import { ROOT, WORDS, buildSites, firstRoute } from './visual/pipeline.mjs';
 import { startServer } from './visual/serve.mjs';
+import { Overdue, within, closeWithin, watchdog, human } from './lib/bounded.mjs';
 
 const OUT = join(ROOT, '.thumbnails');
 const VIEWPORT = { width: 1200, height: 750 };
@@ -65,51 +66,82 @@ function targets(words) {
   });
 }
 
-/** Build every target once and screenshot each; returns { key: Buffer }. */
-async function render(list, work) {
+/*
+ * Deadlines (lib/bounded.mjs): page.evaluate has no timeout of its own. One
+ * target (open, scroll, wait for images, screenshot) takes about a second;
+ * a target past TARGET_MS is a FAIL naming it. The whole run's backstop
+ * covers each pass's build (its children are bounded in pipeline.mjs) and
+ * every target with wide margin.
+ */
+const TARGET_MS = 60_000;
+const CLOSE_MS = 15_000;
+const PASS_BASE_MS = 30 * 60_000;
+const PER_TARGET_MS = 30_000;
+
+/** One target in its own context: the word's block at the top of the frame, then a screenshot (null when the block is missing). */
+async function shoot(ctx, s, server) {
+  const page = await ctx.newPage();
+  await page.goto(new URL(firstRoute(s.source), server.url).href, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+  // A whole class token, so `az-nav` does not match `az-nav-logo`.
+  const found = await page.evaluate((cls) => {
+    const el = [...document.querySelectorAll('[class]')].find((e) => e.classList.contains(cls));
+    if (!el) return false;
+    window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY);
+    return true;
+  }, `az-${s.word}`);
+  if (!found) return null;
+  // Scrolling starts lazy images that were below the fold; a shot taken
+  // before they finish differs run to run. Wait for fonts and for every
+  // image in the frame (only those — a lazy image outside it never loads).
+  await page.evaluate(async (h) => {
+    await document.fonts.ready;
+    const inFrame = [...document.images].filter((img) => {
+      const r = img.getBoundingClientRect();
+      return r.bottom > 0 && r.top < h;
+    });
+    await Promise.all(inFrame.map((img) => img.decode().catch(() => undefined)));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  }, VIEWPORT.height);
+  return page.screenshot({ animations: 'disabled', caret: 'hide', timeout: NAV_TIMEOUT_MS });
+}
+
+/**
+ * Build every target once and screenshot each; returns { key: Buffer }.
+ * `closed` is false when a context or the browser would not close.
+ */
+async function render(list, work, progress = {}) {
   const sites = list.map((t) => ({ ...t, dir: join(work, `${t.word}-${t.variant}`) }));
   await buildSites(sites, work);
   const shots = {};
   const failures = [];
+  let closed = true;
   const server = await startServer();
-  const browser = await chromium.launch();
+  const browser = await within(TARGET_MS, 'chromium.launch', () => chromium.launch());
   try {
     for (const s of sites) {
       const key = `${s.word}/${s.variant}`;
       if (!s.compiled) { failures.push(`${key}: does not compile — ${s.error}`); continue; }
       server.serve(s.dist);
-      const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, colorScheme: 'light', reducedMotion: 'reduce' });
-      const page = await ctx.newPage();
-      await page.goto(new URL(firstRoute(s.source), server.url).href, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
-      // The word's block at the top of the frame: a whole class token, so
-      // `az-nav` does not match `az-nav-logo`.
-      const found = await page.evaluate((cls) => {
-        const el = [...document.querySelectorAll('[class]')].find((e) => e.classList.contains(cls));
-        if (!el) return false;
-        window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY);
-        return true;
-      }, `az-${s.word}`);
-      if (!found) { failures.push(`${key}: no .az-${s.word} element on the page`); await ctx.close(); continue; }
-      // Scrolling starts lazy images that were below the fold; a shot taken
-      // before they finish differs run to run. Wait for fonts and for every
-      // image in the frame (only those — a lazy image outside it never loads).
-      await page.evaluate(async (h) => {
-        await document.fonts.ready;
-        const inFrame = [...document.images].filter((img) => {
-          const r = img.getBoundingClientRect();
-          return r.bottom > 0 && r.top < h;
+      let ctx;
+      try {
+        const shot = await within(TARGET_MS, `thumbnail ${key}`, async () => {
+          ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, colorScheme: 'light', reducedMotion: 'reduce' });
+          return shoot(ctx, s, server);
         });
-        await Promise.all(inFrame.map((img) => img.decode().catch(() => undefined)));
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      }, VIEWPORT.height);
-      shots[key] = await page.screenshot({ animations: 'disabled', caret: 'hide', timeout: NAV_TIMEOUT_MS });
-      await ctx.close();
+        if (shot) shots[key] = shot;
+        else failures.push(`${key}: no .az-${s.word} element on the page`);
+      } catch (e) {
+        if (!(e instanceof Overdue)) throw e;
+        failures.push(`${key}: ${e.message}`);
+      }
+      if (ctx) closed = (await closeWithin(ctx, CLOSE_MS, `context.close ${key}`)) && closed;
+      progress.last = `thumbnail ${key}`;
     }
   } finally {
-    await browser.close();
-    await server.close();
+    closed = (await closeWithin(browser, CLOSE_MS, 'chromium.close')) && closed;
+    closed = (await closeWithin(server, CLOSE_MS, 'server.close')) && closed;
   }
-  return { shots, failures };
+  return { shots, failures, closed };
 }
 
 async function main(argv) {
@@ -122,11 +154,19 @@ async function main(argv) {
   const list = targets(words);
 
   const started = performance.now();
+  const passes = verify ? 2 : 1;
+  const runMs = passes * (PASS_BASE_MS + list.length * PER_TARGET_MS);
+  const progress = { last: 'building' };
+  const run = watchdog(runMs, 'thumbnails', progress);
+  console.log(`deadlines: target ${human(TARGET_MS)} · run ${human(runMs)} (${list.length} targets × ${passes})`);
   const work = mkdtempSync(join(tmpdir(), 'az-thumbs-'));
-  const first = await render(list, join(work, 'a'));
+  const first = await render(list, join(work, 'a'), progress);
   const failures = [...first.failures];
+  let closed = first.closed;
   if (verify) {
-    const second = await render(list, join(work, 'b'));
+    progress.last = 'building the second pass';
+    const second = await render(list, join(work, 'b'), progress);
+    closed = closed && second.closed;
     for (const key of Object.keys(first.shots)) {
       if (!second.shots[key]?.equals(first.shots[key])) failures.push(`${key}: two renders of one source differ`);
     }
@@ -147,6 +187,10 @@ async function main(argv) {
   for (const f of failures) console.log(`  FAIL ${f}`);
   console.log(`${Object.keys(first.shots).length}/${list.length} thumbnails${verify ? ', each rendered twice' : ''} in ${seconds}s — .thumbnails/`);
   console.log(failures.length === 0 ? 'THUMBNAILS OK' : `${failures.length} THUMBNAIL(S) FAILED`);
+  run.clear();
+  // A browser that would not close is still running: ending the process is
+  // what kills it (Playwright kills what it launched on exit).
+  if (!closed) process.exit(failures.length === 0 ? 0 : 1);
   return failures.length === 0 ? 0 : 1;
 }
 

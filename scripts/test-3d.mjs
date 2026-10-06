@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, buildSites } from './visual/pipeline.mjs';
 import { startServer } from './visual/serve.mjs';
+import { Overdue, within, closeWithin, watchdog, human } from './lib/bounded.mjs';
 
 /** Bound on every wait for the runtime to reach a state. */
 const WAIT_MS = 15_000;
@@ -188,9 +189,23 @@ page /account
       text "Yes, in the studio."
 `;
 
+/*
+ * Deadlines (lib/bounded.mjs): page.evaluate has no timeout of its own. The
+ * run takes two to three minutes; past RUN_MS it is stuck, and the watchdog
+ * names the last check that finished and ends the process (which kills the
+ * browsers). Each other engine's pass and each close is bounded on its own.
+ */
+const RUN_MS = 15 * 60_000;
+const ENGINE_MS = 60_000;
+const CLOSE_MS = 15_000;
+const progress = { last: 'building' };
+const run = watchdog(RUN_MS, 'test:3d', progress);
+console.log(`deadlines: run ${human(RUN_MS)} · other engine ${human(ENGINE_MS)} · close ${human(CLOSE_MS)}`);
+
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
+  progress.last = name;
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? '   ' + detail : ''}`);
 };
 
@@ -648,29 +663,43 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
   await context.close();
 }
 
-await browser.close();
+let closed = await closeWithin(browser, CLOSE_MS, 'chromium.close');
 
 /* ---- the other engines: the page never breaks ------------------------------ */
 for (const [name, engine] of [['firefox', firefox], ['webkit', webkit]]) {
-  const other = await engine.launch();
-  server.serve(procedural.dist);
-  const page = await other.newPage({ viewport: { width: 1440, height: 900 } });
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(new URL('/?az-probe=off', server.url).href, { waitUntil: 'load' });
-  await page.waitForTimeout(SETTLE_MS * 2);
-  const state = await page.evaluate(() => ({
-    rung: document.documentElement.getAttribute('data-az3d-rung'),
-    live: document.querySelectorAll('[data-live="true"]').length,
-  }));
-  // With WebGL the hero goes live; without it the page stays on its posters.
-  // Either is correct — a page error is not.
-  check(`${name} ${other.version()}: renders live or falls back, with no page errors`,
-    errors.length === 0, `rung ${state.rung ?? 'none (poster)'}, ${state.live} live parts${errors[0] ? `; ${errors[0]}` : ''}`);
-  await other.close();
+  let other;
+  try {
+    await within(ENGINE_MS, `${name}: the procedural page`, async () => {
+      other = await engine.launch();
+      server.serve(procedural.dist);
+      const page = await other.newPage({ viewport: { width: 1440, height: 900 } });
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(new URL('/?az-probe=off', server.url).href, { waitUntil: 'load' });
+      await page.waitForTimeout(SETTLE_MS * 2);
+      const state = await page.evaluate(() => ({
+        rung: document.documentElement.getAttribute('data-az3d-rung'),
+        live: document.querySelectorAll('[data-live="true"]').length,
+      }));
+      // With WebGL the hero goes live; without it the page stays on its posters.
+      // Either is correct — a page error is not.
+      check(`${name} ${other.version()}: renders live or falls back, with no page errors`,
+        errors.length === 0, `rung ${state.rung ?? 'none (poster)'}, ${state.live} live parts${errors[0] ? `; ${errors[0]}` : ''}`);
+    });
+  } catch (e) {
+    if (!(e instanceof Overdue)) throw e;
+    check(`${name}: renders live or falls back, with no page errors`, false, e.message);
+    // The abandoned work may still be launching a browser this loop never sees.
+    closed = false;
+  }
+  if (other) closed = (await closeWithin(other, CLOSE_MS, `${name}.close`)) && closed;
 }
 
-await server.close();
+closed = (await closeWithin(server, CLOSE_MS, 'server.close')) && closed;
+run.clear();
 if (failures === 0) rmSync(work, { recursive: true, force: true });
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED — work dir kept: ${work}`);
 process.exitCode = failures === 0 ? 0 : 1;
+// A browser that would not close is still running: ending the process is
+// what kills it (Playwright kills what it launched on exit).
+if (!closed) process.exit();

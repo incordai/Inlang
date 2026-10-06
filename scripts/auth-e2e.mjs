@@ -23,15 +23,31 @@ import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
 import { ROOT as ROOT_DIR, buildSites } from './visual/pipeline.mjs';
+import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 
 const PUBLIC_KEY = 'pk-probe-public';
 const USER = { id: 'u-ada', email: 'ada@studio.test', password: 'correct-horse-battery' };
 const RESET_TOKEN = 'reset-probe-ok';
 const EXPIRED_TOKEN = 'reset-probe-expired';
 
+/*
+ * Deadlines (lib/bounded.mjs): page.evaluate and close() have no timeout of
+ * their own. A normal run takes under a minute. Past RUN_MS (15× that) the
+ * run is stuck: the watchdog names the last check that finished, stops what
+ * this run started, and ends the process (which kills the browsers). Each
+ * close is bounded on its own.
+ */
+const RUN_MS = 15 * 60_000;
+const CLOSE_MS = 15_000;
+const progress = { last: 'starting' };
+const run = watchdog(RUN_MS, 'test:auth', progress);
+console.log(`deadlines: run ${human(RUN_MS)} · close ${human(CLOSE_MS)}`);
+let closed = true;
+
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
+  progress.last = name;
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? '   ' + detail : ''}`);
 };
 
@@ -639,12 +655,12 @@ try {
       check(`${name} azbackend: no page errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
       backend.calls.length = 0;
     } finally {
-      await ctx.close();
-      if (b !== browser) await b.close();
+      closed = (await closeWithin(ctx, CLOSE_MS, `${name} context.close`)) && closed;
+      if (b !== browser) closed = (await closeWithin(b, CLOSE_MS, `${name}.close`)) && closed;
     }
   }
 } finally {
-  await browser.close();
+  closed = (await closeWithin(browser, CLOSE_MS, 'chromium.close')) && closed;
   host.close();
   backendHost.close();
   provider.close();
@@ -739,6 +755,7 @@ const freePort = () => new Promise((done) => {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  progress.cleanup = () => child.kill('SIGTERM');
   let serverLog = '';
   child.stdout.on('data', (c) => { serverLog += c; });
   child.stderr.on('data', (c) => { serverLog += c; });
@@ -845,7 +862,7 @@ const freePort = () => new Promise((done) => {
     check('backend: the server logged no password or token',
       !serverLog.includes(USER.password) && !serverLog.includes('a-brand-new-password') && !/token=/.test(serverLog), serverLog.slice(0, 200));
   } finally {
-    await b.close();
+    closed = (await closeWithin(b, CLOSE_MS, 'chromium.close')) && closed;
     child.kill('SIGTERM');
     realHost.close();
     smtp.close();
@@ -856,3 +873,7 @@ const freePort = () => new Promise((done) => {
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED — work dir kept: ${work}`);
 if (failures === 0) rmSync(work, { recursive: true, force: true });
 process.exitCode = failures === 0 ? 0 : 1;
+run.clear();
+// A browser that would not close is still running: ending the process is
+// what kills it (Playwright kills what it launched on exit).
+if (!closed) process.exit();
