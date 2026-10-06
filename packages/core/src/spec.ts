@@ -252,7 +252,10 @@ export function buildSpec(
   for (const extra of root.filter((w) => w.word === 'site').slice(1)) {
     diagnostics.push({ code: 'AZ1508', message: 'site: declared twice — keep one', pos: extra.pos, severity: 'error' });
   }
-  const seenRoutes = new Set<string>();
+  // Keyed lower-cased: `/About` and `/about` build to one folder on a
+  // case-insensitive disk (macOS, Windows) and to two pages on most hosts —
+  // either way one of them is lost.
+  const seenRoutes = new Map<string, string>();
   for (const p of pageWords) {
     const arg = p.args[0];
     const problem = routeProblem(arg);
@@ -260,12 +263,17 @@ export function buildSpec(
       diagnostics.push({ code: 'AZ1413', message: problem, pos: arg?.pos ?? p.pos, severity: 'error' });
       continue;
     }
-    if (seenRoutes.has(arg!.value)) {
+    const route = arg!.value;
+    const earlier = seenRoutes.get(route.toLowerCase());
+    if (earlier === route) {
+      diagnostics.push({ code: 'AZ1509', message: `page: '${route}' declared twice — keep one`, pos: p.pos, severity: 'error' });
+    } else if (earlier !== undefined) {
       diagnostics.push({
-        code: 'AZ1509', message: `page: '${arg!.value}' declared twice — keep one`, pos: p.pos, severity: 'error',
+        code: 'AZ1509', message: `page: '${route}' and '${earlier}' differ only in case — rename one`, pos: p.pos, severity: 'error',
       });
+    } else {
+      seenRoutes.set(route.toLowerCase(), route);
     }
-    seenRoutes.add(arg!.value);
   }
 
   if (pageWords.length === 0) {
@@ -363,7 +371,9 @@ export function buildSpec(
   if (tables.length > 0) {
     for (const p of pageWords) {
       const route = p.args[0]?.value;
-      if (route === '/admin' || route?.startsWith('/admin/')) {
+      // Any case: `/Admin` is the same folder as `/admin` on a case-insensitive disk.
+      const lower = route?.toLowerCase();
+      if (lower === '/admin' || lower?.startsWith('/admin/')) {
         diagnostics.push({ code: 'AZ1268', message: `page: '${route}' is generated for data — use another route`, pos: p.args[0]?.pos ?? p.pos, severity: 'error' });
       }
     }

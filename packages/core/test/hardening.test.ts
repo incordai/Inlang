@@ -132,6 +132,13 @@ test('AZ1509: two pages on one route', () => {
   assert.ok(codes('az 1\nsite aurora\npage /\npage /\n').includes('AZ1509'));
 });
 
+test('AZ1509: two routes that differ only in case are one folder on a case-insensitive disk (review #10)', () => {
+  const r = compile('az 1\nsite aurora\npage /\npage /about\npage /About\n', { manifests: new Map() });
+  assert.deepEqual(r.diagnostics.filter((d) => d.code === 'AZ1509').map((d) => d.message),
+    ["page: '/About' and '/about' differ only in case — rename one"]);
+  assert.ok(!codes('az 1\nsite aurora\npage /\npage /about\npage /aboutus\n').includes('AZ1509'), 'CONTROL: different routes');
+});
+
 test('AZ1508: a second site', () => {
   assert.ok(codes('az 1\nsite aurora\nsite other\npage /\n').includes('AZ1508'));
 });
