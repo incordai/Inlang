@@ -106,7 +106,10 @@ export function attachAuth(doc: Document, adapter: AuthAdapter, options?: Attach
       const errors = check(form, method(form, null)).filter((x) => x.field === input.name);
       if (errors.length === 0) {
         failed.delete(input.name);
-        setInline(form, input.name, null);
+        // Keep the line's box: focusout fires on the mousedown of the submit
+        // button, so collapsing the error here moved the button out from
+        // under the pointer before mouseup and the click was lost.
+        setInline(form, input.name, null, true);
       } else {
         setInline(form, input.name, errors[0].message);
       }
@@ -215,7 +218,7 @@ const inputFor = (form: HTMLFormElement, field: string) =>
  * One field's error: text in its own element, tied by aria-describedby,
  * aria-invalid on the field (§6). null clears it.
  */
-function setInline(form: HTMLFormElement, field: string, message: string | null) {
+function setInline(form: HTMLFormElement, field: string, message: string | null, keepSpace = false) {
   const input = inputFor(form, field);
   if (!input) return;
   const error = form.querySelector<HTMLElement>(`#${CSS.escape(`${input.id}-error`)}`);
@@ -223,10 +226,22 @@ function setInline(form: HTMLFormElement, field: string, message: string | null)
   if (message && error) {
     error.textContent = message;
     error.hidden = false;
+    error.style.visibility = '';
     input.setAttribute('aria-invalid', 'true');
     described.add(error.id);
   } else {
-    if (error) { error.textContent = ''; error.hidden = true; described.delete(error.id); }
+    if (error) {
+      described.delete(error.id);
+      if (keepSpace && !error.hidden) {
+        // Out of sight and out of the accessibility tree, but still taking
+        // its height, so nothing below it moves. The next submit clears it.
+        error.style.visibility = 'hidden';
+      } else {
+        error.textContent = '';
+        error.hidden = true;
+        error.style.visibility = '';
+      }
+    }
     input.removeAttribute('aria-invalid');
   }
   if (described.size) input.setAttribute('aria-describedby', [...described].join(' '));

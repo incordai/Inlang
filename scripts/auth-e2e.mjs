@@ -413,7 +413,18 @@ try {
   /* 3. wrong password — the closed code's copy, not the provider's words. */
   await email.fill(USER.email);
   await form('login').locator('input[name="password"]').fill('wrong-password');
-  await form('login').getByRole('button', { name: 'Sign in' }).click();
+  // §6 re-validates a failed field on blur. The blur fires on the submit's
+  // mousedown, so if clearing the error moved the button, the click was lost.
+  const submit = form('login').getByRole('button', { name: 'Sign in' });
+  const beforeBlur = await submit.boundingBox();
+  await form('login').locator('input[name="password"]').blur();
+  await email.focus();
+  await email.blur();
+  const afterBlur = await submit.boundingBox();
+  check('§6: a corrected field\'s blur never moves the submit button (a click must land)',
+    beforeBlur && afterBlur && beforeBlur.y === afterBlur.y,
+    `y ${beforeBlur?.y} -> ${afterBlur?.y}`);
+  await submit.click();
   await page.waitForFunction(() => /don't match/.test(document.querySelector('.az-auth-summary')?.textContent ?? ''));
   check('§3: a wrong password shows invalid_credentials copy', true);
   check('§3.2: every request carried the PUBLIC key header',
