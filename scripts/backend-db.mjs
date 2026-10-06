@@ -19,10 +19,21 @@ import { loadConfig } from '../packages/backend/src/server/env.ts';
 import { createOidc } from '../packages/backend/src/server/oidc.ts';
 import { createStore } from '../packages/backend/src/server/store.ts';
 import { dataSuite } from './backend-db-data.mjs';
-import { closeWithin } from './lib/bounded.mjs';
+import { closeWithin, watchdog, within } from './lib/bounded.mjs';
 
 /** A database connection that will not close is abandoned after this (rule 13: bound every wait). */
 const DB_CLOSE_MS = 15_000;
+/** The test HTTP server's close, the same way. */
+const SERVER_CLOSE_MS = 10_000;
+/** One request to the in-process server. */
+const FETCH_MS = 15_000;
+/** One connection attempt while a container starts. */
+const CONNECT_MS = 10_000;
+/** `docker run` may pull a pinned image the first time; every other docker call is quick. */
+const DOCKER_RUN_MS = 10 * 60_000;
+const DOCKER_MS = 60_000;
+/** The whole run: two engines, each started, exercised and removed (measured ~2 min warm). */
+const RUN_MS = 25 * 60_000;
 
 /** Pinned images — the current PostgreSQL release and MySQL's long-term-support line. */
 const IMAGES = { postgres: 'postgres:18.6-alpine', mysql: 'mysql:8.4.11' };
@@ -36,11 +47,23 @@ if (!DOCKER) {
   console.error('backend-db: Docker is not available — start it, or run this where it is');
   process.exit(2);
 }
-const docker = (...args) => execFileSync(DOCKER, args, { encoding: 'utf8' }).trim();
+const docker = (...args) => execFileSync(DOCKER, args, {
+  encoding: 'utf8', timeout: args[0] === 'run' ? DOCKER_RUN_MS : DOCKER_MS, killSignal: 'SIGKILL',
+}).trim();
+
+/** The containers still running, removed at the run deadline as in each suite's finally. */
+const containers = new Set();
+const progress = {
+  cleanup: () => {
+    for (const id of containers) { try { docker('rm', '-f', id); } catch { /* already gone */ } }
+  },
+};
+const run = watchdog(RUN_MS, 'test:backend-db', progress);
 
 let failures = 0;
 const check = (name, pass, detail = '') => {
   if (!pass) failures++;
+  progress.last = name;
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? `   ${detail}` : ''}`);
 };
 /** A finding recorded as observed — not a pass or a fail. */
@@ -62,6 +85,7 @@ function startContainer(engine) {
     : ['-e', `MYSQL_ROOT_PASSWORD=${PASSWORD}`, '-e', 'MYSQL_DATABASE=az'];
   const port = engine === 'postgres' ? '5432' : '3306';
   const id = docker('run', '-d', '--rm', '-p', `127.0.0.1::${port}`, ...env, IMAGES[engine]);
+  containers.add(id);
   const host = docker('port', id, port).split('\n')[0].replace('0.0.0.0', '127.0.0.1');
   const url = engine === 'postgres'
     ? `postgres://postgres:${PASSWORD}@${host}/az`
@@ -73,11 +97,18 @@ async function suite(engine) {
   const c = startContainer(engine);
   console.log(`\n${engine} (${IMAGES[engine]})`);
   let db;
+  let server;
   try {
     db = await until(async () => {
       const d = engine === 'postgres' ? await openPostgres(c.url, false) : await openMysql(c.url, false);
-      await d.get('SELECT 1 AS ok');
-      return d;
+      try {
+        await within(CONNECT_MS, `${engine} first query`, () => d.get('SELECT 1 AS ok'));
+        return d;
+      } catch (e) {
+        // A pool from an attempt that failed is closed, never left to hold the run open.
+        await closeWithin(d, DB_CLOSE_MS, `${engine} attempt close`);
+        throw e;
+      }
     }, engine);
     check(`${engine}: migrations apply`, (await migrate(db)).join() === '1,2');
     check(`${engine}: migrations are a no-op the second time`, (await migrate(db)).length === 0);
@@ -119,11 +150,12 @@ async function suite(engine) {
     if (!loaded.ok) throw new Error(loaded.problems.join('\n'));
     const mail = [];
     const app = createApp({ config: loaded.config, store, mailer: { send: async (m) => { mail.push(m); } }, oidc: createOidc(fetch), log: () => {} });
-    const server = createServer((q, r) => { void app.handler(q, r); });
+    server = createServer((q, r) => { void app.handler(q, r); });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     const base = `http://127.0.0.1:${server.address().port}`;
     const post = (path, body, cookie = '') => fetch(`${base}${path}`, {
       method: 'POST', headers: { origin: SITE, 'x-az-request': '1', 'content-type': 'application/json', cookie }, body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FETCH_MS),
     });
     const pw = 'a-long-enough-password';
     const up = await post('/auth/sign-up', { name: 'Bea', email: 'bea@studio.test', password: pw, passwordConfirm: pw, location: 'Porto' });
@@ -132,7 +164,7 @@ async function suite(engine) {
     const inOk = await post('/auth/sign-in', { email: 'BEA@studio.test', password: pw });
     const cookie = (inOk.headers.getSetCookie()[0] ?? '').split(';')[0];
     check(`${engine} HTTP: sign-in (address in another case) sets the session cookie`, inOk.status === 200 && cookie.startsWith('__Host-az_session='));
-    const read = await (await fetch(`${base}/auth/session`, { headers: { origin: SITE, cookie } })).json();
+    const read = await (await fetch(`${base}/auth/session`, { headers: { origin: SITE, cookie }, signal: AbortSignal.timeout(FETCH_MS) })).json();
     check(`${engine} HTTP: the session reads back`, read.session?.user?.name === 'Bea');
     await post('/auth/reset', { email: 'bea@studio.test' });
     await new Promise((r) => setTimeout(r, 50));
@@ -141,13 +173,16 @@ async function suite(engine) {
     check(`${engine} HTTP: a reset link sets a new password`, set.status === 200);
     const again = await post('/auth/password', { token: t, password: 'third-long-password', passwordConfirm: 'third-long-password' });
     check(`${engine} HTTP: …once`, (await again.json()).error === 'expired_token');
-    server.close();
 
     // The data tables on this engine (data-spec §14).
     await dataSuite(engine, db, () => (engine === 'postgres' ? openPostgres(c.url, false) : openMysql(c.url, false)), check, info);
   } finally {
+    // Closed whether the checks passed or threw: a server left listening
+    // would hold the run open after its last check.
+    if (server) await closeWithin(server, SERVER_CLOSE_MS, `${engine} HTTP server close`);
     if (db) await closeWithin(db, DB_CLOSE_MS, `${engine} connection close`);
     docker('rm', '-f', c.id);
+    containers.delete(c.id);
   }
 }
 
@@ -159,5 +194,6 @@ for (const engine of ['postgres', 'mysql']) {
     console.log(`FAIL  ${engine}: ${e.message}`);
   }
 }
+run.clear();
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exitCode = failures === 0 ? 0 : 1;
