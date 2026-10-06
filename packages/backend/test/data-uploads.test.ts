@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { client, startBackend, type Harness } from './helpers.ts';
+import { client, SITE, startBackend, type Harness } from './helpers.ts';
 import { dataOf } from './data-fixture.ts';
 import { createImages } from '../src/server/data-images.ts';
 import { createData } from '../src/server/data-api.ts';
@@ -102,6 +102,12 @@ test('upload → item with { url, width, height }; the url serves a clean WebP w
       'cross-origin-resource-policy': 'cross-origin',
     });
     assert.equal(img.headers.get('content-length'), String(bytes.length));
+    // Cached publicly, so it varies by Origin: an <img> load without one must
+    // never be served to a later fetch() that needs the CORS headers (review #6).
+    assert.equal(img.headers.get('vary'), 'Origin');
+    const fetched = await ana.c.get(photo.url.slice(h.url.length));
+    assert.deepEqual([fetched.status, fetched.headers.get('vary'), fetched.headers.get('access-control-allow-origin')], [200, 'Origin', SITE]);
+    await fetched.body?.cancel();
 
     // The same row read and listed carries the same image.
     const one = await body(await ana.c.get(`/data/products/${chair}`)) as { item: { photo: Img; proof: Img } };
@@ -112,6 +118,7 @@ test('upload → item with { url, width, height }; the url serves a clean WebP w
     // Without `v` (not the URL the API hands out), never cached as immutable.
     const bare = await client(h.url).navigate(`${h.url}/data/products/${chair}/photo`);
     assert.deepEqual([bare.status, bare.headers.get('cache-control'), bare.headers.get('cross-origin-resource-policy')], [200, 'private, no-store', 'same-site']);
+    assert.equal(bare.headers.get('vary'), 'Origin', 'every image answer varies by Origin');
   } finally {
     await h.close();
   }

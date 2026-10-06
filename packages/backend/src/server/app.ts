@@ -86,9 +86,14 @@ export interface DataRoutes {
 /** `GET /data/<t>/<id>/<field>` and its admin twin: an image, loaded by `<img>`, which sends no Origin. */
 const IMAGE_GET = /^\/(?:admin\/)?data\/[^/]+\/[^/]+\/[^/]+$/;
 
-/** data-spec §8: a stored image is inert wherever it is opened. */
+/**
+ * data-spec §8: a stored image is inert wherever it is opened. It always
+ * varies by Origin: an `<img>` load (no Origin, no CORS headers) cached
+ * publicly must never answer a later `fetch()` from the site.
+ */
 function imageHeaders(file: DataFile): Record<string, string> {
   return {
+    vary: 'Origin',
     'content-type': file.type,
     'content-disposition': 'inline',
     'content-security-policy': "default-src 'none'; sandbox",
