@@ -360,7 +360,7 @@ auth-block-spec §3.4 is the protocol the backend implements, and
 three engines. Open: the real-provider login, and a login against the real
 backend once it implements §3.4.
 
-**Data (data-spec) — D1 built 2026-10-05; D2–D4 not started.** `data <table>`
+**Data (data-spec) — D1 and D2 built 2026-10-05; D3–D4 not started.** `data <table>`
 under `site` declares fields and closed `allow` rules (AZ1226–AZ1249, AZ1415);
 `az backend plan` / `az backend schema` record each schema change in the
 `<site>.data.json` lock, which `az build` checks and never writes
@@ -375,8 +375,14 @@ migration kind, resume, two migrators, a unique race on PostgreSQL 18.6 and
 MySQL 8.4.11; the spec's three inferences settled, data-spec §18.2) and
 `pnpm test:data` (the typed client from a built site in Chromium, Firefox and
 WebKit — WebKit signed-out only, as it drops Secure cookies on http loopback).
-Open: the admin area (D2), images (D3, waiting on the image-library decision,
-Q6), `from <table>` in blocks (D4).
+D2, the admin area: verified accounts listed in `AZ_ADMIN_EMAILS` reach
+`/admin/...` on the server (rules bypassed, validation never, every write an
+`az_data_audit` row without values); the site gets generated `/admin` and
+`/admin/<table>` pages inside `<Protected>` (AZ1268 for `page /admin`).
+Measured the same day in `pnpm test`, `pnpm test:backend-db` and
+`pnpm test:data` (axe, keyboard, refusals) — data-spec §18.3.
+Open: images (D3, waiting on the image-library decision, Q6), `from <table>`
+in blocks (D4).
 
 **M5 — not started.**
 

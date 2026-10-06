@@ -166,6 +166,7 @@ one schema for all three readers:
 | `AZ_EMAIL_API_URL`, `AZ_EMAIL_API_KEY` | api | the email endpoint (§7) |
 | `AZ_RESET_PATH`, `AZ_LINK_LANDING` | optional | site paths for the two emailed links |
 | `AZ_OAUTH_PROVIDERS`, `AZ_OAUTH_SIGNUP` | optional | provider ids; `allow` lets a provider create accounts |
+| `AZ_ADMIN_EMAILS` | sites with `data` | verified addresses that may use `/admin` (data-spec §11); empty = nobody |
 | `AZ_OAUTH_<ID>_…` | per provider | `LABEL`, `TYPE` (oidc/oauth2), `ISSUER` or the three URLs, `CLIENT_ID`, `CLIENT_SECRET`, `SCOPES`, `EMAIL_FIELD`, `VERIFIED_FIELD` |
 
 **Nothing here reaches a browser.** No key carries the `AZ_PUBLIC_` prefix a

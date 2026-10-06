@@ -1,8 +1,9 @@
 # Data — tables, API, admin and data in blocks
 
 **Status** approved 2026-10-05 (§16) · **D1 built 2026-10-05** — what was
-built differently, and what the real databases showed, is §18 · D2–D4 not
-built · Extends backend-spec.md and auth-block-spec §3.4
+built differently, and what the real databases showed, is §18 · **D2 (admin)
+built 2026-10-05**, §18.3 · D3–D4 not built · Extends backend-spec.md and
+auth-block-spec §3.4
 
 The owner's goal: **a few words in the `.az` file give a ready backend with an
 API.** The author declares tables; the build gives database tables and
@@ -900,6 +901,39 @@ the decision; the table is kept as the record of what was weighed.
 | `ON DELETE RESTRICT` error code (not in this spec) | `23001 restrict_violation`, **not** `23503` — deleting a referenced row was a 500 until fixed; now `409 in_use` | errno 1451 | `FOREIGN KEY constraint failed` |
 | `DROP COLUMN` on an indexed column | drops the index with it | drops it | **refused** — the index is dropped first, in its own unit |
 | the default list page plan | `Limit → Index Scan Backward using azx_…` on 5,000 rows, no sequential scan | — | — |
+
+### 18.3 D2 — the admin area as built (2026-10-05)
+
+Server: `/admin/data` (tables and row counts), `/admin/data/<t>[/<id>]` (the
+§5 shapes plus `count` and `ownerEmail`), `/admin/audit` (newest first, keyset
+on `(at, id)`, `limit`/`after` only) — `server/src/data-api.ts` `handleAdmin`.
+Site: `/admin`, `/admin/<table>` — `src/data/admin.tsx`, `admin-values.ts`,
+`admin` in `client.ts`, `.az-admin-*` in `theme.css`. AZ1268 in `spec.ts`.
+
+| § | Spec said | Built | Why |
+|---|---|---|---|
+| 11 | `ORDER BY` on any indexed field | The same sort keys as the public list: `created`, `updated`, required fields of a sortable type | Keyset paging needs a non-null key — the engines order NULLs differently (§5.1); an optional indexed field would skip or repeat rows between pages |
+| 11 | writes 300 / 10 min per account, "stricter" | An admin's writes count only against 300 / 10 min **per account**, not the public 60 per address; a refused admin write (not an admin) counts against the per-address limit; reads keep the per-address 600 | The public per-address cap would stop moderation at 60; accounting a refusal per address keeps probing the routes as bounded as public writes |
+| 11 | audit row per admin write | Written after the write succeeds, outside a transaction (the pooler rule); an audit insert that fails answers 500 with the write applied | No cross-statement transactions anywhere in the server; recorded so an operator knows the one gap |
+| 6.3 | — | `az_data_audit` is created by a system step, version 0, in `az_data_migrations` ahead of the site's steps; it is never reported as an applied site step | One claimed, resumable path for every data table, the audit included |
+| 11 | admin = verified listed email | Decided before the table is looked up: a non-admin gets `403 forbidden` (signed out: `401`) for any `/admin/...` path, existing table or not; an admin gets `404` for an absent table | No table enumeration for non-admins (§13) |
+| 11 | upload/replace/clear an image | Not built | Images are D3 (Q6); an `image` field is still AZ1214 |
+| 11 | `AZ_ADMIN_EMAILS` | Listed in `.env.example` only for a site with tables; a malformed entry stops the server naming it; read at start (a change needs a restart) | Sites without tables keep their `.env.example` byte for byte |
+
+Proved: `pnpm test` (`packages/backend/test/data-admin.test.ts` — every §13
+admin row with a CONTROL; each guard removed in turn makes it fail;
+`packages/target-web/test/data-admin.test.ts` — the page's value rules agree
+with the server's checks), `pnpm test:backend-db` (admin list keyset walk and
+count, owner join, private fields, unique and validation held, audit pages, no
+value in the audit — PostgreSQL 18.6, MySQL 8.4.11), `pnpm test:data` (an
+admin verified by a real sign-in link lists, searches, edits — refused with
+the API's sentences — deletes by keyboard behind the named confirm, moderates
+an anyone-create table, reads the audit; axe clean on each state; an unlisted
+and a listed-but-unverified account are refused by page and server; Chromium
+and Firefox signed in, WebKit the signed-out redirect only). The 28 `.az`
+files built before and after D2: the 27 without a backend byte-identical; a
+backend site without tables differs only in the shared server sources
+`app.ts`, `env.ts`, `main.ts` (the admin edge and its key), as D1's did.
 
 ---
 
