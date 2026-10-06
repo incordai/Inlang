@@ -256,7 +256,7 @@ async function verifiedAccount(page, name, email) {
 /** axe on the page as it is now: violations as "rule×count", none expected. */
 async function axeViolations(page) {
   const result = await new AxeBuilder({ page }).analyze();
-  return result.violations.map((v) => `${v.id}×${v.nodes.length}`);
+  return result.violations.map((v) => `${v.id}×${v.nodes.length} at ${v.nodes[0]?.target.join(' ')}: ${v.nodes[0]?.failureSummary?.replace(/\s+/g, ' ').slice(0, 160)}`);
 }
 
 /**
@@ -340,6 +340,9 @@ async function adminFlow(b, name, owner) {
   const named = await dialog.innerText();
   check(`${name} admin: the confirm names the row and the table`, named.includes(`“${name} edited by admin” will be deleted from notes`), named.replace(/\s+/g, ' '));
   check(`${name} admin: focus starts on Cancel, not on Delete`, await page.evaluate(() => document.activeElement?.textContent === 'Cancel'));
+  // Judged once the enter transition has finished: mid-fade, axe measures
+  // the half-transparent colours, not the ones a person reads.
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#az-admin-confirm')).opacity === '1');
   const dialogAxe = await axeViolations(page);
   check(`${name} admin: axe finds nothing with the confirm open`, dialogAxe.length === 0, dialogAxe.join(', '));
   await page.keyboard.press('Escape');
