@@ -565,8 +565,9 @@ periodic job comparing the directory to the keys in use.
 
 **Metadata.** Photos from phones carry location (EXIF GPS). Stripping it
 properly means decoding and re-encoding [R22], which needs an image library —
-a new dependency that must be vetted first (§16, Q6). **Uploads do not ship
-until that is decided.**
+vetted first (§16, Q6): `sharp` 0.35.5, decided 2026-10-06
+(`docs/stack-evaluation.md` §14). Every upload is decoded under a loader
+allow-list and re-encoded to WebP with no metadata; as built: §18.4.
 
 ---
 
@@ -863,7 +864,7 @@ the decision; the table is kept as the record of what was weighed.
 | Q3 | Admins from `AZ_ADMIN_EMAILS` (verified only), or an `admins` list in the `.az` file? | **Env** — addresses are personal data and change without a rebuild |
 | Q4 | Allow `signedin edit/delete` (any account edits any row)? | **No in v1** — the L3 trap; teams later |
 | Q5 | Public tables often need drafts. Add a `visible <flag-field>` table property (rows with it off are seen only by owner and admins)? | **Yes, but in the later phase** — a declared property, not a condition; design it once D1 is real |
-| Q6 | Image re-encoding / metadata stripping needs an image library (a native-binary dependency; how it installs under `--ignore-scripts` is unverified). Vet one, or write a metadata-only stripper (no pixel decoding)? | **Vet a library first (Rule: vet every dependency)**, measured under our install flags; D3 waits on it. Do not ship uploads that keep GPS |
+| Q6 | Image re-encoding / metadata stripping needs an image library (a native-binary dependency; how it installs under `--ignore-scripts` is unverified). Vet one, or write a metadata-only stripper (no pixel decoding)? | **Vet a library first (Rule: vet every dependency)**, measured under our install flags; D3 waits on it. Do not ship uploads that keep GPS. **Done 2026-10-06:** `sharp` 0.35.5 vetted and approved (it loads under `--ignore-scripts`) — stack-evaluation §14 |
 | Q7 | When an account is deleted (not built yet), its rows go (`CASCADE`) or stay ownerless? | **Cascade** — it matches the sessions table and erasure requests; admins can reassign first when that exists |
 | Q8 | Should the API serve non-browser clients (apps, scripts) in v1? | **No** — browser-only like auth; API keys are a later spec |
 | Q9 | Fractional numbers (ratings, weights)? | Add `decimal` later as a fixed-scale integer (e.g. `decimal 2`), same reason as `money`; floating point never |
@@ -917,7 +918,7 @@ Site: `/admin`, `/admin/<table>` — `src/data/admin.tsx`, `admin-values.ts`,
 | 11 | audit row per admin write | Written after the write succeeds, outside a transaction (the pooler rule); an audit insert that fails answers 500 with the write applied | No cross-statement transactions anywhere in the server; recorded so an operator knows the one gap |
 | 6.3 | — | `az_data_audit` is created by a system step, version 0, in `az_data_migrations` ahead of the site's steps; it is never reported as an applied site step | One claimed, resumable path for every data table, the audit included |
 | 11 | admin = verified listed email | Decided before the table is looked up: a non-admin gets `403 forbidden` (signed out: `401`) for any `/admin/...` path, existing table or not; an admin gets `404` for an absent table | No table enumeration for non-admins (§13) |
-| 11 | upload/replace/clear an image | Not built | Images are D3 (Q6); an `image` field is still AZ1214 |
+| 11 | upload/replace/clear an image | Not built in D2 | Images are D3 (Q6) — built 2026-10-06, §18.4 |
 | 11 | `AZ_ADMIN_EMAILS` | Listed in `.env.example` only for a site with tables; a malformed entry stops the server naming it; read at start (a change needs a restart) | Sites without tables keep their `.env.example` byte for byte |
 
 Proved: `pnpm test` (`packages/backend/test/data-admin.test.ts` — every §13
@@ -934,6 +935,80 @@ and Firefox signed in, WebKit the signed-out redirect only). The 28 `.az`
 files built before and after D2: the 27 without a backend byte-identical; a
 backend site without tables differs only in the shared server sources
 `app.ts`, `env.ts`, `main.ts` (the admin edge and its key), as D1's did.
+
+### 18.4 D3 — images as built (2026-10-06)
+
+Server: `server/src/data-images.ts` (sniff, the decode/re-encode pipeline,
+the queue, disk storage, the orphan sweep), the image routes in
+`data-api.ts`, `readRaw`/`sendFile` in `http.ts`, the image edge in `app.ts`,
+`AZ_FILES_DIR`/`AZ_UPLOAD_MAX_MB` in `env.ts`. Site: `upload`/`clear` in
+`src/data/client.ts`, the image field in `src/data/admin.tsx`. The library:
+`sharp` 0.35.5 (vetting: `docs/stack-evaluation.md` §14; backend-spec §9),
+pinned in a generated `server/package.json` only when a table has an image
+field.
+
+| § | Spec said | Built | Why |
+|---|---|---|---|
+| 4.5 | `required` allowed on all but `flag` | Refused on `image` (AZ1236), as `default` already was | An image is uploaded to a row that exists (§5), so a create can never carry one; a required image could never be satisfied |
+| 8 | name = UUID + the detected extension | `<uuid>.webp`, served as `image/webp` | Every upload is decoded and re-encoded to WebP; the stored file's type is WebP whatever came in |
+| 8 | limits | Plus: stored at most 2048 px a side (fit inside, never enlarged); `AZ_UPLOAD_MAX_MB` a whole number 1–20 | The owner's directive for D3; a 40 MP original is not what a page needs |
+| 8 | `public, immutable` for anyone-readable non-private images | The API's URL is `…/<field>?v=<uuid>`; only a request naming the **current** upload is public and immutable; a stale `v` is 404; the bare path is `private, no-store` | "The key changes on every upload" holds only if the URL carries it; without `v` an immutable cache would pin an old image forever |
+| 5.4 | an allowed `Origin` on every `/data` request | Not on `GET /data/<t>/<id>/<field>` (and its admin twin): the read rule (and the admin check) answer it; CORS headers only for an allowed origin | An `<img>` sends no `Origin`; the read changes nothing; `private` images are `same-site` and never cached |
+| 8 | "updates the row (one statement)" | One `UPDATE … WHERE <field> = <old key>` (compare-and-swap), retried at most 5 times; the old file is removed only after it succeeds | Two uploads at once can never remove each other's file; the row always names a file that exists |
+| 8 | — | One image processed at a time, 8 waiting; beyond that `429 rate_limited` | Memory stays near one image's worth (measured below) however many uploads arrive |
+| 8 | periodic sweep | Hourly; a file is removed only if no image column names it **and** it is over an hour old; stale temporaries in `AZ_FILES_DIR/.tmp` too | A file whose row is still being written is never swept |
+| 5 | — | A JSON body never carries an image key, not even `null` (`400 invalid`); clearing is `DELETE …/<field>` | One way to change an image, so a file never outlives its key unnoticed |
+| 11 | admin upload/replace/clear | `GET/PUT/DELETE /admin/data/<t>/<id>/<field>`, any row, `locked` included; audited as `edit`; counted in the 30 uploads an hour per account | The admin twin of the public route, as for rows |
+| 5 | — | A server with image fields allows 120 s per request (15 s otherwise) | A 20 MB upload over a slow link needs longer than a JSON body |
+| 10 | `media`/`src` from an image field | Not done: D4 refuses image mappings (AZ1214 in `core/src/from.ts`) and `gallery` has no rows shell yet | D4 landed while D3 was built and its worker is still changing those files; the mapping needs the rows runtime to read `{ url, width, height }` (follow-up) |
+
+**Finding — CORP `same-site` and IP addresses.** Chromium treats two
+IP-literal origins (`http://127.0.0.1:A` → `http://127.0.0.1:B`) as never
+same-site under `Cross-Origin-Resource-Policy: same-site`, so a private image
+is blocked there; Firefox allows it, and both allow `localhost:A` →
+`localhost:B` (measured with a two-port probe in both). A site and server
+addressed by name on one registrable domain — the deployment the README
+describes — are unaffected; `pnpm test:data` now addresses both by name. A
+site and server on different sites (`AZ_COOKIE_SAMESITE=none`) cannot show a
+non-public image in an `<img>`; such a page can still `fetch` it with
+credentials (CORS) and show the blob.
+
+**Security, each with a test and a CONTROL** (`packages/backend/test/data-images.test.ts`,
+`data-uploads.test.ts`): SVG, HTML, text, GIF and TIFF under an image name →
+415; HEIC → 415; a HEIF file branded HEIC is refused by the sniff even though
+the allowed loader would decode it; SVG, GIF and TIFF cannot decode in the
+process at all (loader allow-list); header bombs (100 000², 60 000², 7000² =
+49 MP, 8001 a side) → 413 in under a second, 8000 × 5000 accepted; a phone
+JPEG with EXIF orientation, camera, GPS, XMP, an ICC profile and a script
+comment is stored with none of them and rotated; a tagged PNG and a JPEG/HTML
+polyglot stored clean; truncated and corrupt files → 415, nothing stored;
+names only `<uuid>.webp`, every other key refused by `pathOf` (no traversal);
+over the cap by `Content-Length` or while streaming (chunked) → 413, no file
+left; another account's upload → 404 and nothing written; signed out → 401;
+no edit rule → 403; `locked` → 400 except for an admin; no Origin or a
+foreign one, or no `x-az-request`, on PUT/DELETE → 403; a private image →
+404 for everyone but its owner and admins; 30 uploads an hour → 429. Each
+guard removed in turn (17 of them) makes its test fail.
+
+**Memory, measured** (fresh process, nine 24 MP JPEGs at once): through the
+queue RSS grew +19 MB over ~160 MB (9.3 s); the same nine unqueued (CONTROL)
++100 MB (3.8 s). Vetting: one 24 MP photo fitted to 2048 in 478–514 ms, peak
+RSS 148 MB.
+
+Proved: `pnpm test` (above, plus DDL, openapi, emit, config, client and
+admin-values tests), `pnpm test:backend-db` (three columns through create,
+add, rename and drop; upload, two replacements at once leaving one file,
+private reads, clear, delete, the sweep — PostgreSQL 18.6, MySQL 8.4.11),
+`pnpm test:data` (Chromium and Firefox: a phone photo uploaded through the
+typed client is shown by an `<img>` on the site's page from the server's
+origin, stored without metadata, served with the §8 headers; renamed SVG and
+another account refused; the admin editor uploads, previews, refuses an SVG
+with the field's sentence and focus, replaces — the old URL 404 — and
+removes; axe clean; no file outlives its row). The 28 `.az` files built
+before and after D3: the 27 without a backend byte-identical; a backend site
+without tables differs only in shared server sources; a site with tables but
+no image field keeps `server/package.json`, `az.config.json`,
+`.env.example`, `README.md`, `data.json` and `openapi.json` byte for byte.
 
 ---
 

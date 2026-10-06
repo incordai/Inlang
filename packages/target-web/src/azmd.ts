@@ -156,6 +156,11 @@ export function azMd(m: MapInput): string {
     out.push('(it records the step in `<file>.data.json`, the reviewed history), then rebuild.');
     out.push('- `server/src/data-api.ts` — the routes; `data-query.ts` — parameters, paging, search; `data-values.ts` — every value checked');
     out.push('- `server/src/data-migrate.ts` — applies `server/data.json`\'s steps; one that loses data waits for `--migrate --confirm`');
+    const images = m.data.flatMap((t) => t.fields.filter((f) => f.type === 'image').map((f) => `\`${t.name}.${f.name}\``));
+    if (images.length > 0) {
+      out.push(`- Images (${images.join(', ')}; data-spec §8): \`tables.<name>.upload(id, field, file)\` / \`clear(id, field)\` once the row exists;`);
+      out.push('  only JPEG, PNG, WebP and AVIF, stored re-encoded as WebP without metadata in `AZ_FILES_DIR` — `server/src/data-images.ts`');
+    }
     out.push('', '## Admin', '');
     out.push('Generated pages, not pages of the .az file (data-spec §11): `/admin` lists the tables, their row counts and the');
     out.push(`audit log; ${m.data.map((t) => `\`/admin/${t.name}\``).join(', ')} list rows (search, sort, filter, pages), create, edit and delete.`);
@@ -165,7 +170,7 @@ export function azMd(m: MapInput): string {
     out.push('- The pages are UX, not security: the server checks every `/admin/...` request. Admins bypass `allow`, never validation;');
     out.push('  `locked` fields are writable. Every admin write is a row of `az_data_audit` (who, table, row, action, time — no values).');
     out.push(`- \`${DATA_DIR}/admin.tsx\` — the pages; \`${DATA_DIR}/admin-values.ts\` — the tables as data, inputs ↔ API values, codes → sentences`);
-    out.push(`- \`${DATA_DIR}/client.ts\` — \`admin.tables()\`, \`list\`, \`get\`, \`create\`, \`update\`, \`remove\`, \`audit\``);
+    out.push(`- \`${DATA_DIR}/client.ts\` — \`admin.tables()\`, \`list\`, \`get\`, \`create\`, \`update\`, \`remove\`, \`audit\`, \`upload\`, \`clear\``);
     out.push('- `server/src/data-api.ts` — the `/admin` routes (`handleAdmin`) and the audit; `.az-admin-*` styles are in `src/theme.css`');
   }
   if (m.from.length > 0) {

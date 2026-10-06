@@ -360,7 +360,7 @@ auth-block-spec §3.4 is the protocol the backend implements, and
 three engines. Open: the real-provider login, and a login against the real
 backend once it implements §3.4.
 
-**Data (data-spec) — D1 and D2 built 2026-10-05; D3–D4 not started.** `data <table>`
+**Data (data-spec) — D1 and D2 built 2026-10-05; D3 (images) built 2026-10-06.** `data <table>`
 under `site` declares fields and closed `allow` rules (AZ1226–AZ1249, AZ1415);
 `az backend plan` / `az backend schema` record each schema change in the
 `<site>.data.json` lock, which `az build` checks and never writes
@@ -381,8 +381,14 @@ D2, the admin area: verified accounts listed in `AZ_ADMIN_EMAILS` reach
 `/admin/<table>` pages inside `<Protected>` (AZ1268 for `page /admin`).
 Measured the same day in `pnpm test`, `pnpm test:backend-db` and
 `pnpm test:data` (axe, keyboard, refusals) — data-spec §18.3.
-Open: images (D3, waiting on the image-library decision, Q6), `from <table>`
-in blocks (D4).
+D3, images: an `image` field is uploaded raw to `PUT /data/<t>/<id>/<field>`,
+sniffed, decoded under a loader allow-list with pixel limits, and stored
+re-encoded as WebP without metadata (`sharp` 0.35.5, vetted —
+stack-evaluation §14); replace, clear and row deletes remove the old file, an
+hourly sweep removes orphans; the typed client and the admin editor upload,
+replace and remove. Measured in `pnpm test`, `pnpm test:backend-db` and
+`pnpm test:data` — data-spec §18.4. Open: image fields in `from <table>`
+blocks (D4 refuses them, AZ1214, until the rows runtime reads images).
 
 **M5 — not started.**
 

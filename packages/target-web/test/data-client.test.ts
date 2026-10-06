@@ -110,6 +110,13 @@ test('image fields: DataImage | null in rows, never input; upload/clear only whe
   assert.ok(!/upload|clear/.test(plainProducts), 'CONTROL: no table upload without image fields');
 });
 
+test('AZ.md names the image fields and where uploads go; a site without them says nothing of images', () => {
+  const md = (data: string) => emitProject(specOf(data), { emitters: {} }).files.find((f) => f.path === 'AZ.md')!.content;
+  assert.match(md(IMAGES), /- Images \(`products\.photo`, `products\.proof`, `products\.badge`, `gallery\.cover`; data-spec §8\)/);
+  assert.match(md(IMAGES), /`server\/src\/data-images\.ts`/);
+  assert.doesNotMatch(md(DATA), /- Images \(/, 'CONTROL');
+});
+
 test('upload sends the file\'s raw bytes with the CSRF header; clear is a DELETE', async () => {
   const realFetch = globalThis.fetch;
   try {
