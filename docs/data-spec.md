@@ -1,7 +1,8 @@
 # Data — tables, API, admin and data in blocks
 
-**Status** design draft 2026-10-05 · not built · Extends backend-spec.md and
-auth-block-spec §3.4 · Needs an owner decision before work starts (§16, Q1)
+**Status** approved 2026-10-05 (§16) · **D1 built 2026-10-05** — what was
+built differently, and what the real databases showed, is §18 · D2–D4 not
+built · Extends backend-spec.md and auth-block-spec §3.4
 
 The owner's goal: **a few words in the `.az` file give a ready backend with an
 API.** The author declares tables; the build gives database tables and
@@ -869,6 +870,36 @@ the decision; the table is kept as the record of what was weighed.
 | Q11 | A build fails when the file and the lock differ, versus `az build` updating the lock itself? | **Fail** — the build stays byte-identical and read-only; schema changes are reviewed diffs |
 | Q12 | Should `data` imply a default `backend` (sqlite + smtp) so the minimal file is shorter? | **No** — keep `backend` explicit; AZ1227 prints the exact lines to add |
 | Q13 | Bot protection for `anyone create` beyond rate limits? | **Rate limits + admin moderation in v1**; the auth spec already rules out captcha in generated code |
+
+---
+
+## 18. D1 as built — deviations and findings (2026-10-05)
+
+### 18.1 Where the build differs from this spec, and why
+
+| § | Spec said | Built | Why |
+|---|---|---|---|
+| 4.3, 9 | `choice` has a `CHECK (x IN …)`; required columns `NOT NULL` | Neither in the database; the server checks every value before any statement. Length checks (SQLite) and VARCHAR caps stay | Both would have to change when a choice gains a value or a field stops being required, and SQLite cannot alter a constraint without rebuilding the table (§6.2's own reason). The caps never change |
+| 4.3 | `url` is `VARCHAR(2048)` on MySQL | `TEXT` on MySQL | MySQL counts each VARCHAR's full width (×4 bytes) against a 65,535-byte row: seven url fields would fill a table. A url is never indexed, so TEXT costs nothing |
+| 4.5 | `default` writes the column default | Defaults are applied by the server on insert; a field added (or made required) with a default fills existing rows with a parameterised `UPDATE … WHERE col IS NULL` | No value ever appears in DDL text — the "no value in SQL" scanner holds for every statement |
+| 5.1 | `ESCAPE '\'` | `ESCAPE '!'` | A backslash inside a MySQL string literal is itself an escape character (default `sql_mode`); `!` means the same on all three engines |
+| 6.1 | the lock holds "the schema each step produces" | The lock holds storage only: per field name, type, currency, choices, ref, required, unique, index — and a sha256 `digest` over its canonical steps | Rules, `search`, `private`, `locked` and `default` change no storage; locking them would make every rule edit a migration. The digest makes AZ1706 decidable |
+| 6.2 | flags `--rename`, `--drop` | also `--unique t.f`, and `--drop t.f.value` for a removed choice value | §6.2 lists adding `unique` and removing a choice value as destructive "explicit flag" changes but names no flag for them. A new unique without its flag is a new code, AZ1707 |
+| 6.1 | the build writes `server/src/data-migrations.ts` | It writes `server/data.json` (the tables, rules and every step's SQL units) and copies the `data-*.ts` modules only for a site with tables | Data, not code: `main.ts` reads it, and a site without tables gets exactly the files it got before |
+| 6.3 | `az_data_migrations (version, step, applied_at)` | adds `claimed_at`; in-progress auth migrations are a negative `applied_at` in the existing table | Claim-before-run needs the claim time to take over a crashed instance's claim safely; the auth table's existing rows keep reading as applied |
+| 4.5 | `locked` on any non-ref field | `locked required` needs a `default` (AZ1236) | Only admins set a locked field; with no default a new row could never be created |
+| 4.2 | constraint and index names `azd_<table>_<field>_idx` | `azx_/azf_/azp_<version>_<n>`, numbered by the step that creates them | Name-derived names break when a table is renamed and a new table takes the old name (PostgreSQL index names are schema-wide, MySQL foreign-key names too) — found by the real-database run |
+
+### 18.2 The inferences, settled on the engines (`pnpm test:backend-db`, `pnpm test`)
+
+| Inference (§) | PostgreSQL 18.6 | MySQL 8.4.11 | SQLite 3.53.4 (node:sqlite) |
+|---|---|---|---|
+| `CHECK` is enforced (§4.3) | yes | **yes** (verified: a violating insert is refused) | yes |
+| `LOWER` folds beyond ASCII (§5.1) | yes — `äbc` finds `ÄBC` | yes | **no** — `LOWER('ÄB')` is `Äb`; ASCII only, as inferred |
+| a prepared `LIMIT ?` (§5.1) | accepted | **accepted** (mysql2 3.24.4 `execute`) — the inference was wrong for this version. The range-checked integer literal is kept anyway: one statement shape for all engines | accepted |
+| `ON DELETE RESTRICT` error code (not in this spec) | `23001 restrict_violation`, **not** `23503` — deleting a referenced row was a 500 until fixed; now `409 in_use` | errno 1451 | `FOREIGN KEY constraint failed` |
+| `DROP COLUMN` on an indexed column | drops the index with it | drops it | **refused** — the index is dropped first, in its own unit |
+| the default list page plan | `Limit → Index Scan Backward using azx_…` on 5,000 rows, no sequential scan | — | — |
 
 ---
 

@@ -358,6 +358,24 @@ auth-block-spec §3.4 is the protocol the backend implements, and
 three engines. Open: the real-provider login, and a login against the real
 backend once it implements §3.4.
 
+**Data (data-spec) — D1 built 2026-10-05; D2–D4 not started.** `data <table>`
+under `site` declares fields and closed `allow` rules (AZ1226–AZ1249, AZ1415);
+`az backend plan` / `az backend schema` record each schema change in the
+`<site>.data.json` lock, which `az build` checks and never writes
+(AZ1701–AZ1707). The generated server applies the steps claimed and
+resumable — destructive ones only with `--migrate --confirm <version>` — and
+serves `/data/<table>` with the owner check inside each statement; the site
+gets a typed client (`src/data/client.ts`), the server an `openapi.json`. The
+same claim-before-run now guards the auth migrations. Measured that day:
+`pnpm test` (the rule matrix — every legal rule set × 3 actors × 5 routes — and
+the §13 rows without uploads or admin), `pnpm test:backend-db` (every
+migration kind, resume, two migrators, a unique race on PostgreSQL 18.6 and
+MySQL 8.4.11; the spec's three inferences settled, data-spec §18.2) and
+`pnpm test:data` (the typed client from a built site in Chromium, Firefox and
+WebKit — WebKit signed-out only, as it drops Secure cookies on http loopback).
+Open: the admin area (D2), images (D3, waiting on the image-library decision,
+Q6), `from <table>` in blocks (D4).
+
 **M5 — not started.**
 
 Still outstanding and not answerable by writing code — PRD §11: open-source
