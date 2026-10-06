@@ -7,9 +7,16 @@
  */
 
 import AxeBuilder from '@axe-core/playwright';
+import sharp from 'sharp';
 
 /** word-gate §1 item 3: the three test widths. */
 export const WIDTHS = [390, 768, 1440];
+
+/** hero-spec §10: the phone the scrim is measured on — the narrowest common one. */
+export const PHONE_WIDTH = 375;
+
+/** hero-spec §9: body text contrast floor (WCAG 2.1 SC 1.4.3). */
+const TEXT_CONTRAST = 4.5;
 
 /** Bound on Tab presses for one keyboard walk; more means a trap or a runaway page. */
 const MAX_TABS = 200;
@@ -388,6 +395,91 @@ export async function hydration(browser, url, readySelector) {
   } finally {
     await ctx.close();
   }
+}
+
+/** WCAG 2.1 relative luminance of sRGB bytes. */
+function luminance(r, g, b) {
+  const f = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+
+/** Contrast ratio, truncated to two places as the theme's own maths does (theme/src/color.ts). */
+const ratio = (la, lb) => Math.floor(((Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)) * 100) / 100;
+
+/**
+ * hero-spec §9/§10: text over media keeps 4.5:1 on a phone, whatever the
+ * poster shows. axe cannot judge text over an image (it reports it as
+ * "incomplete"), so this measures the pixels: the poster is swapped for each
+ * fixture in turn, the text is made transparent, the page is captured, and
+ * every pixel under every line of text is compared with the text's own
+ * colour. The worst pixel decides. `sel` holds `{ poster, text }` selectors;
+ * `fixtures` holds `{ name, bytes, type }` — the darkest and lightest poster.
+ */
+export async function textOverPoster(page, sel, fixtures) {
+  const src = await page.evaluate((q) => document.querySelector(q)?.currentSrc ?? null, sel.poster);
+  if (!src) return { pass: false, detail: `no ${sel.poster} on the page` };
+  const problems = [];
+  let worst = Infinity;
+  for (const f of fixtures) {
+    const url = `${src.split('?')[0]}?az-fixture=${encodeURIComponent(f.name)}`;
+    const match = (u) => u.href === url;
+    const serve = (route) => route.fulfill({ body: f.bytes, contentType: f.type });
+    await page.route(match, serve);
+    const shown = await page.evaluate(async ({ q, url }) => {
+      const img = document.querySelector(q);
+      img.src = url;
+      try { await img.decode(); } catch { return 'did not decode'; }
+      return getComputedStyle(img).visibility === 'hidden' || img.getClientRects().length === 0 ? 'is not on screen' : '';
+    }, { q: sel.poster, url }).finally(() => page.unroute(match, serve));
+    if (shown) { problems.push(`${f.name}: the poster ${shown}`); continue; }
+    const lines = await page.evaluate((text) => {
+      const out = [];
+      for (const q of text) {
+        const els = [...document.querySelectorAll(q)];
+        if (!els.length) out.push({ q, missing: true });
+        for (const el of els) {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0)
+            .map((r) => ({ x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }));
+          out.push({ q, color: getComputedStyle(el).color, rects });
+        }
+      }
+      const hide = document.createElement('style');
+      hide.id = 'az-text-over-poster';
+      hide.textContent = `${text.flatMap((q) => [q, `${q} *`]).join(', ')} { color: transparent !important; text-shadow: none !important; }`;
+      document.head.append(hide);
+      return out;
+    }, sel.text);
+    const png = await page.screenshot({ fullPage: true, animations: 'disabled' });
+    await page.evaluate(() => document.getElementById('az-text-over-poster')?.remove());
+    const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const scale = info.width / await page.evaluate(() => document.documentElement.clientWidth);
+    for (const line of lines) {
+      if (line.missing) { problems.push(`${f.name}: no ${line.q}`); continue; }
+      const rgb = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(line.color);
+      if (!rgb) { problems.push(`${f.name}: ${line.q} colour '${line.color}' is not rgb()`); continue; }
+      const ink = luminance(Number(rgb[1]), Number(rgb[2]), Number(rgb[3]));
+      let low = Infinity;
+      for (const r of line.rects) {
+        const x0 = Math.max(0, Math.floor(r.x * scale)), x1 = Math.min(info.width, Math.ceil((r.x + r.w) * scale));
+        const y0 = Math.max(0, Math.floor(r.y * scale)), y1 = Math.min(info.height, Math.ceil((r.y + r.h) * scale));
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const i = (y * info.width + x) * 3;
+            low = Math.min(low, ratio(ink, luminance(data[i], data[i + 1], data[i + 2])));
+          }
+        }
+      }
+      if (low === Infinity) { problems.push(`${f.name}: ${line.q} has no text on screen`); continue; }
+      worst = Math.min(worst, low);
+      if (low < TEXT_CONTRAST) problems.push(`${f.name}: ${line.q} ${low}:1`);
+    }
+  }
+  return {
+    pass: problems.length === 0,
+    detail: problems.length ? `under ${TEXT_CONTRAST}:1 — ${problems.join('; ')}` : `worst ${worst}:1`,
+  };
 }
 
 /** An image request: held back by imageShift until the page has settled. */

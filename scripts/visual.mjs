@@ -11,7 +11,8 @@
  *   6  prefers-reduced-motion: nothing animates
  *   7  light and dark actually differ (+ screenshots for human review)
  * and, from the gallery spec (§7 rule 1), that images held back and then
- * released move nothing on the page (`image-shift`, CLS 0).
+ * released move nothing on the page (`image-shift`, CLS 0); from the hero
+ * spec (§10), that text over a poster keeps 4.5:1 at 375px (`over-media`).
  * Chromium runs everything; Firefox and WebKit run a smaller pass (overflow
  * and page errors at one width each), so browser claims rest on real runs.
  *
@@ -37,7 +38,7 @@ import { tmpdir } from 'node:os';
 import { crc32, deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer } from './visual/checks.mjs';
+import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer, textOverPoster, PHONE_WIDTH } from './visual/checks.mjs';
 import { FONT_STACKS, THEMES as THEME_TOKENS } from '../packages/theme/src/index.ts';
 import { startServer } from './visual/serve.mjs';
 import {
@@ -114,7 +115,7 @@ async function pool(items, limit, fn) {
 /* ---- results ------------------------------------------------------------ */
 
 const CHECKS = ['compile', 'deadline', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'skip-link',
-  'no-js', 'hydration', 'image-shift',
+  'no-js', 'hydration', 'image-shift', 'over-media',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
   'firefox', 'webkit'];
@@ -146,6 +147,23 @@ const RESTACK = {
 const COLUMN = {
   hero: { split: ['.az-hero-title', '.az-hero-sub', '.az-hero-actions'] },   // hero-spec §2
 };
+/**
+ * Text over media, per word and variant (hero-spec §9/§10): on a phone at the
+ * static tier — reduced motion, so the poster is what shows — every line of
+ * text keeps 4.5:1 over the darkest and the lightest poster fixture (files in
+ * the word's preview-assets/assets). A variant listed here needs a
+ * `preview.<variant>.az` with a poster, which the check swaps for each.
+ */
+const OVER_MEDIA = {
+  hero: {
+    full: {
+      poster: '.az-hero-poster',
+      text: ['.az-hero-eyebrow', '.az-hero-title', '.az-hero-sub', '.az-hero .az-action--secondary'],
+      fixtures: ['poster-dark.webp', 'poster-light.webp'],
+    },
+  },
+};
+
 /**
  * Disclosure forms that replace a layout on phones, per word and variant:
  * at 390px the accordion shows (first group open, the rest closed) and the
@@ -491,6 +509,19 @@ async function checkSite(s, browsers, server) {
     });
   }
 
+  // hero-spec §10: text over the poster on a phone, in both schemes.
+  const overMedia = OVER_MEDIA[s.word]?.[s.variant];
+  if (overMedia) {
+    const fixtures = overMedia.fixtures.map((name) => ({
+      name, type: 'image/webp', bytes: readFileSync(join(WORDS, s.word, 'preview-assets/assets', name)),
+    }));
+    for (const scheme of SCHEMES) {
+      const where = tag(scheme, PHONE_WIDTH);
+      if (await load('over-media', where, { media: { colorScheme: scheme, reducedMotion: 'reduce' }, viewport: { width: PHONE_WIDTH, height: 900 } })) {
+        await checked('over-media', where, (page) => textOverPoster(page, overMedia, fixtures));
+      }
+    }
+  }
   const reduced = { colorScheme: 'light', reducedMotion: 'reduce' };
   if (await load('reduced-motion', `${s.label}/light/1440`, { media: reduced, viewport: { width: 1440, height: 900 } })) {
     await checked('reduced-motion', `${s.label}/light/1440`, reducedMotion);
@@ -672,8 +703,18 @@ const SHIFT = (sized) => {
   <script>document.documentElement.setAttribute('data-az-ready', '');</script></body></html>`;
 };
 
-/** A real PNG of one colour, made here so no binary is checked in. */
-function solidPng(width, height) {
+/**
+ * hero-spec §10: light text on a poster, straight on it or over a scrim that
+ * holds for any poster — as `full` sets its type over its visual.
+ */
+const OVER = (scrimmed) => `<!doctype html><html lang="en"><head><title>over media</title></head><body><main>
+  <header style="position:relative;isolation:isolate;min-height:400px;padding:24px;color:#fff">
+  <img class="p" src="/poster.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1">
+  ${scrimmed ? '<div style="position:absolute;inset:0;z-index:-1;background:rgb(0 0 0 / 0.8)"></div>' : ''}
+  <h1>Over media</h1><p>Light text on the poster.</p></header></main></body></html>`;
+
+/** A real PNG of one grey (`value`, 0–255), made here so no binary is checked in. */
+function solidPng(width, height, value = 0x80) {
   const chunk = (type, data) => {
     const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
     const out = Buffer.alloc(body.length + 8);
@@ -686,7 +727,7 @@ function solidPng(width, height) {
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
   ihdr.set([8, 2, 0, 0, 0], 8);                           // 8-bit RGB
-  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0x80)]);
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, value)]);
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))), chunk('IEND', Buffer.alloc(0)),
@@ -859,6 +900,20 @@ async function selfTest() {
     server.serve(join(dir, name));
     expect(`§7 rule 1 a late image moves nothing (${sized ? 'sized' : 'unsized'} page)`,
       await within(CHECK_MS, 'image-shift self-test', () => imageShift(browser, server.url, READY)), sized);
+  }
+  // hero-spec §10: the darkest and the lightest poster, as the real run swaps them.
+  const posters = [['black', 0], ['white', 255]].map(([name, value]) => ({ name, type: 'image/png', bytes: solidPng(320, 200, value) }));
+  for (const [name, scrimmed] of [['media-bare', false], ['media-scrim', true]]) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'), OVER(scrimmed));
+    writeFileSync(join(dir, name, 'poster.png'), solidPng(320, 200));
+    server.serve(join(dir, name));
+    const ctx = await browser.newContext({ viewport: { width: PHONE_WIDTH, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto(server.url);
+    expect(`hero §10 text over media holds 4.5:1 (${scrimmed ? 'scrimmed' : 'bare'} page)`,
+      await within(CHECK_MS, 'over-media self-test', () => textOverPoster(page, { poster: '.p', text: ['h1', 'p'] }, posters)), scrimmed);
+    await closeWithin(ctx, CLOSE_MS, 'context.close');
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');
   await behaviourSelfTest(browser, server, dir, expect);

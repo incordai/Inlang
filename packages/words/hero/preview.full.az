@@ -1,0 +1,17 @@
+az 1
+
+site aurora
+
+page /
+  hero full 3d
+    eyebrow  "Limited run"
+    title    "Built in the dark"
+    sub      "Handmade. Forty pairs a month."
+    poster   ./preview-assets/assets/poster-dark.webp
+    describe "A plain backdrop behind the title"
+    cta      "Reserve a pair" /reserve
+    alt      "See the process" /process
+
+page /reserve
+
+page /process

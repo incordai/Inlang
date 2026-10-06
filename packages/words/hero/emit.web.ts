@@ -5,7 +5,8 @@
  * Renders: header.az-hero.az-hero--{variant}[data-height] >
  *   p.az-hero-eyebrow? · h1.az-hero-title? · p.az-hero-sub? ·
  *   ul.az-hero-actions? > li > a|button (ctx.actions: cta primary, alt secondary) ·
- *   div.az-hero-visual[data-az-3d=hero]? > img.az-hero-poster?   (only with 3d)
+ *   div.az-hero-visual[data-az-3d=hero]? > img.az-hero-poster?   (only with 3d) ·
+ *   div.az-hero-scrim?   (full + 3d: the gradient over the visual, stronger below sm)
  *   split wraps them as div.az-hero-text + div.az-hero-media (visual goes in media).
  * Variants: center — centred column, centred text · split — two-column grid text|media, one column below sm ·
  *   full — scrim background, on-scrim type, visual absolutely behind · stack — column from the top, visual below ·
@@ -17,13 +18,14 @@
  *   describe → poster alt and the visual's aria-label · model → data-az-model via ctx.asset ·
  *   focus → the poster's object-position (the crop's focal point).
  * Styling: theme tokens only; below.sm mobile gutter (+ split one column); actions below.xs stack;
- *   states.live hides the poster (full: gradient scrim); states.overBackdrop gives the veil;
+ *   states.live hides the poster (full: the header clears, the scrim layer stays);
+ *   states.overBackdrop gives the veil;
  *   the site's `theme pattern` (t.pattern, var refs) is the header's background except on `full`.
  * Behaviour: 3D drawn by packages/scene-runtime from data-az-3d; buttons by target-web/src/actions.ts.
  * Edit guide: layout per variant → the header's style; type → the h1/p styles; actions → ctx.actions options.
  *   Keep: exactly one <h1>; eyebrow never a heading; measure on the text, not the container; svh not vh;
  *   no raw colour or off-scale px (az lint).
- * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/hero-alt.test.ts, packages/words/test/responsive-pilot.test.ts, packages/words/test/type-on-scrim.test.ts, packages/target-web/test/solid-over-hero.test.ts
+ * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/hero-alt.test.ts, packages/words/test/hero-scrim.test.ts, packages/words/test/responsive-pilot.test.ts, packages/words/test/type-on-scrim.test.ts, packages/target-web/test/solid-over-hero.test.ts
  */
 
 /**
@@ -47,6 +49,16 @@ const HEIGHT: Record<string, number> = {
   tall: 92,
   full: 100,
 };
+
+/**
+ * §8/§10 — `full`'s scrim over its visual: alpha stops of `color.scrim`, from
+ * the bottom edge to the top. `phoneTop` is derived, not chosen (§10): 63% is
+ * the smallest whole percent at which `on-scrim` holds 4.5:1 over a pure-white
+ * pixel — the worst a poster or scene can show — in every theme and scheme
+ * (paper light is the edge); 65 keeps the veil's two points for the browser's
+ * compositing (theme VEIL_PERCENT). test/hero-scrim.test.ts proves both.
+ */
+export const SCRIM = { bottom: 88, top: 55, phoneTop: 65 } as const;
 
 /** §4 — display type is fluid; `full` and `minimal` get the larger step. */
 const bigDisplay = (variant: string | null) =>
@@ -195,6 +207,20 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         : { position: 'relative', width: '100%', aspectRatio: variant === 'split' ? '4 / 3' : '16 / 9', marginTop: variant === 'split' ? undefined : px(t.space[48]) },
       children: poster,
     });
+    // §8/§9: the type over the visual sits on a gradient scrim. The header's
+    // own background is under the visual, so the scrim is a layer of its own
+    // over it — the poster now, the canvas when live. Below 768px its light
+    // end rises to the stop that holds over any pixel (§10, SCRIM).
+    if (behind) {
+      const gradient = (top: number) =>
+        `linear-gradient(to top, color-mix(in srgb, ${t.color.scrim} ${SCRIM.bottom}%, transparent), color-mix(in srgb, ${t.color.scrim} ${top}%, transparent))`;
+      children.push({
+        tag: 'div',
+        attrs: { class: 'az-hero-scrim', 'aria-hidden': 'true' },
+        style: { position: 'absolute', inset: '0', zIndex: t.layer.behind, pointerEvents: 'none', background: gradient(SCRIM.top) },
+        below: { sm: { background: gradient(SCRIM.phoneTop) } },
+      });
+    }
   }
 
   // §2 — `split` gives the text ONE column and the visual the other. Placing
@@ -261,12 +287,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       position: threeD && behind ? 'relative' : undefined,
       isolation: threeD && behind ? 'isolate' : undefined,
     },
-    // §8: while the canvas draws behind a `full` hero, the flat scrim becomes
-    // a gradient over the scene — never a flat layer that dims it whole.
+    // §8: while the canvas draws behind a `full` hero, the flat scrim clears
+    // so the scene shows; the scrim layer over the visual is its gradient —
+    // never a flat layer that dims it whole.
     states: {
-      ...(threeD && behind
-        ? { live: { background: `linear-gradient(to top, color-mix(in srgb, ${t.color.scrim} 88%, transparent), color-mix(in srgb, ${t.color.scrim} 55%, transparent))` } }
-        : {}),
+      ...(threeD && behind ? { live: { background: 'transparent' } } : {}),
       // scene-spec §6.5: over a page's backdrop, type never sits on the live
       // surface — every variant but `full` (already on its scrim) takes the veil.
       ...(variant === 'full' ? {} : { overBackdrop: { background: t.color.veil } }),
@@ -280,7 +305,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       : undefined,
     // §10: under 768px `split` restacks to `stack` — text above, media
     // below, which is already the source order. center, stack and minimal
-    // are unchanged; full's crop and scrim wait for the 3D runtime.
+    // are unchanged; full keeps its focal point (`focus`) and its scrim
+    // layer strengthens (SCRIM.phoneTop, on az-hero-scrim).
     // Every variant takes the mobile gutter below sm (§3, theme-spec §1).
     below: {
       sm: {

@@ -89,7 +89,8 @@ Known gaps:
 - `3d` draws through the page's single renderer (packages/scene-runtime); the poster shows until it draws and at the `static` tier
 - Actions render through the button primitive (`ctx.actions`): hierarchy, intent, six states and a 44px target
 - Responsive (§10): `split` restacks to one column below 768px and the actions stack full-width below 480px, checked in a browser by `test:visual` (preview.split.az)
-- Not built: `full`'s crop from a defined focal point (§10 table); the scrim is the gradient scrim of §8
+- Responsive (§10): `full` crops its poster from `focus`, and its scrim over the visual strengthens below 768px (88% → 65% of `scrim`, the stop that holds 4.5:1 over a white pixel in every theme), checked at 375px over the darkest and lightest poster by `test:visual` (preview.full.az)
+- Not measured: the desktop scrim (88% → 55%) over a light poster
 
 ## Tested
 
@@ -97,7 +98,7 @@ What is automated today:
 
 - `packages/words/test/props.test.ts`, `variants.test.ts`, `structure.test.ts` and `conformance.test.ts` run every word: each property changes the output, each variant renders differently, lists are valid HTML, and the emitter reads only declared properties
 - `words.test.ts` runs the theme lint over the emitter (also `az lint`)
-- Word-specific: `hero-alt.test.ts`
+- Word-specific: `hero-alt.test.ts`, `hero-scrim.test.ts`
 - `scripts/verify-build.mjs` compiles the GRAMMAR §8 fixture, which includes this word, builds it with the real toolchain and checks the server-rendered HTML
 
 **Browser-tested** by `pnpm test:visual` (in CI) on this word's `preview.az`, in all three themes, light and dark: Chromium 153 runs every browser check — overflow at 390/768/1440px, axe, keyboard reachability and focus indicator, reduced motion, and that the schemes differ; Firefox 155 and WebKit 26.6 run overflow and page errors at one width each, and the behaviour checks (menus, dropdowns, disclosures, copy, play, scroll behaviours) run in all three engines. Not tested: real Safari or iOS devices, and nav + footer combined in a browser (that combination is only server-rendered, by `verify-build`). The manifest's `tested` field records exactly this.

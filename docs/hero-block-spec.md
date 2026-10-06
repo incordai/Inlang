@@ -266,7 +266,7 @@ Not optional, and cheap to bake in once:
 |---|---|
 | `center` | unchanged; display clamp floor kicks in |
 | `split` | **restacks to `stack`** — text above, media below |
-| `full` | keep, but crop from a defined focal point; strengthen scrim |
+| `full` | keep, but crop from a defined focal point; strengthen scrim (88% → 65%, below) |
 | `stack` | unchanged |
 | `minimal` | unchanged |
 
@@ -275,6 +275,25 @@ The focal point is the author's: `focus top` (or `bottom`, `left`, `right`;
 `focus` does (gallery-block-spec §7). The poster is cropped with
 `object-fit: cover` at every width — a wide box on a desktop, a tall one
 under `full` on a phone — so one value holds the subject in both.
+
+**The scrim, and how it strengthens (implemented).** `full`'s visual sits
+behind the type and the header's flat `scrim` background sits under the
+visual, so the scrim the type reads on is a layer of its own between them
+(`az-hero-scrim`): a gradient of `color.scrim` from **88%** at the bottom
+edge to **55%** at the top, over the poster and, while live, over the scene
+(the header clears so the canvas shows). Below 768px the top stop rises to
+**65%**, so the whole gradient runs 88% → 65%. The number is derived the way
+the veil's is (theme `VEIL_PERCENT`): a poster or a scene can show any
+pixel, and the worst pixel under light ink is pure white; **63% is the
+smallest whole percent at which `on-scrim` holds 4.5:1 over white through
+the scrim in every theme and scheme** (paper light is the edge), and 65 keeps
+the veil's two points for the browser's compositing. At 55% the top fails
+over white (3.54:1 in paper light); the desktop stops are not re-derived by
+this rule and are not yet measured over a light poster. Proven by
+`packages/words/test/hero-scrim.test.ts` (the floor, its edge) and in a
+browser by `test:visual`'s `over-media` check: at 375px, both schemes, every
+theme, every line of text over the darkest and the lightest poster fixture
+(`preview.full.az`) keeps ≥ 4.5:1.
 
 `split` restacking is the reason it can't be the default. Half of `split`
 heroes in the wild look broken on a phone because nobody defined the restack.
