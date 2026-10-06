@@ -2,7 +2,7 @@
  * @az server app
  * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth; the /data and /admin edge.
  * Spec: docs/auth-block-spec.md §3.4 · docs/backend-spec.md §5 · docs/data-spec.md §5.4
- * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES, DataRequest, DataRoutes
+ * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES, DataRequest, DataRoutes, DataResult, DataFile
  * Edit guide: same answer for unknown account and wrong password; rate-limit before hashing; claim unverified accounts safely.
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/security.test.ts, packages/backend/test/data-api.test.ts
  */
@@ -28,7 +28,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Config, Provider } from './env.ts';
 import { decoyHash, hashPassword, MAX_PASSWORD, MIN_PASSWORD, pkceChallenge, randomToken, safeEqual, verifyPassword } from './crypto.ts';
 import { linkMessage, resetMessage, type Mailer } from './email.ts';
-import { BodyError, clientIp, cookie, corsHeaders, createLimiter, rateKey, readCookies, readJson, redirect, send } from './http.ts';
+import { BodyError, clientIp, cookie, corsHeaders, createLimiter, rateKey, readCookies, readJson, readRaw, redirect, send, sendFile } from './http.ts';
 import { ProviderError, type Oidc } from './oidc.ts';
 import { normaliseEmail, OAUTH_STATE_TTL_MS, TOKEN_TTL_MS, type Store, type User } from './store.ts';
 
@@ -65,12 +65,36 @@ export interface DataRequest {
   account(): Promise<{ id: string; email: string; verified: boolean } | null>;
   /** The JSON body, at most `limit` bytes; throws BodyError. */
   body(limit: number): Promise<Record<string, unknown>>;
+  /** The raw body streamed to a new file at `to`, at most `limit` bytes; throws BodyError (data-spec §8). */
+  upload(limit: number, to: string): Promise<void>;
 }
+
+/**
+ * A stored image to stream back (data-spec §8). `shared`: anyone may read it
+ * and the URL names this exact upload, so caches and other sites may keep it.
+ */
+export interface DataFile { readonly path: string; readonly type: string; readonly shared: boolean }
+
+export type DataResult = { status: number; body?: unknown; file?: DataFile };
 
 /** The data tables' routes — present only when the site declares data. */
 export interface DataRoutes {
-  handle(req: DataRequest): Promise<{ status: number; body?: unknown }>;
+  handle(req: DataRequest): Promise<DataResult>;
   sweep(): void;
+}
+
+/** `GET /data/<t>/<id>/<field>` and its admin twin: an image, loaded by `<img>`, which sends no Origin. */
+const IMAGE_GET = /^\/(?:admin\/)?data\/[^/]+\/[^/]+\/[^/]+$/;
+
+/** data-spec §8: a stored image is inert wherever it is opened. */
+function imageHeaders(file: DataFile): Record<string, string> {
+  return {
+    'content-type': file.type,
+    'content-disposition': 'inline',
+    'content-security-policy': "default-src 'none'; sandbox",
+    'cache-control': file.shared ? 'public, max-age=31536000, immutable' : 'private, no-store',
+    'cross-origin-resource-policy': file.shared ? 'cross-origin' : 'same-site',
+  };
 }
 
 /** data-spec §5.4: /data is a fetch route with the wider method set. */
@@ -463,9 +487,13 @@ export function createApp(deps: AppDeps) {
     if (data && dataPath) {
       // A fetch route like /auth: an allowed origin always, and the CSRF
       // header on EVERY method that can change something (data-spec §5.4).
+      // The one exception is an image read: an `<img>` sends no Origin, so
+      // its GET is answered by the read rule alone — it changes nothing, and
+      // a private image is `same-site` and never cached (data-spec §8).
       const origin = req.headers.origin ?? '';
-      if (!allowed.has(origin)) return send(res, 403, { error: 'unknown' });
-      const cors = corsHeaders(origin, DATA_METHODS);
+      const imageRead = method === 'GET' && IMAGE_GET.test(url.pathname);
+      if (!allowed.has(origin) && !imageRead) return send(res, 403, { error: 'unknown' });
+      const cors = allowed.has(origin) ? corsHeaders(origin, DATA_METHODS) : {};
       if (method === 'OPTIONS') return send(res, 204, undefined, cors);
       if (method !== 'GET' && req.headers['x-az-request'] !== '1') return send(res, 403, { error: 'unknown' }, cors);
       const result = await data.handle({
@@ -482,8 +510,12 @@ export function createApp(deps: AppDeps) {
           return u ? { id: u.id, email: u.email, verified: u.emailVerified } : null;
         },
         body: (limit) => readJson(req, limit),
+        upload: (limit, to) => readRaw(req, limit, to),
       });
-      return send(res, result.status, result.body, cors);
+      if (result.file) return sendFile(res, result.file.path, imageHeaders(result.file), cors);
+      // A refused upload is answered before its body is read; closing the
+      // connection stops the rest of it arriving instead of reading it all.
+      return send(res, result.status, result.body, req.complete ? cors : { ...cors, connection: 'close' });
     }
 
     if (!url.pathname.startsWith('/auth/')) return send(res, 404, { error: 'unknown' });

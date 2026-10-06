@@ -41,6 +41,8 @@ export const BACKEND_PINS = {
   pg: '8.23.0',
   mysql2: '3.24.4',
   nodemailer: '10.0.10',
+  /** The image library (data-spec §8, §16 Q6): only a site with an image field installs it. */
+  sharp: '0.35.5',
 } as const;
 
 /** Node that runs TypeScript directly and ships `node:sqlite` unflagged. */
@@ -53,12 +55,13 @@ const hashHeader = (what: string): string => `# GENERATED ${generatedJson(what)}
 
 export interface BackendFile { readonly path: string; readonly content: string }
 
-/** Only the drivers this setup uses — a SQLite server installs none. */
+/** Only the drivers this setup uses — a SQLite server installs none; only image fields bring the image library. */
 export function serverDependencies(setup: Setup): Record<string, string> {
   return {
     ...(setup.database === 'postgres' ? { pg: BACKEND_PINS.pg } : {}),
     ...(setup.database === 'mysql' ? { mysql2: BACKEND_PINS.mysql2 } : {}),
     ...(setup.email === 'smtp' ? { nodemailer: BACKEND_PINS.nodemailer } : {}),
+    ...(setup.images === true ? { sharp: BACKEND_PINS.sharp } : {}),
   };
 }
 
@@ -149,6 +152,19 @@ ${data ? dataReadme(data) : ''}`;
 
 /** The README's data section: the API, and the runbook for a step that loses data. */
 function dataReadme(data: BackendData): string {
+  const images = hasImages(data) ? `
+**Images.** An image field is uploaded with \`PUT /data/<table>/<id>/<field>\`
+(the raw bytes, at most \`AZ_UPLOAD_MAX_MB\`) after its row exists. Only
+JPEG, PNG, WebP and AVIF are accepted, by their first bytes; each is decoded
+and stored re-encoded as WebP, at most 2048 px a side, with no metadata — a
+photo's location never reaches the disk. Files live in \`AZ_FILES_DIR\` under
+generated names; back that folder up with the database. Files no row names
+are removed hourly once an hour old.
+
+The image library is a native package (libvips, LGPL-3.0-or-later, bundled
+per platform): \`npm install\` on the machine that runs the server, not a copy
+of another machine's \`node_modules\`.
+` : '';
   return `
 ## Data
 
@@ -173,13 +189,16 @@ Then:
    or a new unique is refused while rows still hold the old value or share a
    value, with the count.
 3. Start the server as usual.
-`;
+${images}`;
 }
+
+/** A table has an image field: the image library and the upload keys are needed. */
+const hasImages = (data: BackendData | undefined) => data !== undefined && data.tables.some((t) => t.fields.some((f) => f.type === 'image'));
 
 /** Everything under `server/` except the copied `src/`. */
 export function backendFiles(siteName: string, backend: SpecBackend, data?: BackendData): BackendFile[] {
   // `data` only when there are tables, so a site without them gets exactly the files it got before.
-  const setup: Setup = { database: backend.database, email: backend.email, ...(data ? { data: true } : {}) };
+  const setup: Setup = { database: backend.database, email: backend.email, ...(data ? { data: true } : {}), ...(hasImages(data) ? { images: true } : {}) };
   const deps = serverDependencies(setup);
   return [
     {
@@ -198,7 +217,7 @@ export function backendFiles(siteName: string, backend: SpecBackend, data?: Back
       path: `${SERVER_DIR}/az.config.json`,
       content: `${JSON.stringify({
         _generated: generatedJson('the backend\'s choices from the .az source: database and email'),
-        siteName, database: setup.database, email: setup.email, ...(setup.data ? { data: true } : {}),
+        siteName, database: setup.database, email: setup.email, ...(setup.data ? { data: true } : {}), ...(setup.images ? { images: true } : {}),
       }, null, 2)}\n`,
     },
     { path: `${SERVER_DIR}/.env.example`, content: `${hashHeader('every backend key with its meaning; copy to .env (az backend init) and fill it')}${envExample(setup)}` },

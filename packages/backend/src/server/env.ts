@@ -28,6 +28,8 @@ export interface Setup {
   readonly email: EmailWay;
   /** The site declares data tables (data-spec): their keys are listed too. */
   readonly data?: boolean;
+  /** A data table has an image field (data-spec §8): the upload keys are listed too. */
+  readonly images?: boolean;
 }
 
 export interface KeySpec {
@@ -42,6 +44,9 @@ export interface KeySpec {
 }
 
 const always = () => true;
+
+/** data-spec §8: the upload cap's default and ceiling, in MB. */
+export const UPLOAD_MB = { default: 5, max: 20 } as const;
 
 /** Every key the server reads, in the order `.env.example` lists them. */
 export const KEYS: readonly KeySpec[] = [
@@ -69,6 +74,8 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_LINK_LANDING', about: 'Where a sign-in link lands on the site once it has signed the visitor in.', when: always, required: false, example: '/' },
   { name: 'AZ_OAUTH_PROVIDERS', about: 'Provider ids, comma-separated (lower-case letters, digits, -). Each needs its own AZ_OAUTH_<ID>_… keys below; empty for none.', when: always, required: false, example: '' },
   { name: 'AZ_ADMIN_EMAILS', about: 'Who may use /admin: verified account addresses, comma-separated. An unverified account with a listed address is not an admin. Empty: nobody.', when: (s) => s.data === true, required: false, example: '' },
+  { name: 'AZ_FILES_DIR', about: 'Where uploaded images are stored, outside anything served statically. Created on first start; back it up with the database.', when: (s) => s.images === true, required: false, example: './data/files' },
+  { name: 'AZ_UPLOAD_MAX_MB', about: `The largest image upload, in MB (default ${UPLOAD_MB.default}, at most ${UPLOAD_MB.max}).`, when: (s) => s.images === true, required: false, example: String(UPLOAD_MB.default) },
   { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: always, required: false, example: 'deny' },
 ];
 
@@ -141,6 +148,10 @@ export interface Config {
   readonly linkLanding: string;
   readonly providers: readonly Provider[];
   readonly oauthSignup: boolean;
+  /** AZ_FILES_DIR: stored images (setup.images only). */
+  readonly filesDir: string;
+  /** AZ_UPLOAD_MAX_MB in bytes (setup.images only). */
+  readonly uploadLimit: number;
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -290,6 +301,11 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
     });
   }
 
+  const uploadMb = Number(get('AZ_UPLOAD_MAX_MB') || String(UPLOAD_MB.default));
+  if (setup.images === true && (!Number.isInteger(uploadMb) || uploadMb < 1 || uploadMb > UPLOAD_MB.max)) {
+    problems.push(`AZ_UPLOAD_MAX_MB must be a whole number of MB, 1–${UPLOAD_MB.max}`);
+  }
+
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -313,6 +329,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
       resetPath, linkLanding,
       providers,
       oauthSignup: signup === 'allow',
+      filesDir: get('AZ_FILES_DIR') || './data/files',
+      uploadLimit: uploadMb * 1024 * 1024,
     },
   };
 }

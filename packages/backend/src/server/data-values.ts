@@ -2,7 +2,7 @@
  * @az server data-values
  * Purpose: the data tables' runtime model, every value's validation, and rows as the API returns them.
  * Spec: docs/data-spec.md §4.3–§4.5, §5.2, §9
- * Exports: Table, Field, FieldType, Rules, Who, Stored, ValueProblem, loadTables, checkValue, storedDefault, outRow, q, physical, isUuid, isDate, chars, TEXT_LIMITS
+ * Exports: Table, Field, FieldType, Rules, Who, Stored, ValueProblem, loadTables, checkValue, storedDefault, outRow, fieldColumns, imageVersion, q, physical, isUuid, isDate, chars, TEXT_LIMITS
  * Edit guide: the server is the first line (the database the second): every value is checked here before any statement.
  * Tests: packages/backend/test/data-api.test.ts
  */
@@ -22,7 +22,7 @@ import type { Database } from './env.ts';
 
 export type Who = 'anyone' | 'signedin' | 'owner';
 export type Rules = { readonly read: readonly Who[]; readonly create: readonly Who[]; readonly edit: readonly Who[]; readonly delete: readonly Who[] };
-export type FieldType = 'text' | 'longtext' | 'number' | 'money' | 'flag' | 'date' | 'datetime' | 'email' | 'url' | 'choice' | 'ref';
+export type FieldType = 'text' | 'longtext' | 'number' | 'money' | 'flag' | 'date' | 'datetime' | 'email' | 'url' | 'choice' | 'image' | 'ref';
 
 export interface Field {
   readonly name: string;
@@ -49,7 +49,7 @@ export interface Table {
 export const TEXT_LIMITS = { text: 200, longtext: 10_000, email: 254, url: 2048, choice: 63 } as const;
 
 const NAME = /^[a-z][a-z0-9]*$/;
-const TYPES: ReadonlySet<string> = new Set(['text', 'longtext', 'number', 'money', 'flag', 'date', 'datetime', 'email', 'url', 'choice', 'ref']);
+const TYPES: ReadonlySet<string> = new Set(['text', 'longtext', 'number', 'money', 'flag', 'date', 'datetime', 'email', 'url', 'choice', 'image', 'ref']);
 const WHO: ReadonlySet<string> = new Set(['anyone', 'signedin', 'owner']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -58,6 +58,16 @@ export const physical = (table: string) => `azd_${table}`;
 export const q = (d: Database, name: string) => (d === 'mysql' ? `\`${name}\`` : `"${name}"`);
 export const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v);
 export const chars = (v: string) => [...v].length;
+
+/**
+ * A field's columns: one, or for an image its stored key with the width and
+ * height beside it (data-spec §4.3). Field names never hold `_`.
+ */
+export const fieldColumns = (f: Field): readonly string[] =>
+  f.type === 'image' ? [f.name, `${f.name}__w`, `${f.name}__h`] : [f.name];
+
+/** The version an image URL carries: its stored key's UUID, new on every upload (data-spec §8). */
+export const imageVersion = (key: string) => key.slice(0, key.indexOf('.'));
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -149,6 +159,9 @@ export function checkValue(f: Field, v: unknown): { ok: true; value: Stored } | 
       return typeof v === 'string' && isDate(v) ? { ok: true, value: v } : bad;
     case 'ref':
       return isUuid(v) ? { ok: true, value: v } : bad;
+    case 'image':
+      // Set only by uploading its bytes (PUT /data/<t>/<id>/<field>), never in a JSON body.
+      return bad;
   }
 }
 
@@ -162,9 +175,12 @@ const NUMERIC: ReadonlySet<FieldType> = new Set(['number', 'money', 'datetime'])
  * A row as the API returns it: `{ id, created, updated, mine, …fields }`.
  * The owner's id never leaves the server — `mine` says whether it is the
  * caller. Engines return 64-bit integers as numbers or strings; both become
- * numbers (every stored value is a safe integer).
+ * numbers (every stored value is a safe integer). An image is `{ url, width,
+ * height }`: `imageBase` is the server's public URL plus the route prefix
+ * (`/data` or `/admin/data`), and the URL's `v` is the stored key's UUID, so
+ * a new upload is a new URL and the old one may be cached for good.
  */
-export function outRow(t: Table, row: Record<string, unknown>, user: string | null): Record<string, unknown> {
+export function outRow(t: Table, row: Record<string, unknown>, user: string | null, imageBase = '/data'): Record<string, unknown> {
   const out: Record<string, unknown> = {
     id: row.id,
     created: Number(row.created),
@@ -173,6 +189,12 @@ export function outRow(t: Table, row: Record<string, unknown>, user: string | nu
   };
   for (const f of t.fields) {
     const v = row[f.name];
+    if (f.type === 'image') {
+      out[f.name] = typeof v === 'string' && v !== ''
+        ? { url: `${imageBase}/${t.name}/${String(row.id)}/${f.name}?v=${imageVersion(v)}`, width: Number(row[`${f.name}__w`]), height: Number(row[`${f.name}__h`]) }
+        : null;
+      continue;
+    }
     out[f.name] = v === null || v === undefined
       ? (f.type === 'flag' ? false : null)
       : f.type === 'flag' ? Number(v) === 1

@@ -5,7 +5,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { compile, plan, type Manifest, type SpecTable } from '../../core/src/index.ts';
+import { compile, plan, type LockStep, type Manifest, type SpecTable } from '../../core/src/index.ts';
 import { dataSteps } from '../src/data-ddl.ts';
 import type { DataStep } from '../src/server/data-migrate.ts';
 import { loadTables, type Table } from '../src/server/data-values.ts';
@@ -31,4 +31,11 @@ export function dataOf(data: string): { tables: Table[]; steps: DataStep[] } {
   const p = plan([], spec, { rename: [], drop: [], unique: [] });
   // Through JSON and loadTables, exactly as the server reads data.json.
   return { tables: loadTables(JSON.parse(JSON.stringify({ tables: spec }))), steps: dataSteps([{ version: 1, ops: p.ops }]) };
+}
+
+/** `data …` lines → what `az build` hands the backend emitter: the spec tables and the lock's first step. */
+export function backendDataOf(data: string): { tables: readonly SpecTable[]; steps: LockStep[] } {
+  const r = compile(dataSite(data), { manifests });
+  if (!r.ok || !r.spec?.site.data) throw new Error(`fixture does not compile: ${JSON.stringify(r.diagnostics)}`);
+  return { tables: r.spec.site.data, steps: [{ version: 1, ops: plan([], r.spec.site.data, { rename: [], drop: [], unique: [] }).ops }] };
 }

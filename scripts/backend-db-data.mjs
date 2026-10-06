@@ -2,15 +2,21 @@
  * The data tables against REAL PostgreSQL and MySQL (data-spec §14): every
  * migration kind up from empty, guards, a crashed step resumed, two
  * migrators at once, the rules and values through the data routes, the
- * admin routes and their audit (§11), a
+ * admin routes and their audit (§11), image fields (§8: three columns
+ * through every migration kind, upload, replace under a race, clear, delete
+ * and the orphan sweep), a
  * unique race, foreign keys, keyset order, search case per engine — and
  * the spec's three INFERENCES settled on the engines themselves (CHECK on
  * MySQL, LOWER outside ASCII, a driver's `LIMIT ?`). Run by backend-db.mjs
  * inside its containers.
  */
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createImages } from '../packages/backend/src/server/data-images.ts';
+import { plainJpeg } from '../packages/backend/test/image-fixtures.ts';
 import { compile, plan, replay } from '../packages/core/src/index.ts';
 import { dataSteps } from '../packages/backend/src/data-ddl.ts';
 import { DestructivePending, GuardFailed, migrateData } from '../packages/backend/src/server/data-migrate.ts';
@@ -245,6 +251,57 @@ export async function dataSuite(engine, db, openAgain, check, info) {
   check(`${engine} ADMIN: the audit pages newest first, naming the admin`,
     [...audit1.body.items, ...audit2.body.items].map((x) => x.action).join() === 'delete,create,edit' && audit2.body.next === null && audit1.body.items[0].admin === 'boss@data.test',
     JSON.stringify([audit1.body, audit2.body]));
+
+  // ---- image fields (data-spec §4.3, §8), on this engine -----------------
+  const pics = lockOf([
+    ['  data pics\n    title text\n    photo image\n    allow anyone read\n    allow signedin create\n    allow owner edit delete\n'],
+    ['  data pics\n    title text\n    photo image\n    proof image private\n    allow anyone read\n    allow signedin create\n    allow owner edit delete\n'],
+    ['  data pics\n    title text\n    picture image\n    proof image private\n    allow anyone read\n    allow signedin create\n    allow owner edit delete\n', { rename: ['pics.photo=picture'] }],
+    ['  data pics\n    title text\n    picture image\n    gone image\n    proof image private\n    allow anyone read\n    allow signedin create\n    allow owner edit delete\n'],
+    ['  data pics\n    title text\n    picture image\n    proof image private\n    allow anyone read\n    allow signedin create\n    allow owner edit delete\n', { drop: ['pics.gone'] }],
+  ], 400);
+  await migrateData(db, pics.steps, { confirm: Infinity });
+  check(`${engine} IMAGES: three columns per image through create, add, rename and drop`,
+    (await columns(db, 'azd_pics')).join() === 'id,owner,created,updated,title,picture,picture__w,picture__h,proof,proof__w,proof__h', (await columns(db, 'azd_pics')).join());
+  const dir = mkdtempSync(join(tmpdir(), `az-db-images-${engine}-`));
+  const images = await createImages({ dir });
+  const gallery = createData({ db, tables: pics.tables, images, publicUrl: 'https://api.data.test' });
+  const stored = () => readdirSync(dir).filter((n) => n.endsWith('.webp'));
+  const send = (method, path, user, bytes) => gallery.handle({
+    method, url: new URL(path, 'http://x'), ip: '10.0.2.1', user: async () => user, body: async () => ({}),
+    upload: async (_limit, to) => { writeFileSync(to, bytes); },
+  });
+  const pic = await send('POST', '/data/pics', users[0]);
+  const pid = pic.body?.item?.id;
+  check(`${engine} IMAGES: a row is created without its image`, pic.status === 201 && pic.body.item.picture === null, JSON.stringify(pic.body));
+  const up = await send('PUT', `/data/pics/${pid}/picture`, users[0], await plainJpeg(300, 200));
+  const row = await db.get(`SELECT ${['picture', 'picture__w', 'picture__h'].map((c) => (engine === 'mysql' ? `\`${c}\`` : `"${c}"`)).join(', ')} FROM ${engine === 'mysql' ? '`azd_pics`' : '"azd_pics"'} WHERE id = ?`, [pid]);
+  check(`${engine} IMAGES: upload stores the key and size; the API answers { url, width, height }`,
+    up.status === 200 && up.body.item.picture.width === 300 && Number(row.picture__w) === 300 && Number(row.picture__h) === 200
+      && /^[0-9a-f-]{36}\.webp$/.test(row.picture) && up.body.item.picture.url === `https://api.data.test/data/pics/${pid}/picture?v=${row.picture.slice(0, 36)}`,
+    JSON.stringify([up.status, row]));
+  const both = await Promise.all([300, 400].map(async (w) => send('PUT', `/data/pics/${pid}/picture`, users[0], await plainJpeg(w, 100))));
+  const after = await db.get(`SELECT ${engine === 'mysql' ? '`picture`' : '"picture"'} AS k FROM ${engine === 'mysql' ? '`azd_pics`' : '"azd_pics"'} WHERE id = ?`, [pid]);
+  check(`${engine} IMAGES: two replacements at once — both answered, one file left, the one the row names`,
+    both.every((r) => r.status === 200) && stored().length === 1 && stored()[0] === after.k, `${both.map((r) => r.status)} ${stored()} ${after.k}`);
+  const theirs = await send('PUT', `/data/pics/${pid}/picture`, users[1], await plainJpeg(10, 10));
+  check(`${engine} IMAGES: another account's upload is 404 and stores nothing`, theirs.status === 404 && stored().length === 1);
+  await send('PUT', `/data/pics/${pid}/proof`, users[0], await plainJpeg(10, 10));
+  const read = (user, field, v) => gallery.handle({ method: 'GET', url: new URL(`/data/pics/${pid}/${field}${v ? `?v=${v}` : ''}`, 'http://x'), ip: '10.0.2.2', user: async () => user });
+  const proofKey = (await db.get(`SELECT ${engine === 'mysql' ? '`proof`' : '"proof"'} AS k FROM ${engine === 'mysql' ? '`azd_pics`' : '"azd_pics"'} WHERE id = ?`, [pid])).k;
+  const own = await read(users[0], 'proof', proofKey.slice(0, 36));
+  check(`${engine} IMAGES: a private image — its owner reads it (never shared), others get 404`,
+    own.status === 200 && own.file?.shared === false && (await read(users[1], 'proof')).status === 404 && (await read(null, 'proof')).status === 404);
+  const pub = await read(null, 'picture', after.k.slice(0, 36));
+  check(`${engine} IMAGES: a public image under its current version is shared (immutable)`, pub.status === 200 && pub.file?.shared === true);
+  const cleared = await send('DELETE', `/data/pics/${pid}/picture`, users[0]);
+  check(`${engine} IMAGES: clear nulls the three columns and removes the file`, cleared.status === 200 && cleared.body.item.picture === null && stored().length === 1);
+  const removed = await send('DELETE', `/data/pics/${pid}`, users[0]);
+  check(`${engine} IMAGES: deleting the row removes its remaining image`, removed.status === 204 && stored().length === 0, `${removed.status} ${stored()}`);
+  const temp = images.tempPath();
+  writeFileSync(temp, await plainJpeg(10, 10));
+  await images.store(temp);
+  check(`${engine} IMAGES: the sweep keeps a young orphan (its row may be on the way)`, (await gallery.sweepImages()) === 0 && stored().length === 1);
 
   if (engine === 'postgres') {
     await db.run(`INSERT INTO azd_items (id, owner, created, updated, name, price)

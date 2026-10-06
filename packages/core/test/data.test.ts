@@ -126,7 +126,10 @@ const CASES: [string, string, string][] = [
   ['AZ1249', 'a scheme pair in a data line', site('  data notes\n    body text default mailto:a@b.c\n')],
   ['AZ1249', 'a route in a data line', site('  data notes\n    body text /home\n')],
   ['AZ1249', 'a path in a data line', site('  data notes\n    body text ./x.ts\n')],
-  ['AZ1214', 'an image field before uploads ship', site('  data notes\n    photo image\n')],
+  ['AZ1236', 'required on an image (uploaded after its row exists)', site('  data notes\n    photo image required\n')],
+  ['AZ1236', 'a default on an image', site('  data notes\n    photo image default x\n')],
+  ['AZ1236', 'unique on an image', site('  data notes\n    photo image unique\n')],
+  ['AZ1236', 'search on an image', site('  data notes\n    photo image search\n')],
   ['AZ1219', 'lines beneath a field', site('  data notes\n    body text\n      nested text\n')],
 ];
 
@@ -153,6 +156,13 @@ test('warnings: no allow lines (AZ1246), strangers create (AZ1247), a readable e
 test('CONTROL: a private email on a public table does not warn', () => {
   const r = run(site('  data notes\n    contact email private\n    allow anyone read\n'));
   assert.ok(!r.diagnostics.some((d) => d.code === 'AZ1248'));
+});
+
+test('an image field compiles, private and locked allowed (data-spec §4.5, §8)', () => {
+  const src = site('  data notes\n    photo image\n    proof image private locked\n    allow anyone read\n');
+  assert.deepEqual(errors(src), []);
+  const f = run(src).spec!.site.data![0].fields;
+  assert.deepEqual(f.map((x) => [x.name, x.type, x.private, x.locked]), [['photo', 'image', false, false], ['proof', 'image', true, true]]);
 });
 
 test('a self-reference is legal (a category with a parent category)', () => {

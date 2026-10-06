@@ -71,3 +71,29 @@ test('the error codes are exactly the ones the server answers on /data', () => {
 test('type names: one row of each table', () => {
   assert.deepEqual(['products', 'categories', 'boxes', 'notes', 'news', 'glass'].map(typeName), ['Product', 'Category', 'Box', 'Note', 'New', 'Glass']);
 });
+
+test('image fields: { url, width, height } in rows, never in a body; GET/PUT/DELETE on their own path as rules allow', () => {
+  const doc = JSON.parse(openapi('Shop', tablesOf(`  data products
+    name text required
+    photo image
+    badge image locked
+    allow anyone read
+    allow signedin create
+    allow owner edit delete
+  data gallery
+    cover image
+    allow anyone read
+    allow signedin create
+`), 1));
+  const s = doc.components.schemas;
+  assert.deepEqual(s.Product.properties.photo.type, ['object', 'null']);
+  assert.deepEqual(s.Product.properties.photo.required, ['url', 'width', 'height']);
+  assert.ok(!('photo' in s.ProductInput.properties) && !('badge' in s.ProductInput.properties), 'an image is uploaded, never sent as JSON');
+  const photo = doc.paths['/data/products/{id}/photo'];
+  assert.deepEqual(Object.keys(photo).filter((k) => k !== 'parameters').sort(), ['delete', 'get', 'put']);
+  assert.deepEqual(Object.keys(photo.put.requestBody.content), ['application/octet-stream']);
+  assert.deepEqual(Object.keys(photo.put.responses).sort(), ['200', '400', '401', '403', '404', '413', '415', '429']);
+  assert.deepEqual(Object.keys(photo.get.responses['200'].content), ['image/webp']);
+  assert.deepEqual(Object.keys(doc.paths['/data/products/{id}/badge']).filter((k) => k !== 'parameters'), ['get'], 'locked: read only');
+  assert.deepEqual(Object.keys(doc.paths['/data/gallery/{id}/cover']).filter((k) => k !== 'parameters'), ['get'], 'no edit rule: read only');
+});

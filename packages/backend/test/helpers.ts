@@ -9,6 +9,7 @@ import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } fr
 import { createApp } from '../src/server/app.ts';
 import { migrate, openSqlite, type Db } from '../src/server/db.ts';
 import { createData } from '../src/server/data-api.ts';
+import type { Images } from '../src/server/data-images.ts';
 import { migrateData, type DataStep } from '../src/server/data-migrate.ts';
 import type { Table } from '../src/server/data-values.ts';
 import { loadConfig, type Config } from '../src/server/env.ts';
@@ -102,6 +103,9 @@ export async function startBackend(
     data?: { tables: readonly Table[]; steps: readonly DataStep[] };
     /** AZ_ADMIN_EMAILS, already parsed (lower-cased). */
     admins?: readonly string[];
+    /** Image storage, for tables with an image field, and its upload cap in bytes. */
+    images?: Images;
+    uploadLimit?: number;
   } = {},
 ): Promise<Harness> {
   const clock = { now: Date.now() };
@@ -128,7 +132,12 @@ export async function startBackend(
     store: createStore(db, config.secret, () => clock.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }),
     mailer: over.mailer ?? { send: async (m) => { mail.push(m); } },
     oidc: createOidc((...a) => fetch(...a), () => clock.now), now: () => clock.now, log: over.log ?? (() => {}),
-    ...(over.data ? { data: createData({ db, tables: over.data.tables, admins: over.admins ?? [], now: () => clock.now }) } : {}),
+    ...(over.data ? {
+      data: createData({
+        db, tables: over.data.tables, admins: over.admins ?? [], now: () => clock.now, publicUrl: url,
+        ...(over.images ? { images: over.images } : {}), ...(over.uploadLimit ? { uploadLimit: over.uploadLimit } : {}),
+      }),
+    } : {}),
   });
   server.on('request', (req, res) => { void app.handler(req, res); });
   return { url, mail, clock, config, db, close: async () => { server.close(); await db.close(); } };
@@ -166,6 +175,16 @@ export function client(base: string, origin = SITE) {
           ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers,
         },
         ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
+      });
+      keep(r);
+      return r;
+    },
+    /** Raw bytes, as the typed client's upload sends them. */
+    async upload(method: string, path: string, bytes: Uint8Array, headers: Record<string, string> = {}) {
+      const r = await fetch(`${base}${path}`, {
+        method, redirect: 'manual',
+        headers: { origin, 'x-az-request': '1', cookie: cookieHeader(), 'content-type': 'application/octet-stream', ...headers },
+        body: bytes,
       });
       keep(r);
       return r;

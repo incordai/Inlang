@@ -64,9 +64,9 @@ const SQL_WORDS = new Set(('CREATE TABLE INDEX UNIQUE ON ALTER ADD COLUMN DROP R
 test('no value is ever SQL text: identifiers quoted, the only literals are the fixed type caps', () => {
   const lock = lockOf([
     [V1],
-    [`${V1}    featured flag default on\n    due date\n    link url\n    body longtext\n    contact email unique\n  data reviews\n    product ref products\n`],
+    [`${V1}    featured flag default on\n    due date\n    link url\n    body longtext\n    contact email unique\n    photo image\n  data reviews\n    product ref products\n`],
   ]);
-  const caps = new Set(['200', '10000', '254', '2048', '63', '10', '0', '1', '36']);
+  const caps = new Set(['200', '10000', '254', '2048', '63', '10', '0', '1', '36', '80']);
   for (const step of dataSteps(lock)) {
     for (const [engine, units] of Object.entries(step.units)) {
       for (const u of units) {
@@ -95,6 +95,32 @@ test('create, add with a fill, rename, drop: every op lands on SQLite and the da
   assert.deepEqual(await columns(db, 'azd_items'), ['id', 'owner', 'created', 'updated', 'name', 'price', 'status', 'featured', 'note']);
   assert.deepEqual({ ...(await db.get('SELECT name, featured, note FROM azd_items WHERE id = ?', ['r1'])) }, { name: 'Chair', featured: 0, note: 'none' });
   assert.deepEqual(await migrateData(db, steps, { confirm: Infinity }), [], 'CONTROL: nothing left to apply');
+  await db.close();
+});
+
+test('an image is three columns — key, width, height — through create, add, rename and drop (data-spec §4.3)', async () => {
+  const db = await fresh();
+  const steps = dataSteps(lockOf([
+    [`${V1}    photo image\n`],
+    [`${V1}    photo image\n    back image\n`],
+    [`${V1}    picture image\n    back image\n`, { rename: ['products.photo=picture'] }],
+    [`${V1}    picture image\n`, { drop: ['products.back'] }],
+  ]));
+  const base = ['id', 'owner', 'created', 'updated', 'name', 'price', 'status', 'sku'];
+  await migrateData(db, steps.slice(0, 1));
+  assert.deepEqual(await columns(db, 'azd_products'), [...base, 'photo', 'photo__w', 'photo__h']);
+  await db.run('INSERT INTO azd_products (id, owner, created, updated, name, photo, photo__w, photo__h) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)', ['r1', 1, 1, 'Chair', 'k.webp', 640, 480]);
+  await migrateData(db, steps.slice(0, 2));
+  assert.deepEqual(await columns(db, 'azd_products'), [...base, 'photo', 'photo__w', 'photo__h', 'back', 'back__w', 'back__h']);
+  await migrateData(db, steps, { confirm: Infinity });
+  assert.deepEqual(await columns(db, 'azd_products'), [...base, 'picture', 'picture__w', 'picture__h']);
+  assert.deepEqual({ ...(await db.get('SELECT picture, picture__w, picture__h FROM azd_products WHERE id = ?', ['r1'])) }, { picture: 'k.webp', picture__w: 640, picture__h: 480 });
+  // One unit per column on every engine, each with its own probe, so a crash resumes per column.
+  const add = steps[1].units;
+  for (const d of ['sqlite', 'postgres', 'mysql'] as const) {
+    assert.deepEqual(add[d].map((u) => u.probe && 'name' in u.probe ? u.probe.name : null), ['back', 'back__w', 'back__h'], d);
+  }
+  assert.match(add.postgres[0].sql!, /"back" VARCHAR\(80\)$/);
   await db.close();
 });
 

@@ -53,6 +53,23 @@ test('config: a database CA file needs TLS required; with it, the path is kept f
   assert.equal(good.ok && good.config.databaseTls, true);
 });
 
+test('config: the upload cap is 1–20 MB, default 5; the files folder defaults outside anything served (data-spec §8)', () => {
+  const base = {
+    AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'https://api.example.org', AZ_ALLOWED_ORIGINS: 'https://www.example.org',
+    AZ_EMAIL_FROM: 'x', AZ_SMTP_HOST: 'h', AZ_SMTP_PORT: '587',
+  };
+  const images = { database: 'sqlite', email: 'smtp', data: true, images: true } as const;
+  for (const v of ['0', '21', '2.5', 'lots']) {
+    const r = loadConfig({ ...base, AZ_UPLOAD_MAX_MB: v }, images, 's');
+    assert.match(r.ok ? '' : r.problems.join('\n'), /AZ_UPLOAD_MAX_MB must be a whole number of MB, 1–20/, v);
+  }
+  const d = loadConfig(base, images, 's');
+  assert.deepEqual(d.ok && [d.config.uploadLimit, d.config.filesDir], [5 * 1024 * 1024, './data/files']);
+  const set = loadConfig({ ...base, AZ_UPLOAD_MAX_MB: '20', AZ_FILES_DIR: '/srv/files' }, images, 's');
+  assert.deepEqual(set.ok && [set.config.uploadLimit, set.config.filesDir], [20 * 1024 * 1024, '/srv/files']);
+  assert.ok(loadConfig({ ...base, AZ_UPLOAD_MAX_MB: 'lots' }, { database: 'sqlite', email: 'smtp' }, 's').ok, 'CONTROL: a site without images ignores the key');
+});
+
 test('config: every provider key is checked, and an oauth2 provider without a verified field is still valid', () => {
   const base = { AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'https://api.example.org', AZ_ALLOWED_ORIGINS: 'https://www.example.org', AZ_EMAIL_FROM: 'x', AZ_SMTP_HOST: 'h', AZ_SMTP_PORT: '587' };
   const bad = loadConfig({ ...base, AZ_OAUTH_PROVIDERS: 'work,Bad_Id', AZ_OAUTH_WORK_TYPE: 'oidc' }, { database: 'sqlite', email: 'smtp' }, 's');

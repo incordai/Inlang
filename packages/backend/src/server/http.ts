@@ -2,7 +2,7 @@
  * @az server http
  * Purpose: the HTTP edge: JSON bodies, cookies, CORS, security headers, rate limits, client IP.
  * Spec: docs/backend-spec.md §5
- * Exports: readJson, cookie, corsHeaders, clientIp, createLimiter
+ * Exports: readJson, readRaw, sendFile, cookie, corsHeaders, clientIp, createLimiter
  * Edit guide: trust X-Forwarded-For only by hop count; exact-origin CORS; cap limiter memory.
  * Tests: packages/backend/test/security.test.ts
  */
@@ -14,8 +14,11 @@
  * Copied into a generated server; imports only node built-ins.
  */
 
+import { createWriteStream } from 'node:fs';
+import { open, rm } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
+import { pipeline } from 'node:stream/promises';
 
 /** The largest request body read; auth bodies are a few hundred bytes. */
 export const BODY_LIMIT = 16 * 1024;
@@ -40,6 +43,56 @@ export async function readJson(req: IncomingMessage, limit: number = BODY_LIMIT)
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new BodyError('not an object');
   return parsed as Record<string, unknown>;
+}
+
+/**
+ * A raw body streamed to a new file at `to`, at most `limit` bytes — refused
+ * by its declared length before a byte is read, and counted while reading,
+ * so an over-cap body never reaches the disk beyond `limit` (data-spec §8).
+ * On any failure the partial file is removed; throws BodyError('too large')
+ * for the cap. The file is created exclusively, readable only by the server.
+ */
+export async function readRaw(req: IncomingMessage, limit: number, to: string): Promise<void> {
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > limit) throw new BodyError('too large');
+  let size = 0;
+  const out = createWriteStream(to, { flags: 'wx', mode: 0o600 });
+  try {
+    await pipeline(req, async function* (source: AsyncIterable<Buffer>) {
+      for await (const chunk of source) {
+        size += chunk.length;
+        if (size > limit) throw new BodyError('too large');
+        yield chunk;
+      }
+    }, out);
+  } catch (e) {
+    await rm(to, { force: true });
+    if (e instanceof BodyError) throw e;
+    throw new BodyError('aborted');
+  }
+}
+
+/**
+ * A stored file streamed back with the given headers over the security set;
+ * a file gone since its row was read answers 404 like an absent row.
+ */
+export async function sendFile(res: ServerResponse, path: string, headers: Record<string, string>, cors: Record<string, string>): Promise<void> {
+  let fh;
+  try {
+    fh = await open(path, 'r');
+  } catch {
+    return send(res, 404, { error: 'not_found' }, cors);
+  }
+  try {
+    const { size } = await fh.stat();
+    res.writeHead(200, { ...SECURITY_HEADERS, ...cors, ...headers, 'content-length': String(size) });
+    await pipeline(fh.createReadStream({ autoClose: false }), res);
+  } catch {
+    // The client went away mid-file; nothing more can be sent.
+    res.destroy();
+  } finally {
+    await fh.close();
+  }
 }
 
 export function readCookies(req: IncomingMessage): Record<string, string> {

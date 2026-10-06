@@ -51,7 +51,7 @@ export const TYPE_DESCRIPTIONS: Readonly<Record<DataType, string>> = {
   email: 'An email address',
   url: 'An http(s) link',
   choice: 'One of the listed values: choice draft live',
-  image: 'An uploaded image (arrives with uploads, phase D3)',
+  image: 'An uploaded image, re-encoded without its metadata',
   ref: 'Belongs to a row of another table: ref categories',
 };
 
@@ -357,14 +357,6 @@ function field(table: string, line: DataLine, err: Report): SpecField | null {
     return null;
   }
   const type = typeArg.value;
-  if (type === 'image') {
-    // data-spec §15: image fields ship with uploads (D3), after the image
-    // library decision (§16 Q6). Accepting the type now would compile a
-    // field nothing can set.
-    err('AZ1214', `data ${table}: '${name} image' is not available yet — image fields arrive with uploads`, typeArg.pos);
-    return null;
-  }
-
   const isModifier = (a: Arg | undefined) => a !== undefined && a.kind === 'word' && isOne(DATA_MODIFIERS, a.value);
   let i = 0;
   let currency: string | undefined;
@@ -426,14 +418,15 @@ function field(table: string, line: DataLine, err: Report): SpecField | null {
     const mod = a.value as DataModifier;
     const refuse = () => err('AZ1236', `data ${table}: '${mod}' does not apply to ${type} — remove it`, a.pos);
     switch (mod) {
-      case 'required': if (type === 'flag') { refuse(); return null; } mods.required = true; break;
+      // An image is uploaded after its row exists (data-spec §5), so a create can never carry it.
+      case 'required': if (type === 'flag' || type === 'image') { refuse(); return null; } mods.required = true; break;
       case 'unique': if (!UNIQUE_TYPES.has(type)) { refuse(); return null; } mods.unique = true; break;
       case 'index': if (!INDEX_TYPES.has(type)) { refuse(); return null; } mods.index = true; break;
       case 'search': if (!SEARCH_TYPES.has(type)) { refuse(); return null; } mods.search = true; break;
       case 'private': mods.private = true; break;
       case 'locked': if (type === 'ref') { refuse(); return null; } mods.locked = true; break;
       case 'default': {
-        if (type === 'ref') { refuse(); return null; }
+        if (type === 'ref' || type === 'image') { refuse(); return null; }
         const v = rest[i + 1];
         const parsed = v ? defaultValue(type, v, choices) : null;
         if (parsed === null) {

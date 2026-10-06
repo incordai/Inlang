@@ -88,7 +88,7 @@ const literal = (value: unknown) => JSON.stringify(value, null, 2)
 export function adminValuesTs(tables: readonly SpecTable[]): string {
   return `${generated('the admin pages\' tables and value rules: inputs to API values, codes to sentences')}import type { AdminRow, DataErrorCode, TableName } from "./client.ts";
 
-export type FieldType = "text" | "longtext" | "number" | "money" | "flag" | "date" | "datetime" | "email" | "url" | "choice" | "ref";
+export type FieldType = "text" | "longtext" | "number" | "money" | "flag" | "date" | "datetime" | "email" | "url" | "choice" | "image" | "ref";
 
 export interface FieldInfo {
   readonly name: string;
@@ -141,7 +141,7 @@ export function problemText(code: DataErrorCode, field?: string): string {
     case "forbidden": return "This account is not an admin of this site.";
     case "signin_required": return "Your session has ended. Sign in again.";
     case "rate_limited": return "Too many changes in a short time. Wait a few minutes, then try again.";
-    case "too_large": return "This row is too large to save.";
+    case "too_large": return field ? what + " is too large: use a smaller file, at most 8000 pixels a side." : "This row is too large to save.";
     case "bad_query": return "That search, sort or filter is not available here.";
     case "unsupported_type": return what + " is not a supported file type.";
     default: return "Something went wrong. Check the connection and try again.";
@@ -229,7 +229,14 @@ export function rowName(t: TableInfo, row: AdminRow): string {
 }
 
 /** The columns a row list shows: the short fields, at most five. */
-export const columnsOf = (t: TableInfo) => t.fields.filter((f) => f.type !== "longtext").slice(0, 5);
+export const columnsOf = (t: TableInfo) => t.fields.filter((f) => f.type !== "longtext" && f.type !== "image").slice(0, 5);
+
+/** An image field's value as the API returns it, or null. */
+export function imageOf(v: unknown): { url: string; width: number; height: number } | null {
+  if (!v || typeof v !== "object") return null;
+  const { url, width, height } = v as Record<string, unknown>;
+  return typeof url === "string" && typeof width === "number" && typeof height === "number" ? { url, width, height } : null;
+}
 
 export const hrefOf = (table: string, row?: string) => "/admin/" + table + (row ? "?row=" + encodeURIComponent(row) : "");
 `;
@@ -248,7 +255,7 @@ export function adminTsx(): string {
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { admin, type AdminRow, type AuditEntry, type DataErrorCode, type TableName } from "./client.ts";
 import {
-  cellText, columnsOf, fromInput, hrefOf, label, money, PAGE_SIZE, problemText, rowName, TABLES, toInput, UUID,
+  cellText, columnsOf, fromInput, hrefOf, imageOf, label, money, PAGE_SIZE, problemText, rowName, TABLES, toInput, UUID,
   type FieldInfo, type TableInfo,
 } from "./admin-values.ts";
 
@@ -515,6 +522,7 @@ function TablePage({ table }: { table: TableInfo }) {
       {editing ? (
         <Editor key={editing === "new" ? "new" : editing.id} table={table} row={editing === "new" ? null : editing}
           onCancel={() => setEditing(null)}
+          onImage={() => setTick((n) => n + 1)}
           onSaved={(row, created) => {
             setEditing(null);
             setMessage((created ? "Created “" : "Saved “") + rowName(table, row) + "”.");
@@ -639,11 +647,85 @@ function FieldInput({ table, f, value, error, onChange }: {
   );
 }
 
-/** Create or edit one row: every field, the server's checks and its copy. */
-function Editor({ table, row, onCancel, onSaved }: {
-  table: TableInfo; row: AdminRow | null; onCancel: () => void; onSaved: (row: AdminRow, created: boolean) => void;
+/** The image types the server accepts, by their content (data-spec §8). */
+const IMAGE_TYPES = "image/jpeg,image/png,image/webp,image/avif";
+
+/**
+ * An image field: its preview, and upload, replace or remove — each saved at
+ * once, apart from the form, because an image is uploaded to a row that
+ * exists (data-spec §5). A new row's image waits until the row is created.
+ */
+function ImageField({ table, row, f, onChanged }: {
+  table: TableInfo; row: AdminRow | null; f: FieldInfo; onChanged: () => void;
+}): ReactNode {
+  const id = "az-admin-" + table.name + "-" + f.name;
+  const [image, setImage] = useState(row ? imageOf(row[f.name]) : null);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  // A refusal moves focus to the file input — once it is enabled again, after the render.
+  useEffect(() => { if (error) input.current?.focus(); }, [error]);
+  const hint = [hintOf(f), "JPEG, PNG, WebP or AVIF. It is stored as WebP, without its metadata, such as where a photo was taken."]
+    .filter(Boolean).join(" ");
+  if (!row) {
+    return (
+      <div className="az-admin-field">
+        <p className="az-admin-legend">{label(f.name)}</p>
+        <p className="az-admin-hint">Create the row first, then upload its image.</p>
+      </div>
+    );
+  }
+  const act = async (run: () => ReturnType<typeof admin.clear>, done: string) => {
+    setBusy(true);
+    setError("");
+    setStatus("Saving…");
+    const r = await run();
+    setBusy(false);
+    if (input.current) input.current.value = "";
+    if (r.ok) {
+      setImage(imageOf(r.item[f.name]));
+      setStatus(done);
+      onChanged();
+    } else {
+      setStatus("");
+      setError(problemText(r.code, f.name));
+    }
+  };
+  return (
+    <fieldset className="az-admin-field az-admin-image" data-invalid={error ? "" : undefined}>
+      <legend className="az-admin-legend">{label(f.name)}</legend>
+      {image
+        ? <img className="az-admin-preview" src={image.url} width={image.width} height={image.height} alt={"The current " + f.name} />
+        : <p className="az-admin-hint">No image yet.</p>}
+      <label htmlFor={id}>{image ? "Replace with another file" : "Upload a file"}</label>
+      <input ref={input} id={id} type="file" accept={IMAGE_TYPES} disabled={busy}
+        aria-describedby={id + "-hint" + (error ? " " + id + "-error" : "")} aria-invalid={error ? true : undefined}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void act(() => admin.upload(table.name, row.id, f.name, file), label(f.name) + " saved.");
+        }} />
+      <p id={id + "-hint"} className="az-admin-hint">{hint}</p>
+      {image ? (
+        <div className="az-admin-actions">
+          <button type="button" className="az-admin-button" disabled={busy}
+            onClick={() => { void act(() => admin.clear(table.name, row.id, f.name), label(f.name) + " removed."); }}>
+            {"Remove " + f.name}
+          </button>
+        </div>
+      ) : null}
+      <p role="status" className="az-admin-status">{status}</p>
+      {error ? <p id={id + "-error"} className="az-admin-error">{error}</p> : null}
+    </fieldset>
+  );
+}
+
+/** Create or edit one row: every field, the server's checks and its copy. Images are saved on their own (ImageField). */
+function Editor({ table, row, onCancel, onSaved, onImage }: {
+  table: TableInfo; row: AdminRow | null; onCancel: () => void; onSaved: (row: AdminRow, created: boolean) => void; onImage: () => void;
 }) {
-  const start = () => Object.fromEntries(table.fields.map((f) => [f.name, toInput(f, row ? row[f.name] : f.default)]));
+  const fields = table.fields.filter((f) => f.type !== "image");
+  const start = () => Object.fromEntries(fields.map((f) => [f.name, toInput(f, row ? row[f.name] : f.default)]));
   const [values, setValues] = useState<Record<string, string | boolean>>(start);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
@@ -654,7 +736,7 @@ function Editor({ table, row, onCancel, onSaved }: {
 
   const showErrors = (found: Record<string, string>) => {
     setErrors(found);
-    const first = table.fields.find((f) => found[f.name]);
+    const first = fields.find((f) => found[f.name]);
     if (first) form.current?.querySelector<HTMLElement>("#az-admin-" + table.name + "-" + first.name)?.focus();
   };
 
@@ -662,7 +744,7 @@ function Editor({ table, row, onCancel, onSaved }: {
     e.preventDefault();
     const body: Record<string, unknown> = {};
     const found: Record<string, string> = {};
-    for (const f of table.fields) {
+    for (const f of fields) {
       const raw = values[f.name];
       if (row && raw === toInput(f, row[f.name])) continue;           // unchanged: not sent
       const p = fromInput(f, raw);
@@ -683,7 +765,7 @@ function Editor({ table, row, onCancel, onSaved }: {
     const r = row ? await admin.update(table.name, row.id, body) : await admin.create(table.name, body);
     setBusy(false);
     if (r.ok) { onSaved(r.item, !row); return; }
-    if (r.field && table.fields.some((f) => f.name === r.field)) showErrors({ [r.field]: problemText(r.code, r.field) });
+    if (r.field && fields.some((f) => f.name === r.field)) showErrors({ [r.field]: problemText(r.code, r.field) });
     else setFormError(problemText(r.code));
   };
 
@@ -692,9 +774,12 @@ function Editor({ table, row, onCancel, onSaved }: {
     <form ref={form} className="az-admin-editor" noValidate aria-labelledby="az-admin-editor-title" onSubmit={(e) => { void submit(e); }}>
       <h2 id="az-admin-editor-title" ref={heading} tabIndex={-1}>{title}</h2>
       {row ? <p className="az-admin-hint">{"Owner: " + (row.ownerEmail ?? "nobody") + " · id " + row.id}</p> : null}
-      {table.fields.map((f) => (
+      {fields.map((f) => (
         <FieldInput key={f.name} table={table} f={f} value={values[f.name]} error={errors[f.name] ?? ""}
           onChange={(v) => setValues({ ...values, [f.name]: v })} />
+      ))}
+      {table.fields.filter((f) => f.type === "image").map((f) => (
+        <ImageField key={f.name} table={table} row={row} f={f} onChanged={onImage} />
       ))}
       <p role="alert" className="az-admin-error">{formError}</p>
       <div className="az-admin-actions">
@@ -774,6 +859,12 @@ export function adminCss(t: ThemeLike): string {
 .az-admin-table :is(th, td) { padding: ${px(t.space[8])} ${px(t.space[12])}; text-align: start; vertical-align: top;
   border-bottom: 1px solid var(--az-color-border); max-width: ${t.size['measure-display']}ch; overflow-wrap: anywhere; }
 .az-admin-table th { background: var(--az-color-surface-alt); white-space: nowrap; }
+.az-admin-image { margin: 0; padding: 0; border: 0; gap: ${px(t.space[8])}; }
+.az-admin-legend { padding: 0; font-weight: ${t.type['weight-bold']}; font-size: ${t.typeSize.sm}; }
+.az-admin-image label { font-weight: normal; }
+.az-admin-preview { display: block; max-width: 100%; height: auto; max-height: ${px(t.space[128] * 2)}; object-fit: contain;
+  background: var(--az-color-surface-alt); border: 1px solid var(--az-color-border); border-radius: ${px(t.radius.sm)}; }
+.az-admin-image input[type="file"] { min-height: ${px(t.size.tap)}; font: inherit; max-width: 100%; }
 .az-admin-confirm { ${decls(confirm.style)} }
 .az-admin-confirm[data-state="open"] { ${decls(confirm.states.open)} }
 .az-admin-confirm > * + * { margin-top: ${px(t.space[16])}; }

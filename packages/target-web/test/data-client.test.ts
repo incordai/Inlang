@@ -68,20 +68,70 @@ test('only granted operations; a table named like a keyword is a key, not a vari
   assert.match(src, /readonly contact: string \| null;/, 'private reads as nullable');
 });
 
-test('the generated client type-checks under strict TypeScript', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'az-client-'));
-  writeFileSync(join(dir, 'client.ts'), dataClient(specOf(DATA).site.data!));
-  writeFileSync(join(dir, 'env.d.ts'), 'interface ImportMeta { readonly env: Record<string, string | undefined> }\n');
-  const tsc = join(ROOT, 'node_modules/typescript/bin/tsc');
-  // Run from the temporary folder: no project tsconfig.json applies there.
-  const r = spawnSync(process.execPath, [tsc, '--noEmit', '--strict', '--target', 'es2022', '--module', 'esnext', '--moduleResolution', 'bundler', '--lib', 'es2022,dom', '--allowImportingTsExtensions', 'client.ts', 'env.d.ts'], { encoding: 'utf8', cwd: dir });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
+const IMAGES = `  data products
+    name text required
+    photo image
+    proof image private
+    badge image locked
+    allow anyone read
+    allow signedin create
+    allow owner edit delete
+  data gallery
+    cover image
+    allow anyone read
+    allow signedin create
+`;
+
+test('the generated client type-checks under strict TypeScript — with and without image fields', () => {
+  for (const data of [DATA, IMAGES]) {
+    const dir = mkdtempSync(join(tmpdir(), 'az-client-'));
+    writeFileSync(join(dir, 'client.ts'), dataClient(specOf(data).site.data!));
+    writeFileSync(join(dir, 'env.d.ts'), 'interface ImportMeta { readonly env: Record<string, string | undefined> }\n');
+    const tsc = join(ROOT, 'node_modules/typescript/bin/tsc');
+    // Run from the temporary folder: no project tsconfig.json applies there.
+    const r = spawnSync(process.execPath, [tsc, '--noEmit', '--strict', '--target', 'es2022', '--module', 'esnext', '--moduleResolution', 'bundler', '--lib', 'es2022,dom', '--allowImportingTsExtensions', 'client.ts', 'env.d.ts'], { encoding: 'utf8', cwd: dir });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  }
+});
+
+test('image fields: DataImage | null in rows, never input; upload/clear only where an edit rule opens them, locked ones admin-only', () => {
+  const src = dataClient(specOf(IMAGES).site.data!);
+  assert.match(src, /readonly photo: DataImage \| null;/);
+  assert.ok(!/ProductInput \{[^}]*(photo|proof|badge)/.test(src) && !/ProductPatch \{[^}]*(photo|proof|badge)/.test(src), 'never sent as JSON');
+  const products = /products: \{([\s\S]*?)\n {2}\},/.exec(src)![1];
+  assert.deepEqual([...products.matchAll(/^ {4}(\w+): \(/gm)].map((m) => m[1]), ['list', 'get', 'create', 'update', 'remove', 'upload', 'clear']);
+  assert.match(products, /upload: \(id: string, field: "photo" \| "proof", file: Blob\)/, 'the locked badge is not offered');
+  const gallery = /gallery: \{([\s\S]*?)\n {2}\},/.exec(src)![1];
+  assert.ok(!/upload|clear/.test(gallery), 'no edit rule, no upload');
+  assert.match(src, /^ {2}upload: \(table: TableName, id: string, field: string, file: Blob\)/m, 'admins upload to any image field');
+  const plain = dataClient(specOf(DATA).site.data!);
+  assert.ok(!/DataImage/.test(plain), 'CONTROL: no image type without image fields');
+  const plainProducts = /products: \{([\s\S]*?)\n {2}\},/.exec(plain)![1];
+  assert.ok(!/upload|clear/.test(plainProducts), 'CONTROL: no table upload without image fields');
+});
+
+test('upload sends the file\'s raw bytes with the CSRF header; clear is a DELETE', async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    const { tables, calls } = await loadClient(() => Response.json({ item: { id: 'x', photo: null } }), IMAGES);
+    const file = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], { type: 'image/jpeg' });
+    assert.deepEqual(await tables.products.upload('a/b', 'photo', file), { ok: true, item: { id: 'x', photo: null } });
+    await tables.products.clear('abc', 'proof');
+    assert.deepEqual(calls.map((c) => [c.init.method, c.url]), [
+      ['PUT', 'https://api.studio.test/data/products/a%2Fb/photo'],
+      ['DELETE', 'https://api.studio.test/data/products/abc/proof'],
+    ]);
+    assert.equal(calls[0].init.body, file, 'the Blob itself, not JSON');
+    assert.deepEqual(calls[0].init.headers, { 'content-type': 'application/octet-stream', 'x-az-request': '1' });
+    assert.equal(calls[0].init.credentials, 'include');
+    assert.deepEqual(calls[1].init.headers, { 'x-az-request': '1' });
+  } finally { globalThis.fetch = realFetch; }
 });
 
 /** The generated module, loaded with its backend address fixed and fetch recorded. */
-async function loadClient(respond: (url: string, init: RequestInit) => Promise<Response> | Response) {
+async function loadClient(respond: (url: string, init: RequestInit) => Promise<Response> | Response, data = DATA) {
   const dir = mkdtempSync(join(tmpdir(), 'az-client-'));
-  const src = dataClient(specOf(DATA).site.data!).replace(/import\.meta\.env\.AZ_PUBLIC_BACKEND_URL/, '"https://api.studio.test"');
+  const src = dataClient(specOf(data).site.data!).replace(/import\.meta\.env\.AZ_PUBLIC_BACKEND_URL/, '"https://api.studio.test"');
   writeFileSync(join(dir, 'client.ts'), src);
   const calls: { url: string; init: RequestInit }[] = [];
   globalThis.fetch = (async (url: string, init: RequestInit) => {

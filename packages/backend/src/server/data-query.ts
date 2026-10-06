@@ -20,7 +20,7 @@
 
 import type { Value } from './db.ts';
 import type { Database } from './env.ts';
-import { chars, checkValue, isDate, isUuid, physical, q, type Field, type FieldType, type Table } from './data-values.ts';
+import { chars, checkValue, fieldColumns, isDate, isUuid, physical, q, type Field, type FieldType, type Table } from './data-values.ts';
 
 export const LIMIT_DEFAULT = 20;
 export const LIMIT_MAX = 100;
@@ -185,11 +185,13 @@ export function readable(d: Database, t: Table, user: string | null): { sql: str
   const params: Value[] = [];
   const cols = ['id', 'owner', 'created', 'updated'].map((c) => q(d, c));
   for (const f of t.fields) {
-    if (f.private) {
-      cols.push(`CASE WHEN ${q(d, 'owner')} = ? THEN ${q(d, f.name)} END AS ${q(d, f.name)}`);
-      params.push(user);
-    } else {
-      cols.push(q(d, f.name));
+    for (const c of fieldColumns(f)) {
+      if (f.private) {
+        cols.push(`CASE WHEN ${q(d, 'owner')} = ? THEN ${q(d, c)} END AS ${q(d, c)}`);
+        params.push(user);
+      } else {
+        cols.push(q(d, c));
+      }
     }
   }
   return { sql: cols.join(', '), params };
@@ -201,7 +203,7 @@ export function readable(d: Database, t: Table, user: string | null): { sql: str
  * aliased `r` so the subquery's `u` columns can never shadow a field name.
  */
 function adminColumns(d: Database, t: Table): string {
-  const cols = ['id', 'owner', 'created', 'updated', ...t.fields.map((f) => f.name)].map((c) => `r.${q(d, c)}`);
+  const cols = ['id', 'owner', 'created', 'updated', ...t.fields.flatMap(fieldColumns)].map((c) => `r.${q(d, c)}`);
   cols.push(`(SELECT u.${q(d, 'email')} FROM ${q(d, 'az_users')} u WHERE u.${q(d, 'id')} = r.${q(d, 'owner')}) AS ${q(d, 'az_owner_email')}`);
   return cols.join(', ');
 }

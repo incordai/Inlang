@@ -65,9 +65,23 @@ function columnType(d: Database, f: LockField): string {
     case 'ref':
       return d === 'sqlite' ? 'TEXT' : 'VARCHAR(36)';
     case 'image':
-      throw new Error('data-ddl: image fields ship in D3');
+      // The stored file's generated name, `<uuid>.webp` (data-spec §8).
+      return d === 'sqlite' ? 'TEXT' : 'VARCHAR(80)';
   }
 }
+
+/** An image's width and height columns beside its key (data-spec §4.3); field names never hold `_`. */
+export const imageSizeColumns = (field: string): readonly [string, string] => [`${field}__w`, `${field}__h`];
+
+/** A field's columns on one engine: one, or three for an image. */
+function columns(d: Database, f: LockField): [string, string][] {
+  const main: [string, string] = [f.name, columnType(d, f)];
+  if (f.type !== 'image') return [main];
+  return [main, ...imageSizeColumns(f.name).map((c): [string, string] => [c, 'INTEGER'])];
+}
+
+/** Every column name a field occupies. */
+const columnNames = (f: LockField): string[] => (f.type === 'image' ? [f.name, ...imageSizeColumns(f.name)] : [f.name]);
 
 const fillValue = (v: Fill): Param => (typeof v === 'boolean' ? (v ? 1 : 0) : v);
 
@@ -149,7 +163,7 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
               `${q(d, 'owner')} ${idType}`,
               `${q(d, 'created')} ${big} NOT NULL`,
               `${q(d, 'updated')} ${big} NOT NULL`,
-              ...op.fields.map((f) => `${q(d, f.name)} ${columnType(d, f)}`),
+              ...op.fields.flatMap((f) => columns(d, f).map(([c, type]) => `${q(d, c)} ${type}`)),
               `CONSTRAINT ${q(d, s.pk)} PRIMARY KEY (${q(d, 'id')})`,
               fkClause(d, s.fks.get('owner')!, 'owner', 'az_users', true),
               ...op.fields.filter((f) => f.type === 'ref').map((f) => fkClause(d, s.fks.get(f.name)!, f.name, physical(f.ref!), false)),
@@ -173,7 +187,7 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
           const t = physical(op.table);
           const fk = f.type === 'ref' ? name('f') : undefined;
           if (fk) s.fks.set(f.name, fk);
-          all((d) => {
+          for (const d of DIALECTS) {
             // MySQL adds the foreign key as its own statement (below); the
             // others take it in the column, one statement either way.
             const ref = fk && d !== 'mysql'
@@ -181,11 +195,14 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
                 ? ` REFERENCES ${q(d, physical(f.ref!))} (${q(d, 'id')}) ON DELETE RESTRICT`
                 : ` CONSTRAINT ${q(d, fk)} REFERENCES ${q(d, physical(f.ref!))} (${q(d, 'id')}) ON DELETE RESTRICT`
               : '';
-            return {
-              sql: `ALTER TABLE ${q(d, t)} ADD COLUMN ${q(d, f.name)} ${columnType(d, f)}${ref}`,
-              probe: { kind: 'column', table: t, name: f.name, done: 'present' },
-            };
-          });
+            // One unit per column, each with its own probe, so a resumed step skips what landed.
+            for (const [c, type] of columns(d, f)) {
+              out[d].push({
+                sql: `ALTER TABLE ${q(d, t)} ADD COLUMN ${q(d, c)} ${type}${c === f.name ? ref : ''}`,
+                probe: { kind: 'column', table: t, name: c, done: 'present' },
+              });
+            }
+          }
           if (fk) {
             out.mysql.push({
               sql: `ALTER TABLE ${q('mysql', t)} ADD ${fkClause('mysql', fk, f.name, physical(f.ref!), false)}`,
@@ -211,7 +228,9 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
           // SQLite refuses to drop an indexed column; the others drop the index with it.
           dropIndex(op.table, s, `unique:${op.field}`);
           dropIndex(op.table, s, `plain:${op.field}`);
-          all((d) => ({ sql: `ALTER TABLE ${q(d, t)} DROP COLUMN ${q(d, op.field)}`, probe: { kind: 'column', table: t, name: op.field, done: 'absent' } }));
+          for (const c of columnNames(s.fields.get(op.field)!)) {
+            all((d) => ({ sql: `ALTER TABLE ${q(d, t)} DROP COLUMN ${q(d, c)}`, probe: { kind: 'column', table: t, name: c, done: 'absent' } }));
+          }
           s.fields.delete(op.field);
           summary.push(`drop ${op.table}.${op.field}`);
           break;
@@ -219,11 +238,14 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
         case 'renameField': {
           const s = need(op.table);
           const t = physical(op.table);
-          all((d) => ({
-            sql: `ALTER TABLE ${q(d, t)} RENAME COLUMN ${q(d, op.field)} TO ${q(d, op.to)}`,
-            probe: { kind: 'column', table: t, name: op.to, done: 'present' },
-          }));
           const f = s.fields.get(op.field)!;
+          const renamed = columnNames({ ...f, name: op.to });
+          columnNames(f).forEach((from, i) => {
+            all((d) => ({
+              sql: `ALTER TABLE ${q(d, t)} RENAME COLUMN ${q(d, from)} TO ${q(d, renamed[i])}`,
+              probe: { kind: 'column', table: t, name: renamed[i], done: 'present' },
+            }));
+          });
           s.fields.delete(op.field);
           s.fields.set(op.to, { ...f, name: op.to });
           for (const k of ['unique', 'plain']) {

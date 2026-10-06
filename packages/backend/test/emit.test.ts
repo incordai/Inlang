@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { BACKEND_PINS, backendFiles, envExample, envFile, serverDependencies } from '../src/emit.ts';
 import { DRIVERS } from '../src/server/drivers.ts';
 import { KEYS } from '../src/server/env.ts';
+import type { LockStep, SpecTable } from '../../core/src/index.ts';
+import { backendDataOf as dataOf } from './data-fixture.ts';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -31,6 +33,26 @@ test('dependencies: only what the setup uses — a SQLite + API server installs 
   assert.deepEqual(serverDependencies({ database: 'sqlite', email: 'api' }), {});
   assert.deepEqual(serverDependencies({ database: 'postgres', email: 'smtp' }), { pg: '8.23.0', nodemailer: '10.0.10' });
   assert.deepEqual(serverDependencies({ database: 'mysql', email: 'api' }), { mysql2: '3.24.4' });
+});
+
+test('the image library is installed only for a site with an image field (data-spec §8)', () => {
+  assert.deepEqual(serverDependencies({ database: 'sqlite', email: 'api', data: true }), {}, 'tables without images: nothing new');
+  assert.deepEqual(serverDependencies({ database: 'sqlite', email: 'api', data: true, images: true }), { sharp: '0.35.5' });
+  const withImages = dataOf('  data notes\n    body text\n    photo image\n    allow anyone read\n');
+  const without = dataOf('  data notes\n    body text\n    allow anyone read\n');
+  const pkg = (d?: { tables: readonly SpecTable[]; steps: readonly LockStep[] }) =>
+    backendFiles('Studio', { database: 'sqlite', email: 'api' }, d).find((f) => f.path === 'server/package.json')!.content;
+  assert.equal(JSON.parse(pkg(withImages)).dependencies.sharp, '0.35.5');
+  assert.equal(pkg(without), pkg(undefined), 'a data site without images: package.json byte-identical to a site without data');
+  const files = (d: typeof withImages) => backendFiles('Studio', { database: 'sqlite', email: 'api' }, d);
+  const env = (d: typeof withImages) => files(d).find((f) => f.path === 'server/.env.example')!.content;
+  assert.match(env(withImages), /^AZ_FILES_DIR=\.\/data\/files$/m);
+  assert.match(env(withImages), /^AZ_UPLOAD_MAX_MB=5$/m);
+  assert.doesNotMatch(env(without), /AZ_FILES_DIR|AZ_UPLOAD_MAX_MB/);
+  const config = (d: typeof withImages) => JSON.parse(files(d).find((f) => f.path === 'server/az.config.json')!.content);
+  assert.deepEqual([config(withImages).images, config(without).images], [true, undefined]);
+  assert.match(files(withImages).find((f) => f.path === 'server/README.md')!.content, /\*\*Images\.\*\*/);
+  assert.doesNotMatch(files(without).find((f) => f.path === 'server/README.md')!.content, /\*\*Images\.\*\*/);
 });
 
 test('.env.example: every key the setup reads, described, and no secret value', () => {

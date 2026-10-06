@@ -1,6 +1,6 @@
 /**
  * @az server drivers
- * Purpose: the database/email driver modules the server may load, by name.
+ * Purpose: the database/email driver modules (and the image library) the server may load, by name.
  * Spec: docs/backend-spec.md §3
  * Exports: DRIVERS, loadDriver
  * Edit guide: a new driver needs vetting and an exact pin in backend-emit.
@@ -15,7 +15,7 @@
  * Copied into a generated server; imports nothing.
  */
 
-export const DRIVERS = ['node:sqlite', 'pg', 'mysql2/promise', 'nodemailer'] as const;
+export const DRIVERS = ['node:sqlite', 'pg', 'mysql2/promise', 'nodemailer', 'sharp'] as const;
 export type Driver = (typeof DRIVERS)[number];
 
 export const loadDriver = (name: Driver): Promise<Record<string, unknown>> =>

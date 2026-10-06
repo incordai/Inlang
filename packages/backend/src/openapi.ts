@@ -47,7 +47,11 @@ function fieldSchema(f: SpecField): Schema {
       case 'flag': return { type: 'boolean' };
       case 'date': return { type: 'string', format: 'date' };
       case 'ref': return { type: 'string', format: 'uuid', description: `id of a ${typeName(f.ref!)}` };
-      case 'image': throw new Error('openapi: image fields ship in D3');
+      case 'image': return {
+        type: 'object', required: ['url', 'width', 'height'], additionalProperties: false,
+        properties: { url: { type: 'string', format: 'uri' }, width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 } },
+        description: 'uploaded with PUT …/{field}; the url changes on every upload',
+      };
     }
   })();
   return f.type === 'flag' ? base : { ...base, type: [base.type, 'null'] };
@@ -96,7 +100,8 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
       },
       additionalProperties: false,
     };
-    const writable = t.fields.filter((f) => !f.locked);
+    // An image is never in a JSON body: it is uploaded on its own route.
+    const writable = t.fields.filter((f) => !f.locked && f.type !== 'image');
     schemas[`${name}Input`] = {
       type: 'object',
       required: writable.filter((f) => f.required && f.default === undefined).map((f) => f.name),
@@ -146,6 +151,35 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
     const idParam = [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }];
     if (Object.keys(collection).length > 0) paths[`/data/${t.name}`] = collection;
     if (Object.keys(one).length > 0) paths[`/data/${t.name}/{id}`] = { parameters: idParam, ...one };
+    for (const f of t.fields.filter((x) => x.type === 'image')) {
+      const ops: Record<string, unknown> = {};
+      const field = typeName(f.name);
+      if (g.read) {
+        ops.get = {
+          operationId: `get${name}${field}`,
+          parameters: [{ name: 'v', in: 'query', required: false, schema: { type: 'string' }, description: 'the upload this url names; another one is not_found' }],
+          responses: {
+            200: { description: 'the image, re-encoded as WebP; no Origin needed (an <img> sends none)', content: { 'image/webp': { schema: { type: 'string', format: 'binary' } } } },
+            ...ERRORS, ...notFound,
+          },
+        };
+      }
+      if (g.edit && !f.locked) {
+        ops.put = {
+          operationId: `upload${name}${field}`,
+          requestBody: { required: true, content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }, description: 'the raw bytes of a JPEG, PNG, WebP or AVIF image, judged by its first bytes' },
+          responses: {
+            200: { description: 'stored', ...item }, ...ERRORS, ...notFound,
+            413: errorResponse('too_large — over the upload cap, or more than 8000 px a side or 40 megapixels'),
+            415: errorResponse('unsupported_type — not a JPEG, PNG, WebP or AVIF image'),
+          },
+        };
+        ops.delete = { operationId: `clear${name}${field}`, responses: { 200: { description: 'cleared', ...item }, ...ERRORS, ...notFound } };
+      }
+      if (Object.keys(ops).length > 0) {
+        paths[`/data/${t.name}/{id}/${f.name}`] = { parameters: idParam, ...ops };
+      }
+    }
   }
   const doc = {
     // The root takes only `x-` extensions, so the generated-file note rides as one.

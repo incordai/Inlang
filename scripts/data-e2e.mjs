@@ -4,7 +4,10 @@
  * ships; the server `az build` generated for it, started as its own process
  * over SQLite; and the typed client (src/data/client.ts) used from a `raw`
  * component on the page — reads, writes, rules, private fields and error
- * codes through the browser's own cookie, CORS and CSRF handling.
+ * codes through the browser's own cookie, CORS and CSRF handling; image
+ * uploads (data-spec §8) through the client and the admin editor, shown by
+ * an <img> across origins, stored without a photo's location, and removed
+ * with their row.
  *
  *     pnpm test:data
  *
@@ -25,12 +28,13 @@ import { createServer as createNetServer } from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { CLI, ROOT, WORDS, buildSites } from './visual/pipeline.mjs';
+import { metadataFindings, phoneJpeg, plainJpeg, SVG } from '../packages/backend/test/image-fixtures.ts';
 
 let failures = 0;
 const check = (name, pass, detail = '') => {
@@ -51,6 +55,7 @@ site notebook
     title   text     required search
     body    longtext
     contact email    private
+    photo   image
     allow anyone   read
     allow signedin create
     allow owner    edit delete
@@ -152,7 +157,12 @@ export default function Notes() {
   if (!notes) return <p data-notes="loading">Loading</p>;
   return (
     <ul data-notes="list">
-      {notes.map((n) => <li key={n.id} data-mine={String(n.mine)}>{n.title}</li>)}
+      {notes.map((n) => (
+        <li key={n.id} data-mine={String(n.mine)}>
+          {n.title}
+          {n.photo ? <img src={n.photo.url} width={n.photo.width} height={n.photo.height} alt={"Photo for " + n.title} /> : null}
+        </li>
+      ))}
     </ul>
   );
 }
@@ -175,7 +185,7 @@ function startSite(root) {
     res.writeHead(404).end();
   });
   return new Promise((done) => server.listen(0, '127.0.0.1', () =>
-    done({ url: `http://127.0.0.1:${server.address().port}`, close: () => server.close() })));
+    done({ url: `http://localhost:${server.address().port}`, close: () => server.close() })));
 }
 
 const freePort = () => new Promise((done) => {
@@ -216,7 +226,11 @@ const unquote = (raw) => raw.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/g, (
 
 const work = mkdtempSync(join(tmpdir(), 'az-data-e2e-'));
 const serverPort = await freePort();
-const serverUrl = `http://127.0.0.1:${serverPort}`;
+// The site and its server by NAME, as a deployment addresses them: Chromium
+// judges two IP-literal origins never same-site, so a private image's
+// `Cross-Origin-Resource-Policy: same-site` would block it between
+// 127.0.0.1 ports while allowing it between localhost ports (measured).
+const serverUrl = `http://localhost:${serverPort}`;
 process.env.AZ_PUBLIC_BACKEND_URL = serverUrl;
 
 // The site's folder: its source, its component, and its schema lock — written
@@ -242,6 +256,14 @@ const host = await startSite(normalize(site.dist));
 const serverDir = join(site.proj, 'server');
 mkdirSync(join(serverDir, 'node_modules'), { recursive: true });
 symlinkSync(realpathSync(join(ROOT, 'node_modules/nodemailer')), join(serverDir, 'node_modules/nodemailer'), 'dir');
+// The image library the generated package.json pins (data-spec §8): the repository's tested copy.
+symlinkSync(realpathSync(join(ROOT, 'node_modules/sharp')), join(serverDir, 'node_modules/sharp'), 'dir');
+const filesDir = join(serverDir, 'data/files');
+/** The stored images and leftover temporaries right now. */
+const stored = () => ({
+  files: existsSync(filesDir) ? readdirSync(filesDir).filter((n) => n.endsWith('.webp')).length : 0,
+  temp: existsSync(join(filesDir, '.tmp')) ? readdirSync(join(filesDir, '.tmp')).length : 0,
+});
 const child = spawn(process.execPath, ['src/main.ts'], {
   cwd: serverDir,
   env: {
@@ -249,6 +271,7 @@ const child = spawn(process.execPath, ['src/main.ts'], {
     AZ_SESSION_SECRET: randomBytes(32).toString('base64url'),
     AZ_BACKEND_PUBLIC_URL: serverUrl, AZ_PORT: String(serverPort), AZ_ALLOWED_ORIGINS: host.url,
     AZ_SQLITE_PATH: join(serverDir, 'data/test.db'),
+    AZ_FILES_DIR: filesDir,
     AZ_EMAIL_FROM: 'Notebook <no-reply@notebook.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(smtp.port),
     // One admin per signed-in browser, and a listed address nobody verifies.
     AZ_ADMIN_EMAILS: [...BROWSERS.map((b) => adminEmail(b)), ...BROWSERS.map((b) => `unverified-${b}@notebook.test`)].join(','),
@@ -284,6 +307,47 @@ async function signUp(page, name, email = `${name.toLowerCase()}-${randomBytes(3
   await form.locator('input[name="terms"]').check();
   await form.getByRole('button', { name: 'Create account' }).click();
   await page.waitForURL((u) => !u.pathname.startsWith('/signup'));
+}
+
+/** Upload bytes through the page's own typed client, as a file input's File would be sent. */
+const uploadVia = (page, id, bytes) => page.evaluate(async ([i, b]) => {
+  await new Promise((r) => { const t = setInterval(() => { if (globalThis.azData) { clearInterval(t); r(); } }, 20); });
+  return globalThis.azData.notes.upload(i, 'photo', new Blob([new Uint8Array(b)], { type: 'image/jpeg' }));
+}, [id, [...bytes]]);
+
+/**
+ * Images through the typed client (data-spec §8, §13): a phone photo stored
+ * rotated and without its location, shown by an <img> on the site's own page
+ * across origins, served with the §8 headers; renamed SVG refused; another
+ * account refused; deleting the row removes the file.
+ */
+async function imageFlow(name, owner, other) {
+  const made = await use(owner, 'create', { title: `${name} with photo` });
+  const up = await uploadVia(owner, made.item.id, await phoneJpeg(640, 320, 6));
+  check(`${name}: the owner uploads a phone photo; it comes back rotated, as { url, width, height }`,
+    up.ok === true && up.item.photo?.width === 320 && up.item.photo?.height === 640 && up.item.photo.url.startsWith(`${serverUrl}/data/notes/`), JSON.stringify(up).slice(0, 200));
+  const res = await fetch(up.item.photo.url);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  check(`${name}: the stored image carries no EXIF, GPS, XMP, ICC or comment`, res.ok && metadataFindings(bytes).length === 0, metadataFindings(bytes).join(', '));
+  const h = Object.fromEntries(['content-type', 'x-content-type-options', 'content-security-policy', 'cache-control', 'cross-origin-resource-policy', 'content-disposition'].map((k) => [k, res.headers.get(k)]));
+  check(`${name}: served with the §8 headers`, JSON.stringify(h) === JSON.stringify({
+    'content-type': 'image/webp', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox",
+    'cache-control': 'public, max-age=31536000, immutable', 'cross-origin-resource-policy': 'cross-origin', 'content-disposition': 'inline',
+  }), JSON.stringify(h));
+  await owner.reload();
+  const img = owner.locator(`img[alt="Photo for ${name} with photo"]`);
+  await img.waitFor();
+  await owner.waitForFunction((alt) => { const i = document.querySelector(`img[alt="${alt}"]`); return i?.complete && i.naturalWidth > 0; }, `Photo for ${name} with photo`);
+  check(`${name}: the site's page shows it with an <img> from the server's origin`, await img.evaluate((i) => i.naturalWidth === 320 && i.naturalHeight === 640));
+  const svg = await uploadVia(owner, made.item.id, SVG);
+  check(`${name}: an SVG sent as a photo is refused as unsupported_type`, svg.ok === false && svg.code === 'unsupported_type' && svg.field === 'photo', JSON.stringify(svg));
+  const theirs = await uploadVia(other, made.item.id, await plainJpeg(20, 20));
+  check(`${name}: another account's upload to the row is not_found`, theirs.ok === false && theirs.code === 'not_found', JSON.stringify(theirs));
+  const before = stored();
+  await use(owner, 'remove', made.item.id);
+  const after = stored();
+  const gone = await fetch(up.item.photo.url);
+  check(`${name}: deleting the row removes its file; the url is then not_found`, after.files === before.files - 1 && after.temp === 0 && gone.status === 404, `${JSON.stringify(before)} → ${JSON.stringify(after)}, ${gone.status}`);
 }
 
 /** Call the page's own typed client: `client.notes.<op>(...args)`. */
@@ -385,6 +449,44 @@ async function adminFlow(b, name, owner) {
     await page.locator('#az-admin-notes-contact').getAttribute('aria-invalid') === 'true');
   const editorAxe = await axeViolations(page);
   check(`${name} admin: axe finds nothing with the editor and its errors open`, editorAxe.length === 0, editorAxe.join(', '));
+
+  // The image field: saved on its own, at once — upload, refused type, replace, remove.
+  const photoInput = page.locator('#az-admin-notes-photo');
+  /** The image requests the page made, with what the server answered — named when a preview does not show. */
+  const imageAnswers = [];
+  page.on('response', (r) => { if (r.request().resourceType() === 'image') imageAnswers.push(`${r.status()} ${r.headers()['content-type'] ?? ''} ${r.headers()['cross-origin-resource-policy'] ?? ''}`); });
+  page.on('requestfailed', (r) => { if (r.resourceType() === 'image') imageAnswers.push(`failed: ${r.failure()?.errorText}`); });
+  await photoInput.setInputFiles({ name: 'holiday.jpg', mimeType: 'image/jpeg', buffer: await phoneJpeg(400, 200, 6) });
+  await page.getByText('Photo saved.').waitFor();
+  const preview = page.locator('img.az-admin-preview[alt="The current photo"]');
+  const shown = await page.waitForFunction(() => { const i = document.querySelector('img.az-admin-preview'); return i?.complete && i.naturalWidth > 0; }, null, { timeout: 10_000 })
+    .then(() => true, () => false);
+  // What the browser got, named on failure: the preview's address, and the same address fetched with the cookie.
+  const probe = await page.evaluate(async () => {
+    const i = document.querySelector('img.az-admin-preview');
+    if (!i) return 'no preview';
+    const r = await fetch(i.src, { credentials: 'include' }).catch((e) => ({ status: String(e), headers: new Headers() }));
+    return `${i.src} complete=${i.complete} natural=${i.naturalWidth}x${i.naturalHeight} fetch=${r.status} ${r.headers.get('content-type')}`;
+  }) + ` img: ${imageAnswers.join(', ')}`;
+  const first = (await preview.getAttribute('src').catch(() => null)) ?? '';
+  check(`${name} admin: an uploaded photo previews (rotated, from the admin route)`,
+    shown && /natural=200x400/.test(probe) && first.startsWith(`${serverUrl}/admin/data/notes/`), probe);
+  const imageAxe = await axeViolations(page);
+  check(`${name} admin: axe finds nothing with the image field and its preview`, imageAxe.length === 0, imageAxe.join(', '));
+  await photoInput.setInputFiles({ name: 'vector.jpg', mimeType: 'image/jpeg', buffer: SVG });
+  await page.getByText('Photo is not a supported file type.').waitFor();
+  check(`${name} admin: an SVG named .jpg is refused with the field's sentence; focus on the file input`,
+    await photoInput.evaluate((el) => document.activeElement === el && el.getAttribute('aria-invalid') === 'true'));
+  await photoInput.setInputFiles({ name: 'other.png', mimeType: 'image/jpeg', buffer: await plainJpeg(300, 100) });
+  await page.waitForFunction((old) => { const i = document.querySelector('img.az-admin-preview'); return i && i.getAttribute('src') !== old && i.complete && i.naturalWidth === 300; }, first);
+  const replacedOld = await page.evaluate(async (u) => (await fetch(u, { credentials: 'include' })).status, first);
+  check(`${name} admin: replacing shows the new image; the old one is gone (404)`, replacedOld === 404, String(replacedOld));
+  await page.getByRole('button', { name: 'Remove photo' }).click();
+  await page.getByText('Photo removed.').waitFor();
+  check(`${name} admin: Remove clears it; no preview remains`, (await preview.count()) === 0 && (await use(owner, 'get', target.item.id)).item?.photo === null);
+  await photoInput.setInputFiles({ name: 'keep.jpg', mimeType: 'image/jpeg', buffer: await plainJpeg(64, 64) });
+  await page.getByText('Photo saved.').waitFor();
+
   await page.locator('#az-admin-notes-contact').fill(SECRET_CONTACT);
   await page.getByRole('button', { name: 'Save changes' }).click();
   await page.getByText(`Saved “${name} edited by admin”.`).waitFor();
@@ -421,6 +523,7 @@ async function adminFlow(b, name, owner) {
   await page.waitForFunction(() => document.activeElement?.classList.contains('az-admin-count'));
   const gone = await use(owner, 'get', target.item.id);
   check(`${name} admin: deleted; focus lands on the row count, the owner's row is not_found`, gone.ok === false && gone.code === 'not_found', JSON.stringify(gone));
+  check(`${name} admin: the deleted row's image file went with it`, stored().files === 0 && stored().temp === 0, JSON.stringify(stored()));
 
   // Moderation: the anyone-create table says so; the stranger's row is removable.
   await page.goto(`${host.url}/admin/messages`);
@@ -704,6 +807,7 @@ try {
       check(`${name}: its owner deletes it`, removed.ok === true);
       const gone = await use(owner, 'get', made.item.id);
       check(`${name}: then it is not_found`, gone.ok === false && gone.code === 'not_found');
+      await imageFlow(name, owner, other);
       await adminFlow(b, name, owner);
     } finally {
       await b.close();
@@ -711,6 +815,7 @@ try {
   }
   check('no page errors in any browser', errors.length === 0, errors.slice(0, 2).join(' | '));
   check('the server logged no private value', !serverLog.includes(SECRET_CONTACT) && !serverLog.includes(PASSWORD), serverLog.slice(0, 200));
+  check('no image file outlived its row: the files folder is empty, no temporary left', stored().files === 0 && stored().temp === 0, JSON.stringify(stored()));
 } finally {
   child.kill('SIGTERM');
   host.close();

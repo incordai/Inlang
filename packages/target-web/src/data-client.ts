@@ -1,6 +1,6 @@
 /**
  * @az module data-client
- * Purpose: src/data/client.ts — the typed client for the data tables: list/get/create/update/remove per table, and the admin routes.
+ * Purpose: src/data/client.ts — the typed client for the data tables: list/get/create/update/remove/upload/clear per table, and the admin routes.
  * Spec: docs/data-spec.md §7
  * Exports: DATA_DIR, dataClient
  * Edit guide: only the actions some rule grants; no dependency; results are { ok } unions with the closed error codes.
@@ -37,7 +37,7 @@ function valueType(f: SpecField): string {
     case 'number': case 'money': case 'datetime': return 'number';
     case 'flag': return 'boolean';
     case 'choice': return (f.choices ?? []).map(str).join(' | ');
-    case 'image': throw new Error('data-client: image fields ship in D3');
+    case 'image': return 'DataImage';
     default: return 'string';
   }
 }
@@ -46,15 +46,20 @@ const EQUALITY = new Set(['number', 'money', 'flag', 'date', 'datetime', 'choice
 const RANGE = new Set(['number', 'money', 'date', 'datetime']);
 const SORTABLE = new Set(['text', 'number', 'money', 'date', 'datetime', 'choice']);
 
+const hasImages = (tables: readonly SpecTable[]) => tables.some((t) => t.fields.some((f) => f.type === 'image'));
+/** The image fields a caller other than an admin may upload to (locked ones are admin-only). */
+const uploadable = (t: SpecTable) => (t.rules.edit.length > 0 ? t.fields.filter((f) => f.type === 'image' && !f.locked) : []);
+
 function tableBlock(t: SpecTable): string {
   const T = typeName(t.name);
   const row = t.fields.map((f) => {
     // A flag is never null (absent is off); a private field is null on
-    // every row but the caller's own; an optional one may be empty.
-    const nullable = f.type !== 'flag' && (!f.required || f.private);
+    // every row but the caller's own; an optional one (every image) may be empty.
+    const nullable = f.type !== 'flag' && (!f.required || f.private || f.type === 'image');
     return `  readonly ${f.name}: ${valueType(f)}${nullable ? ' | null' : ''};`;
   });
-  const writable = t.fields.filter((f) => !f.locked);
+  // An image is never in a JSON body: it has its own upload route.
+  const writable = t.fields.filter((f) => !f.locked && f.type !== 'image');
   const input = writable.map((f) => {
     const needed = f.required && f.default === undefined;
     return `  ${f.name}${needed ? '' : '?'}: ${valueType(f)}${f.required ? '' : ' | null'};`;
@@ -113,6 +118,13 @@ function tableRoutes(t: SpecTable): string {
     ...(t.rules.create.length > 0 ? [`    create: (input: ${T}Input) => call<{ item: ${T} }>("POST", ${str(path)}, input),`] : []),
     ...(t.rules.edit.length > 0 ? [`    update: (id: string, changes: ${T}Patch) => call<{ item: ${T} }>("PATCH", ${one()}, changes),`] : []),
     ...(t.rules.delete.length > 0 ? [`    remove: (id: string) => call<Record<string, never>>("DELETE", ${one()}),`] : []),
+    ...(uploadable(t).length > 0 ? (() => {
+      const fields = uploadable(t).map((f) => str(f.name)).join(' | ');
+      return [
+        `    /** Upload an image file (JPEG, PNG, WebP or AVIF) to an image field of a row you own; it is stored re-encoded, without metadata. */\n    upload: (id: string, field: ${fields}, file: Blob) => call<{ item: ${T} }>("PUT", \`${path}/\${encodeURIComponent(id)}/\${field}\`, file),`,
+        `    clear: (id: string, field: ${fields}) => call<{ item: ${T} }>("DELETE", \`${path}/\${encodeURIComponent(id)}/\${field}\`),`,
+      ];
+    })() : []),
   ];
   const what = ops.length === 0 ? 'no allow line opens it to the site (admins only)' : 'the routes its allow lines open';
   return `  /** \`${t.name}\` — ${what}. */\n  ${t.name}: {\n${ops.join('\n')}\n  },`;
@@ -120,12 +132,21 @@ function tableRoutes(t: SpecTable): string {
 
 /** The client module's text for these tables. */
 export function dataClient(tables: readonly SpecTable[]): string {
+  // Only a site with image fields gets the image type and raw-body uploads, so the others' client is unchanged.
+  const images = hasImages(tables);
   return `${generated('the typed client for the site\'s data tables: list/get/create/update/remove per table (data-spec §7)')}
 /** Every refusal the server can answer (data-spec §5.3). */
 export type DataErrorCode = ${CODES.map(str).join(' | ')};
 
 export type DataResult<T> = ({ readonly ok: true } & T) | { readonly ok: false; readonly code: DataErrorCode; readonly field?: string };
-
+${images ? `
+/** An uploaded image (data-spec §8): its address changes with every upload. */
+export interface DataImage {
+  readonly url: string;
+  readonly width: number;
+  readonly height: number;
+}
+` : ''}
 const BASE: string = import.meta.env.${BACKEND_ENV[0]} ?? "";
 const CODES: ReadonlySet<string> = new Set<DataErrorCode>([${CODES.map(str).join(', ')}]);
 
@@ -141,18 +162,19 @@ function search(query: object): string {
   return s ? \`?\${s}\` : "";
 }
 
-/** One request; always resolves, never throws. */
+/** One request — JSON, or a file's raw bytes for an image upload; always resolves, never throws. */
 async function call<T>(method: string, path: string, body?: unknown): Promise<DataResult<T>> {
   let res: Response;
+  const raw = body instanceof Blob;
   try {
     res = await fetch(\`\${BASE}\${path}\`, {
       method,
       credentials: "include",
       headers: {
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...(body === undefined ? {} : { "content-type": raw ? "application/octet-stream" : "application/json" }),
         ...(method === "GET" ? {} : { "x-az-request": "1" }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body: raw ? body : JSON.stringify(body) }),
     });
   } catch {
     return { ok: false, code: "unknown" };
@@ -225,6 +247,11 @@ export const admin = {
   /** Admin writes, newest first; pass \`next\` back as \`after\`. */
   audit: (query: { limit?: number; after?: string } = {}) =>
     call<{ items: AuditEntry[]; next: string | null }>("GET", \`/admin/audit\${search(query)}\`),
+  /** Upload an image file to any row's image field, locked ones included (audited as an edit). */
+  upload: (table: TableName, id: string, field: string, file: Blob) =>
+    call<{ item: AdminRow }>("PUT", \`/admin/data/\${table}/\${encodeURIComponent(id)}/\${encodeURIComponent(field)}\`, file),
+  clear: (table: TableName, id: string, field: string) =>
+    call<{ item: AdminRow }>("DELETE", \`/admin/data/\${table}/\${encodeURIComponent(id)}/\${encodeURIComponent(field)}\`),
 } as const;
 `;
 }

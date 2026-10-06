@@ -34,11 +34,13 @@ import { createStore } from './store.ts';
 const PRUNE_MS = 10 * 60 * 1000;
 /** Rate-limit maps are swept often; each is also bounded (createLimiter). */
 const SWEEP_MS = 60 * 1000;
+/** Unreferenced image files are looked for this often (data-spec §8). */
+const FILE_SWEEP_MS = 60 * 60 * 1000;
 
 const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string } & Setup;
 if (existsSync('.env')) process.loadEnvFile('.env');
 
-const loaded = loadConfig(process.env, { database: site.database, email: site.email }, site.siteName);
+const loaded = loadConfig(process.env, { database: site.database, email: site.email, ...(site.images === true ? { images: true } : {}) }, site.siteName);
 if (!loaded.ok) {
   process.stderr.write(`backend: cannot start — fix these in .env (see .env.example):\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}\n`);
   process.exit(1);
@@ -97,6 +99,7 @@ if (applied.length > 0) process.stdout.write(`backend: applied migrations ${appl
 // data modules are part of the build only then.
 const dataFile = new URL('../data.json', import.meta.url);
 let data: DataRoutes | undefined;
+let sweepImages: (() => Promise<number>) | undefined;
 if (existsSync(dataFile)) {
   const { loadTables } = await import('./data-values.ts');
   const { migrateData, DestructivePending, GuardFailed } = await import('./data-migrate.ts');
@@ -111,7 +114,17 @@ if (existsSync(dataFile)) {
   }
   const steps = await orStop(() => migrateData(db, model.steps, { confirm: args.confirm }), [DestructivePending, GuardFailed, MigrationBusy]);
   if (steps.length > 0) process.stdout.write(`backend: applied data steps ${steps.join(', ')}\n`);
-  data = createData({ db, tables, admins: admins.emails });
+  // The image library loads only when a table has an image field (data-spec §8).
+  const images = config.setup.images === true
+    ? await (await import('./data-images.ts')).createImages({ dir: config.filesDir })
+    : undefined;
+  const api = createData({
+    db, tables, admins: admins.emails, publicUrl: config.publicUrl,
+    ...(images ? { images, uploadLimit: config.uploadLimit } : {}),
+    log: (line) => process.stderr.write(`backend: ${line}\n`),
+  });
+  data = api;
+  if (images) sweepImages = api.sweepImages;
 }
 if (args.migrate) {
   process.stdout.write('backend: migrations are up to date\n');
@@ -129,7 +142,8 @@ const server = createServer((req, res) => {
     if (!res.headersSent) res.writeHead(500).end(); else res.end();
   });
 });
-server.requestTimeout = 15_000;
+// An image upload of up to AZ_UPLOAD_MAX_MB needs longer than a JSON body.
+server.requestTimeout = config.setup.images === true ? 120_000 : 15_000;
 server.headersTimeout = 10_000;
 
 const sweep = setInterval(() => app.sweep(), SWEEP_MS);
@@ -138,6 +152,12 @@ const prune = setInterval(() => {
   store.prune().catch((e: unknown) => process.stderr.write(`backend: prune failed: ${(e as Error).name}\n`));
 }, PRUNE_MS);
 prune.unref();
+const fileSweep = sweepImages && setInterval(() => {
+  sweepImages!().then(
+    (n) => { if (n > 0) process.stdout.write(`backend: removed ${n} unreferenced image file(s)\n`); },
+    (e: unknown) => process.stderr.write(`backend: image sweep failed: ${(e as Error).name}\n`));
+}, FILE_SWEEP_MS);
+fileSweep?.unref();
 
 server.listen(config.port, config.host, () => {
   process.stdout.write(`backend: listening on http://${config.host}:${config.port} for ${config.allowedOrigins.join(', ')}\n`);
@@ -146,6 +166,7 @@ server.listen(config.port, config.host, () => {
 const stop = () => {
   clearInterval(prune);
   clearInterval(sweep);
+  if (fileSweep) clearInterval(fileSweep);
   server.close(() => { void db.close().then(() => process.exit(0)); });
 };
 process.once('SIGTERM', stop);
