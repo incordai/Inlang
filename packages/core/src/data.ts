@@ -2,7 +2,7 @@
  * @az module data
  * Purpose: `data <table>` declarations: fields, types, modifiers, allow rules → SpecTable, with every check.
  * Spec: docs/data-spec.md §4, §12
- * Exports: buildTables, typeName, DATA_TYPES, DATA_MODIFIERS, WHO, ACTIONS, TEXT_LIMITS, SpecTable, SpecField, SpecRules, Who, Action, DataType
+ * Exports: buildTables, typeName, writeEcho, DATA_TYPES, DATA_MODIFIERS, WHO, ACTIONS, TEXT_LIMITS, SpecTable, SpecField, SpecRules, Who, Action, DataType
  * Edit guide: the vocabulary is closed; a new type needs ddl (packages/backend/src/data-ddl.ts), the server's validator and a description.
  * Tests: packages/core/test/data.test.ts
  */
@@ -533,6 +533,20 @@ export function textOk(v: string, max: number, paragraphs: boolean): boolean {
 }
 
 /** A real calendar day between 0001-01-01 and 9999-12-31. */
+/**
+ * Whether a write's answer carries its row (data-spec §5): only as the read
+ * rules grant it to the writer. An edit or upload is the owner's, who holds a
+ * session; a create may come from someone signed out, whom only `anyone
+ * read` lets see it. 'row' always, 'none' never, 'maybe' depends on a session.
+ */
+export function writeEcho(rules: SpecRules): { readonly create: 'row' | 'none' | 'maybe'; readonly edit: 'row' | 'none' } {
+  const read = rules.read.length > 0;
+  return {
+    create: rules.read.includes('anyone') ? 'row' : !read ? 'none' : rules.create.includes('anyone') ? 'maybe' : 'row',
+    edit: read ? 'row' : 'none',
+  };
+}
+
 /**
  * The type one row of a table is, for the typed client and openapi.json:
  * `products` → `Product`, `categories` → `Category`, `boxes` → `Box`.

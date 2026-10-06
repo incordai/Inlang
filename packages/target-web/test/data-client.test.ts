@@ -68,6 +68,15 @@ test('only granted operations; a table named like a keyword is a key, not a vari
   assert.match(src, /readonly contact: string \| null;/, 'private reads as nullable');
 });
 
+test('a write answers with its row only as the read rules grant it (review #4)', () => {
+  const src = dataClient(specOf(`${DATA}  data notes\n    body text\n    allow owner read edit\n    allow signedin create\n  data tips\n    body text\n    allow signedin read\n    allow anyone create\n`).site.data!);
+  assert.match(src, /create: \(input: ProductInput\) => call<\{ item: Product \}>/, 'anyone reads: the row');
+  assert.match(src, /create: \(input: ClassInput\) => call<\{ item: null \}>/, 'nobody reads: never the row');
+  assert.match(src, /create: \(input: NoteInput\) => call<\{ item: Note \}>/, 'the creator owns it and owners read');
+  assert.match(src, /update: \(id: string, changes: NotePatch\) => call<\{ item: Note \}>/);
+  assert.match(src, /create: \(input: TipInput\) => call<\{ item: Tip \| null \}>/, 'signed out, the creator may not read it');
+});
+
 const IMAGES = `  data products
     name text required
     photo image

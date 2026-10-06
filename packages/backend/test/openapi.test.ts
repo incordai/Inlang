@@ -55,6 +55,13 @@ test('only granted operations; locked fields are not input; private fields are n
   assert.deepEqual(doc.components.schemas.Product.properties.price.type, ['integer', 'null']);
 });
 
+test('a write answers with its row only as the read rules grant it (review #4)', () => {
+  const doc = JSON.parse(openapi('Shop', tablesOf(SHOP), 1));
+  const created = (path: string) => doc.paths[path].post.responses['201'].content['application/json'].schema.properties.item;
+  assert.deepEqual(created('/data/products'), { $ref: '#/components/schemas/Product' });
+  assert.equal(created('/data/waitlist').type, 'null', 'nobody reads the waitlist: never the row');
+});
+
 test('the error codes are exactly the ones the server answers on /data', () => {
   const api = readFileSync(new URL('../src/server/data-api.ts', import.meta.url), 'utf8');
   const values = readFileSync(new URL('../src/server/data-values.ts', import.meta.url), 'utf8');

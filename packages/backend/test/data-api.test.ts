@@ -101,6 +101,13 @@ test(`the authorization matrix: ${LEGAL.length} rule sets × 3 actors × 5 route
             if (want.sees !== undefined) {
               const items = ((await res.json()) as { items: { id: string }[] }).items;
               assert.equal(items.some((x) => x.id === row), want.sees, `${where}: row visible`);
+            } else if ((route === 'create' || route === 'edit') && res.ok) {
+              // The written row comes back only when a read rule grants it to
+              // the writer — who owns it, unless signed out (review #4).
+              const echoed = rules.read.includes('anyone') || (actor !== 'out' && rules.read.length > 0);
+              const { item } = (await res.json()) as { item: Record<string, unknown> | null };
+              assert.equal(item !== null, echoed, `${where}: row echoed`);
+              if (item) assert.equal(item.title, route === 'create' ? 'new' : 'edited', where);
             } else {
               await res.body?.cancel();
             }

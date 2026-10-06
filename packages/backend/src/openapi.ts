@@ -13,7 +13,7 @@
  * opens is always 403 and is left out, as the typed client leaves it out.
  */
 
-import { typeName, type SpecField, type SpecTable } from '../../core/src/data.ts';
+import { typeName, writeEcho, type SpecField, type SpecTable } from '../../core/src/data.ts';
 import { generatedJson } from '../../core/src/generated.ts';
 
 /** data-spec §5.3, closed. */
@@ -108,7 +108,15 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
       properties: Object.fromEntries(writable.map((f) => [f.name, fieldSchema(f)])),
       additionalProperties: false,
     };
-    const item = { content: { 'application/json': { schema: { type: 'object', required: ['item'], properties: { item: { $ref: `#/components/schemas/${name}` } } } } } };
+    const itemAs = (schema: Schema) => ({ content: { 'application/json': { schema: { type: 'object', required: ['item'], properties: { item: schema } } } } });
+    const row = { $ref: `#/components/schemas/${name}` };
+    const item = itemAs(row);
+    // A write answers with its row only as the read rules grant it (writeEcho).
+    const unread = { type: 'null', description: 'no read rule grants this row to the writer' };
+    const echo = writeEcho(t.rules);
+    const answer = (e: 'row' | 'none' | 'maybe') => (e === 'row' ? item : itemAs(e === 'none' ? unread : { anyOf: [row, unread] }));
+    const edited = answer(echo.edit);
+    const created = answer(echo.create);
     const body = { required: true, content: { 'application/json': { schema: { $ref: `#/components/schemas/${name}Input` } } } };
     const notFound = { 404: errorResponse('not_found — absent, or not yours: the same answer') };
     const collection: Record<string, unknown> = {};
@@ -133,13 +141,13 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
     if (g.create) {
       collection.post = {
         operationId: `create${name}`, requestBody: body,
-        responses: { 201: { description: 'created', ...item }, ...ERRORS, 409: errorResponse('taken, with the field'), 413: errorResponse('too_large') },
+        responses: { 201: { description: 'created', ...created }, ...ERRORS, 409: errorResponse('taken, with the field'), 413: errorResponse('too_large') },
       };
     }
     if (g.edit) {
       one.patch = {
         operationId: `update${name}`, requestBody: { ...body, content: { 'application/json': { schema: { $ref: `#/components/schemas/${name}Input`, description: 'any subset of the fields' } } } },
-        responses: { 200: { description: 'updated', ...item }, ...ERRORS, ...notFound, 409: errorResponse('taken, with the field'), 413: errorResponse('too_large') },
+        responses: { 200: { description: 'updated', ...edited }, ...ERRORS, ...notFound, 409: errorResponse('taken, with the field'), 413: errorResponse('too_large') },
       };
     }
     if (g.delete) {
@@ -169,12 +177,12 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
           operationId: `upload${name}${field}`,
           requestBody: { required: true, content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }, description: 'the raw bytes of a JPEG, PNG, WebP or AVIF image, judged by its first bytes' },
           responses: {
-            200: { description: 'stored', ...item }, ...ERRORS, ...notFound,
+            200: { description: 'stored', ...edited }, ...ERRORS, ...notFound,
             413: errorResponse('too_large — over the upload cap, or more than 8000 px a side or 40 megapixels'),
             415: errorResponse('unsupported_type — not a JPEG, PNG, WebP or AVIF image'),
           },
         };
-        ops.delete = { operationId: `clear${name}${field}`, responses: { 200: { description: 'cleared', ...item }, ...ERRORS, ...notFound } };
+        ops.delete = { operationId: `clear${name}${field}`, responses: { 200: { description: 'cleared', ...edited }, ...ERRORS, ...notFound } };
       }
       if (Object.keys(ops).length > 0) {
         paths[`/data/${t.name}/{id}/${f.name}`] = { parameters: idParam, ...ops };

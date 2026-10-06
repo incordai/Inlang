@@ -193,8 +193,15 @@ export function createData(deps: DataDeps): DataApi {
     return undefined;
   }
 
+  /**
+   * The row a write answers with — only as the read rules grant it to this
+   * caller (data-spec §5): a table strangers fill but nobody reads answers
+   * `item: null`, never the row.
+   */
   async function readOne(t: Table, id: string, user: string | null): Promise<Record<string, unknown> | null> {
-    const s = selectOne(d, t, id, user, false);
+    const g = grant(t.rules.read, user);
+    if (!g.ok) return null;
+    const s = selectOne(d, t, id, user, g.ownerOnly);
     const row = await db.get(s.sql, s.params);
     return row ? outRow(t, row, user, publicBase) : null;
   }

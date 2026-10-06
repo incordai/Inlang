@@ -19,7 +19,7 @@
 
 import { BACKEND_ENV } from './auth.ts';
 import { generated } from './generated.ts';
-import { typeName, type SpecField, type SpecTable } from '../../core/src/data.ts';
+import { typeName, writeEcho, type SpecField, type SpecTable } from '../../core/src/data.ts';
 
 export const DATA_DIR = 'src/data';
 
@@ -110,19 +110,23 @@ function tableRoutes(t: SpecTable): string {
   const T = typeName(t.name);
   const path = `/data/${t.name}`;
   const one = (id = 'id') => `\`${path}/\${encodeURIComponent(${id})}\``;
+  // A write answers with its row only as the read rules grant it to the writer.
+  const echo = writeEcho(t.rules);
+  const answer = (e: 'row' | 'none' | 'maybe') => (e === 'row' ? T : e === 'none' ? 'null' : `${T} | null`);
+  const [created, edited] = [answer(echo.create), answer(echo.edit)];
   const ops = [
     ...(t.rules.read.length > 0 ? [
       `    /** A page of rows; pass \`next\` back as \`after\` for the following page. */\n    list: (query: ${T}Query = {}) => call<{ items: ${T}[]; next: string | null }>("GET", \`${path}\${search(query)}\`),`,
       `    get: (id: string) => call<{ item: ${T} }>("GET", ${one()}),`,
     ] : []),
-    ...(t.rules.create.length > 0 ? [`    create: (input: ${T}Input) => call<{ item: ${T} }>("POST", ${str(path)}, input),`] : []),
-    ...(t.rules.edit.length > 0 ? [`    update: (id: string, changes: ${T}Patch) => call<{ item: ${T} }>("PATCH", ${one()}, changes),`] : []),
+    ...(t.rules.create.length > 0 ? [`    create: (input: ${T}Input) => call<{ item: ${created} }>("POST", ${str(path)}, input),`] : []),
+    ...(t.rules.edit.length > 0 ? [`    update: (id: string, changes: ${T}Patch) => call<{ item: ${edited} }>("PATCH", ${one()}, changes),`] : []),
     ...(t.rules.delete.length > 0 ? [`    remove: (id: string) => call<Record<string, never>>("DELETE", ${one()}),`] : []),
     ...(uploadable(t).length > 0 ? (() => {
       const fields = uploadable(t).map((f) => str(f.name)).join(' | ');
       return [
-        `    /** Upload an image file (JPEG, PNG, WebP or AVIF) to an image field of a row you own; it is stored re-encoded, without metadata. */\n    upload: (id: string, field: ${fields}, file: Blob) => call<{ item: ${T} }>("PUT", \`${path}/\${encodeURIComponent(id)}/\${field}\`, file),`,
-        `    clear: (id: string, field: ${fields}) => call<{ item: ${T} }>("DELETE", \`${path}/\${encodeURIComponent(id)}/\${field}\`),`,
+        `    /** Upload an image file (JPEG, PNG, WebP or AVIF) to an image field of a row you own; it is stored re-encoded, without metadata. */\n    upload: (id: string, field: ${fields}, file: Blob) => call<{ item: ${edited} }>("PUT", \`${path}/\${encodeURIComponent(id)}/\${field}\`, file),`,
+        `    clear: (id: string, field: ${fields}) => call<{ item: ${edited} }>("DELETE", \`${path}/\${encodeURIComponent(id)}/\${field}\`),`,
       ];
     })() : []),
   ];
