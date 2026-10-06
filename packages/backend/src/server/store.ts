@@ -1,7 +1,7 @@
 /**
  * @az server store
  * Purpose: accounts, sessions and single-use tokens over the database.
- * Spec: docs/backend-spec.md §3, §5
+ * Spec: docs/backend-spec.md §3, §5 · docs/data-spec.md §18.7 (pre-claim rows)
  * Exports: createStore, normaliseEmail, DEFAULT_SESSION_POLICY
  * Edit guide: single use by one conditional UPDATE; tokens stored as digests only.
  * Tests: packages/backend/test/backend.test.ts
@@ -65,7 +65,15 @@ export interface OAuthState {
   readonly site: string;
 }
 
-export function createStore(db: Db, secret: Buffer, now: () => number = Date.now, policy: SessionPolicy = DEFAULT_SESSION_POLICY) {
+/**
+ * `ownedRows`: one `DELETE … WHERE owner = ?` per data table (data-values.ts
+ * ownedRowDeletes) — what an account's own rows are, which only the data
+ * tables know. Empty for a site without data.
+ */
+export function createStore(
+  db: Db, secret: Buffer, now: () => number = Date.now, policy: SessionPolicy = DEFAULT_SESSION_POLICY,
+  ownedRows: readonly string[] = [],
+) {
   const d = (token: string) => digest(secret, token);
 
   return {
@@ -105,17 +113,20 @@ export function createStore(db: Db, secret: Buffer, now: () => number = Date.now
     /**
      * An UNVERIFIED account is being claimed by whoever just proved the
      * mailbox (a sign-in link) or a provider that vouches for the address.
-     * Anyone could have created it: its password and every session are the
-     * creator's, not necessarily the owner's. Both go; the account becomes
-     * verified. One conditional UPDATE, so only an unverified row changes.
+     * Anyone could have created it: its password, every session and every
+     * data row it wrote are the creator's, not necessarily the owner's. All
+     * go — a squatter must leave nothing under someone else's address — and
+     * the account becomes verified. One transaction, guarded by a
+     * conditional UPDATE: only an unverified row changes, and either all of
+     * it happens or none (image files of deleted rows go in the orphan sweep).
      */
     async claimUnverified(userId: string): Promise<boolean> {
-      const changed = await db.run(
-        'UPDATE az_users SET password_hash = NULL, email_verified = 1, updated_at = ? WHERE id = ? AND email_verified = 0',
-        [now(), userId]);
-      if (changed !== 1) return false;
-      await db.run('DELETE FROM az_sessions WHERE user_id = ?', [userId]);
-      return true;
+      return db.guarded(
+        { sql: 'UPDATE az_users SET password_hash = NULL, email_verified = 1, updated_at = ? WHERE id = ? AND email_verified = 0', params: [now(), userId] },
+        [
+          { sql: 'DELETE FROM az_sessions WHERE user_id = ?', params: [userId] },
+          ...ownedRows.map((sql) => ({ sql, params: [userId] })),
+        ]);
     },
 
     /** A new session. The token is returned once, for the cookie; only its digest is kept. */

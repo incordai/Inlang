@@ -37,7 +37,7 @@ import { createApp, type DataRoutes } from '../../backend/src/server/app.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
 import { createData, parseAdminEmails } from '../../backend/src/server/data-api.ts';
 import { migrateData, type DataStep } from '../../backend/src/server/data-migrate.ts';
-import { loadTables } from '../../backend/src/server/data-values.ts';
+import { loadTables, ownedRowDeletes } from '../../backend/src/server/data-values.ts';
 import { createMailer } from '../../backend/src/server/email.ts';
 import { loadConfig } from '../../backend/src/server/env.ts';
 import { createOidc } from '../../backend/src/server/oidc.ts';
@@ -283,6 +283,7 @@ export async function startDevBackend(
   const db = await openSqlite(config.sqlitePath);
   await migrate(db);
   let data: DataRoutes | undefined;
+  let ownedRows: string[] = [];
   if (dataJson !== undefined) {
     // AZ_ADMIN_EMAILS in backend.env names the dev admins (data-spec §11).
     const admins = parseAdminEmails(env.AZ_ADMIN_EMAILS);
@@ -294,9 +295,11 @@ export async function startDevBackend(
     for (const step of model.steps.filter((s) => applied.includes(s.version))) {
       print(`az dev: applied data step ${step.version} to ${DEV_DIR}/dev.db: ${step.summary.join('; ')}${step.destructive ? ' (data dropped or changed)' : ''}`);
     }
-    data = createData({ db, tables: loadTables(model), admins: admins.emails });
+    const tables = loadTables(model);
+    ownedRows = ownedRowDeletes(db.dialect, tables);
+    data = createData({ db, tables, admins: admins.emails });
   }
-  const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs });
+  const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }, ownedRows);
   const app = createApp({
     config, store,
     ...(data ? { data } : {}),

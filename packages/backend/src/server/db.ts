@@ -2,7 +2,7 @@
  * @az server db
  * Purpose: one small interface over SQLite, PostgreSQL and MySQL, plus migrations.
  * Spec: docs/backend-spec.md §3
- * Exports: openSqlite, openPostgres, openMysql, migrate, Db, QueryTimeout, isUniqueViolation
+ * Exports: openSqlite, openPostgres, openMysql, migrate, Db, Statement, QueryTimeout, isUniqueViolation
  * Edit guide: parameterised queries only; unnamed statements (pooler-safe).
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/claim.test.ts
  */
@@ -30,6 +30,10 @@ import type { Database } from './env.ts';
 
 export type Value = string | number | null;
 export type Row = Record<string, unknown>;
+export interface Statement {
+  readonly sql: string;
+  readonly params: readonly Value[];
+}
 
 export interface Db {
   readonly dialect: Database;
@@ -53,6 +57,13 @@ export interface Db {
   script(statements: readonly string[]): Promise<number>;
   get(sql: string, params?: readonly Value[]): Promise<Row | undefined>;
   run(sql: string, params?: readonly Value[]): Promise<number>;
+  /**
+   * ONE transaction on one connection: `first` runs; only when it changed
+   * exactly one row do `then` run, and all commit together — otherwise, or
+   * on any error, nothing does. True when it committed. Pooler-safe: a
+   * transaction-mode pooler keeps one transaction on one server connection.
+   */
+  guarded(first: Statement, then: readonly Statement[]): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -97,9 +108,17 @@ interface PgPool {
   connect(): Promise<PgClient>;
   end(): Promise<void>;
 }
+interface MysqlConnection {
+  execute(sql: string, params: readonly Value[]): Promise<[unknown, unknown]>;
+  query(sql: string): Promise<unknown>;
+  release(): void;
+  /** Closes the connection instead of returning it to the pool. */
+  destroy(): void;
+}
 interface MysqlPool {
   execute(sql: string, params: readonly Value[]): Promise<[unknown, unknown]>;
   query(sql: string): Promise<unknown>;
+  getConnection(): Promise<MysqlConnection>;
   end(): Promise<void>;
 }
 
@@ -118,6 +137,23 @@ export async function openSqlite(path: string): Promise<Db> {
     },
     get: async (sql, p = []) => db.prepare(sql).get(...p),
     run: async (sql, p = []) => Number(db.prepare(sql).run(...p).changes),
+    // Synchronous from BEGIN to COMMIT: no other request's statement can
+    // land inside this transaction on the server's one connection.
+    guarded: async (first, then) => {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (Number(db.prepare(first.sql).run(...first.params).changes) !== 1) {
+          db.exec('ROLLBACK');
+          return false;
+        }
+        for (const s of then) db.prepare(s.sql).run(...s.params);
+        db.exec('COMMIT');
+        return true;
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+    },
     script: async (statements) => {
       // A no-op inside a transaction, so set before BEGIN; this connection
       // is the server's only one, and it is set back in every case.
@@ -190,6 +226,29 @@ export async function openPostgres(url: string, tls: boolean, ca?: string): Prom
     get: async (sql, p = []) => (await pool.query(numbered(sql), p)).rows[0],
     script: async () => { throw new Error('script: SQLite only'); },
     run: async (sql, p = []) => (await pool.query(numbered(sql), p)).rowCount ?? 0,
+    guarded: async (first, then) => {
+      const c = await pool.connect();
+      let broken = false;
+      try {
+        await c.query('BEGIN');
+        if (((await c.query(numbered(first.sql), first.params)).rowCount ?? 0) !== 1) {
+          await c.query('ROLLBACK');
+          return false;
+        }
+        for (const s of then) await c.query(numbered(s.sql), s.params);
+        await c.query('COMMIT');
+        return true;
+      } catch (e) {
+        try {
+          await c.query('ROLLBACK');
+        } catch {
+          broken = true;
+        }
+        throw e;
+      } finally {
+        c.release(broken);
+      }
+    },
     close: () => pool.end(),
   };
 }
@@ -218,6 +277,29 @@ export async function openMysql(url: string, tls: boolean, ca?: string): Promise
     get: async (sql, p = []) => ((await pool.execute(sql, p))[0] as Row[])[0],
     script: async () => { throw new Error('script: SQLite only'); },
     run: async (sql, p = []) => ((await pool.execute(sql, p))[0] as { affectedRows: number }).affectedRows,
+    guarded: async (first, then) => {
+      const c = await pool.getConnection();
+      let broken = false;
+      try {
+        await c.query('START TRANSACTION');
+        if (((await c.execute(first.sql, first.params))[0] as { affectedRows: number }).affectedRows !== 1) {
+          await c.query('ROLLBACK');
+          return false;
+        }
+        for (const s of then) await c.execute(s.sql, s.params);
+        await c.query('COMMIT');
+        return true;
+      } catch (e) {
+        try {
+          await c.query('ROLLBACK');
+        } catch {
+          broken = true;
+        }
+        throw e;
+      } finally {
+        if (broken) c.destroy(); else c.release();
+      }
+    },
     close: () => pool.end(),
   };
 }

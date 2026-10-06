@@ -1,6 +1,6 @@
 /**
  * Findings of the backend security review, each reproduced and guarded:
- * pre-registration takeover, a one-request crash, login CSRF through the
+ * pre-registration takeover (and the rows a planted account wrote), a one-request crash, login CSRF through the
  * sign-in link, spoofable proxy addresses and IPv6 buckets, unbounded
  * limiter maps, personal data in logs, loose address checks, over-long
  * provider values, cookie prefixes, and idle/absolute session expiry.
@@ -10,7 +10,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
-import { client, SITE, startBackend, startIdp } from './helpers.ts';
+import { randomUUID } from 'node:crypto';
+import { client, SECRET, SITE, startBackend, startIdp } from './helpers.ts';
+import { dataOf } from './data-fixture.ts';
+import { migrate, openSqlite } from '../src/server/db.ts';
+import { migrateData } from '../src/server/data-migrate.ts';
+import { ownedRowDeletes } from '../src/server/data-values.ts';
+import { createStore } from '../src/server/store.ts';
 import { clientIp, createLimiter, rateKey } from '../src/server/http.ts';
 import { isEmail, isSitePath } from '../src/server/app.ts';
 import { loadConfig } from '../src/server/env.ts';
@@ -89,6 +95,86 @@ test('CONTROL takeover: a VERIFIED account keeps its password when a provider li
     await roundTrip(h, client(h.url));
     assert.equal((await client(h.url).post('/auth/sign-in', { email: VICTIM, password: GOOD })).status, 200);
   } finally { await h.close(); idp.close(); }
+});
+
+/* ---- 1b. the rows a planted account wrote go with the claim ----------- */
+
+const BOARD = '  data posts\n    title text required\n    allow anyone read\n    allow signedin create\n    allow owner edit delete\n'
+  + '  data replies\n    post ref posts required\n    body text required\n    allow anyone read\n    allow signedin create\n'
+  + '  data notes\n    about ref posts\n    body text required\n    allow anyone read\n    allow signedin create\n';
+
+const items = async (c: ReturnType<typeof client>, t: string) =>
+  ((await (await c.get(`/data/${t}`)).json()) as { items: Record<string, unknown>[] }).items;
+
+test('SECURITY squat: claiming a planted account deletes the rows it wrote; rows pointing at them follow their ref', async () => {
+  const h = await startBackend({}, { data: dataOf(BOARD) });
+  try {
+    const attacker = client(h.url);
+    assert.equal((await attacker.post('/auth/sign-up', planted)).status, 200);
+    const made = await attacker.post('/data/posts', { title: 'planted under the victim' });
+    assert.equal(made.status, 201, 'CONTROL: the planter can write while unverified');
+    const planted1 = ((await made.json()) as { item: { id: string } }).item.id;
+
+    const bystander = client(h.url);
+    await bystander.post('/auth/sign-up', { name: 'B', email: 'bystander@studio.test', password: GOOD, passwordConfirm: GOOD });
+    assert.equal((await bystander.post('/data/posts', { title: 'mine' })).status, 201);
+    assert.equal((await bystander.post('/data/replies', { post: planted1, body: 'a reply' })).status, 201);
+    assert.equal((await bystander.post('/data/notes', { about: planted1, body: 'a mention' })).status, 201);
+
+    const owner = client(h.url);
+    await owner.post('/auth/link', { email: VICTIM });
+    await settle();
+    assert.equal((await owner.navigate(/https?:\/\/\S+/.exec(h.mail[0].text)![0])).status, 302);
+    assert.ok(await sessionOf(owner), 'CONTROL: the mailbox owner is signed in');
+
+    const anyone = client(h.url);
+    assert.deepEqual((await items(anyone, 'posts')).map((r) => r.title), ['mine'], 'the planted row is gone; the bystander\'s own row stays');
+    assert.deepEqual(await items(anyone, 'replies'), [], 'a required ref to it cascades');
+    assert.deepEqual((await items(anyone, 'notes')).map((r) => [r.body, r.about ?? null]), [['a mention', null]], 'an optional ref to it is cleared');
+
+    // CONTROL: what the owner writes after the claim is theirs and stays.
+    assert.equal((await owner.post('/data/posts', { title: 'the real one' })).status, 201);
+    assert.deepEqual((await items(anyone, 'posts')).map((r) => r.title).sort(), ['mine', 'the real one']);
+  } finally { await h.close(); }
+});
+
+test('SECURITY squat: the claim is one transaction — a failing delete leaves the account, its sessions and its rows as they were', async () => {
+  const db = await openSqlite(':memory:');
+  try {
+    await migrate(db);
+    const { tables, steps } = dataOf(BOARD);
+    await migrateData(db, steps, { confirm: Infinity });
+    const secret = Buffer.from(SECRET, 'base64url');
+    const hash = 'planted-hash';
+    const seed = async (store: ReturnType<typeof createStore>, email: string) => {
+      const u = await store.createUser({ email, name: 'P', passwordHash: hash, location: null, verified: false });
+      assert.ok(u !== 'taken');
+      const s = await store.createSession(u.id);
+      await db.run('INSERT INTO "azd_posts" (id, owner, created, updated, title) VALUES (?, ?, ?, ?, ?)', [randomUUID(), u.id, 1, 1, 'planted']);
+      return { id: u.id, token: s.token };
+    };
+    const count = async (owner: string) => Number((await db.get('SELECT COUNT(*) AS n FROM "azd_posts" WHERE owner = ?', [owner]))!.n);
+
+    const broken = createStore(db, secret, Date.now, undefined, [...ownedRowDeletes('sqlite', tables), 'DELETE FROM "azd_missing" WHERE owner = ?']);
+    const a = await seed(broken, 'a@studio.test');
+    await assert.rejects(broken.claimUnverified(a.id));
+    const after = await broken.userById(a.id);
+    assert.deepEqual([after?.emailVerified, after?.passwordHash], [false, hash], 'the account is unchanged');
+    assert.ok(await broken.sessionUser(a.token), 'its session is unchanged');
+    assert.equal(await count(a.id), 1, 'its rows are unchanged');
+
+    // CONTROL: the same claim with the real statements commits all of it.
+    const store = createStore(db, secret, Date.now, undefined, ownedRowDeletes('sqlite', tables));
+    assert.equal(await store.claimUnverified(a.id), true);
+    assert.deepEqual([(await store.userById(a.id))?.emailVerified, (await store.userById(a.id))?.passwordHash], [true, null]);
+    assert.equal(await store.sessionUser(a.token), null);
+    assert.equal(await count(a.id), 0);
+    // A verified account is never claimed: nothing of it is touched.
+    assert.equal(await store.claimUnverified(a.id), false);
+    await db.run('INSERT INTO "azd_posts" (id, owner, created, updated, title) VALUES (?, ?, ?, ?, ?)', [randomUUID(), a.id, 2, 2, 'after']);
+    assert.equal(await store.claimUnverified(a.id), false);
+    assert.equal(await count(a.id), 1, 'CONTROL: a verified owner\'s rows stay');
+  } finally { await db.close(); }
 });
 
 /* ---- 2. one request must never stop the server ------------------------ */

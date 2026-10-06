@@ -11,7 +11,7 @@ import { migrate, openSqlite, type Db } from '../src/server/db.ts';
 import { createData } from '../src/server/data-api.ts';
 import type { Images } from '../src/server/data-images.ts';
 import { migrateData, type DataStep } from '../src/server/data-migrate.ts';
-import type { Table } from '../src/server/data-values.ts';
+import { ownedRowDeletes, type Table } from '../src/server/data-values.ts';
 import { loadConfig, type Config } from '../src/server/env.ts';
 import { createOidc } from '../src/server/oidc.ts';
 import { createStore } from '../src/server/store.ts';
@@ -129,7 +129,8 @@ export async function startBackend(
   config = { ...config, publicUrl: url };
   const app = createApp({
     config,
-    store: createStore(db, config.secret, () => clock.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }),
+    store: createStore(db, config.secret, () => clock.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs },
+      over.data ? ownedRowDeletes(db.dialect, over.data.tables) : []),
     mailer: over.mailer ?? { send: async (m) => { mail.push(m); } },
     oidc: createOidc((...a) => fetch(...a), () => clock.now), now: () => clock.now, log: over.log ?? (() => {}),
     ...(over.data ? {

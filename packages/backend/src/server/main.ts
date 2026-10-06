@@ -108,12 +108,15 @@ if (applied.length > 0) process.stdout.write(`backend: applied migrations ${appl
 const dataFile = new URL('../data.json', import.meta.url);
 let data: DataRoutes | undefined;
 let sweepImages: (() => Promise<number>) | undefined;
+// Claiming an unverified account deletes the rows it wrote (store.ts).
+let ownedRows: string[] = [];
 if (existsSync(dataFile)) {
-  const { loadTables } = await import('./data-values.ts');
+  const { loadTables, ownedRowDeletes } = await import('./data-values.ts');
   const { migrateData, DestructivePending, GuardFailed } = await import('./data-migrate.ts');
   const { createData, parseAdminEmails } = await import('./data-api.ts');
   const model = JSON.parse(readFileSync(dataFile, 'utf8')) as { steps: DataStep[] };
   const tables = loadTables(model);
+  ownedRows = ownedRowDeletes(db.dialect, tables);
   // AZ_ADMIN_EMAILS (data-spec §11): a malformed entry stops the server, named.
   const admins = parseAdminEmails(process.env.AZ_ADMIN_EMAILS);
   if (!admins.ok) {
@@ -140,7 +143,7 @@ if (args.migrate) {
   process.exit(0);
 }
 
-const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs });
+const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }, ownedRows);
 const app = createApp({ config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)), ...(data ? { data } : {}) });
 // The handler answers its own failures; this catch is the last line, so one
 // request can never become an unhandled rejection that ends the process.

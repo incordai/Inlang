@@ -2,7 +2,7 @@
  * @az server data-values
  * Purpose: the data tables' runtime model, every value's validation, and rows as the API returns them.
  * Spec: docs/data-spec.md §4.3–§4.5, §5.2, §9
- * Exports: Table, Field, FieldType, Rules, Who, Stored, ValueProblem, loadTables, checkValue, storedDefault, outRow, fieldColumns, imageVersion, q, physical, isUuid, isDate, chars, TEXT_LIMITS
+ * Exports: Table, Field, FieldType, Rules, Who, Stored, ValueProblem, loadTables, ownedRowDeletes, checkValue, storedDefault, outRow, fieldColumns, imageVersion, q, physical, isUuid, isDate, chars, TEXT_LIMITS
  * Edit guide: the server is the first line (the database the second): every value is checked here before any statement.
  * Tests: packages/backend/test/data-api.test.ts
  */
@@ -92,6 +92,15 @@ export function loadTables(raw: unknown): Table[] {
     return { name: t.name, fields, rules: rules as unknown as Rules };
   });
 }
+
+/**
+ * One statement per table deleting an account's own rows, `?` its id —
+ * run when an unverified account is claimed (store.ts claimUnverified). A
+ * row of another account that points at a deleted row follows its ref's
+ * rule: a required ref's row goes with it, an optional one is cleared.
+ */
+export const ownedRowDeletes = (d: Database, tables: readonly Table[]): string[] =>
+  tables.map((t) => `DELETE FROM ${q(d, physical(t.name))} WHERE ${q(d, 'owner')} = ?`);
 
 /** A real calendar day, 0001-01-01 … 9999-12-31. */
 function isDate(v: string): boolean {
