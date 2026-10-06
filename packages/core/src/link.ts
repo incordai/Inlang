@@ -142,7 +142,7 @@ const NAMED_VALUE_SETS: Record<string, { test: (v: string) => boolean; describe:
 };
 
 /** Structure keywords live in core, not in `words/` — PRD §6.2. */
-export const STRUCTURE = new Set(['site', 'theme', 'font', 'page', 'raw', 'slot', 'backend']);
+export const STRUCTURE = new Set(['site', 'theme', 'font', 'page', 'raw', 'slot', 'backend', 'data']);
 
 /**
  * Where `slot <name> <path>` may put a component on EVERY block, beside the
@@ -511,8 +511,26 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     return { word: 'backend', variant: null, modifiers: [], args: [], props, as: s.as, children: [], pos: s.pos };
   }
 
+  /**
+   * `data <table>` (data-spec §4.1): site-level. Its lines are fields and
+   * rules, not words — they are kept as written and checked as a whole by
+   * the spec stage (data.ts), which sees every table at once (refs, names).
+   */
+  function dataDecl(s: Statement, parentWord: string | null): LinkedWord | null {
+    if (parentWord !== 'site') {
+      err('AZ1226', 'data: declared outside site — tables are site-level', s.pos);
+      return null;
+    }
+    const raw = (st: Statement): LinkedWord => ({
+      word: st.word, variant: null, modifiers: [], args: st.args, props: {}, as: st.as,
+      children: st.children.map(raw), pos: st.pos,
+    });
+    return raw(s);
+  }
+
   function resolve(s: Statement, parent: Manifest | undefined, parentWord: string | null): LinkedWord | null {
     if (s.word === 'backend') return backendDecl(s, parentWord);
+    if (s.word === 'data') return dataDecl(s, parentWord);
 
     // A property of the enclosing word.
     if (isProp(s, parent)) {

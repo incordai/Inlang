@@ -9,6 +9,9 @@
 
 import { SITE_WIDTHS, type Manifest, type PropSpec } from './link.ts';
 import { BACKEND_SETTINGS } from './backend.ts';
+import {
+  ACTION_DESCRIPTIONS, MODIFIER_DESCRIPTIONS, TYPE_DESCRIPTIONS, WHO_DESCRIPTIONS,
+} from './data.ts';
 
 /** The owner's limit: short enough for an AI to read every one cheaply. */
 export const DESCRIPTION_MAX = 60;
@@ -54,6 +57,21 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
   page: { description: 'One page of the site; its value is the route' },
   raw: { description: 'Mount your own component file in page or block' },
   slot: { description: 'Put your component in a block slot or before/after' },
+  data: {
+    description: 'A database table and its API: data products',
+    // A data line is `<field> <type> <modifiers…>` or `allow <who> <action…>`:
+    // the types, modifiers and `allow` are what can follow.
+    settings: {
+      ...TYPE_DESCRIPTIONS,
+      ...MODIFIER_DESCRIPTIONS,
+      allow: 'Who may do what: allow anyone read',
+    },
+    values: { allow: { ...WHO_DESCRIPTIONS, ...ACTION_DESCRIPTIONS } },
+  },
+  allow: {
+    description: 'A data rule: allow <who> <action…>; none = admins',
+    settings: { ...WHO_DESCRIPTIONS, ...ACTION_DESCRIPTIONS },
+  },
   backend: {
     description: 'Built-in server: database and email choices',
     settings: {

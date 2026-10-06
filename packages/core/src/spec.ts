@@ -24,6 +24,7 @@
  */
 
 import type { BackendDatabase, BackendEmail, SpecBackend } from './backend.ts';
+import { buildTables, type SpecTable } from './data.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { SpecBlock } from './spec-block.ts';
 import type { LinkedWord } from './link.ts';
@@ -66,6 +67,11 @@ export interface SpecSite {
    * declares one, so a site without it serialises exactly as before.
    */
   readonly backend?: SpecBackend;
+  /**
+   * Data tables (data-spec §4) — absent unless the file declares `data`, so
+   * a site without tables serialises exactly as before.
+   */
+  readonly data?: readonly SpecTable[];
 }
 
 export interface Spec {
@@ -318,6 +324,11 @@ export function buildSpec(
       severity: 'error',
     });
   }
+  // ---- data tables (data-spec §4) ---------------------------------------
+  const dataReport = buildTables(kids.filter((w) => w.word === 'data'), backend !== null || declared !== undefined);
+  diagnostics.push(...dataReport.diagnostics);
+  const tables = dataReport.tables;
+
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');
   const patternWord = themeWord?.children.find((w) => w.word === 'pattern');
 
@@ -333,6 +344,7 @@ export function buildSpec(
       inherited,
       scoped: Object.fromEntries([...site.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
       ...(backend ? { backend } : {}),
+      ...(tables.length > 0 ? { data: tables } : {}),
     },
     pages,
   };
