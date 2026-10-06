@@ -129,8 +129,8 @@ export interface ServeOptions {
   readonly outDir: string;
   readonly sitePort: number;
   readonly open: boolean;
-  /** The backend's site name and whether the build produced a `server/`. */
-  readonly backend: { readonly siteName: string } | null;
+  /** The backend's site name, and its `server/data.json` when the site has tables; null without a `server/`. */
+  readonly backend: { readonly siteName: string; readonly data?: string } | null;
   readonly print: (line: string) => void;
 }
 
@@ -179,7 +179,7 @@ export async function serve(options: ServeOptions): Promise<Served> {
       const mailboxPort = await freePort(0);
       mailbox = await startMailbox(mailboxPort, print);
       backend = await startDevBackend(projectDir, options.backend.siteName,
-        { site: sitePort, backend: backendPort, mailbox: mailboxPort }, mailbox, print);
+        { site: sitePort, backend: backendPort, mailbox: mailboxPort }, mailbox, print, options.backend.data);
       env.AZ_PUBLIC_BACKEND_URL = backend.url;
     }
 

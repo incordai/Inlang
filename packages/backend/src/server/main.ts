@@ -1,9 +1,9 @@
 /**
  * @az server main
- * Purpose: start the backend: config, migrations, store, routes, HTTP server.
- * Spec: docs/backend-spec.md §8
+ * Purpose: start the backend: config, migrations, store, routes, HTTP server; --migrate --confirm for data steps.
+ * Spec: docs/backend-spec.md §8 · docs/data-spec.md §6.3
  * Exports: (none — entry point)
- * Edit guide: refuse to start on invalid config; never let a handler rejection crash the process.
+ * Edit guide: refuse to start on invalid config or an unconfirmed destructive step; never let a handler rejection crash the process.
  * Tests: packages/backend/test/backend.test.ts
  */
 
@@ -22,7 +22,9 @@
 
 import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { createApp } from './app.ts';
+import { createApp, type DataRoutes } from './app.ts';
+import { MigrationBusy } from './claim.ts';
+import type { DataStep } from './data-migrate.ts';
 import { migrate, openMysql, openPostgres, openSqlite, type Db } from './db.ts';
 import { createMailer } from './email.ts';
 import { loadConfig, type Setup } from './env.ts';
@@ -60,11 +62,59 @@ const db: Db = config.setup.database === 'sqlite'
   : config.setup.database === 'postgres'
     ? await openPostgres(config.databaseUrl, config.databaseTls, ca)
     : await openMysql(config.databaseUrl, config.databaseTls, ca);
-const applied = await migrate(db);
+/**
+ * `--migrate --confirm <version>`: apply the data steps up to that version,
+ * the destructive ones included, then exit (data-spec §6.3). Without
+ * `--migrate` the server applies only safe steps and then serves.
+ */
+function migrateArgs(argv: readonly string[]): { migrate: boolean; confirm: number } {
+  const migrateOnly = argv.includes('--migrate');
+  const at = argv.indexOf('--confirm');
+  const raw = at >= 0 ? argv[at + 1] : undefined;
+  if (at >= 0 && (!migrateOnly || raw === undefined || !/^[1-9]\d{0,5}$/.test(raw))) {
+    process.stderr.write('backend: --confirm takes a step version and goes with --migrate: node src/main.ts --migrate --confirm 3\n');
+    process.exit(1);
+  }
+  return { migrate: migrateOnly, confirm: raw === undefined ? 0 : Number(raw) };
+}
+const args = migrateArgs(process.argv.slice(2));
+
+/** A refusal to migrate is the operator's to act on: its message, then exit — never a stack. */
+async function orStop<T>(run: () => Promise<T>, refusals: readonly (new (...a: never[]) => Error)[]): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    if (!refusals.some((r) => e instanceof r)) throw e;
+    process.stderr.write(`backend: cannot start — ${(e as Error).message}\n`);
+    process.exit(1);
+  }
+}
+
+const applied = await orStop(() => migrate(db), [MigrationBusy]);
 if (applied.length > 0) process.stdout.write(`backend: applied migrations ${applied.join(', ')}\n`);
 
+// The data tables, only when the site declares them: `data.json` and the
+// data modules are part of the build only then.
+const dataFile = new URL('../data.json', import.meta.url);
+let data: DataRoutes | undefined;
+if (existsSync(dataFile)) {
+  const { loadTables } = await import('./data-values.ts');
+  const { migrateData, DestructivePending, GuardFailed } = await import('./data-migrate.ts');
+  const { createData } = await import('./data-api.ts');
+  const model = JSON.parse(readFileSync(dataFile, 'utf8')) as { steps: DataStep[] };
+  const tables = loadTables(model);
+  const steps = await orStop(() => migrateData(db, model.steps, { confirm: args.confirm }), [DestructivePending, GuardFailed, MigrationBusy]);
+  if (steps.length > 0) process.stdout.write(`backend: applied data steps ${steps.join(', ')}\n`);
+  data = createData({ db, tables });
+}
+if (args.migrate) {
+  process.stdout.write('backend: migrations are up to date\n');
+  await db.close();
+  process.exit(0);
+}
+
 const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs });
-const app = createApp({ config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)) });
+const app = createApp({ config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)), ...(data ? { data } : {}) });
 // The handler answers its own failures; this catch is the last line, so one
 // request can never become an unhandled rejection that ends the process.
 const server = createServer((req, res) => {

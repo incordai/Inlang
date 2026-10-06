@@ -27,19 +27,33 @@ function project(source: string) {
 const env = { ...process.env, AZ_PUBLIC_BACKEND_URL: 'http://127.0.0.1:8787' };
 const az = (...args: string[]) => spawnSync(process.execPath, [...process.execArgv, BIN, ...args], { encoding: 'utf8', env: { ...env, AZ_WORDS: WORDS } });
 
-test('a site that declares a backend gets server/ with every source file copied verbatim', () => {
+test('a site that declares a backend gets server/ with every source file copied verbatim — the data modules only with tables', () => {
   process.env.AZ_PUBLIC_BACKEND_URL = 'http://127.0.0.1:8787';
   const p = project(SITE(BACKEND));
   const r = build({ source: p.file, outDir: p.out, wordsDir: WORDS });
   assert.equal(r.ok, true, r.report);
   const src = join(ROOT, 'packages/backend/src/server');
   for (const f of readdirSync(src)) {
+    if (f.startsWith('data-')) {
+      assert.ok(!existsSync(join(p.out, 'server/src', f)), `${f}: no tables, no data module`);
+      continue;
+    }
     assert.equal(readFileSync(join(p.out, 'server/src', f), 'utf8'), readFileSync(join(src, f), 'utf8'), f);
   }
   for (const f of ['package.json', 'az.config.json', '.env.example', '.gitignore', 'README.md']) {
     assert.ok(existsSync(join(p.out, 'server', f)), f);
   }
+  for (const f of ['data.json', 'openapi.json']) assert.ok(!existsSync(join(p.out, 'server', f)), `${f} only with tables`);
   assert.ok(!existsSync(join(p.out, 'server/.env')), 'a build never writes .env');
+
+  const d = project(SITE(`${BACKEND}  data notes\n    title text required\n    allow anyone read\n`));
+  assert.equal(az('backend', 'schema', d.file).status, 0);
+  const withData = build({ source: d.file, outDir: d.out, wordsDir: WORDS });
+  assert.equal(withData.ok, true, withData.report);
+  for (const f of readdirSync(src)) {
+    assert.equal(readFileSync(join(d.out, 'server/src', f), 'utf8'), readFileSync(join(src, f), 'utf8'), `with tables: ${f}`);
+  }
+  for (const f of ['data.json', 'openapi.json']) assert.ok(existsSync(join(d.out, 'server', f)), `with tables: ${f}`);
 });
 
 test('CONTROL: a site without one gets no server/ at all', () => {

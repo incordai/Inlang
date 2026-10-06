@@ -19,8 +19,18 @@
 
 import { randomBytes } from 'node:crypto';
 import type { SpecBackend } from '../../core/src/backend.ts';
+import type { SpecTable } from '../../core/src/data.ts';
+import type { LockStep } from '../../core/src/data-lock.ts';
 import { KEYS, PROVIDER_KEYS, type Setup } from './server/env.ts';
 import { generatedJson, generatedMd } from '../../core/src/generated.ts';
+import { dataSteps } from './data-ddl.ts';
+import { openapi } from './openapi.ts';
+
+/** The site's data tables and the lock's steps that build them (data-spec §6). */
+export interface BackendData {
+  readonly tables: readonly SpecTable[];
+  readonly steps: readonly LockStep[];
+}
 
 /**
  * Exact pins for the drivers a generated server may need — vetted rows
@@ -78,7 +88,7 @@ export function envFile(setup: Setup): string {
   return envExample(setup).replace(/^AZ_SESSION_SECRET=$/m, `AZ_SESSION_SECRET=${secret}`);
 }
 
-function readme(siteName: string, setup: Setup): string {
+function readme(siteName: string, setup: Setup, data: BackendData | undefined): string {
   const db = { sqlite: 'SQLite (a file; no server to run)', postgres: 'PostgreSQL', mysql: 'MySQL' }[setup.database];
   const email = { smtp: 'SMTP', api: 'an HTTPS email API' }[setup.email];
   return `${generatedMd('how to run, configure and deploy the site\'s backend')}# ${siteName} — backend
@@ -134,11 +144,40 @@ site's build, which only ever inlines \`AZ_PUBLIC_*\` values.
   limit in front (proxy or platform) as well.
 - \`/health\` answers \`{"ok":true}\` for a load balancer.
 - Migrations run on every start and are safe to repeat.
+${data ? dataReadme(data) : ''}`;
+}
+
+/** The README's data section: the API, and the runbook for a step that loses data. */
+function dataReadme(data: BackendData): string {
+  return `
+## Data
+
+This server also serves the site's tables (${data.tables.map((t) => `\`${t.name}\``).join(', ')})
+at \`/data/<table>\` — \`openapi.json\` describes every route. Who may read,
+create, edit and delete is decided by the \`allow\` lines in the .az file and
+checked inside each database statement. The Origin check stops other sites'
+pages, not other programs: the rules are the access control.
+
+The tables' history is \`data.json\`, built from the site's \`.data.json\`
+lock. On start the server applies each new step, one statement at a time,
+recorded so an interrupted step resumes. Several instances may start at once:
+one applies each statement, the others wait.
+
+**A step that loses data** (a drop, a rename, a removed choice, a new
+unique) is never applied on start. The server refuses to start and names it.
+Then:
+
+1. Back up the database.
+2. Run \`node src/main.ts --migrate --confirm <version>\` with the version it
+   named. It applies the steps up to that version and exits; a removed choice
+   or a new unique is refused while rows still hold the old value or share a
+   value, with the count.
+3. Start the server as usual.
 `;
 }
 
 /** Everything under `server/` except the copied `src/`. */
-export function backendFiles(siteName: string, backend: SpecBackend): BackendFile[] {
+export function backendFiles(siteName: string, backend: SpecBackend, data?: BackendData): BackendFile[] {
   const setup: Setup = { database: backend.database, email: backend.email };
   const deps = serverDependencies(setup);
   return [
@@ -163,6 +202,18 @@ export function backendFiles(siteName: string, backend: SpecBackend): BackendFil
     },
     { path: `${SERVER_DIR}/.env.example`, content: `${hashHeader('every backend key with its meaning; copy to .env (az backend init) and fill it')}${envExample(setup)}` },
     { path: `${SERVER_DIR}/.gitignore`, content: `${hashHeader('keeps .env, the SQLite data and node_modules out of version control')}.env\ndata/\nnode_modules/\n` },
-    { path: `${SERVER_DIR}/README.md`, content: readme(siteName, setup) },
+    { path: `${SERVER_DIR}/README.md`, content: readme(siteName, setup, data) },
+    // Only with tables, so a site without data gets exactly the files it got before.
+    ...(data ? [
+      {
+        path: `${SERVER_DIR}/data.json`,
+        content: `${JSON.stringify({
+          _generated: generatedJson('the data tables, their rules, and the SQL that builds them, from the .az file and its .data.json lock'),
+          tables: data.tables,
+          steps: dataSteps(data.steps),
+        }, null, 2)}\n`,
+      },
+      { path: `${SERVER_DIR}/openapi.json`, content: openapi(siteName, data.tables, data.steps.length) },
+    ] : []),
   ];
 }

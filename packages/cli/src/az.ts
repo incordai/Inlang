@@ -40,7 +40,7 @@ import { lintWords } from './lint.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
 import { initBackendEnv } from './backend-init.ts';
-import { lockOption, runDataPlan, runDataSchema } from './data-schema.ts';
+import { lockOption, readLockSteps, runDataPlan, runDataSchema } from './data-schema.ts';
 import { writeOutput } from './output.ts';
 // mcp.ts imports build/wordsFor from here; the cycle is safe for the same
 // reason as dev.ts's — nothing is touched until a command runs.
@@ -161,6 +161,7 @@ export function build(options: BuildOptions): BuildOutcome {
     throw e;
   }
   const { assets, modules } = project;
+  const tables = result.spec.site.data;
   // The behaviour runtime ships with every site, copied verbatim from the
   // overlay package into RUNTIME_DIR — part of the output, so it is written
   // and checked like any emitted file. The build guard's scanner ships with
@@ -172,10 +173,13 @@ export function build(options: BuildOptions): BuildOutcome {
     ...(project.auth ? copied('../../auth-runtime/src/runtime/', AUTH_DIR) : []),
     // The 3D runtime only with a site whose pages declare a 3D view (scene-spec §5).
     ...(project.three ? copied('../../scene-runtime/src/runtime/', THREE_DIR) : []),
-    // The built-in backend only with a site that declares one (backend-spec §8).
+    // The built-in backend only with a site that declares one (backend-spec §8);
+    // its data modules only with a site that declares tables (data-spec §6),
+    // whose lock compile() has already checked against the file.
     ...(result.spec.site.backend
-      ? [...backendFiles(result.spec.site.name, result.spec.site.backend),
-         ...copied('../../backend/src/server/', `${SERVER_DIR}/src`)]
+      ? [...backendFiles(result.spec.site.name, result.spec.site.backend,
+          tables ? { tables, steps: readLockSteps(options.source) } : undefined),
+         ...copied('../../backend/src/server/', `${SERVER_DIR}/src`, (f) => tables !== undefined || !f.startsWith('data-'))]
       : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
 
@@ -425,6 +429,7 @@ function runDev(file: string, outDir: string, wordsDir: string, rest: string[]):
   /** The serving start, once begun — awaited on Ctrl-C so no child outlives us. */
   let started: Promise<Served | null> | null = null;
   let packageHash: string | null = null;
+  let dataAtStart: string | undefined;
 
   const handle = dev({
     source: file,
@@ -439,9 +444,15 @@ function runDev(file: string, outDir: string, wordsDir: string, rest: string[]):
         print('az dev: the site\'s dependencies changed — restart az dev to install them');
       }
       packageHash ??= pkg;
+      // The dev backend applies the tables' steps once, at start.
+      const dataJson = outcome.files.find((f) => f.path === 'server/data.json')?.content;
+      if (started && dataJson !== dataAtStart) print('az dev: the data tables changed — restart az dev to apply them');
       if (started) return;
+      dataAtStart = dataJson;
       const config = outcome.files.find((f) => f.path === 'server/az.config.json');
-      const backend = config ? { siteName: (JSON.parse(config.content) as { siteName: string }).siteName } : null;
+      const backend = config
+        ? { siteName: (JSON.parse(config.content) as { siteName: string }).siteName, ...(dataJson !== undefined ? { data: dataJson } : {}) }
+        : null;
       started = serve({ source: file, outDir, sitePort, open: rest.includes('--open'), backend, print })
         .catch((e: unknown) => {
           process.stderr.write(`az dev: ${(e as Error).message}\n`);

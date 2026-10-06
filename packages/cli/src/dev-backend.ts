@@ -33,8 +33,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { createApp } from '../../backend/src/server/app.ts';
+import { createApp, type DataRoutes } from '../../backend/src/server/app.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
+import { createData } from '../../backend/src/server/data-api.ts';
+import { migrateData, type DataStep } from '../../backend/src/server/data-migrate.ts';
+import { loadTables } from '../../backend/src/server/data-values.ts';
 import { createMailer } from '../../backend/src/server/email.ts';
 import { loadConfig } from '../../backend/src/server/env.ts';
 import { createOidc } from '../../backend/src/server/oidc.ts';
@@ -264,6 +267,8 @@ export interface DevBackend {
  */
 export async function startDevBackend(
   projectDir: string, siteName: string, ports: DevPorts, mailbox: Mailbox, print: (line: string) => void,
+  /** The build's `server/data.json`, when the site declares tables. */
+  dataJson?: string,
 ): Promise<DevBackend> {
   const dir = devDir(projectDir);
   const env = devBackendEnv(ports, devSecret(dir), join(dir, 'dev.db'), mailbox.key, readEnvFile(join(dir, 'backend.env')));
@@ -277,9 +282,21 @@ export async function startDevBackend(
   assertLoopback(config.host);
   const db = await openSqlite(config.sqlitePath);
   await migrate(db);
+  let data: DataRoutes | undefined;
+  if (dataJson !== undefined) {
+    // The dev database is disposable (data-spec §6.3): every step applies,
+    // the destructive ones too — and what they did is said, not hidden.
+    const model = JSON.parse(dataJson) as { steps: DataStep[] };
+    const applied = await migrateData(db, model.steps, { confirm: Infinity });
+    for (const step of model.steps.filter((s) => applied.includes(s.version))) {
+      print(`az dev: applied data step ${step.version} to ${DEV_DIR}/dev.db: ${step.summary.join('; ')}${step.destructive ? ' (data dropped or changed)' : ''}`);
+    }
+    data = createData({ db, tables: loadTables(model) });
+  }
   const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs });
   const app = createApp({
     config, store,
+    ...(data ? { data } : {}),
     mailer: await createMailer(config),
     oidc: createOidc((...a) => fetch(...a)),
     log: (line) => print(`backend: ${line}`),
