@@ -73,7 +73,7 @@ test('a write answers with its row only as the read rules grant it (review #4)',
   assert.match(src, /create: \(input: ProductsRowInput\) => call<\{ item: ProductsRow \}>/, 'anyone reads: the row');
   assert.match(src, /create: \(input: ClassRowInput\) => call<\{ item: null \}>/, 'nobody reads: never the row');
   assert.match(src, /create: \(input: NotesRowInput\) => call<\{ item: NotesRow \}>/, 'the creator owns it and owners read');
-  assert.match(src, /update: \(id: string, changes: NotesRowPatch\) => call<\{ item: NotesRow \}>/);
+  assert.match(src, /update: \(id: string, changes: NotesRowPatch\) => toRow<\{ item: NotesRow \}>/);
   assert.match(src, /create: \(input: TipsRowInput\) => call<\{ item: TipsRow \| null \}>/, 'signed out, the creator may not read it');
 });
 
@@ -146,11 +146,11 @@ test('upload sends the file\'s raw bytes with the CSRF header; clear is a DELETE
   try {
     const { tables, calls } = await loadClient(() => Response.json({ item: { id: 'x', photo: null } }), IMAGES);
     const file = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], { type: 'image/jpeg' });
-    assert.deepEqual(await tables.products.upload('a/b', 'photo', file), { ok: true, item: { id: 'x', photo: null } });
-    await tables.products.clear('abc', 'proof');
+    assert.deepEqual(await tables.products.upload(ID, 'photo', file), { ok: true, item: { id: 'x', photo: null } });
+    await tables.products.clear(ID, 'proof');
     assert.deepEqual(calls.map((c) => [c.init.method, c.url]), [
-      ['PUT', 'https://api.studio.test/data/products/a%2Fb/photo'],
-      ['DELETE', 'https://api.studio.test/data/products/abc/proof'],
+      ['PUT', `https://api.studio.test/data/products/${ID}/photo`],
+      ['DELETE', `https://api.studio.test/data/products/${ID}/proof`],
     ]);
     assert.equal(calls[0].init.body, file, 'the Blob itself, not JSON');
     assert.deepEqual(calls[0].init.headers, { 'content-type': 'application/octet-stream', 'x-az-request': '1' });
@@ -169,21 +169,25 @@ async function loadClient(respond: (url: string, init: RequestInit) => Promise<R
     calls.push({ url, init });
     return respond(url, init);
   }) as typeof fetch;
-  const mod = await import(pathToFileURL(join(dir, 'client.ts')).href) as { tables: Record<string, Record<string, (...a: unknown[]) => Promise<Record<string, unknown>>>> };
-  return { tables: mod.tables, calls };
+  type Op = (...a: unknown[]) => Promise<Record<string, unknown>>;
+  const mod = await import(pathToFileURL(join(dir, 'client.ts')).href) as { tables: Record<string, Record<string, Op>>; admin: Record<string, Op> };
+  return { tables: mod.tables, admin: mod.admin, calls };
 }
+
+/** A row id as the server makes one (randomUUID). */
+const ID = '0b6f5c2e-7d4a-4c1b-9e3f-2a8d6c4b1f00';
 
 test('requests: the address, credentials, the CSRF header on writes only, encoded queries and ids', async () => {
   const realFetch = globalThis.fetch;
   try {
     const { tables, calls } = await loadClient(() => Response.json({ items: [], next: null }));
     await tables.products.list({ limit: 5, sort: '-price', featured: true, 'status.in': ['draft', 'live'], 'price.gte': 100, mine: true, q: 'a&b' });
-    await tables.products.get('id/../x');
+    await tables.products.get(ID);
     await tables.products.create({ name: 'n', price: 1 });
-    await tables.products.update('abc', { price: 2 });
-    await tables.products.remove('abc');
+    await tables.products.update(ID, { price: 2 });
+    await tables.products.remove(ID);
     assert.equal(calls[0].url, 'https://api.studio.test/data/products?limit=5&sort=-price&featured=on&status.in=draft%2Clive&price.gte=100&mine=1&q=a%26b');
-    assert.equal(calls[1].url, 'https://api.studio.test/data/products/id%2F..%2Fx');
+    assert.equal(calls[1].url, `https://api.studio.test/data/products/${ID}`);
     assert.deepEqual(calls.map((c) => c.init.method), ['GET', 'GET', 'POST', 'PATCH', 'DELETE']);
     for (const c of calls) {
       assert.equal(c.init.credentials, 'include');
@@ -213,6 +217,41 @@ test('results: every answer resolves — data, a closed code with its field, or 
     assert.deepEqual(await tables.products.create({ name: 'n', price: 1 }), { ok: false, code: 'unknown' });
     assert.deepEqual(await tables.products.list(), { ok: false, code: 'unknown' });
     assert.deepEqual(await tables.products.list(), { ok: false, code: 'unknown' });
-    assert.deepEqual(await tables.products.remove('x'), { ok: true });
+    assert.deepEqual(await tables.products.remove(ID), { ok: true });
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('ids: only a row id the server could have made reaches a URL; `..` and the rest are not_found, with no request', async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    const { tables, admin, calls } = await loadClient(() => Response.json({ item: { id: ID } }), IMAGES);
+    const bad = ['..', '.', '', '../products', 'a/b', '%2e%2e', ID.toUpperCase(), `${ID}/..`, ` ${ID}`, `${ID}?x=1`];
+    const file = new Blob([new Uint8Array([1])]);
+    for (const id of bad) {
+      for (const [what, run] of [
+        ['get', () => tables.products.get(id)], ['update', () => tables.products.update(id, { price: 2 })],
+        ['remove', () => tables.products.remove(id)], ['upload', () => tables.products.upload(id, 'photo', file)],
+        ['clear', () => tables.products.clear(id, 'photo')],
+        ['admin.get', () => admin.get('products', id)], ['admin.update', () => admin.update('products', id, {})],
+        ['admin.remove', () => admin.remove('products', id)], ['admin.clear', () => admin.clear('products', id, 'photo')],
+        ['admin.upload', () => admin.upload('products', id, 'photo', file)],
+      ] as const) {
+        assert.deepEqual(await run(), { ok: false, code: 'not_found' }, `${what}(${JSON.stringify(id)})`);
+      }
+    }
+    // A field or table that is not a name: `clear(id, "..")` would otherwise be the row's DELETE.
+    for (const field of ['..', '.', 'a/b', '']) {
+      assert.deepEqual(await admin.clear('products', ID, field), { ok: false, code: 'not_found' }, `field ${field}`);
+      assert.deepEqual(await admin.upload('products', ID, field, file), { ok: false, code: 'not_found' }, `field ${field}`);
+    }
+    assert.deepEqual(await admin.get('..', ID), { ok: false, code: 'not_found' }, 'table ..');
+    assert.equal(calls.length, 0, 'no refused id ever became a request');
+    // CONTROL: a real id goes out, unchanged.
+    assert.deepEqual(await admin.get('products', ID), { ok: true, item: { id: ID } });
+    assert.deepEqual(await admin.clear('products', ID, 'photo'), { ok: true, item: { id: ID } });
+    assert.deepEqual(calls.map((c) => [c.init.method, c.url]), [
+      ['GET', `https://api.studio.test/admin/data/products/${ID}`],
+      ['DELETE', `https://api.studio.test/admin/data/products/${ID}/photo`],
+    ]);
   } finally { globalThis.fetch = realFetch; }
 });

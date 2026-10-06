@@ -109,7 +109,6 @@ ${query.join('\n')}
 function tableRoutes(t: SpecTable): string {
   const T = typeName(t.name);
   const path = `/data/${t.name}`;
-  const one = (id = 'id') => `\`${path}/\${encodeURIComponent(${id})}\``;
   // A write answers with its row only as the read rules grant it to the writer.
   const echo = writeEcho(t.rules);
   const answer = (e: 'row' | 'none' | 'maybe') => (e === 'row' ? T : e === 'none' ? 'null' : `${T} | null`);
@@ -117,16 +116,16 @@ function tableRoutes(t: SpecTable): string {
   const ops = [
     ...(t.rules.read.length > 0 ? [
       `    /** A page of rows; pass \`next\` back as \`after\` for the following page. */\n    list: (query: ${T}Query = {}) => call<{ items: ${T}[]; next: string | null }>("GET", \`${path}\${search(query)}\`),`,
-      `    get: (id: string) => call<{ item: ${T} }>("GET", ${one()}),`,
+      `    get: (id: string) => toRow<{ item: ${T} }>("GET", rowPath(${str(path)}, id)),`,
     ] : []),
     ...(t.rules.create.length > 0 ? [`    create: (input: ${T}Input) => call<{ item: ${created} }>("POST", ${str(path)}, input),`] : []),
-    ...(t.rules.edit.length > 0 ? [`    update: (id: string, changes: ${T}Patch) => call<{ item: ${edited} }>("PATCH", ${one()}, changes),`] : []),
-    ...(t.rules.delete.length > 0 ? [`    remove: (id: string) => call<Record<string, never>>("DELETE", ${one()}),`] : []),
+    ...(t.rules.edit.length > 0 ? [`    update: (id: string, changes: ${T}Patch) => toRow<{ item: ${edited} }>("PATCH", rowPath(${str(path)}, id), changes),`] : []),
+    ...(t.rules.delete.length > 0 ? [`    remove: (id: string) => toRow<Record<string, never>>("DELETE", rowPath(${str(path)}, id)),`] : []),
     ...(uploadable(t).length > 0 ? (() => {
       const fields = uploadable(t).map((f) => str(f.name)).join(' | ');
       return [
-        `    /** Upload an image file (JPEG, PNG, WebP or AVIF) to an image field of a row you own; it is stored re-encoded, without metadata. */\n    upload: (id: string, field: ${fields}, file: Blob) => call<{ item: ${edited} }>("PUT", \`${path}/\${encodeURIComponent(id)}/\${field}\`, file),`,
-        `    clear: (id: string, field: ${fields}) => call<{ item: ${edited} }>("DELETE", \`${path}/\${encodeURIComponent(id)}/\${field}\`),`,
+        `    /** Upload an image file (JPEG, PNG, WebP or AVIF) to an image field of a row you own; it is stored re-encoded, without metadata. */\n    upload: (id: string, field: ${fields}, file: Blob) => toRow<{ item: ${edited} }>("PUT", rowPath(${str(path)}, id, field), file),`,
+        `    clear: (id: string, field: ${fields}) => toRow<{ item: ${edited} }>("DELETE", rowPath(${str(path)}, id, field)),`,
       ];
     })() : []),
   ];
@@ -198,6 +197,27 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<Da
   return { ok: true, ...answer } as DataResult<T>;
 }
 
+/** A row id as the server makes one (a random UUID, data-spec §3); a field or table name as the compiler writes one. */
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const NAME = /^[a-z][a-z0-9]*$/;
+
+/**
+ * The path to one row (or one of its image fields), or null when the id or
+ * field cannot be one. Checked here, before any URL is built: \`..\` survives
+ * encodeURIComponent and fetch resolves it, so \`get("..")\` would otherwise
+ * call the table's list, and \`clear(id, "..")\` the row's DELETE.
+ */
+function rowPath(base: string, id: string, field?: string): string | null {
+  if (typeof id !== "string" || !ID.test(id)) return null;
+  if (field !== undefined && (typeof field !== "string" || !NAME.test(field))) return null;
+  return field === undefined ? \`\${base}/\${id}\` : \`\${base}/\${id}/\${field}\`;
+}
+
+/** A request to one row; a path that names none is answered as the server answers it, not_found, with no request. */
+function toRow<T>(method: string, path: string | null, body?: unknown): Promise<DataResult<T>> {
+  return path === null ? Promise.resolve({ ok: false, code: "not_found" }) : call<T>(method, path, body);
+}
+
 ${tables.map(tableBlock).join('\n')}
 /**
  * Every table, by its name in the .az file: \`tables.products.list()\`. One
@@ -210,6 +230,10 @@ ${tables.map(tableRoutes).join('\n')}
 
 /** A table's name, as the admin routes take it. */
 export type TableName = ${tables.map((t) => str(t.name)).join(' | ')};
+
+/** An admin path to one row of a table, checked as rowPath checks one. */
+const adminRow = (table: TableName, id: string, field?: string) =>
+  typeof table === "string" && NAME.test(table) ? rowPath(\`/admin/data/\${table}\`, id, field) : null;
 
 /** A row as an admin reads it: every field, private ones too, and the owner's address. */
 export interface AdminRow {
@@ -243,19 +267,19 @@ export const admin = {
   /** A page of rows, with \`count\`: the rows the query matches. */
   list: (table: TableName, query: Record<string, string | number | boolean> = {}) =>
     call<{ items: AdminRow[]; next: string | null; count: number }>("GET", \`/admin/data/\${table}\${search(query)}\`),
-  get: (table: TableName, id: string) => call<{ item: AdminRow }>("GET", \`/admin/data/\${table}/\${encodeURIComponent(id)}\`),
+  get: (table: TableName, id: string) => toRow<{ item: AdminRow }>("GET", adminRow(table, id)),
   create: (table: TableName, input: Record<string, unknown>) => call<{ item: AdminRow }>("POST", \`/admin/data/\${table}\`, input),
   update: (table: TableName, id: string, changes: Record<string, unknown>) =>
-    call<{ item: AdminRow }>("PATCH", \`/admin/data/\${table}/\${encodeURIComponent(id)}\`, changes),
-  remove: (table: TableName, id: string) => call<Record<string, never>>("DELETE", \`/admin/data/\${table}/\${encodeURIComponent(id)}\`),
+    toRow<{ item: AdminRow }>("PATCH", adminRow(table, id), changes),
+  remove: (table: TableName, id: string) => toRow<Record<string, never>>("DELETE", adminRow(table, id)),
   /** Admin writes, newest first; pass \`next\` back as \`after\`. */
   audit: (query: { limit?: number; after?: string } = {}) =>
     call<{ items: AuditEntry[]; next: string | null }>("GET", \`/admin/audit\${search(query)}\`),
   /** Upload an image file to any row's image field, locked ones included (audited as an edit). */
   upload: (table: TableName, id: string, field: string, file: Blob) =>
-    call<{ item: AdminRow }>("PUT", \`/admin/data/\${table}/\${encodeURIComponent(id)}/\${encodeURIComponent(field)}\`, file),
+    toRow<{ item: AdminRow }>("PUT", adminRow(table, id, field), file),
   clear: (table: TableName, id: string, field: string) =>
-    call<{ item: AdminRow }>("DELETE", \`/admin/data/\${table}/\${encodeURIComponent(id)}/\${encodeURIComponent(field)}\`),
+    toRow<{ item: AdminRow }>("DELETE", adminRow(table, id, field)),
 } as const;
 `;
 }
