@@ -149,6 +149,25 @@ freezes or context loss, not the 33.3 ms floor. (2) SwiftShader passes
 headless shell a SwiftShader frame takes ~600 ms, so §3.2's 60 warm-up frames
 take ~36 s.
 
+**A snapshot pinned to `lite` is reproducible — 2026-10-06.** Headless
+`chromium` (SwiftShader, CPU raster), viewport and DPR 1 fixed, light scheme,
+`?az-probe=off`, fonts settled, CSS animations disabled, page at rest (rung 6
+has no scroll-linked camera, so nothing moves):
+
+- spike (`spike-m0`, `pnpm test:snapshot`, 1280×720, the timing readout
+  masked): `?az-rung=6` PNG sha256 `cf1eec2f038c0a5d` in two fresh contexts
+  and again after relaunching the browser; `?az-tier=lite` gives the same
+  bytes; **control** `?az-rung=4` gives `64109f447f5ba166`. Same hashes on 3
+  consecutive runs.
+- generated site (`pnpm test:3d`, 1440×900, the procedural `hero full 3d`):
+  `?az-tier=lite` lands on rung 6 with the hero live; the 71,094-byte PNG is
+  byte-identical in two fresh contexts and after a browser restart;
+  **control** — the same page under another site name (another seed,
+  scene-spec §11.1) renders different bytes.
+
+Exact bytes, so no perceptual threshold was needed. This holds for a CPU
+rasteriser; a GPU driver is not claimed to be byte-stable.
+
 ### What is still open
 
 No genuinely slow device has run the probe; every threshold is validated only

@@ -325,6 +325,17 @@ Effect on word-quality-gate §1:
 | *new* — ladder correctness | force each rung; assert the renderer's actual pixel ratio, post-pass count and camera scroll-subscription count. Assert the *effect*, never that a function returned successfully |
 | *new* — decision logic | pure unit test over synthetic interval arrays (§8.2). No browser, no pixels, no flake |
 
+**Verified 2026-10-06 — a snapshot pinned to `lite` is byte-reproducible.**
+Under the headless CPU rasteriser, with viewport, DPR, scheme and reduced
+motion fixed, `?az-probe=off`, fonts settled and the page at rest, a
+`?az-tier=lite` screenshot is byte-identical across two fresh browser contexts
+and across a browser restart — in the spike (`spike-m0`, `pnpm test:snapshot`;
+`?az-tier=lite` and `?az-rung=6` give the same bytes) and in a generated site
+(`pnpm test:3d`). Each has a control that must differ: rung 4 in the spike,
+another seed in the generated site. Exact bytes, no perceptual threshold;
+figures in ASSUMPTIONS A1b. A GPU driver is not claimed byte-stable — snapshot
+tests run on the CPU rasteriser, as CI does.
+
 ---
 
 ## 7. What this does **not** solve
