@@ -471,6 +471,8 @@ mechanically detectable from two manifests.
    3D. *(Recommend: `targets: ["web"]`, reported as unavailable rather than an
    error per ARCHITECTURE §4.3 — but a page built around four scenes has no
    mobile story, so warn at `az build` rather than surprise anyone in Phase 3.)*
+   *(Resolved 2026-10-06: the mobile target emits the scene's poster with its
+   `alt`, no entrance, plus the build note — mobile-motion-spec §2.1.)*
 6. **Does `scene` survive M5?** *(The honest test is whether the dogfood site
    uses it for something `hero 3d` could not do. If no page has both a 3D hero
    and a scene, cut it — a block never repeated is a hero with extra steps.)*

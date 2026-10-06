@@ -46,7 +46,10 @@ the full protocol in VERIFICATION §2 and record it; if not, M0 still completes.
       model budget as the critical-path 3D check
 - [x] Draco model < 5MB **on the opt-in model path only** (tests A8) — 0.38 MB
       for a 218,880-triangle sample, geometry only (ASSUMPTIONS A8; textures unmeasured)
-- [ ] forced-tier override works; a snapshot pinned to `lite` is reproducible
+- [x] forced-tier override works; a snapshot pinned to `lite` is reproducible —
+      byte-identical PNGs across fresh contexts and a browser restart, spike
+      (`pnpm test:snapshot`) and generated site (`pnpm test:3d`), each with a
+      differing control (ASSUMPTIONS A1b, motion-tiers-spec §6.1) (2026-10-06)
 - [ ] `ASSUMPTIONS.md` A1b, A2, A8, A8b updated to `HOLDS` or `FAILED`; A1 updated
       only if a real device was actually measured
 
@@ -114,7 +117,8 @@ free while snapshots exist — authoring-experience §2).
 - [x] `az lint` fails a deliberately non-compliant word (tests A7) — `lint-migrate.test.ts`
 - [x] 3 themes, all blocks rendering correctly in each, light and dark — `pnpm gate --every-variant`
 - [x] thumbnails generated for every block and every variant
-- [ ] mobile motion vocabulary **designed and written down** (PRD §6.4)
+- [x] mobile motion vocabulary **designed and written down** (PRD §6.4) —
+      `docs/mobile-motion-spec.md`; design only, built with Phase 3's mobile emitters (2026-10-06)
 
 ⛔ **Do not add block #12.** Not for any reason. Log requests in a backlog file.
 A new *variant* on an existing block is a smaller decision but still a

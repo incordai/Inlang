@@ -303,6 +303,8 @@ tells you your CTA is weak is doing something no boilerplate generator does.
 2. Is `eyebrow` worth a slot, or is it `text` inside the hero?
 3. Mobile-app target: which variant does `hero` map to? Probably `stack` with a
    spring entrance — needs deciding in the M2 mobile-vocabulary work.
+   *(Resolved 2026-10-06: `stack`, poster on top, spring entrance —
+   mobile-motion-spec §2.1.)*
 
 ---
 

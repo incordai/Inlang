@@ -356,8 +356,10 @@ mechanism, thresholds and hysteresis in `motion-tiers-spec.md`.
 the *emitted code* is what adapts on the visitor's device. Snapshots pin the
 tier explicitly so visual tests stay deterministic.
 
-**Open task before M2:** design the mobile motion vocabulary. This roughly
-doubles design work per word — budget for it knowingly.
+**Mobile motion vocabulary:** designed in `mobile-motion-spec.md` (M2,
+2026-10-06) — every motion word and modifier mapped to native motion, shared
+tokens, reduced-motion, haptics and budgets. Design only; it is built with the
+Phase 3 mobile emitters, and still roughly doubles design work per word.
 
 ### 6.5 Auth — honest treatment
 
