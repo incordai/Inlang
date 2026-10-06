@@ -135,11 +135,13 @@ export async function runClaimed(
 
 /** Whether a statement's effect is already in the database. */
 export interface Probe {
-  readonly kind: 'table' | 'column' | 'index' | 'fk';
+  readonly kind: 'table' | 'column' | 'index' | 'fk' | 'onDelete';
   /** The physical table (for an index on MySQL, and for a column or fk). */
   readonly table: string;
   /** The column, index or constraint name; absent for a table. */
   readonly name?: string;
+  /** `onDelete` only (SQLite): the action the column's foreign key must have. */
+  readonly action?: string;
   /** The effect is done when the object is present (create, add, rename) or absent (drop). */
   readonly done: 'present' | 'absent';
 }
@@ -160,6 +162,10 @@ function probeQuery(db: Db, p: Probe): { sql: string; params: Value[] } {
       if (db.dialect === 'sqlite') return { sql: "SELECT 1 AS x FROM sqlite_schema WHERE type = 'index' AND name = ?", params: [p.name!] };
       if (db.dialect === 'postgres') return { sql: 'SELECT 1 AS x FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?', params: [p.name!] };
       return { sql: 'SELECT 1 AS x FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?', params: [p.table, p.name!] };
+    case 'onDelete':
+      // Only SQLite rebuilds a table to change it; the others probe the new key by name.
+      if (db.dialect !== 'sqlite') throw new Error('probe: onDelete is a SQLite probe');
+      return { sql: 'SELECT 1 AS x FROM pragma_foreign_key_list(?) WHERE "from" = ? AND on_delete = ?', params: [p.table, p.name!, p.action!] };
     case 'fk':
       // SQLite foreign keys are part of their column; no unit adds one alone.
       if (db.dialect === 'sqlite') throw new Error('probe: SQLite has no separate foreign keys');

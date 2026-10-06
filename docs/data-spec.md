@@ -217,7 +217,7 @@ because the keywords (`allow`) are reserved field names (§4.6).
 | `url` | link | `TEXT` + check 2048 | `VARCHAR(2048)` | `VARCHAR(2048)` | string | `https:` (or `http:`) only; never indexed |
 | `choice` | one of the listed values | `TEXT` + `CHECK(x IN …)` | `VARCHAR(63)` + `CHECK` | `VARCHAR(63)` + `CHECK` | string | value in the declared list |
 | `image` | an uploaded image | `TEXT` key + `INTEGER` w/h | `VARCHAR(80)` + `INTEGER` ×2 | same | `{ url, width, height }` or null | §8 |
-| `ref` | belongs-to another table | `TEXT REFERENCES … ` | `VARCHAR(36) REFERENCES …` | `VARCHAR(36)` + FK | string (id) | target row must exist; `ON DELETE RESTRICT` |
+| `ref` | belongs-to another table | `TEXT REFERENCES … ` | `VARCHAR(36) REFERENCES …` | `VARCHAR(36)` + FK | string (id) | target row must exist; `ON DELETE CASCADE` when required, `SET NULL` when optional (§18.6) |
 
 Why these mappings: they follow the existing rule "the three engines hold
 identical values" (`migrations.ts` header). `date` as `YYYY-MM-DD` text sorts
@@ -403,7 +403,7 @@ to copy; the server never writes a sentence meant for a person.
 | 403 | `unknown` | CSRF/Origin refusal — unchanged from auth (`app.ts:438`) |
 | 404 | `not_found` | no such row **or no readable/editable row** — same answer |
 | 409 | `taken` | a unique field already holds the value (`field`) |
-| 409 | `in_use` | delete refused: another table's `ref` points here |
+| 409 | `in_use` | delete refused: another table's `ref` points here — only on a database whose keys predate §18.6 and are not yet relinked |
 | 413 | `too_large` | body or image over the cap |
 | 415 | `unsupported_type` | image not one of the allowed formats |
 | 429 | `rate_limited` | §5.5 |
@@ -1051,6 +1051,25 @@ unique ids, skeleton height, empty, error + Try again with focus kept,
 no-JS, no console error on hydration, axe in every state — Chromium, Firefox,
 WebKit; WebKit signed-out only). The 26 word previews built by the
 compiler before D4 and with it: byte-identical, every file.
+
+### 18.6 Review fixes and owner decisions (2026-10-06)
+
+Each row has a test that failed on the code before it and a control.
+
+| Finding | Decision / fix | Proof |
+|---|---|---|
+| A `unique` + `private` field answered `409 taken` for anyone's hidden value — a yes/no oracle | Compile error **AZ1236** (the modifier-conflict code, as `private` + `search` already is; no new code). No other 409 path reads a private value: `taken` names only the written field | core/test/data.test.ts |
+| `unique` + `default`: every row omitting the field shares one value; adding the field to a populated table fills every row with it | Compile error **AZ1236**. In the DDL the duplicate count and `CREATE UNIQUE INDEX` are **one claimed unit** placed **before any fill**; a pending fill is counted as the value it will write (`COALESCE`). Such a step is destructive (needs `--confirm`) | backend/test/data-ddl.test.ts |
+| A unique index that still failed (a row written after the count) crashed the start with the driver's message, which on one engine quotes the duplicated value | The unit recounts and throws `GuardFailed` with a count, never the driver text. `main.ts` names any other migration failure by class and code only and exits 1 — no unhandled rejection | data-ddl.test.ts, backend/test/main.test.ts (spawns `main.ts`) |
+| `readOne` returned a written row whatever the read rules said | A create / edit / image answer is `item: null` unless a read rule grants the row to the writer (`writeEcho` in core; openapi.json and the typed client type it so) | data-api.test.ts (every legal rule set), openapi.test.ts, data-client.test.ts |
+| A cursor for a 200-character CJK or emoji sort value was longer than `CURSOR_MAX` (600) and refused | `CURSOR_MAX` is derived from the text cap in its costliest JSON spelling (six bytes a character) plus an id, as base64url | data-api.test.ts (CJK, emoji, a quote; both directions) |
+| Sorts and `q` could read every row | Every field the API sorts by (required, sortable type) is **indexed automatically, recorded in the lock** (`index: true`); an older lock plans it as a safe "gains its index" step. `q` stays a LIKE; every public list runs under `Db.allWithin(…, 2000 ms)`: PostgreSQL `SET LOCAL statement_timeout` inside one read-only transaction on one connection, MySQL the `MAX_EXECUTION_TIME` hint — the database cancels, no session state, pooler-safe. Past it: `429 rate_limited` (as a full image queue), logged without the query. node:sqlite has no way to interrupt a statement: on SQLite the bound is the table's size | data-lock.test.ts, data-api.test.ts, `pnpm test:backend-db` (a cross join cancelled at ~200 ms on both engines; the pool answers after) |
+| An image cached publicly from an `<img>` (no Origin) could answer a later `fetch()` without CORS headers | `Vary: Origin` on every image response | data-uploads.test.ts |
+| **Owner decision**: a stranger's row pointing at an owner's row made the owner's delete `409 in_use` | A required `ref` is `ON DELETE CASCADE`, an optional one `ON DELETE SET NULL`, on all three engines. The lock records it per ref field (`onDelete: cascade \| setnull`); a lock step written before the rule has none and its key RESTRICTs. Planning such a lock gives a **destructive** setField per ref ("deleting a products row now deletes the reviews rows that point at it") and the step waits for `--migrate --confirm`. PostgreSQL and MySQL swap the key in **one** `ALTER TABLE … DROP …, ADD CONSTRAINT … ON DELETE …` (a new name, probed). SQLite keeps foreign keys inside the table, so it is **rebuilt**: one script in one transaction with foreign keys off — create, copy, drop, rename, every index back under its name — checked with `foreign_key_check` before commit; a dangling row rolls it all back as `GuardFailed` with a count. Image files of cascaded rows are removed by the orphan sweep (§8) | data-lock.test.ts, data-ddl.test.ts (rebuild keeps rows and indexes; rollback on a dangling row), data-api / data-admin tests, `pnpm test:backend-db` RELINK checks, `pnpm test:data` (a reply cascades, a mention is cleared) |
+| `from` gallery `alt` could map an optional field (empty alt text) | **AZ1262** unless the field is `required` | core/test/from.test.ts |
+| Row types collided: `box`/`boxes` were both `Box`; `records`, `promises`, `responses` shadowed `Record`, `Promise`, `Response` | The type is the table's own name plus `Row` (`ProductsRow`, `…Input`, `…Patch`, `…Query`); openapi operations are named by the table (`listProducts`) | openapi.test.ts; data-client.test.ts compiles, under strict tsc, a client for such tables beside code using the built-ins |
+| `/Admin` escaped AZ1268; `/About` beside `/about` compiled | Routes compare case-insensitively: AZ1268 any case; two routes differing only in case are **AZ1509** | core/test/data.test.ts, hardening.test.ts |
+| Harness: the backend-db HTTP server closed only on success; the watchdog only sent SIGTERM | backend-db.mjs: server closed (bounded) in `finally`, run watchdog, bounded docker calls, connects and fetches. bounded.mjs `stopChild`: SIGTERM, then SIGKILL after 3 s; the watchdog stops `progress.children` that way. spike-m0 has its own `scripts/bounded.ts` (its own package) and test:snapshot uses it | scripts/lib/bounded.test.mjs (in `pnpm test`), spike `pnpm test:snapshot` |
 
 ---
 

@@ -33,9 +33,11 @@ export interface Guard {
   readonly message: string;
 }
 
-/** One statement, or one guard. */
+/** One statement, one guard, or (SQLite only) one script run as a single transaction. */
 export interface DataUnit {
   readonly sql?: string;
+  /** SQLite table rebuild (data-ddl.ts relink): all or nothing, foreign keys checked before commit. */
+  readonly script?: readonly string[];
   readonly params?: readonly Param[];
   readonly probe?: Probe;
   readonly guard?: Guard;
@@ -149,7 +151,12 @@ export async function migrateData(db: Db, steps: readonly DataStep[], options: M
     for (let i = 0; i < units.length; i++) {
       const unit = units[i];
       const outcome = await runClaimed(unitClaim(db, step.version, i + 1), async () => {
-        if (unit.sql !== undefined && unit.probe && (await probeDone(db, unit.probe))) return;
+        if ((unit.sql !== undefined || unit.script !== undefined) && unit.probe && (await probeDone(db, unit.probe))) return;
+        if (unit.script !== undefined) {
+          const broken = await db.script(unit.script);
+          if (broken > 0) throw new GuardFailed(`data step ${step.version}: rows point at rows that do not exist — ${broken} row${broken === 1 ? '' : 's'}; nothing was changed`);
+          return;
+        }
         const guard = unit.guard;
         const counted = async () => {
           if (!guard) return;

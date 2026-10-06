@@ -44,6 +44,13 @@ export interface Db {
    * the bound is the table's size (data-spec §18).
    */
   allWithin(sql: string, params: readonly Value[], ms: number): Promise<Row[]>;
+  /**
+   * SQLite only: statements run as ONE transaction with foreign keys off
+   * (a table rebuild, data-ddl.ts relink), checked with foreign_key_check
+   * before commit. Returns the violations found — when any, nothing was
+   * committed. The other engines never get a script.
+   */
+  script(statements: readonly string[]): Promise<number>;
   get(sql: string, params?: readonly Value[]): Promise<Row | undefined>;
   run(sql: string, params?: readonly Value[]): Promise<number>;
   close(): Promise<void>;
@@ -111,6 +118,25 @@ export async function openSqlite(path: string): Promise<Db> {
     },
     get: async (sql, p = []) => db.prepare(sql).get(...p),
     run: async (sql, p = []) => Number(db.prepare(sql).run(...p).changes),
+    script: async (statements) => {
+      // A no-op inside a transaction, so set before BEGIN; this connection
+      // is the server's only one, and it is set back in every case.
+      db.exec('PRAGMA foreign_keys = OFF');
+      try {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          for (const s of statements) db.exec(s);
+          const broken = db.prepare('PRAGMA foreign_key_check').all().length;
+          db.exec(broken > 0 ? 'ROLLBACK' : 'COMMIT');
+          return broken;
+        } catch (e) {
+          db.exec('ROLLBACK');
+          throw e;
+        }
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON');
+      }
+    },
     close: async () => db.close(),
   };
 }
@@ -162,6 +188,7 @@ export async function openPostgres(url: string, tls: boolean, ca?: string): Prom
       }
     },
     get: async (sql, p = []) => (await pool.query(numbered(sql), p)).rows[0],
+    script: async () => { throw new Error('script: SQLite only'); },
     run: async (sql, p = []) => (await pool.query(numbered(sql), p)).rowCount ?? 0,
     close: () => pool.end(),
   };
@@ -189,6 +216,7 @@ export async function openMysql(url: string, tls: boolean, ca?: string): Promise
       }
     },
     get: async (sql, p = []) => ((await pool.execute(sql, p))[0] as Row[])[0],
+    script: async () => { throw new Error('script: SQLite only'); },
     run: async (sql, p = []) => ((await pool.execute(sql, p))[0] as { affectedRows: number }).affectedRows,
     close: () => pool.end(),
   };

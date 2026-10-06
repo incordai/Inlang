@@ -144,6 +144,35 @@ export async function dataSuite(engine, db, openAgain, check, info) {
       `${results.map((r) => r.status)} ${recorded}/${units}`);
   } finally { await closeWithin(other, DB_CLOSE_MS, `${engine} second connection close`); }
 
+  // ---- a lock from before the onDelete rule: its keys relinked -----------
+  // Raw steps as an older lock holds them (no onDelete: RESTRICT), then the
+  // step today's plan writes for it — one ALTER that swaps the key.
+  const legacy = [
+    { version: 501, ops: [{ op: 'createTable', table: 'oldparents', fields: [{ name: 'name', type: 'text', required: true, unique: false, index: false }] }] },
+    { version: 502, ops: [{ op: 'createTable', table: 'oldkids', fields: [
+      { name: 'parent', type: 'ref', ref: 'oldparents', required: true, unique: false, index: false },
+      { name: 'other', type: 'ref', ref: 'oldparents', required: false, unique: false, index: false },
+    ] }] },
+  ];
+  const now = compile(SITE('  data oldparents\n    name text required\n  data oldkids\n    parent ref oldparents required\n    other ref oldparents\n'), { manifests });
+  const relinkOps = plan(replay(legacy.map((x, i) => ({ ...x, version: i + 1 }))), now.spec.site.data, { rename: [], drop: [], unique: [] }).ops;
+  const relinked = dataSteps([...legacy, { version: 503, ops: relinkOps }]);
+  await migrateData(db, relinked.slice(0, 2));
+  const tq = (t) => (engine === 'mysql' ? `\`${t}\`` : `"${t}"`);
+  await db.run(`INSERT INTO ${tq('azd_oldparents')} (id, owner, created, updated, name) VALUES ('q1', NULL, 1, 1, 'a'), ('q2', NULL, 1, 1, 'b')`);
+  await db.run(`INSERT INTO ${tq('azd_oldkids')} (id, owner, created, updated, parent, other) VALUES ('k1', NULL, 1, 1, 'q1', 'q2'), ('k2', NULL, 1, 1, 'q2', 'q1')`);
+  let blocked = false;
+  try { await db.run(`DELETE FROM ${tq('azd_oldparents')} WHERE id = 'q1'`); } catch { blocked = true; }
+  check(`${engine} RELINK: CONTROL — before it, a referencing row blocks the delete`, blocked);
+  let pending = null;
+  try { await migrateData(db, relinked); } catch (e) { pending = e; }
+  check(`${engine} RELINK: the step waits for --confirm`, pending instanceof DestructivePending, pending?.message);
+  check(`${engine} RELINK: applied`, (await migrateData(db, relinked, { confirm: 503 })).join() === '503');
+  await db.run(`DELETE FROM ${tq('azd_oldparents')} WHERE id = 'q1'`);
+  const kids = (await db.all(`SELECT id, parent, other FROM ${tq('azd_oldkids')} ORDER BY id`)).map((r) => `${r.id}:${r.parent}:${r.other}`);
+  check(`${engine} RELINK: a required ref cascades, an optional one is cleared`, kids.join() === 'k2:q2:null', kids.join());
+  check(`${engine} RELINK: applying again is a no-op`, (await migrateData(db, relinked, { confirm: 503 })).length === 0);
+
   // ---- the routes, on this engine ---------------------------------------
   const shop = lockOf([[`  data items
     name text required search
@@ -183,8 +212,13 @@ export async function dataSuite(engine, db, openAgain, check, info) {
     race.map((r) => r.status).sort().join() === '201,409' && race.some((r) => r.body?.error === 'taken' && r.body?.field === 'sku'), race.map((r) => r.status).join());
   check(`${engine} API: a ref must exist`, (await call('POST', '/data/notes', users[1], { item: randomUUID() })).body?.field === 'item');
   check(`${engine} API: a note on the item`, (await call('POST', '/data/notes', users[1], { item: id })).status === 201);
-  const inUse = await call('DELETE', `/data/items/${id}`, users[0]);
-  check(`${engine} API: a referenced row is in_use`, inUse.status === 409 && inUse.body.error === 'in_use');
+  // A stranger's row never blocks an owner's delete (data-spec §4.3): the
+  // note's required ref goes with the item.
+  const doomed = (await call('POST', '/data/items', users[0], { name: 'doomed', price: 1 })).body.item.id;
+  const note = (await call('POST', '/data/notes', users[1], { item: doomed })).body.item.id;
+  const gone = await call('DELETE', `/data/items/${doomed}`, users[0]);
+  check(`${engine} API: another account's row does not block the owner's delete; it cascades`,
+    gone.status === 204 && (await call('GET', `/data/notes/${note}`, null)).status === 404, `${gone.status}`);
   for (let i = 0; i < 30; i++) await call('POST', '/data/items', users[0], { name: `k${i}`, price: i % 4 });
   const expected = (await db.all(`SELECT id, price FROM ${engine === 'mysql' ? '`azd_items`' : '"azd_items"'}`))
     .map((r) => ({ id: r.id, price: Number(r.price) }))

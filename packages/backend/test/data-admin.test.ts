@@ -173,14 +173,13 @@ test('admin writes: rules bypassed — locked fields, others\' rows, tables with
     assert.equal((await boss.c.request('DELETE', `/admin/data/notes/${noteId}`)).status, 204);
     assert.equal((await boss.c.request('DELETE', `/admin/data/notes/${noteId}`)).status, 404, 'gone');
 
-    // A ref holds the row: refused with a code, nothing removed.
+    // A required ref goes with the row it points at (review #8): never a block.
     const rev = await ana.c.request('POST', '/data/reviews', { product: chair, stars: 5 });
     assert.equal(rev.status, 201);
-    assert.deepEqual([(await boss.c.request('DELETE', `/admin/data/products/${chair}`).then(async (r) => [r.status, await r.json()]))], [[409, { error: 'in_use' }]]);
     const revId = ((await rev.json()) as { item: { id: string } }).item.id;
-    assert.equal((await boss.c.request('DELETE', `/admin/data/reviews/${revId}`)).status, 204, 'another account\'s row');
     assert.equal((await boss.c.request('DELETE', `/admin/data/products/${chair}`)).status, 204);
     assert.equal((await ana.c.get(`/data/products/${chair}`)).status, 404);
+    assert.equal((await boss.c.get(`/admin/data/reviews/${revId}`)).status, 404, 'the review that pointed at it went with it');
   } finally { await h.close(); }
 });
 

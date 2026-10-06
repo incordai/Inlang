@@ -85,6 +85,22 @@ const columnNames = (f: LockField): string[] => (f.type === 'image' ? [f.name, .
 
 const fillValue = (v: Fill): Param => (typeof v === 'boolean' ? (v ? 1 : 0) : v);
 
+/**
+ * What deleting the row a ref points at does (data-spec §4.3): a required
+ * ref's rows go with it, an optional ref is cleared — so nobody else's row
+ * can stop an owner deleting their own. A lock step written before the rule
+ * has no `onDelete`: its foreign key RESTRICTs until a later step relinks it.
+ */
+const refAction = (f: LockField): string => (f.onDelete === 'cascade' ? 'CASCADE' : f.onDelete === 'setnull' ? 'SET NULL' : 'RESTRICT');
+
+/** The columns of an index, from its key in TableState.indexes. */
+function indexColumns(key: string): { cols: string[]; unique: boolean } {
+  if (key === 'owner') return { cols: ['owner'], unique: false };
+  if (key === 'created' || key === 'updated') return { cols: [key, 'id'], unique: false };
+  const [kind, field] = key.split(':');
+  return kind === 'unique' ? { cols: [field], unique: true } : { cols: [field, 'id'], unique: false };
+}
+
 /** One table's live names while the lock replays. */
 interface TableState {
   fields: Map<string, LockField>;
@@ -161,8 +177,63 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
       if (f.unique) createIndex(table, s, `unique:${f.name}`, [f.name], true);
       else if (f.index || f.type === 'ref') createIndex(table, s, `plain:${f.name}`, [f.name, 'id'], false);
     };
-    const fkClause = (d: Database, fk: string, col: string, target: string, cascade: boolean) =>
-      `CONSTRAINT ${q(d, fk)} FOREIGN KEY (${q(d, col)}) REFERENCES ${q(d, target)} (${q(d, 'id')}) ON DELETE ${cascade ? 'CASCADE' : 'RESTRICT'}`;
+    const fkClause = (d: Database, fk: string, col: string, target: string, action: string) =>
+      `CONSTRAINT ${q(d, fk)} FOREIGN KEY (${q(d, col)}) REFERENCES ${q(d, target)} (${q(d, 'id')}) ON DELETE ${action}`;
+    /** A table's full definition from its live state: system columns, fields, keys. */
+    const tableBody = (d: Database, s: TableState): string => {
+      const idType = d === 'sqlite' ? 'TEXT' : 'VARCHAR(36)';
+      const big = d === 'sqlite' ? 'INTEGER' : 'BIGINT';
+      const fields = [...s.fields.values()];
+      return [
+        `${q(d, 'id')} ${idType} NOT NULL`,
+        `${q(d, 'owner')} ${idType}`,
+        `${q(d, 'created')} ${big} NOT NULL`,
+        `${q(d, 'updated')} ${big} NOT NULL`,
+        ...fields.flatMap((f) => columns(d, f).map(([c, type]) => `${q(d, c)} ${type}`)),
+        `CONSTRAINT ${q(d, s.pk)} PRIMARY KEY (${q(d, 'id')})`,
+        fkClause(d, s.fks.get('owner')!, 'owner', 'az_users', 'CASCADE'),
+        ...fields.filter((f) => f.type === 'ref').map((f) => fkClause(d, s.fks.get(f.name)!, f.name, physical(f.ref!), refAction(f))),
+      ].join(', ');
+    };
+    /**
+     * A ref's foreign key takes the field's current action. PostgreSQL and
+     * MySQL swap the constraint in ONE statement (drop the old, add one under
+     * a new name, so the probe tells which landed). SQLite keeps foreign keys
+     * inside the table, so the table is rebuilt — one script the server runs
+     * in a single transaction with foreign keys off, checked before commit
+     * (data-migrate.ts, Db.script) — its indexes recreated under their names.
+     */
+    const relink = (table: string, s: TableState, f: LockField) => {
+      const t = physical(table);
+      const old = s.fks.get(f.name)!;
+      const fk = name('f');
+      s.fks.set(f.name, fk);
+      const clause = (d: Database) => fkClause(d, fk, f.name, physical(f.ref!), refAction(f));
+      out.postgres.push({
+        sql: `ALTER TABLE ${q('postgres', t)} DROP CONSTRAINT ${q('postgres', old)}, ADD ${clause('postgres')}`,
+        probe: { kind: 'fk', table: t, name: fk, done: 'present' },
+      });
+      out.mysql.push({
+        sql: `ALTER TABLE ${q('mysql', t)} DROP FOREIGN KEY ${q('mysql', old)}, ADD ${clause('mysql')}`,
+        probe: { kind: 'fk', table: t, name: fk, done: 'present' },
+      });
+      const d = 'sqlite';
+      const tmp = `${t}__relink`;
+      const cols = ['id', 'owner', 'created', 'updated', ...[...s.fields.values()].flatMap(columnNames)].map((c) => q(d, c)).join(', ');
+      out.sqlite.push({
+        script: [
+          `CREATE TABLE ${q(d, tmp)} (${tableBody(d, s)})`,
+          `INSERT INTO ${q(d, tmp)} (${cols}) SELECT ${cols} FROM ${q(d, t)}`,
+          `DROP TABLE ${q(d, t)}`,
+          `ALTER TABLE ${q(d, tmp)} RENAME TO ${q(d, t)}`,
+          ...[...s.indexes].map(([key, ix]) => {
+            const { cols: on, unique } = indexColumns(key);
+            return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${q(d, ix)} ON ${q(d, t)} (${on.map((c) => q(d, c)).join(', ')})`;
+          }),
+        ],
+        probe: { kind: 'onDelete', table: t, name: f.name, action: refAction(f), done: 'present' },
+      });
+    };
 
     for (const op of step.ops) {
       if (DESTRUCTIVE_OPS.has(op.op)) destructive = true;
@@ -173,24 +244,10 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
           for (const f of op.fields) if (f.type === 'ref') s.fks.set(f.name, name('f'));
           tables.set(op.table, s);
           const t = physical(op.table);
-          all((d) => {
-            const idType = d === 'sqlite' ? 'TEXT' : 'VARCHAR(36)';
-            const big = d === 'sqlite' ? 'INTEGER' : 'BIGINT';
-            const cols = [
-              `${q(d, 'id')} ${idType} NOT NULL`,
-              `${q(d, 'owner')} ${idType}`,
-              `${q(d, 'created')} ${big} NOT NULL`,
-              `${q(d, 'updated')} ${big} NOT NULL`,
-              ...op.fields.flatMap((f) => columns(d, f).map(([c, type]) => `${q(d, c)} ${type}`)),
-              `CONSTRAINT ${q(d, s.pk)} PRIMARY KEY (${q(d, 'id')})`,
-              fkClause(d, s.fks.get('owner')!, 'owner', 'az_users', true),
-              ...op.fields.filter((f) => f.type === 'ref').map((f) => fkClause(d, s.fks.get(f.name)!, f.name, physical(f.ref!), false)),
-            ];
-            return {
-              sql: `CREATE TABLE ${q(d, t)} (${cols.join(', ')})${d === 'mysql' ? ` ${MYSQL_TABLE}` : ''}`,
-              probe: { kind: 'table', table: t, done: 'present' },
-            };
-          });
+          all((d) => ({
+            sql: `CREATE TABLE ${q(d, t)} (${tableBody(d, s)})${d === 'mysql' ? ` ${MYSQL_TABLE}` : ''}`,
+            probe: { kind: 'table', table: t, done: 'present' },
+          }));
           createIndex(op.table, s, 'owner', ['owner'], false);
           createIndex(op.table, s, 'created', ['created', 'id'], false);
           createIndex(op.table, s, 'updated', ['updated', 'id'], false);
@@ -210,8 +267,8 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
             // others take it in the column, one statement either way.
             const ref = fk && d !== 'mysql'
               ? d === 'sqlite'
-                ? ` REFERENCES ${q(d, physical(f.ref!))} (${q(d, 'id')}) ON DELETE RESTRICT`
-                : ` CONSTRAINT ${q(d, fk)} REFERENCES ${q(d, physical(f.ref!))} (${q(d, 'id')}) ON DELETE RESTRICT`
+                ? ` REFERENCES ${q(d, physical(f.ref!))} (${q(d, 'id')}) ON DELETE ${refAction(f)}`
+                : ` CONSTRAINT ${q(d, fk)} REFERENCES ${q(d, physical(f.ref!))} (${q(d, 'id')}) ON DELETE ${refAction(f)}`
               : '';
             // One unit per column, each with its own probe, so a resumed step skips what landed.
             for (const [c, type] of columns(d, f)) {
@@ -223,7 +280,7 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
           }
           if (fk) {
             out.mysql.push({
-              sql: `ALTER TABLE ${q('mysql', t)} ADD ${fkClause('mysql', fk, f.name, physical(f.ref!), false)}`,
+              sql: `ALTER TABLE ${q('mysql', t)} ADD ${fkClause('mysql', fk, f.name, physical(f.ref!), refAction(f))}`,
               probe: { kind: 'fk', table: t, name: fk, done: 'present' },
             });
           }
@@ -339,6 +396,12 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
           if (s.indexes.has(`plain:${col}`) && !wantPlain) dropIndex(op.table, s, `plain:${col}`);
           if (wantPlain && !s.indexes.has(`plain:${col}`)) createIndex(op.table, s, `plain:${col}`, [col, 'id'], false);
           s.fields.set(col, now);
+          if (now.type === 'ref' && was.onDelete !== now.onDelete) {
+            // Rebuilds the table on SQLite: waits for --confirm like a drop.
+            destructive = true;
+            relink(op.table, s, now);
+            summary.push(`relink ${op.table}.${col}: deleting a ${now.ref} row ${now.onDelete === 'cascade' ? 'deletes' : 'clears'} it`);
+          }
           if (summary.length === 0 || !summary[summary.length - 1].includes(`${op.table}.${col}`)) summary.push(`change ${op.table}.${col}`);
           break;
         }

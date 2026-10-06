@@ -443,7 +443,7 @@ test('values: each type\'s limits, boundaries and refusals', async () => {
   } finally { await h.close(); }
 });
 
-test('unique and foreign keys: 409 taken names the field; a ref must exist; a referenced row is in_use', async () => {
+test('unique and foreign keys: 409 taken names the field; a ref must exist; a stranger\'s row never blocks an owner\'s delete (review #8)', async () => {
   const { h, a, b, create } = await shop();
   try {
     const first = await create(a.c, { sku: 'S-1' });
@@ -452,9 +452,11 @@ test('unique and foreign keys: 409 taken names the field; a ref must exist; a re
     assert.equal((await a.c.request('POST', '/data/products', { name: 'y', price: 1, sku: 's-1' })).status, 201, 'binary comparison: case differs');
     const orphan = await b.c.request('POST', '/data/reviews', { product: '00000000-0000-4000-8000-0000000000ff', stars: 5 });
     assert.deepEqual([orphan.status, await orphan.json()], [400, { error: 'invalid', field: 'product' }]);
-    assert.equal((await b.c.request('POST', '/data/reviews', { product: first.id, stars: 5 })).status, 201);
+    const review = await json(await b.c.request('POST', '/data/reviews', { product: first.id, stars: 5 }));
+    // `product ref products required`: the review goes with the product.
     const del = await a.c.request('DELETE', `/data/products/${first.id}`);
-    assert.deepEqual([del.status, await del.json()], [409, { error: 'in_use' }]);
+    assert.equal(del.status, 204, 'another account\'s review does not block the owner');
+    assert.equal((await b.c.get(`/data/reviews/${(review.item as { id: string }).id}`)).status, 404, 'its required ref cascaded');
   } finally { await h.close(); }
 });
 

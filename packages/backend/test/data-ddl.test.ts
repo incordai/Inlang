@@ -212,17 +212,77 @@ test('a renamed table frees its name: a new table may take it', async () => {
   await db.close();
 });
 
-test('foreign keys: a ref target in use cannot be deleted; deleting the owner account removes its rows', async () => {
+test('foreign keys: a required ref goes with its target, an optional one is cleared; deleting the owner account removes its rows (review #8)', async () => {
   const db = await fresh();
-  const steps = dataSteps(lockOf([[`${V1}  data reviews\n    product ref products\n`]]));
+  const steps = dataSteps(lockOf([[`${V1}  data reviews\n    product ref products required\n    also ref products\n`]]));
+  for (const d of ['sqlite', 'postgres', 'mysql'] as const) {
+    const create = steps[0].units[d].find((u) => /CREATE TABLE \W?azd_reviews/.test(u.sql ?? ''))!.sql!;
+    assert.match(create, /FOREIGN KEY \W+product\W+ REFERENCES \W+azd_products\W+id\W+ ON DELETE CASCADE/, d);
+    assert.match(create, /FOREIGN KEY \W+also\W+ REFERENCES \W+azd_products\W+id\W+ ON DELETE SET NULL/, d);
+  }
   await migrateData(db, steps);
   await db.run("INSERT INTO az_users (id, email, name, created_at, updated_at) VALUES ('u1', 'a@b.cd', 'A', 1, 1)");
-  await db.run("INSERT INTO azd_products (id, owner, created, updated, name) VALUES ('p1', 'u1', 1, 1, 'x')");
-  await db.run("INSERT INTO azd_reviews (id, owner, created, updated, product) VALUES ('r1', NULL, 1, 1, 'p1')");
-  await assert.rejects(db.run("DELETE FROM azd_products WHERE id = 'p1'"), /FOREIGN KEY/);
-  await db.run("DELETE FROM azd_reviews WHERE id = 'r1'");
+  await db.run("INSERT INTO azd_products (id, owner, created, updated, name) VALUES ('p1', 'u1', 1, 1, 'x'), ('p2', 'u1', 1, 1, 'y')");
+  await db.run("INSERT INTO azd_reviews (id, owner, created, updated, product, also) VALUES ('r1', NULL, 1, 1, 'p1', 'p2'), ('r2', NULL, 1, 1, 'p2', 'p1')");
+  await db.run("DELETE FROM azd_products WHERE id = 'p1'");
+  assert.deepEqual((await db.all('SELECT id, product, also FROM azd_reviews')).map((r) => ({ ...r })), [{ id: 'r2', product: 'p2', also: null }],
+    'r1 (required ref to p1) went with it; r2 (optional ref to p1) was cleared');
   await db.run("DELETE FROM az_users WHERE id = 'u1'");
   assert.equal((await db.all('SELECT id FROM azd_products')).length, 0, 'owner cascade');
+  await db.close();
+});
+
+/** A step from before the rule (data-spec §18): its refs carry no onDelete, so their keys RESTRICT. */
+const LEGACY: LockStep[] = [
+  { version: 1, ops: [{ op: 'createTable', table: 'products', fields: [{ name: 'name', type: 'text', required: true, unique: false, index: false }] }] },
+  { version: 2, ops: [{ op: 'createTable', table: 'reviews', fields: [
+    { name: 'product', type: 'ref', ref: 'products', required: true, unique: false, index: false },
+    { name: 'body', type: 'text', required: false, unique: true, index: false },
+  ] }] },
+];
+
+test('a lock from before the rule: plan relinks its refs, destructive; SQLite rebuilds the table, data, indexes and all (review #8)', async () => {
+  const file = '  data products\n    name text required\n  data reviews\n    product ref products required\n    body text unique\n';
+  const r = compile(SITE(file), { manifests });
+  assert.ok(r.ok, JSON.stringify(r.diagnostics));
+  const p = plan(replay(LEGACY), r.spec!.site.data!, { rename: [], drop: [], unique: [] });
+  assert.deepEqual([p.problems, p.flagErrors], [[], []]);
+  assert.ok(p.changes.some((c) => c.kind === 'destructive' && /deleting a products row now deletes the reviews rows that point at it/.test(c.text)), JSON.stringify(p.changes));
+  const steps = dataSteps([...LEGACY, { version: 3, ops: p.ops }]);
+  assert.equal(steps[2].destructive, true, 'waits for --confirm');
+  assert.match(steps[2].units.postgres.at(-1)!.sql!, /DROP CONSTRAINT "azf_2_\d+", ADD CONSTRAINT "azf_3_\d+" FOREIGN KEY \("product"\) REFERENCES "azd_products" \("id"\) ON DELETE CASCADE$/);
+  assert.match(steps[2].units.mysql.at(-1)!.sql!, /DROP FOREIGN KEY `azf_2_\d+`, ADD CONSTRAINT `azf_3_\d+` FOREIGN KEY \(`product`\) REFERENCES `azd_products` \(`id`\) ON DELETE CASCADE$/);
+
+  const db = await fresh();
+  await migrateData(db, steps.slice(0, 2));
+  await db.run("INSERT INTO azd_products (id, owner, created, updated, name) VALUES ('p1', NULL, 1, 1, 'x')");
+  await db.run("INSERT INTO azd_reviews (id, owner, created, updated, product, body) VALUES ('r1', NULL, 1, 1, 'p1', 'kept')");
+  await assert.rejects(db.run("DELETE FROM azd_products WHERE id = 'p1'"), /FOREIGN KEY/, 'CONTROL: before the relink a stranger blocks the delete');
+  const indexesBefore = (await db.all("SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'azd_reviews' AND sql IS NOT NULL ORDER BY name")).map((x) => x.name);
+  await assert.rejects(migrateData(db, steps), DestructivePending);
+  assert.deepEqual(await migrateData(db, steps, { confirm: 3 }), [3]);
+  assert.deepEqual({ ...(await db.get("SELECT id, product, body FROM azd_reviews"))! }, { id: 'r1', product: 'p1', body: 'kept' }, 'the rows survive the rebuild');
+  assert.deepEqual((await db.all("SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'azd_reviews' AND sql IS NOT NULL ORDER BY name")).map((x) => x.name), indexesBefore, 'every index back, same names');
+  await assert.rejects(db.run("INSERT INTO azd_reviews (id, owner, created, updated, product, body) VALUES ('r2', NULL, 1, 1, 'p1', 'kept')"), /UNIQUE/, 'the unique index works');
+  assert.equal(Number((await db.get('PRAGMA foreign_keys'))!.foreign_keys), 1, 'foreign keys back on');
+  await db.run("DELETE FROM azd_products WHERE id = 'p1'");
+  assert.equal((await db.all('SELECT id FROM azd_reviews')).length, 0, 'the delete now cascades');
+  assert.deepEqual(await migrateData(db, steps, { confirm: 3 }), [], 'CONTROL: nothing left to apply');
+  await db.close();
+});
+
+test('a relink that would leave a dangling ref commits nothing and says how many rows (review #8)', async () => {
+  const file = '  data products\n    name text required\n  data reviews\n    product ref products required\n    body text unique\n';
+  const r = compile(SITE(file), { manifests });
+  const steps = dataSteps([...LEGACY, { version: 3, ops: plan(replay(LEGACY), r.spec!.site.data!, { rename: [], drop: [], unique: [] }).ops }]);
+  const db = await fresh();
+  await migrateData(db, steps.slice(0, 2));
+  await db.run('PRAGMA foreign_keys = OFF');
+  await db.run("INSERT INTO azd_reviews (id, owner, created, updated, product) VALUES ('r1', NULL, 1, 1, 'gone')");
+  await db.run('PRAGMA foreign_keys = ON');
+  await assert.rejects(migrateData(db, steps, { confirm: 3 }), (e: unknown) => e instanceof GuardFailed && /do not exist — 1 row; nothing was changed/.test(e.message));
+  assert.ok((await db.get("SELECT 1 AS x FROM sqlite_schema WHERE name = 'azd_reviews__relink'")) === undefined, 'the rebuild rolled back');
+  assert.equal((await db.all("SELECT 1 FROM pragma_foreign_key_list('azd_reviews') WHERE on_delete = 'RESTRICT'")).length, 1, 'the key is unchanged');
   await db.close();
 });
 

@@ -86,6 +86,11 @@ site notebook
   data quotes
     line    text     required
     allow anyone   read
+  data replies
+    note    ref      notes required
+    also    ref      notes
+    allow anyone   read
+    allow signedin create
 
 page /
   hero center
@@ -449,6 +454,26 @@ async function adminFlow(b, name, owner) {
     body: JSON.stringify({ email: 'spam@junk.test' }),
   })).status, serverUrl);
   check(`${name}: a stranger adds a row to the anyone-create table`, target.ok === true && spam === 201, `${spam}`);
+
+  // Another account's rows never block the owner's delete (data-spec §4.3):
+  // a reply's required ref goes with the note, an optional one is cleared.
+  const doomed = await use(owner, 'create', { title: `${name} doomed` });
+  const reply = (body) => page.evaluate(async ([base, b]) => {
+    const r = await fetch(`${base}/data/replies`, {
+      method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', 'x-az-request': '1' }, body: JSON.stringify(b),
+    });
+    return [r.status, (await r.json()).item?.id];
+  }, [serverUrl, body]);
+  const [s1, onDoomed] = await reply({ note: doomed.item.id });
+  const [s2, beside] = await reply({ note: target.item.id, also: doomed.item.id });
+  const removed = await use(owner, 'remove', doomed.item.id);
+  const after = await page.evaluate(async ([base, a, b]) => {
+    const one = async (id) => { const r = await fetch(`${base}/data/replies/${id}`, { credentials: 'include' }); return [r.status, r.ok ? (await r.json()).item.also : null]; };
+    return [await one(a), await one(b)];
+  }, [serverUrl, onDoomed, beside]);
+  check(`${name}: the owner deletes a note another account replied to — the reply goes, a mention is cleared`,
+    s1 === 201 && s2 === 201 && removed.ok === true && after[0][0] === 404 && after[1][0] === 200 && after[1][1] === null,
+    JSON.stringify([s1, s2, removed, after]));
 
   await page.goto(`${host.url}/admin`);
   const tables = page.locator('section[aria-labelledby="az-admin-tables"]');

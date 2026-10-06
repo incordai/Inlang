@@ -210,8 +210,25 @@ test('a damaged lock is refused whatever the damage', () => {
     resign({ steps: [{ version: 1, ops: [{ op: 'dropTable', table: 'products' }] }] }),
     resign({ steps: [{ version: 1, ops: [{ op: 'createTable', table: 'p', fields: [{ name: 'x', type: 'blob', required: false, unique: false, index: false }] }] }] }),
     resign({ steps: [{ version: 1, ops: [{ op: 'createTable', table: 'p', fields: [{ name: 'x', type: 'ref', ref: 'nowhere', required: false, unique: false, index: false }] }] }] }),
+    // onDelete: only on a ref, only cascade or setnull (data-spec §4.3).
+    resign({ steps: [{ version: 1, ops: [{ op: 'createTable', table: 'p', fields: [{ name: 'x', type: 'text', onDelete: 'cascade', required: false, unique: false, index: false }] }] }] }),
+    resign({ steps: [{ version: 1, ops: [{ op: 'createTable', table: 'p', fields: [{ name: 'x', type: 'ref', ref: 'p', onDelete: 'restrict', required: false, unique: false, index: false }] }] }] }),
   ];
   for (const c of cases) assert.throws(() => parseLock(c, sha), LockError, c.slice(0, 80));
+});
+
+test('a ref records what deleting its target does: cascade when required, setnull when optional; a lock without it plans a relink (review #8)', () => {
+  const [t] = storageOf(tablesOf('  data notes\n    title text required\n    parent ref notes\n    owned ref notes required\n    allow anyone read\n'));
+  assert.deepEqual(t.fields.map((f) => [f.name, f.onDelete]), [['title', undefined], ['parent', 'setnull'], ['owned', 'cascade']]);
+  const steps = [{ version: 1, ops: [{ op: 'createTable' as const, table: 'notes', fields: storageOf(tablesOf('  data notes\n    title text required\n    parent ref notes\n')).at(0)!.fields }] }];
+  assert.doesNotThrow(() => parseLock(serialiseLock(steps, sha), sha), 'CONTROL: a valid onDelete reads back');
+  const legacy = [{ version: 1, ops: [{ op: 'createTable' as const, table: 'notes', fields: [
+    { name: 'title', type: 'text' as const, required: true, unique: false, index: true },
+    { name: 'parent', type: 'ref' as const, ref: 'notes', required: false, unique: false, index: false },
+  ] }] }];
+  const p = plan(replay(legacy), tablesOf('  data notes\n    title text required\n    parent ref notes\n    allow anyone read\n'), NO);
+  assert.deepEqual([codes(p), kinds(p)], [[], ['destructive']]);
+  assert.equal(p.changes[0].text, 'deleting a notes row now clears notes.parent (the table is rebuilt on SQLite)');
 });
 
 const AT = { line: 3, col: 3 };

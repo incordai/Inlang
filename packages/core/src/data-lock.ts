@@ -2,7 +2,7 @@
  * @az module data-lock
  * Purpose: the schema lock — storage schema, replay, file-vs-lock diff, AZ1701–AZ1707.
  * Spec: docs/data-spec.md §6.1–§6.2
- * Exports: LOCK_FORMAT, LockField, LockTable, Fill, LockOp, LockStep, DataLock, LockFlags, Change, PlanResult, LockError, storageOf, applyOp, replay, parseLock, serialiseLock, canonicalSteps, plan, checkLock
+ * Exports: LOCK_FORMAT, LockField, OnDelete, onDeleteOf, LockTable, Fill, LockOp, LockStep, DataLock, LockFlags, Change, PlanResult, LockError, storageOf, applyOp, replay, parseLock, serialiseLock, canonicalSteps, plan, checkLock
  * Edit guide: a new op needs replay, plan and the backend's DDL (packages/backend/src/data-ddl.ts) in the same change.
  * Tests: packages/core/test/data-lock.test.ts
  */
@@ -26,10 +26,23 @@ export interface LockField {
   readonly currency?: string;
   readonly choices?: readonly string[];
   readonly ref?: string;
+  /**
+   * `ref` only: what deleting the row it points at does (data-spec §4.3) —
+   * `cascade` for a required ref, `setnull` for an optional one, so nobody
+   * else's row can stop an owner deleting their own. Absent in steps written
+   * before this rule: those foreign keys RESTRICT until a step relinks them.
+   */
+  readonly onDelete?: OnDelete;
   readonly required: boolean;
   readonly unique: boolean;
   readonly index: boolean;
 }
+
+export type OnDelete = 'cascade' | 'setnull';
+const ON_DELETE: ReadonlySet<string> = new Set<OnDelete>(['cascade', 'setnull']);
+
+/** The rule: a required ref's rows go with their target; an optional ref is cleared. */
+export const onDeleteOf = (f: { readonly required: boolean }): OnDelete => (f.required ? 'cascade' : 'setnull');
 
 export interface LockTable {
   readonly name: string;
@@ -77,6 +90,7 @@ export function storageOf(tables: readonly SpecTable[]): LockTable[] {
     name: t.name,
     fields: t.fields.map((f) => lockField({
       name: f.name, type: f.type, currency: f.currency, choices: f.choices, ref: f.ref,
+      ...(f.type === 'ref' ? { onDelete: onDeleteOf(f) } : {}),
       required: f.required, unique: f.unique, index: f.index || (sortable(f) && !f.unique),
     })),
   }));
@@ -90,6 +104,7 @@ function lockField(f: LockField): LockField {
     ...(f.currency !== undefined ? { currency: f.currency } : {}),
     ...(f.choices !== undefined ? { choices: [...f.choices] } : {}),
     ...(f.ref !== undefined ? { ref: f.ref } : {}),
+    ...(f.onDelete !== undefined ? { onDelete: f.onDelete } : {}),
     required: f.required,
     unique: f.unique,
     index: f.index,
@@ -124,8 +139,8 @@ export function serialiseLock(steps: readonly LockStep[], digest: (text: string)
 
 function checkField(v: unknown): LockField {
   if (!isObject(v)) throw new LockError('a field is not an object');
-  const { name, type, currency, choices, ref, required, unique, index } = v;
-  const known = new Set(['name', 'type', 'currency', 'choices', 'ref', 'required', 'unique', 'index']);
+  const { name, type, currency, choices, ref, onDelete, required, unique, index } = v;
+  const known = new Set(['name', 'type', 'currency', 'choices', 'ref', 'onDelete', 'required', 'unique', 'index']);
   for (const k of Object.keys(v)) if (!known.has(k)) throw new LockError(`unknown field key '${k}'`);
   if (typeof name !== 'string' || !NAME.test(name)) throw new LockError('a field name is invalid');
   if (typeof type !== 'string' || !TYPES.has(type)) throw new LockError(`field '${name}' has an unknown type`);
@@ -137,6 +152,9 @@ function checkField(v: unknown): LockField {
   }
   if ((ref !== undefined) !== (type === 'ref') || (ref !== undefined && (typeof ref !== 'string' || !NAME.test(ref)))) {
     throw new LockError(`field '${name}' has a malformed ref`);
+  }
+  if (onDelete !== undefined && (type !== 'ref' || typeof onDelete !== 'string' || !ON_DELETE.has(onDelete))) {
+    throw new LockError(`field '${name}' has a malformed onDelete`);
   }
   if ((choices !== undefined) !== (type === 'choice')) throw new LockError(`field '${name}' has malformed choices`);
   if (choices !== undefined && (!Array.isArray(choices) || choices.length < 2
@@ -479,7 +497,7 @@ export function plan(lockTables: readonly LockTable[], file: readonly SpecTable[
         continue;
       }
       if (sameList(was.choices, now.choices) && was.required === now.required
-        && was.unique === now.unique && was.index === now.index) continue;
+        && was.unique === now.unique && was.index === now.index && was.onDelete === now.onDelete) continue;
 
       let blocked = false;
       const removed = (was.choices ?? []).filter((c) => !(now.choices ?? []).includes(c));
@@ -517,6 +535,14 @@ export function plan(lockTables: readonly LockTable[], file: readonly SpecTable[
       }
       if (was.unique && !now.unique) changes.push({ kind: 'safe', text: `${key} no longer unique` });
       if (was.index !== now.index) changes.push({ kind: 'safe', text: `${key} ${now.index ? 'gains' : 'loses'} its index` });
+      if (was.onDelete !== now.onDelete) {
+        // Rebuilt on SQLite (its foreign keys live in the table), so the step
+        // waits for --confirm like every change that rewrites rows.
+        changes.push({
+          kind: 'destructive',
+          text: `deleting a ${now.ref} row now ${now.onDelete === 'cascade' ? `deletes the ${target.name} rows that point at it` : `clears ${key}`} (the table is rebuilt on SQLite)`,
+        });
+      }
       if (!blocked) sets.push({ op: 'setField', table: target.name, field: now, ...(fill !== undefined ? { fill } : {}) });
     }
   }
