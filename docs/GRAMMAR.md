@@ -674,6 +674,22 @@ each a system face (theme-spec §8.1); any other is
 with no family, or `font` with no roles, is AZ1205; a repeated role warns
 (AZ1203) and the first is kept.
 
+**Theme settings.** `theme <name>` takes one of `midnight`, `paper`,
+`signal`; any other is
+`theme: 'purple' is not a theme — use midnight, paper, signal` (AZ1417). Its
+indented settings are `accent` and `pattern`; any other is
+`theme: 'sparkle' is not a theme setting — use accent, pattern` (AZ1405).
+`accent <hue>` names one hue from a closed set — `violet`, `indigo`, `blue`,
+`teal`, `green`, `lime`, `amber`, `orange`, `rose` — whose ramp step is chosen
+per scheme to hold the theme-spec §6 floors; any other is
+`theme: accent 'magenta' is not a hue — …` (AZ1418). Without `accent` the
+theme keeps its own. `pattern <shape> [origin]` takes a shape — `none`,
+`glow`, `spotlight`, `ramp`, `grid`, `hatch`, `dots` — and an origin — `top`
+(the default), `bottom`, `left`, `right`, `center`; an unknown shape or origin
+is AZ1419. Without `pattern` there is none. A setting with no value is AZ1205,
+an extra value AZ1406, and a repeated setting warns (AZ1203) and the first is
+kept. `az explain theme accent` lists the hues.
+
 ### 4.5 Repeated values
 
 A prop declared `"repeat": true` accepts more than one value on one line, all

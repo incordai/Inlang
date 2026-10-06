@@ -204,6 +204,23 @@ offered, so a palette choice cannot silently break legibility.
 from the theme. Patterns that name their own colours cannot be themed, which is
 why this is a shape vocabulary rather than a list of gradients.
 
+*Built (2026-10-05).* `accent` takes one of nine hues (`violet` `indigo`
+`blue` `teal` `green` `lime` `amber` `orange` `rose`); their OKLCH ramps are
+generated into `packages/theme/src/ramps.ts` by `scripts/gen-ramps.mjs`. The
+compiler picks, per theme and scheme, the first step that holds the
+theme-spec §6 floors and writes it to `color.accent`, `color.accent-hover` and
+`color.accent-contrast` in both schemes; the focus ring stays the theme's own.
+All 54 theme × hue × scheme choices hold (`packages/theme/test/contrast.test.ts`,
+1260 pairs); a hue that could not is a build error, never a low-contrast ship.
+Without `accent` the theme keeps its own. The steps are **not** exposed as
+`color.accent-700`-style tokens — words read the three accent tokens only.
+`pattern` is drawn from the accent token (`color-mix`, no colour of its own),
+declared once in `theme.css` and painted on the hero (not under `full`'s
+scrim). Its peak strength is capped at 10% accent over the ground: the largest
+that holds every reading pair is 12%, and the spike's 55% glow fails
+(`packages/theme/test/pattern.test.ts`). Without `pattern` there is none.
+Unknown theme AZ1417, setting AZ1405, hue AZ1418, shape or origin AZ1419.
+
 **Why the hero needs nothing new.** Site width and hero width are independent —
 a narrow site with a full-bleed hero is a normal pairing — but `hero` already
 carries that axis in its variants: `full` is full-bleed, `center`/`split`/
