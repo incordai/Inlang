@@ -944,6 +944,21 @@ reaching a font CDN. The theme package declares its faces so the emitter can
 `preload` the display face and set `font-display: swap`. Those declarations are
 package metadata, **not `ctx.theme` tokens** — no word ever reads them.
 
+*Status, 2026-10-05.* The table above is the design; **the code ships system
+stacks for all three themes** (`system-ui, sans-serif` /
+`ui-monospace, monospace`) and no face files yet — adding the six faces needs
+licence-vetted `woff2` files (CONVENTIONS check 9). What is built:
+
+- **`font` roles** (`display`, `body`, `mono`) each name one family from a
+  closed set — `sans`, `serif`, `mono`, `rounded` — resolved by
+  `FONT_STACKS` in `packages/theme` to system stacks, so nothing is downloaded
+  and builds stay offline. The role overrides that `type.*` token, so every
+  block reading it follows. Unknown role AZ1405, unknown family AZ1416.
+- **The page's body family.** `theme.css` sets `body { font-family: type.body }`
+  and form controls inherit it. Before this, text a word did not style itself
+  (a hero's sub, a text block, an FAQ answer) fell back to the browser's
+  default face — a serif in most browsers — on every theme.
+
 ### 8.2 Sizes — six steps, global
 
 `clamp()` throughout: hero-spec §4 requires *"fluid, not breakpoint-stepped"*.

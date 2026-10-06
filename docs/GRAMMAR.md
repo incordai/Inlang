@@ -659,8 +659,13 @@ grammar for it. The `as` clause overrides *hierarchy* (`as ghost`), not intent.
 **Keyed arguments.** A `PAIR` argument in a non-`url` position is a keyed
 value: the key selects the sub-prop and the value is typed by that sub-prop's
 declared type. `font` with indented `display` and `body` roles is one statement with two keyed
-arguments, `display` and `body`, each of type `string`. An unknown key is
-`font: 'heading:' is not a font role — use display, body or mono` (AZ1405).
+arguments, `display` and `body`. An unknown role is
+`font: 'heading' is not a font role — use display, body, mono` (AZ1405). Each
+role names one family from a closed set — `sans`, `serif`, `mono`, `rounded`,
+each a system face (theme-spec §8.1); any other is
+`font: 'comic' is not a family — use sans, serif, mono, rounded` (AZ1416). A role
+with no family, or `font` with no roles, is AZ1205; a repeated role warns
+(AZ1203) and the first is kept.
 
 ### 4.5 Repeated values
 

@@ -102,7 +102,13 @@ free while snapshots exist — authoring-experience §2).
 
 **Exit criteria**
 - [x] all 11 blocks pass the 12-point gate, in every variant
-- [ ] all 5 structure keywords implemented and covered by fixtures — **open: `font` is parsed but the web target ignores it** (2026-10-05)
+- [ ] all 5 structure keywords implemented and covered by fixtures — `site`,
+      `page`, `raw` and now `font` are built and covered (`font`: core
+      `font.test.ts`, target `font.test.ts`, verify-build, the gate's `font`
+      check in three themes). **Open: `theme`'s own settings** — `accent` and
+      `pattern` are dropped by the linker (they compile to the defaults, and an
+      unknown setting under `theme` is not reported) and only ever reach
+      `data-` attributes nothing styles (2026-10-05)
 - [x] `az lint` fails a deliberately non-compliant word (tests A7) — `lint-migrate.test.ts`
 - [x] 3 themes, all blocks rendering correctly in each, light and dark — `pnpm gate --every-variant`
 - [x] thumbnails generated for every block and every variant
