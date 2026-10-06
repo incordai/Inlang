@@ -270,6 +270,12 @@ Not optional, and cheap to bake in once:
 | `stack` | unchanged |
 | `minimal` | unchanged |
 
+The focal point is the author's: `focus top` (or `bottom`, `left`, `right`;
+`center` by default) sets the poster's `object-position`, as gallery's
+`focus` does (gallery-block-spec §7). The poster is cropped with
+`object-fit: cover` at every width — a wide box on a desktop, a tall one
+under `full` on a phone — so one value holds the subject in both.
+
 `split` restacking is the reason it can't be the default. Half of `split`
 heroes in the wild look broken on a phone because nobody defined the restack.
 
@@ -327,6 +333,7 @@ lint, auto-install and validation are all generated from it.
     "model":   { "type": "path", "ext": [".glb"], "maxBytes": 5242880 },
     "poster":  { "type": "path", "ext": [".jpg", ".png", ".webp"] },
     "describe": { "type": "string", "maxWords": 20 },
+    "focus":   { "type": "enum", "values": ["center", "top", "bottom", "left", "right"], "default": "center" },
     "height":  { "type": "enum", "values": ["compact", "peek", "tall", "full"], "default": "peek" }
   },
   "slots": { "cta": { "max": 2 }, "alt": { "max": 1 } },

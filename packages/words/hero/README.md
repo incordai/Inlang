@@ -59,6 +59,7 @@ Combine freely.
 | `model` | path |  |  | .glb | an optional `.glb` model for `3d` |
 | `poster` | path |  |  | .jpg, .png, .webp | the static image a `3d` hero shows at the static tier and while loading |
 | `describe` | string |  |  | ≤ 20 words | the poster's alt text |
+| `focus` | enum | `center` / `top` / `bottom` / `left` / `right` | `center` |  | which part of the poster a crop keeps — on a phone, `full` crops it tall |
 | `height` | enum | `compact` / `peek` / `tall` / `full` | `peek` |  | `compact`, `peek`, `tall` or `full` |
 
 Rules: `scroll` requires `3d`; `3d` works better with `poster`, `describe` (warning).

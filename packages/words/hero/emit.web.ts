@@ -14,7 +14,8 @@
  *   glass — blurred veil over a backdrop (translucent.states.overBackdrop).
  * Props: eyebrow → p.az-hero-eyebrow · title → h1.az-hero-title · sub → p.az-hero-sub ·
  *   height → min-height in svh (HEIGHT table) + data-height · poster → img.az-hero-poster via ctx.asset ·
- *   describe → poster alt and the visual's aria-label · model → data-az-model via ctx.asset.
+ *   describe → poster alt and the visual's aria-label · model → data-az-model via ctx.asset ·
+ *   focus → the poster's object-position (the crop's focal point).
  * Styling: theme tokens only; below.sm mobile gutter (+ split one column); actions below.xs stack;
  *   states.live hides the poster (full: gradient scrim); states.overBackdrop gives the veil;
  *   the site's `theme pattern` (t.pattern, var refs) is the header's background except on `full`.
@@ -162,7 +163,13 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
             decoding: 'async',
             'data-az-live-part': '',
           },
-          style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+          // §10: the poster is cropped to its box — wide on a desktop, tall
+          // on a phone under `full` — so `focus` names the part it keeps,
+          // as gallery's does (gallery-spec §7).
+          style: {
+            display: 'block', width: '100%', height: '100%', objectFit: 'cover',
+            objectPosition: block.props.focus && block.props.focus !== 'center' ? block.props.focus : undefined,
+          },
           // The canvas draws here now; the poster steps aside, not away.
           states: { live: { visibility: 'hidden' } },
         }]

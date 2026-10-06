@@ -1,5 +1,5 @@
 /**
- * hero `alt` and `describe` — hero-block-spec §1, §5, §8, §9.
+ * hero `alt`, `describe` and `focus` — hero-block-spec §1, §5, §8, §9, §10.
  *
  * `alt "Label" <dest>` is the hero's SECONDARY button (§1, GRAMMAR §5.2).
  * It used to be declared as a string prop as well, and the linker turns a
@@ -142,4 +142,27 @@ test('CONTROL: with a description the describe warning is gone', () => {
   const { result } = heroOf(POSTER);
   assert.ok(!result.diagnostics.some((d) => /describe/.test(d.message)),
     JSON.stringify(result.diagnostics));
+});
+
+test('§10: `focus` is the poster crop\'s focal point — object-position, centre by default', () => {
+  const poster = (focus: string | null) => {
+    const { result, hero } = heroOf([
+      'hero full 3d',
+      '  title "Built in the dark"',
+      '  poster ./assets/still.webp',
+      '  describe "A workbench under one lamp"',
+      ...(focus ? [`  focus ${focus}`] : []),
+    ]);
+    assert.ok(hero, result.diagnostics.map((d) => `${d.code} ${d.message}`).join('\n'));
+    const img = find(render(hero), (n) => n.tag === 'img');
+    assert.ok(img, 'the poster is emitted');
+    return img.style ?? {};
+  };
+  assert.equal(poster('top').objectPosition, 'top');
+  assert.equal(poster('left').objectPosition, 'left');
+  assert.equal(poster('top').objectFit, 'cover', 'the crop it positions');
+  assert.equal(poster(null).objectPosition, undefined, 'CONTROL: no focus, the default centre');
+  assert.equal(poster('center').objectPosition, undefined, 'CONTROL: centre is the default, written as nothing');
+  const { result } = heroOf(['hero full', '  title "x"', '  focus middle']);
+  assert.ok(result.diagnostics.some((d) => d.severity === 'error'), 'a value outside the enum is refused');
 });

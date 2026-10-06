@@ -70,6 +70,25 @@
       "maxWords": 20,
       "description": "Alt text for the poster and 3D scene"
     },
+    "focus": {
+      "type": "enum",
+      "default": "center",
+      "values": [
+        "center",
+        "top",
+        "bottom",
+        "left",
+        "right"
+      ],
+      "description": "Which part of the poster to keep when cropping",
+      "valueDescriptions": {
+        "center": "Keep the centre (default)",
+        "top": "Keep the top edge",
+        "bottom": "Keep the bottom edge",
+        "left": "Keep the left edge",
+        "right": "Keep the right edge"
+      }
+    },
     "height": {
       "type": "enum",
       "values": [
