@@ -191,6 +191,49 @@ export async function fonts(page, expected) {
   };
 }
 
+/**
+ * PRD §6.1a `theme accent` / `theme pattern`, as the page renders them: the
+ * computed colour of the accent token, and the computed background image of
+ * the element that carries the page's <h1> (the hero paints the pattern).
+ */
+export async function themeReading(page) {
+  return page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--az-color-accent)';
+    document.body.appendChild(probe);
+    const accent = getComputedStyle(probe).color;
+    probe.remove();
+    const h1 = document.querySelector('h1');
+    const host = h1?.closest('header, section') ?? document.body;
+    return { accent, pattern: getComputedStyle(host).backgroundImage };
+  });
+}
+
+/**
+ * Sites that differ only in their theme settings must render differently:
+ * every accent its own computed colour, every pattern its own background, and
+ * a site without a pattern none at all. `readings` holds
+ * `{ label, accent, pattern, patterned }` per site.
+ */
+export function settingsDiffer(readings) {
+  const problems = [];
+  const clash = (key) => {
+    const seen = new Map();
+    for (const r of readings) {
+      if (seen.has(r[key])) problems.push(`${r.label} and ${seen.get(r[key])} render the same ${key} (${r[key]})`);
+      else seen.set(r[key], r.label);
+    }
+  };
+  clash('accent');
+  clash('pattern');
+  for (const r of readings) {
+    if (r.patterned && r.pattern === 'none') problems.push(`${r.label} asked for a pattern and paints none`);
+    if (!r.patterned && r.pattern !== 'none') problems.push(`${r.label} asked for no pattern and paints ${r.pattern}`);
+  }
+  if (readings.length < 2) problems.push(`${readings.length} site(s) read — nothing to compare`);
+  return { pass: problems.length === 0, detail: problems.join('; ') };
+}
+
 export async function frame(page) {
   return page.evaluate(() => {
     const site = document.querySelector('.az-site');

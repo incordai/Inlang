@@ -34,7 +34,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, frame, fonts } from './visual/checks.mjs';
+import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, frame, fonts, themeReading, settingsDiffer } from './visual/checks.mjs';
 import { FONT_STACKS, THEMES as THEME_TOKENS } from '../packages/theme/src/index.ts';
 import { startServer } from './visual/serve.mjs';
 import {
@@ -82,7 +82,7 @@ async function pool(items, limit, fn) {
 
 /* ---- results ------------------------------------------------------------ */
 
-const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'font', 'disclosure', 'skip-link',
+const CHECKS = ['compile', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'skip-link',
   'no-js', 'hydration',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
@@ -186,6 +186,29 @@ function expectedFonts(theme, roles = {}) {
   };
 }
 
+/**
+ * PRD §6.1a, checked on the hero (it paints the pattern): the preview as
+ * written and the same preview with each of these `theme` settings, in one
+ * theme. Each must render its own accent colour and its own pattern, and the
+ * preview as written no pattern — so a site that dropped either setting, or
+ * rendered every value alike, cannot pass.
+ */
+const THEME_SETTINGS = [
+  { accent: 'teal', pattern: 'glow top' },
+  { accent: 'rose', pattern: 'dots center' },
+];
+
+/** preview.az with `theme <name>` plus its settings as the site's first child. */
+function withSettings(source, theme, settings) {
+  const lines = source.split('\n');
+  const at = lines.findIndex((l) => /^site\b/.test(l));
+  lines.splice(at + 1, 0, `  theme ${theme}`, ...Object.entries(settings).map(([k, v]) => `    ${k} ${v}`));
+  return lines.join('\n');
+}
+
+/** What the theme-settings sites rendered, compared once all are checked. */
+const themeReadings = [];
+
 /** The reserved variant that renders nothing (GRAMMAR §5.2) — nothing to check. */
 const RENDERS_NOTHING = 'none';
 
@@ -235,13 +258,17 @@ async function buildAll(words, work, everyVariant) {
       sites.push({ word: FONT_WORD, theme, variant: null, file: 'preview.az + font', source: withFonts(preview),
         label: `${theme}:font`, roles: FONT_ROLES });
     }
+    THEME_SETTINGS.forEach((settings, i) => {
+      sites.push({ word: FONT_WORD, theme: VARIANT_THEME, variant: null, file: `preview.az + theme settings ${i + 1}`,
+        source: withSettings(preview, VARIANT_THEME, settings), label: `${VARIANT_THEME}:${settings.accent}`, settings });
+    });
   }
   for (const s of sites) {
-    s.dir = join(work, `${s.word}-${s.variant ?? 'default'}-${s.theme}${s.roles ? '-font' : ''}`);
+    s.dir = join(work, `${s.word}-${s.variant ?? 'default'}-${s.theme}${s.roles ? '-font' : ''}${s.settings ? `-${s.settings.accent}` : ''}`);
     mkdirSync(s.dir, { recursive: true });
     const src = join(WORDS, s.word);
     const preview = s.source ?? readFileSync(join(src, s.file), 'utf8');
-    writeFileSync(join(s.dir, 'site.az'), themed(preview, s.theme));
+    writeFileSync(join(s.dir, 'site.az'), s.settings ? preview : themed(preview, s.theme));
     // Each page is its own HTML file, and a preview's extra pages exist only
     // so its links resolve. The word under test is on the FIRST page declared.
     s.path = firstRoute(preview);
@@ -364,6 +391,10 @@ async function checkSite(s, browsers, server) {
   // the same preview with `font` roles (the roles' stacks).
   if (s.word === FONT_WORD && !s.variant) {
     record(s.word, 'font', `${s.label}/light/${FRAME_WIDTH}`, await fonts(page, expectedFonts(s.theme, s.roles)));
+  }
+  // PRD §6.1a: the hero preview as written and with each theme setting.
+  if (s.word === FONT_WORD && !s.variant && !s.roles && s.theme === VARIANT_THEME) {
+    themeReadings.push({ label: s.label, patterned: Boolean(s.settings), ...await themeReading(page) });
   }
   record(s.word, 'schemes', s.label, {
     pass: bg.light !== bg.dark,
@@ -586,6 +617,26 @@ async function selfTest() {
       await fonts(page, { display: FONT_STACKS.serif, body: FONT_STACKS.mono }), styled);
     await ctx.close();
   }
+  // PRD §6.1a: sites that set different accents and patterns, and the bug
+  // `theme` used to ship — every setting dropped, every site alike.
+  for (const [name, honoured] of [['settings-bad', false], ['settings-good', true]]) {
+    const readings = [];
+    for (const [i, ink] of ['#7c3aed', '#0f766e', '#be123c'].entries()) {
+      const page = `${name}-${i}`;
+      const accent = honoured ? ink : '#7c3aed';
+      const pattern = honoured && i > 0 ? `radial-gradient(circle at ${i * 30}% 10%, ${ink}, transparent)` : 'none';
+      mkdirSync(join(dir, page));
+      writeFileSync(join(dir, page, 'index.html'),
+        `<!doctype html><html lang="en"><head><title>theme</title><style>:root { --az-color-accent: ${accent}; } header { background-image: ${pattern}; }</style></head><body><header><h1>Theme</h1></header></body></html>`);
+      server.serve(join(dir, page));
+      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      const p = await ctx.newPage();
+      await p.goto(server.url);
+      readings.push({ label: page, patterned: i > 0, ...await themeReading(p) });
+      await ctx.close();
+    }
+    expect(`PRD §6.1a theme settings render per value (${honoured ? 'good' : 'bad'} sites)`, settingsDiffer(readings), honoured);
+  }
   for (const [name, padded] of [['pinned-bad', false], ['pinned-good', true]]) {
     mkdirSync(join(dir, name));
     writeFileSync(join(dir, name, 'index.html'), PINNED(padded));
@@ -654,6 +705,9 @@ async function main(argv) {
   } finally {
     await server.close();
     await Promise.all(Object.values(browsers).map((b) => b.close()));
+  }
+  if (sites.some((s) => s.settings)) {
+    record(FONT_WORD, 'theme-settings', themeReadings.map((r) => r.label).join(' vs '), settingsDiffer(themeReadings));
   }
 
   const seconds = ((performance.now() - started) / 1000).toFixed(1);
