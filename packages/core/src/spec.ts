@@ -51,8 +51,11 @@ export interface SpecSite {
   /** Frame — PRD §6.1a. Resolved to a word, never a pixel value. */
   readonly width: string;
   readonly theme: string;
-  readonly accent: string;
+  /** `theme accent` (PRD §6.1a): a hue; null keeps the theme's own designed accent. */
+  readonly accent: string | null;
+  /** `theme pattern` shape and where its light sits; `none` paints nothing. */
   readonly pattern: string;
+  readonly patternOrigin: string;
   readonly fonts: Record<string, string>;
   /** Blocks declared at site level and inherited by every page. */
   readonly inherited: SpecBlock[];
@@ -89,8 +92,8 @@ export interface SpecResult {
 const SITE_DEFAULTS = {
   width: 'default',
   theme: 'midnight',
-  accent: 'violet',
-  pattern: 'glow',
+  pattern: 'none',
+  patternOrigin: 'top',
 } as const;
 
 /** Blocks that may be declared at site level and inherited — nav-spec §8. */
@@ -338,8 +341,9 @@ export function buildSpec(
       name: siteWord?.args[0]?.value ?? 'site',
       width: valueOf(widthWord, SITE_DEFAULTS.width),
       theme: valueOf(themeWord, SITE_DEFAULTS.theme),
-      accent: valueOf(accentWord, SITE_DEFAULTS.accent),
+      accent: accentWord?.args[0]?.value ?? null,
       pattern: valueOf(patternWord, SITE_DEFAULTS.pattern),
+      patternOrigin: patternWord?.args[1]?.value ?? SITE_DEFAULTS.patternOrigin,
       fonts,
       inherited,
       scoped: Object.fromEntries([...site.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),

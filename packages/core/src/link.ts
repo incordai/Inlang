@@ -180,6 +180,50 @@ export const FONT_FAMILIES: Readonly<Record<string, string>> = {
   rounded: 'Rounded system face; plain sans where unavailable',
 };
 
+/**
+ * The themes a site may name — theme-spec §5. Core cannot import the theme
+ * package (ARCHITECTURE §2), so the names live here and
+ * theme/test/accent.test.ts keeps them equal to THEMES.
+ */
+export const THEME_NAMES: Readonly<Record<string, string>> = {
+  midnight: 'Dark-native, near-black ground, one electric accent',
+  paper: 'Light editorial: warm paper, ink type, oxblood accent',
+  signal: 'High-contrast industrial: square edges, orange accent',
+};
+
+/** `theme accent` hues — PRD §6.1a; equal to the theme package's ACCENT_RAMPS. */
+export const ACCENT_HUES: Readonly<Record<string, string>> = {
+  violet: 'Violet accent ramp, contrast-checked in both schemes',
+  indigo: 'Indigo accent ramp, contrast-checked in both schemes',
+  blue: 'Blue accent ramp, contrast-checked in both schemes',
+  teal: 'Teal accent ramp, contrast-checked in both schemes',
+  green: 'Green accent ramp, contrast-checked in both schemes',
+  lime: 'Lime accent ramp, contrast-checked in both schemes',
+  amber: 'Amber accent ramp, contrast-checked in both schemes',
+  orange: 'Orange accent ramp, contrast-checked in both schemes',
+  rose: 'Rose accent ramp, contrast-checked in both schemes',
+};
+
+/** `theme pattern` shapes — PRD §6.1a; equal to the theme package's PATTERN_SHAPES. */
+export const PATTERN_SHAPE_NAMES: Readonly<Record<string, string>> = {
+  none: 'No background pattern',
+  glow: 'Accent light blooming from one edge',
+  spotlight: 'A soft circle of accent light at the origin',
+  ramp: 'Directional accent fade away from the origin',
+  grid: 'Perpendicular accent hairlines',
+  hatch: 'Diagonal accent hairlines',
+  dots: 'Accent dot lattice',
+};
+
+/** Where a pattern's light sits; equal to the theme package's PATTERN_ORIGINS. */
+export const PATTERN_ORIGIN_NAMES: Readonly<Record<string, string>> = {
+  top: 'Light from the top edge (the default)',
+  bottom: 'Light from the bottom edge',
+  left: 'Light from the left edge',
+  right: 'Light from the right edge',
+  center: 'Light from the centre',
+};
+
 /** Properties those keywords accept — PRD §6.1a. */
 export const STRUCTURE_PROPS: Record<string, ReadonlySet<string>> = {
   site: new Set(['width', 'theme', 'font']),
@@ -579,6 +623,66 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     return out;
   }
 
+  /**
+   * `theme <name>` and its settings (PRD §6.1a): the name is one of the
+   * themes, `accent` a hue, `pattern` a shape with an optional origin. Bad
+   * lines are reported and dropped; good ones become the children spec.ts
+   * reads. Returning none here once dropped every setting, so `accent` and
+   * `pattern` always compiled to the defaults and a typo passed silently.
+   */
+  function themeSettings(s: Statement): LinkedWord[] {
+    const name = s.args[0];
+    const themes = Object.keys(THEME_NAMES);
+    if (name && !Object.hasOwn(THEME_NAMES, name.value)) {
+      err('AZ1417', `theme: '${shown(name.value)}' is not a theme — use ${themes.join(', ')}`, name.pos);
+    }
+    const settings = [...STRUCTURE_PROPS.theme];
+    const seen = new Set<string>();
+    const out: LinkedWord[] = [];
+    for (const c of s.children) {
+      if (!settings.includes(c.word)) {
+        err('AZ1405', `theme: '${shown(c.word)}' is not a theme setting — use ${settings.join(', ')}`, c.pos);
+        continue;
+      }
+      const choices = c.word === 'accent' ? ACCENT_HUES : PATTERN_SHAPE_NAMES;
+      const value = c.args[0];
+      if (!value) {
+        err('AZ1205', `theme: '${c.word}' has no value — write: ${c.word} ${Object.keys(choices).join('|')}`, c.pos);
+        continue;
+      }
+      if (c.word === 'accent' && !Object.hasOwn(ACCENT_HUES, value.value)) {
+        err('AZ1418', `theme: accent '${shown(value.value)}' is not a hue — use ${Object.keys(ACCENT_HUES).join(', ')}`, value.pos);
+        continue;
+      }
+      if (c.word === 'pattern') {
+        if (!Object.hasOwn(PATTERN_SHAPE_NAMES, value.value)) {
+          err('AZ1419', `theme: pattern '${shown(value.value)}' is not a shape — use ${Object.keys(PATTERN_SHAPE_NAMES).join(', ')}`, value.pos);
+          continue;
+        }
+        const origin = c.args[1];
+        if (origin && !Object.hasOwn(PATTERN_ORIGIN_NAMES, origin.value)) {
+          err('AZ1419', `theme: pattern origin '${shown(origin.value)}' is not one of: ${Object.keys(PATTERN_ORIGIN_NAMES).join(', ')}`, origin.pos);
+          continue;
+        }
+        if (c.args.length > 2) {
+          err('AZ1406', `theme: 'pattern' takes a shape and an origin — remove '${shown(c.args[2].value)}'`, c.args[2].pos);
+          continue;
+        }
+      } else if (c.args.length > 1) {
+        err('AZ1406', `theme: 'accent' takes one value — remove '${shown(c.args[1].value)}'`, c.args[1].pos);
+        continue;
+      }
+      if (seen.has(c.word)) {
+        warn('AZ1203', `theme: '${c.word}' repeated — once is enough`, c.pos);
+        continue;
+      }
+      seen.add(c.word);
+      out.push({ word: c.word, variant: null, modifiers: [], args: c.args, props: {}, as: null,
+                 children: [], pos: c.pos });
+    }
+    return out;
+  }
+
   function resolve(s: Statement, parent: Manifest | undefined, parentWord: string | null): LinkedWord | null {
     if (s.word === 'backend') return backendDecl(s, parentWord);
     if (s.word === 'data') return dataDecl(s, parentWord);
@@ -603,7 +707,11 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
       }
       // `font` carries its roles as children (GRAMMAR font-decl); returning
       // none here dropped every role, so `font` never reached the Spec.
-      const children = parentWord === 'site' && s.word === 'font' ? fontRoles(s) : [];
+      // `theme` carries its settings the same way (PRD §6.1a).
+      const children = parentWord !== 'site' ? []
+        : s.word === 'font' ? fontRoles(s)
+        : s.word === 'theme' ? themeSettings(s)
+        : [];
       return { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as,
                children, pos: s.pos };
     }

@@ -225,6 +225,11 @@ export interface ThemeLike {
   readonly layer: Readonly<Record<string, number>>;
   readonly breakpoint: Readonly<Record<BreakpointName, number>>;
   readonly typeSize: Readonly<Record<string, string>>;
+  /**
+   * The site's `theme pattern` (PRD §6.1a) as var() references, present only
+   * when the site sets one. A word paints it as background-image/size/position.
+   */
+  readonly pattern?: Readonly<{ image: string; size: string; position: string }>;
 }
 
 /** What every `emit.web.ts` exports. */

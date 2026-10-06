@@ -543,6 +543,38 @@ try {
   check('SECURITY: the text survives ESCAPED, not silently dropped',
     evilHtml.includes('&lt;/script&gt;'));
 
+  /* ---- PRD §6.1a: `theme accent` and `theme pattern` reach the shipped CSS ---- */
+  // The GRAMMAR §8 fixture must stay byte-identical to the doc and sets
+  // neither, so a second small site carries them through the real build.
+  const tuned = join(work, 'tuned.az');
+  writeFileSync(tuned,
+    'az 1\nsite tuned\n  theme midnight\n    accent teal\n    pattern glow left\n\n' +
+    'page /\n  hero center\n    title "Tuned"\n    sub "Accent and pattern from the theme."\n');
+  const tunedProj = join(work, 'tuned');
+  node(CLI, ['build', tuned, '--out', tunedProj], work);
+  cpSync(join(proj, 'node_modules'), join(tunedProj, 'node_modules'), { recursive: true });
+  shippedBuild(tunedProj);
+  {
+    // The minifier rewrites colours (hsl → hex), so the reference is the
+    // default-midnight site built above, minified the same way.
+    const shippedCss = (dir) => {
+      const f = readdirSync(join(dir, 'dist/assets')).find((n) => n.endsWith('.css'));
+      return f ? readFileSync(join(dir, 'dist/assets', f), 'utf8') : '';
+    };
+    const accentsOf = (text) => [...text.matchAll(/--az-color-accent:\s*([^;}]+)/g)].map((m) => m[1].trim());
+    const css = shippedCss(tunedProj);
+    const accents = accentsOf(css);
+    const defaults = accentsOf(shippedCss(evilProj));
+    check('theme accent: the shipped CSS carries the regenerated accent, not the theme default',
+      accents.length >= 2 && defaults.length >= 2 && accents.every((v) => !defaults.includes(v)),
+      `tuned ${accents.join(' | ')} vs default ${defaults.join(' | ')}`);
+    check('theme pattern: declared once from the accent token',
+      /--az-pattern-image:\s*radial-gradient\([^;]*var\(--az-color-accent\)/.test(css));
+    check('theme pattern: the hero paints it', /background-image:\s*var\(--az-pattern-image\)/.test(css));
+  }
+  check('CONTROL: a site without pattern ships no pattern declaration',
+    !readFileSync(join(evilProj, 'src/theme.css'), 'utf8').includes('--az-pattern-image'));
+
   /* ---- determinism ------------------------------------------------------ */
   const a = join(work, 'a'), b = join(work, 'b');
   node(CLI, ['build', site, '--out', a], work);

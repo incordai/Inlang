@@ -22,7 +22,11 @@
 
 import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
-import { FONT_STACKS, resolve, schemeCss, schemeReferences, THEMES, type Theme } from '../../theme/src/index.ts';
+import {
+  ACCENT_RAMPS, FONT_STACKS, PATTERN_ORIGINS, PATTERN_REFERENCES, PATTERN_SHAPES, patternCss, patternLayers,
+  resolve, schemeCss, schemeReferences, THEMES, withAccent,
+  type AccentName, type PatternOrigin, type PatternShape, type Theme,
+} from '../../theme/src/index.ts';
 import { generated, generatedJson } from './generated.ts';
 import { azMd } from './azmd.ts';
 import { emitPages, type EmitterMap } from './tree.ts';
@@ -276,8 +280,6 @@ export default function App({ route }: { route: string }) {
         name=${jsxValue(spec.site.name)}
         width=${jsxValue(spec.site.width)}
         theme=${jsxValue(spec.site.theme)}
-        accent=${jsxValue(spec.site.accent)}
-        pattern=${jsxValue(spec.site.pattern)}
       >
         {page
           ? <Page route={page.route} layout={page.layout}
@@ -440,8 +442,8 @@ export function NotFound() {
 }
 
 export function Site(
-  { name, width, theme, accent, pattern, children }:
-  { name: string; width: string; theme: string; accent: string; pattern: string; children?: ReactNode },
+  { name, width, theme, children }:
+  { name: string; width: string; theme: string; children?: ReactNode },
 ) {
   // The behaviour runtime wires what the words marked (data-az-behaviour).
   // A layout effect, so a deep-linked FAQ answer opens before first paint
@@ -457,7 +459,7 @@ export function Site(
   }, []);
   return (
     <div className="az-site" data-site={name} data-width={width}
-         data-theme={theme} data-accent={accent} data-pattern={pattern}>
+         data-theme={theme}>
       {children}
     </div>
   );
@@ -576,9 +578,24 @@ function sideLayoutCss(spec: Spec, theme: ThemeLike): string {
 `;
 }
 
-/** The theme the site asked for, falling back to the default. */
+/**
+ * The theme the site asked for, falling back to the default, with its accent
+ * regenerated when `theme accent` names a hue (PRD §6.1a). The compiler has
+ * already refused an unknown hue (AZ1418); withAccent throws rather than ship
+ * a step under its contrast floor.
+ */
 function namedTheme(spec: Spec, override?: Theme): Theme {
-  return override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
+  const base = override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
+  const hue = spec.site.accent;
+  return withAccent(base, hue !== null && Object.hasOwn(ACCENT_RAMPS, hue) ? hue as AccentName : null);
+}
+
+/** The site's pattern as CSS, or null for `none` — ink is the accent token. */
+function sitePattern(spec: Spec, named: Theme) {
+  const shape = (PATTERN_SHAPES as readonly string[]).includes(spec.site.pattern) ? spec.site.pattern as PatternShape : 'none';
+  const origin = (PATTERN_ORIGINS as readonly string[]).includes(spec.site.patternOrigin)
+    ? spec.site.patternOrigin as PatternOrigin : 'top';
+  return patternLayers(shape, origin, schemeReferences(named).color.accent);
 }
 
 /**
@@ -601,7 +618,7 @@ function fontOverrides(fonts: Readonly<Record<string, string>>): Record<string, 
  * by the browser per scheme (theme-spec §3.3); every other group is the same
  * in both schemes, so either resolution gives it.
  */
-function themeFor(named: Theme, fonts: Readonly<Record<string, string>> = {}): ThemeLike {
+function themeFor(named: Theme, fonts: Readonly<Record<string, string>> = {}, patterned = false): ThemeLike {
   const t = resolve(named, named.defaultScheme ?? 'light');
   const schemed = schemeReferences(named);
   return {
@@ -615,6 +632,8 @@ function themeFor(named: Theme, fonts: Readonly<Record<string, string>> = {}): T
     layer: t.layer as unknown as Record<string, number>,
     breakpoint: t.breakpoint,
     typeSize: t.typeSize as unknown as Record<string, string>,
+    // Only a site with a pattern hands words one, so a site without is unchanged.
+    ...(patterned ? { pattern: PATTERN_REFERENCES } : {}),
   };
 }
 
@@ -766,7 +785,8 @@ export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
 
 export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProject {
   const named = namedTheme(spec, options.theme);
-  const theme = themeFor(named, spec.site.fonts);
+  const pattern = sitePattern(spec, named);
+  const theme = themeFor(named, spec.site.fonts, pattern !== null);
   const used = new Set<string>();
   const asset = (raw: string): string => {
     const path = safeAssetPath(raw);
@@ -915,7 +935,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${frameCss(theme)}${schemeCss(named)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
+${frameCss(theme)}${schemeCss(named)}${patternCss(pattern)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
     },
     {
       /**
@@ -993,6 +1013,8 @@ export default defineConfig({
       content: azMd({
         site: spec.site.name,
         theme: named.name,
+        accent: spec.site.accent,
+        pattern: pattern ? `${spec.site.pattern} ${spec.site.patternOrigin}` : null,
         fonts: spec.site.fonts,
         pages: pages.map((p) => ({ route: p.route, file: htmlFileFor(p.route), nodes: p.nodes })),
         dirs: { runtime: RUNTIME_DIR, user: USER_DIR, auth: AUTH_DIR, guard: GUARD_DIR, three: THREE_DIR },

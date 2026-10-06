@@ -7,7 +7,10 @@
  * Tests: packages/core/test/describe.test.ts, packages/words/test/descriptions.test.ts
  */
 
-import { FONT_FAMILIES, SITE_WIDTHS, type Manifest, type PropSpec } from './link.ts';
+import {
+  ACCENT_HUES, FONT_FAMILIES, PATTERN_ORIGIN_NAMES, PATTERN_SHAPE_NAMES, SITE_WIDTHS, THEME_NAMES,
+  type Manifest, type PropSpec,
+} from './link.ts';
 import { BACKEND_SETTINGS } from './backend.ts';
 import {
   ACTION_DESCRIPTIONS, MODIFIER_DESCRIPTIONS, TYPE_DESCRIPTIONS, WHO_DESCRIPTIONS,
@@ -37,7 +40,7 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
       theme: 'Theme name, e.g. midnight, paper or signal',
       font: 'Font roles for display, body and mono text',
     },
-    values: { width: SITE_WIDTHS },
+    values: { width: SITE_WIDTHS, theme: THEME_NAMES },
   },
   theme: {
     description: 'Theme choice and its tuning (under site)',
@@ -45,6 +48,8 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
       accent: 'Hue ramp the theme draws its accent from',
       pattern: 'Background pattern and its origin',
     },
+    // A pattern line is `pattern <shape> [origin]`: both are its values.
+    values: { accent: ACCENT_HUES, pattern: { ...PATTERN_SHAPE_NAMES, ...PATTERN_ORIGIN_NAMES } },
   },
   font: {
     description: 'Font role assignments (under site)',

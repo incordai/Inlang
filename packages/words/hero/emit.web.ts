@@ -16,7 +16,8 @@
  *   height → min-height in svh (HEIGHT table) + data-height · poster → img.az-hero-poster via ctx.asset ·
  *   describe → poster alt and the visual's aria-label · model → data-az-model via ctx.asset.
  * Styling: theme tokens only; below.sm mobile gutter (+ split one column); actions below.xs stack;
- *   states.live hides the poster (full: gradient scrim); states.overBackdrop gives the veil.
+ *   states.live hides the poster (full: gradient scrim); states.overBackdrop gives the veil;
+ *   the site's `theme pattern` (t.pattern, var refs) is the header's background except on `full`.
  * Behaviour: 3D drawn by packages/scene-runtime from data-az-3d; buttons by target-web/src/actions.ts.
  * Edit guide: layout per variant → the header's style; type → the h1/p styles; actions → ctx.actions options.
  *   Keep: exactly one <h1>; eyebrow never a heading; measure on the text, not the container; svh not vh;
@@ -241,6 +242,12 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // §8 — text sits over media only with a SCRIM, and a scrim is a gradient
       // over a colour, never a flat opacity layer that dims the whole image.
       background: variant === 'full' ? t.color.scrim : 'transparent',
+      // PRD §6.1a `theme pattern`: the site's shape, drawn in the accent at a
+      // contrast-proven strength (theme PATTERN_MAX_ALPHA). `full` keeps its
+      // scrim; over a backdrop the veil's shorthand covers the pattern.
+      ...(t.pattern && variant !== 'full'
+        ? { backgroundImage: t.pattern.image, backgroundSize: t.pattern.size, backgroundPosition: t.pattern.position }
+        : {}),
       color: variant === 'full' ? t.color['on-scrim'] : t.color.text,
       // A 3D `full` hero is the positioning context for its visual, and its
       // own stacking context, so the visual sits under the type, not over it.
