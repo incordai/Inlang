@@ -19,9 +19,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compile, explain, serialiseSpec, type Diagnostic } from '../../core/src/index.ts';
+import { compile, explain, serialiseSpec, STRUCTURE_DESCRIPTIONS, type Diagnostic } from '../../core/src/index.ts';
 import { serve } from '../../mcp/src/server.ts';
-import type { Toolbox, ToolDiagnostic, WordEntry } from '../../mcp/src/tools.ts';
+import type { KeywordEntry, Toolbox, ToolDiagnostic, WordEntry } from '../../mcp/src/tools.ts';
 import { build, wordsFor } from './az.ts';
 import { initBackendEnv } from './backend-init.ts';
 import { lockOption } from './data-schema.ts';
@@ -130,6 +130,15 @@ export function toolbox(root: string): Toolbox {
     },
 
     grammar: () => readFileSync(join(REPO, 'docs/GRAMMAR.md'), 'utf8'),
+
+    keywords: () => Object.entries(STRUCTURE_DESCRIPTIONS)
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([name, k]): KeywordEntry => ({
+        name,
+        description: k.description,
+        settings: { ...(k.settings ?? {}) },
+        values: Object.fromEntries(Object.entries(k.values ?? {}).map(([s, v]) => [s, { ...v }])),
+      })),
 
     // Manifests only (no project code runs), like every read-only tool.
     explain: (terms) => explain(terms, loadWords(wordsDir(), projectWords, { code: false }).manifests),

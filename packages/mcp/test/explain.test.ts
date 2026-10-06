@@ -61,3 +61,25 @@ test('az_words carries every word\'s ≤60-character descriptions', async () => 
   assert.equal(Object.keys(hero.descriptions.variants).length, hero.variants.length);
   assert.ok(hero.props.title.description);
 });
+
+test('az_words carries the structure keywords — data and allow with every type, modifier, who and action, ≤60 characters', async () => {
+  const r = await tool('az_words', {});
+  const keywords = r.structuredContent.keywords as { name: string; description: string; settings: Record<string, string>; values: Record<string, Record<string, string>> }[];
+  const data = keywords.find((k) => k.name === 'data')!;
+  const allow = keywords.find((k) => k.name === 'allow')!;
+  for (const term of ['text', 'longtext', 'number', 'money', 'flag', 'date', 'datetime', 'email', 'url', 'choice', 'image', 'ref',
+    'required', 'unique', 'index', 'search', 'private', 'locked', 'default', 'allow']) assert.ok(data.settings[term], `data ${term}`);
+  for (const term of ['anyone', 'signedin', 'owner', 'read', 'create', 'edit', 'delete']) {
+    assert.ok(allow.settings[term], `allow ${term}`);
+    assert.ok(data.values.allow[term], `data allow ${term}`);
+  }
+  for (const k of keywords) {
+    for (const text of [k.description, ...Object.values(k.settings), ...Object.values(k.values).flatMap(Object.values)]) {
+      assert.ok(text.length > 0 && text.length <= 60, `${k.name}: '${text}'`);
+    }
+  }
+  const explained = await tool('az_explain', { terms: 'data money private allow owner edit' });
+  assert.notEqual(explained.isError, true);
+  assert.deepEqual(explained.structuredContent.unknown, [], JSON.stringify(explained.structuredContent));
+  assert.equal(explained.structuredContent.lines.length, 6);
+});

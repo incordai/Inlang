@@ -17,7 +17,8 @@
     "gate": "node scripts/gate.mjs",
     "thumbnails": "node scripts/thumbnails.mjs",
     "lint": "node packages/cli/bin/az.js lint packages/words",
-    "test:backend-db": "node scripts/backend-db.mjs"
+    "test:backend-db": "node scripts/backend-db.mjs",
+    "test:data": "node scripts/data-e2e.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

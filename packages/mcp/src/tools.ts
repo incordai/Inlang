@@ -45,6 +45,14 @@ export interface WordEntry {
   readonly docs: string;
 }
 
+/** A structure keyword: its meaning, what can follow it, and closed values — each ≤60 characters. */
+export interface KeywordEntry {
+  readonly name: string;
+  readonly description: string;
+  readonly settings: Record<string, string>;
+  readonly values: Record<string, Record<string, string>>;
+}
+
 /**
  * What the CLI supplies. Paths arriving here are already absolute and inside
  * the project root.
@@ -56,6 +64,8 @@ export interface Toolbox {
     { ok: boolean; files: string[]; assets: string[]; diagnostics: string };
   readonly lint: (wordsDir: string | null) => { words: string[]; findings: unknown[] };
   readonly words: () => WordEntry[];
+  /** Structure keywords (site, backend, data, allow…): no manifest, so listed apart from the words. */
+  readonly keywords: () => KeywordEntry[];
   readonly wordDocs: (word: string) => string | null;
   readonly migrate: (file: string) =>
     { ok: true; changed: boolean; from: number; to: number } | { ok: false; message: string };
@@ -153,10 +163,10 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'az_words',
-    description: 'The word catalogue: every block word with its variants, modifiers, properties (type, allowed values, default, required) and slots. Use it to write valid .az. Writes nothing.',
+    description: 'The word catalogue: every block word with its variants, modifiers, properties (type, allowed values, default, required) and slots; and every structure keyword (site, backend, data, allow…) with its settings. Use it to write valid .az. Writes nothing.',
     inputSchema: obj({}, []),
     annotations: READ,
-    run: (_a, box) => ({ words: box.words() }),
+    run: (_a, box) => ({ words: box.words(), keywords: box.keywords() }),
   },
   {
     name: 'az_explain',

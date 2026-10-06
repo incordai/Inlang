@@ -496,6 +496,9 @@ value           = STRING | PAIR | BARE ;
 | `raw <path>` | `page`, any block | 1 (M3) | PRD §6.6 |
 | `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
 | `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here |
+| `data <table>` + indented lines | `site` | 1 | data-spec §4 — needs `backend`; a table and its `/data/<table>` API; not a block |
+| `<field> <type> [type-arg…] [modifier…]` | `data` | 1 | data-spec §4.2–§4.5 — types `text longtext number money flag date datetime email url choice image ref`; modifiers `required unique index search private locked default <v>` |
+| `allow <who> <action…>` | `data` | 1 | data-spec §4.7 — who `anyone signedin owner`, action `read create edit delete`; the matrix is closed |
 | `nav …` | `site`, `page` | 1 | nav-spec §8 |
 | `footer …` | `site`, `page` | 1 | PRD §6.1 |
 | `scene backdrop` | `site`, `page` | 1 | scene-spec §6 — the only *layer* block |
@@ -520,6 +523,10 @@ block placed somewhere its parent does not accept is
 setting · AZ1225 a setting missing · AZ1412 a value outside its choices (a
 connection string is told where it belongs) · AZ1506 declared twice · AZ1507
 the site's `auth` must use `adapter azbackend`.
+
+`data`'s diagnostics are AZ1226–AZ1249 and AZ1415 at the link stage (data-spec
+§12), plus AZ1701–AZ1707 when the file and its schema lock `<site>.data.json`
+disagree or the lock is damaged (data-spec §6).
 
 ### 3.4 Deferred constructs
 
@@ -902,6 +909,7 @@ The parser recovers at **line granularity**. Six rules, applied in order:
 | AZ1400–AZ1499 | value typing |
 | AZ1500–AZ1599 | resolution and duplication |
 | AZ1600–AZ1699 | "the grammar cannot express this" |
+| AZ1700–AZ1749 | the data schema lock — file vs `<site>.data.json` (data-spec §6) |
 | AZ2000+ | per-word validations (hero-spec §11, nav-spec §9) |
 
 IDs are permanent once shipped. A retired ID is never reused.
