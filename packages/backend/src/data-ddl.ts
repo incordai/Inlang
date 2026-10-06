@@ -405,6 +405,10 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
           if (summary.length === 0 || !summary[summary.length - 1].includes(`${op.table}.${col}`)) summary.push(`change ${op.table}.${col}`);
           break;
         }
+        case 'expose':
+          // No SQL: who reads what is compiled into every statement from the
+          // file; the lock records it only so that widening is reviewed.
+          break;
       }
     }
     return { version: step.version, destructive, summary, units: out };

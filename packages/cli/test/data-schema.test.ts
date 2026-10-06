@@ -119,3 +119,38 @@ test('CONTROL: a site without data needs no lock, and a stray lock beside it is 
   assert.equal(r.status, 1);
   assert.match(r.stderr, /AZ1701/);
 });
+
+test('a read rule that shows stored rows to more people: build AZ1701, plan and schema AZ1708 until --expose names the table', () => {
+  const OWN = '  data notes\n    title text required\n    allow owner read\n    allow signedin create\n';
+  const p = project(OWN);
+  assert.equal(az('backend', 'schema', p.file).status, 0);
+  const before = readFileSync(p.lock, 'utf8');
+  writeFileSync(p.file, SITE(OWN.replace('allow owner read', 'allow anyone read')), 'utf8');
+
+  const build = az('build', p.file, '--out', p.out);
+  assert.equal(build.status, 1);
+  assert.match(build.stderr, /AZ1701/);
+
+  const plan = az('backend', 'plan', p.file);
+  assert.equal(plan.status, 1);
+  assert.match(plan.stderr, /AZ1708 {2}data: notes becomes readable by anyone \(it was its owner\) — rows stored under the old rules would show; add --expose notes to az backend schema/);
+
+  const refused = az('backend', 'schema', p.file);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /nothing written/);
+  assert.equal(readFileSync(p.lock, 'utf8'), before);
+  assert.equal(az('backend', 'schema', p.file, '--expose').status, 2, '--expose needs a table');
+  assert.equal(az('backend', 'schema', p.file, '--expose', 'nope').status, 2, 'a table that widens nothing is a usage error');
+  assert.equal(readFileSync(p.lock, 'utf8'), before);
+
+  const ok = az('backend', 'schema', p.file, '--expose', 'notes');
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /recorded step 2 in site\.data\.json:\n {2}exposes {6}notes becomes readable by anyone \(it was its owner\) — rows stored under the old rules now show/);
+  assert.equal(az('build', p.file, '--out', p.out).status, 0);
+
+  // CONTROL: narrowing back is a safe step, no flag.
+  writeFileSync(p.file, SITE(OWN), 'utf8');
+  const back = az('backend', 'schema', p.file);
+  assert.equal(back.status, 0, back.stderr);
+  assert.match(back.stdout, /recorded step 3 in site\.data\.json:\n {2}safe {9}notes is now shown to its owner/);
+});

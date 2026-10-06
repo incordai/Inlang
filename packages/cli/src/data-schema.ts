@@ -47,21 +47,22 @@ export function readLockSteps(source: string): readonly LockStep[] {
 
 export type FlagParse = { readonly ok: true; readonly flags: LockFlags } | { readonly ok: false; readonly message: string };
 
-/** `--rename a=b`, `--drop x`, `--unique t.f`, each repeatable; nothing else. */
+/** `--rename a=b`, `--drop x`, `--unique t.f`, `--expose t`, each repeatable; nothing else. */
 export function parseSchemaFlags(args: readonly string[]): FlagParse {
   const rename: string[] = [];
   const drop: string[] = [];
   const unique: string[] = [];
+  const expose: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     const value = args[i + 1];
-    const into = flag === '--rename' ? rename : flag === '--drop' ? drop : flag === '--unique' ? unique : null;
-    if (!into) return { ok: false, message: `unknown option '${flag}' — use --rename old=new, --drop name or --unique table.field` };
+    const into = flag === '--rename' ? rename : flag === '--drop' ? drop : flag === '--unique' ? unique : flag === '--expose' ? expose : null;
+    if (!into) return { ok: false, message: `unknown option '${flag}' — use --rename old=new, --drop name, --unique table.field or --expose table` };
     if (value === undefined || value.startsWith('--')) return { ok: false, message: `${flag} needs a value, e.g. ${flag} products.title${flag === '--rename' ? '=name' : ''}` };
     into.push(value);
     i++;
   }
-  return { ok: true, flags: { rename, drop, unique } };
+  return { ok: true, flags: { rename, drop, unique, expose } };
 }
 
 type Out = { readonly out: (s: string) => void; readonly err: (s: string) => void };
@@ -83,7 +84,7 @@ function planned(source: string, manifests: Map<string, Manifest>, flags: LockFl
 }
 
 function report(p: NonNullable<ReturnType<typeof planned>>, source: string, io: Out): void {
-  for (const c of p.result.changes) io.out(`  ${c.kind === 'safe' ? 'safe       ' : 'destructive'}  ${c.text}\n`);
+  for (const c of p.result.changes) io.out(`  ${c.kind.padEnd('destructive'.length)}  ${c.text}\n`);
   for (const x of p.result.problems) io.err(`${source}: error ${x.code}  ${x.message}\n`);
   for (const f of p.result.flagErrors) io.err(`az: ${f}\n`);
 }
@@ -102,7 +103,7 @@ export function runDataPlan(source: string, manifests: Map<string, Manifest>, io
 }
 
 /**
- * `az backend schema <file.az> [--rename a=b] [--drop x] [--unique t.f]` —
+ * `az backend schema <file.az> [--rename a=b] [--drop x] [--unique t.f] [--expose t]` —
  * append the step. Refuses (and writes nothing) while anything is blocked.
  */
 export function runDataSchema(source: string, manifests: Map<string, Manifest>, args: readonly string[], io: Out): number {

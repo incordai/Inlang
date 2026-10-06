@@ -1,7 +1,8 @@
 /**
- * The schema lock (data-spec §6.1–§6.2): storage schema, replay, the digest,
- * every change kind classified safe / destructive / refused, renames never
- * guessed, and the build-time check (AZ1701, AZ1706).
+ * The schema lock (data-spec §6.1–§6.2): storage schema and exposure, replay,
+ * the digest, every change kind classified safe / destructive / exposes /
+ * refused, renames never guessed, and the build-time check (AZ1701, AZ1706).
+ * Widening what a table shows needs --expose (AZ1708).
  */
 
 import { test } from 'node:test';
@@ -11,7 +12,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { compile, type Manifest } from '../src/index.ts';
 import {
   LockError, checkLock, parseLock, plan, replay, serialiseLock, storageOf,
-  type LockFlags, type LockStep, type LockTable,
+  type LockFlags, type LockOp, type LockStep, type LockTable,
 } from '../src/data-lock.ts';
 import type { SpecTable } from '../src/data.ts';
 
@@ -49,7 +50,7 @@ function step(before: string, after: string, f: LockFlags = NO) {
   const p = plan(replay(steps), want, f);
   if (p.problems.length === 0 && p.flagErrors.length === 0) {
     const landed = replay([...steps, { version: 2, ops: p.ops }]);
-    const byName = (ts: LockTable[]) => Object.fromEntries(ts.map((t) => [t.name, Object.fromEntries(t.fields.map((x) => [x.name, x]))]));
+    const byName = (ts: LockTable[]) => Object.fromEntries(ts.map((t) => [t.name, { fields: Object.fromEntries(t.fields.map((x) => [x.name, x])), expose: t.expose }]));
     assert.deepEqual(byName(landed), byName(storageOf(want)), 'the step lands on the file');
   }
   return p;
@@ -59,9 +60,13 @@ const kinds = (p: { changes: { kind: string }[] }) => p.changes.map((c) => c.kin
 
 const BASE = '  data products\n    name text required\n    price money usd\n    status choice draft live\n    allow anyone read\n';
 
-test('the lock holds storage only: rules, private, locked and default are not in it', () => {
-  const [t] = storageOf(tablesOf('  data notes\n    body text required private locked default "x"\n    allow anyone read\n'));
-  assert.deepEqual(t, { name: 'notes', fields: [{ name: 'body', type: 'text', required: true, unique: false, index: true }] }, 'index: required text is sortable, so indexed');
+test('the lock holds storage and exposure: the read level and private fields; search, locked, default and write rules are not in it', () => {
+  const [t] = storageOf(tablesOf('  data notes\n    body text required private locked default "x"\n    allow anyone read\n    allow signedin create\n'));
+  assert.deepEqual(t, {
+    name: 'notes',
+    fields: [{ name: 'body', type: 'text', required: true, unique: false, index: true }],
+    expose: { read: 'anyone', private: ['body'] },
+  }, 'index: required text is sortable, so indexed');
 });
 
 test('every field the API sorts by is indexed, recorded in the lock (review #3, data-spec §4.5)', () => {
@@ -71,7 +76,7 @@ test('every field the API sorts by is indexed, recorded in the lock (review #3, 
   // A lock written before this rule plans the index as a safe step.
   const old = [{ version: 1, ops: [{ op: 'createTable' as const, table: 'notes', fields: [{ name: 'title', type: 'text' as const, required: true, unique: false, index: false }] }] }];
   const p = plan(replay(old), tablesOf('  data notes\n    title text required\n    allow anyone read\n'), NO);
-  assert.deepEqual([codes(p), kinds(p), p.changes[0].text], [[], ['safe'], 'notes.title gains its index']);
+  assert.deepEqual([codes(p), kinds(p), p.changes.map((c) => c.text)], [[], ['safe', 'safe'], ['notes.title gains its index', 'record what notes shows: shown to anyone']]);
 });
 
 test('CONTROL: an unchanged file plans nothing', () => {
@@ -79,8 +84,8 @@ test('CONTROL: an unchanged file plans nothing', () => {
   assert.deepEqual([p.ops, p.changes, p.problems, p.flagErrors], [[], [], [], []]);
 });
 
-test('CONTROL: changing rules, search, private, locked or a default needs no step', () => {
-  const p = step(BASE, '  data products\n    name text required private locked default "n"\n    price money usd\n    status choice draft live default live\n    allow signedin read\n');
+test('CONTROL: changing search, locked, a default or a write rule needs no step', () => {
+  const p = step(BASE, '  data products\n    name text required search locked default "n"\n    price money usd\n    status choice draft live default live\n    allow anyone read\n    allow signedin create\n');
   assert.deepEqual(p.ops, []);
 });
 
@@ -88,7 +93,7 @@ test('safe: a new table, a new optional field, a new choice value, an index', ()
   const p = step(BASE, `${BASE.replace('draft live', 'draft live sold').replace('price money usd', 'price money usd index')}    blurb longtext\n  data tags\n    label text\n`);
   assert.deepEqual(codes(p), []);
   assert.ok(kinds(p).every((k) => k === 'safe'), JSON.stringify(p.changes));
-  assert.deepEqual(p.ops.map((o) => o.op).sort(), ['addField', 'createTable', 'setField', 'setField']);
+  assert.deepEqual(p.ops.map((o) => o.op).sort(), ['addField', 'createTable', 'expose', 'setField', 'setField']);
 });
 
 test('safe: a new required field with a default fills existing rows; a flag fills off', () => {
@@ -170,7 +175,7 @@ test('AZ1707: a field becoming unique needs --unique; dropping unique is safe', 
 test('a cycle between new tables is created, then closed with an added field', () => {
   const p = step(BASE, `${BASE}  data aa\n    b ref bb\n  data bb\n    a ref aa\n`);
   assert.deepEqual(codes(p), []);
-  assert.deepEqual(p.ops.map((o) => `${o.op} ${o.table}`), ['createTable aa', 'createTable bb', 'addField aa']);
+  assert.deepEqual(p.ops.map((o) => `${o.op} ${o.table}`), ['createTable aa', 'createTable bb', 'addField aa', 'expose aa', 'expose bb']);
 });
 
 test('dropping two tables that point at each other replays', () => {
@@ -227,7 +232,7 @@ test('a ref records what deleting its target does: cascade when required, setnul
     { name: 'parent', type: 'ref' as const, ref: 'notes', required: false, unique: false, index: false },
   ] }] }];
   const p = plan(replay(legacy), tablesOf('  data notes\n    title text required\n    parent ref notes\n    allow anyone read\n'), NO);
-  assert.deepEqual([codes(p), kinds(p)], [[], ['destructive']]);
+  assert.deepEqual([codes(p), kinds(p)], [[], ['destructive', 'safe']], 'the relink, and the exposure baseline (the legacy step has none)');
   assert.equal(p.changes[0].text, 'deleting a notes row now clears notes.parent (the table is rebuilt on SQLite)');
 });
 
@@ -250,7 +255,7 @@ test('checkLock: AZ1706 for a damaged lock', () => {
 test('CONTROL: checkLock passes a matching lock, field order aside, and a site with neither', () => {
   const lock = serialiseLock(lockFor(BASE), sha);
   assert.deepEqual(checkLock(tablesOf(BASE), lock, NAMES, sha, AT), []);
-  const reordered = '  data products\n    status choice draft live\n    price money usd\n    name text required\n';
+  const reordered = '  data products\n    allow anyone read\n    status choice draft live\n    price money usd\n    name text required\n';
   assert.deepEqual(checkLock(tablesOf(reordered), lock, NAMES, sha, AT), []);
   assert.deepEqual(checkLock([], null, NAMES, sha, AT), []);
 });
@@ -264,4 +269,97 @@ test('compile runs the check only when given a lock, at the first data line', ()
   assert.deepEqual(compile(s, { manifests }).diagnostics.filter((d) => d.code.startsWith('AZ17')), [], 'CONTROL: no lock option, no check');
   const noData = compile(src(''), { manifests, lock });
   assert.equal(noData.ok, true, 'CONTROL: a site without data needs no lock');
+});
+
+/* ---- exposure: widening what stored rows show is --expose (AZ1708) ---- */
+
+const OWNED = '  data notes\n    title text required\n    email email private\n    allow owner read\n    allow signedin create\n';
+const readBy = (who: string) => OWNED.replace('allow owner read', `allow ${who} read`);
+
+test('AZ1708: a read rule that shows stored rows to more people needs --expose; with it the step records the new exposure', () => {
+  for (const [from, to] of [['owner', 'anyone'], ['owner', 'signedin'], ['signedin', 'anyone']]) {
+    const p = step(readBy(from), readBy(to));
+    assert.deepEqual(codes(p), ['AZ1708'], `${from} → ${to}`);
+    assert.match(p.problems[0].message, /^data: notes becomes readable by .+ — rows stored under the old rules would show; add --expose notes to az backend schema$/);
+  }
+  const p = step(OWNED, readBy('anyone'), flags({ expose: ['notes'] }));
+  assert.deepEqual([codes(p), p.flagErrors, kinds(p)], [[], [], ['exposes']]);
+  assert.deepEqual(p.ops, [{ op: 'expose', table: 'notes', read: 'anyone', private: ['email'] }]);
+  assert.equal(p.changes[0].text, 'notes becomes readable by anyone (it was its owner) — rows stored under the old rules now show');
+});
+
+test('AZ1708: a field that stops being private on a table others read needs --expose', () => {
+  const pub = readBy('anyone');
+  const p = step(pub, pub.replace('email email private', 'email email'));
+  assert.deepEqual(codes(p), ['AZ1708']);
+  assert.match(p.problems[0].message, /notes\.email is no longer private — anyone can read it/);
+  assert.deepEqual(codes(step(pub, pub.replace('email email private', 'email email'), flags({ expose: ['notes'] }))), []);
+  // Both at once: one problem naming both.
+  const both = step(OWNED, pub.replace('email email private', 'email email'));
+  assert.deepEqual(codes(both), ['AZ1708']);
+  assert.match(both.problems[0].message, /notes becomes readable by anyone \(it was its owner\); notes\.email is no longer private/);
+});
+
+test('CONTROL: narrowing, owner-only changes and new fields are safe exposure steps, no flag', () => {
+  const pub = readBy('anyone');
+  const cases: [string, string][] = [
+    [pub, OWNED], // a narrower read
+    [pub, pub.replace('title text required', 'title text required private')], // a field becomes private
+    [OWNED, OWNED.replace('email email private', 'email email')], // an owner-only table: nobody new reads it
+    [OWNED.replace('    allow owner read\n', ''), OWNED], // admins only → its owner
+  ];
+  for (const [before, after] of cases) {
+    const p = step(before, after);
+    assert.deepEqual([codes(p), p.flagErrors, kinds(p)], [[], [], ['safe']], after);
+    assert.deepEqual(p.ops.map((o) => o.op), ['expose']);
+  }
+  const added = step(pub, `${pub}    phone text\n`);
+  assert.deepEqual([codes(added), added.ops.map((o) => o.op)], [[], ['addField']], 'a new public field holds nothing stored yet, and exposure is unchanged');
+  assert.deepEqual(step(pub, pub).ops, [], 'unchanged: no step');
+});
+
+test('exposure follows renames: a renamed private field stays private; renamed and made public is AZ1708', () => {
+  const pub = readBy('anyone');
+  const renamed = pub.replace('email email private', 'mail email private');
+  const p = step(pub, renamed, flags({ rename: ['notes.email=mail'] }));
+  assert.deepEqual([codes(p), p.ops.map((o) => o.op)], [[], ['renameField']], 'the replayed rename already keeps it private');
+  assert.deepEqual(codes(step(pub, renamed.replace('mail email private', 'mail email'), flags({ rename: ['notes.email=mail'] }))), ['AZ1708']);
+  const table = step(pub, pub.replace('data notes', 'data memos'), flags({ rename: ['notes=memos'] }));
+  assert.deepEqual([codes(table), table.ops.map((o) => o.op)], [[], ['renameTable']]);
+});
+
+test('--expose that widens nothing is a usage error', () => {
+  assert.deepEqual(step(OWNED, OWNED, flags({ expose: ['notes'] })).flagErrors,
+    ['--expose notes: nothing already stored in it becomes readable by more people']);
+  assert.equal(step(OWNED, readBy('anyone'), flags({ expose: ['nope'] })).flagErrors.length, 1);
+});
+
+test('a lock written before exposure was recorded gets a safe baseline step, whatever the rules', () => {
+  const legacy = [{ version: 1, ops: [{ op: 'createTable' as const, table: 'notes', fields: storageOf(tablesOf(OWNED)).at(0)!.fields }] }];
+  const p = plan(replay(legacy), tablesOf(readBy('anyone')), NO);
+  assert.deepEqual([codes(p), kinds(p), p.changes[0].text], [[], ['safe'], 'record what notes shows: shown to anyone, private: email']);
+});
+
+test('the build fails while the file shows more than the lock records (AZ1701), so a widened rule cannot ship unreviewed', () => {
+  const lock = serialiseLock(lockFor(OWNED), sha);
+  assert.deepEqual(checkLock(tablesOf(OWNED), lock, NAMES, sha, AT), [], 'CONTROL: the recorded exposure passes');
+  assert.deepEqual(checkLock(tablesOf(readBy('anyone')), lock, NAMES, sha, AT).map((d) => d.code), ['AZ1701']);
+  assert.deepEqual(checkLock(tablesOf(OWNED.replace('email email private', 'email email')), lock, NAMES, sha, AT).map((d) => d.code), ['AZ1701']);
+});
+
+test('a damaged expose op is refused', () => {
+  const create = lockFor(OWNED)[0].ops[0];
+  const bad = (expose: Record<string, unknown>) =>
+    serialiseLock([{ version: 1, ops: [create, { op: 'expose', table: 'notes', ...expose } as unknown as LockOp] }], sha);
+  assert.doesNotThrow(() => parseLock(bad({ read: 'anyone', private: ['email'] }), sha), 'CONTROL');
+  for (const e of [
+    { read: 'everyone', private: [] },
+    { read: 'anyone', private: ['title', 'email'] },
+    { read: 'anyone', private: ['email', 'email'] },
+    { read: 'anyone', private: ['nope'] },
+    { read: 'anyone' },
+    { read: 'anyone', private: [], extra: 1 },
+  ]) {
+    assert.throws(() => parseLock(bad(e), sha), LockError, JSON.stringify(e));
+  }
 });

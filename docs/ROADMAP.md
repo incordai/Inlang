@@ -368,7 +368,7 @@ backend once it implements §3.4.
 under `site` declares fields and closed `allow` rules (AZ1226–AZ1249, AZ1415);
 `az backend plan` / `az backend schema` record each schema change in the
 `<site>.data.json` lock, which `az build` checks and never writes
-(AZ1701–AZ1707). The generated server applies the steps claimed and
+(AZ1701–AZ1708). The generated server applies the steps claimed and
 resumable — destructive ones only with `--migrate --confirm <version>` — and
 serves `/data/<table>` with the owner check inside each statement; the site
 gets a typed client (`src/data/client.ts`), the server an `openapi.json`. The

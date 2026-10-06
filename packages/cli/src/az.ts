@@ -319,7 +319,7 @@ const USAGE = `az — words to a website
   az eject <word> [--dir project]  take ownership of a word's source — one-way
   az backend init <server-dir>     write the backend's .env with a fresh secret
   az backend plan <file.az>        show the data schema step the file needs
-  az backend schema <file.az> [--rename a=b] [--drop x] [--unique t.f]
+  az backend schema <file.az> [--rename a=b] [--drop x] [--unique t.f] [--expose t]
                                    record that step in <file>.data.json
   az mcp   [--root dir]            serve these tools to an AI agent (MCP, stdio)
   az explain <term...>             one line per term: az explain hero center

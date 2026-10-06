@@ -1,18 +1,21 @@
 /**
  * @az module data-lock
- * Purpose: the schema lock — storage schema, replay, file-vs-lock diff, AZ1701–AZ1707.
- * Spec: docs/data-spec.md §6.1–§6.2
- * Exports: LOCK_FORMAT, LockField, OnDelete, onDeleteOf, LockTable, Fill, LockOp, LockStep, DataLock, LockFlags, Change, PlanResult, LockError, storageOf, applyOp, replay, parseLock, serialiseLock, canonicalSteps, plan, checkLock
+ * Purpose: the schema lock — storage schema and exposure, replay, file-vs-lock diff, AZ1701–AZ1708.
+ * Spec: docs/data-spec.md §6.1–§6.2, §18.7
+ * Exports: LOCK_FORMAT, LockField, OnDelete, onDeleteOf, ReadLevel, Exposure, exposureOf, LockTable, Fill, LockOp, LockStep, DataLock, LockFlags, Change, PlanResult, LockError, storageOf, applyOp, replay, parseLock, serialiseLock, canonicalSteps, plan, checkLock
  * Edit guide: a new op needs replay, plan and the backend's DDL (packages/backend/src/data-ddl.ts) in the same change.
  * Tests: packages/core/test/data-lock.test.ts
  */
 
 /**
  * The `.az` file says what the tables ARE; the lock says how they got there
- * (data-spec §6.1). Only what storage depends on is locked — rules, `search`,
- * `private`, `locked` and `default` are read from the file at build time and
- * change without a step. Pure: the digest function is passed in, because core
- * runs in a browser (index.ts).
+ * (data-spec §6.1). Locked: what storage depends on, and what each table
+ * exposes — who reads it and which fields are `private` — so that showing
+ * stored rows to more people is a reviewed step (`--expose`, AZ1708), never
+ * a side effect of an edited rule. `search`, `locked`, `default` and the
+ * write rules are read from the file at build time and change without a
+ * step. Pure: the digest function is passed in, because core runs in a
+ * browser (index.ts).
  */
 
 import type { Diagnostic, Pos } from './lex.ts';
@@ -44,9 +47,45 @@ const ON_DELETE: ReadonlySet<string> = new Set<OnDelete>(['cascade', 'setnull'])
 /** The rule: a required ref's rows go with their target; an optional ref is cleared. */
 export const onDeleteOf = (f: { readonly required: boolean }): OnDelete => (f.required ? 'cascade' : 'setnull');
 
+/**
+ * Who beyond admins reads a table's rows: its widest read rule (rules add
+ * up, data-spec §4.7). `none`: admins only.
+ */
+export type ReadLevel = 'none' | 'owner' | 'signedin' | 'anyone';
+const READ_LEVELS: readonly ReadLevel[] = ['none', 'owner', 'signedin', 'anyone'];
+
+/** What a table shows: its read level and its `private` fields, sorted. */
+export interface Exposure {
+  readonly read: ReadLevel;
+  readonly private: readonly string[];
+}
+
+/** A file table's exposure. */
+export function exposureOf(t: SpecTable): Exposure {
+  const read = t.rules.read;
+  return {
+    read: read.includes('anyone') ? 'anyone' : read.includes('signedin') ? 'signedin' : read.includes('owner') ? 'owner' : 'none',
+    private: t.fields.filter((f) => f.private).map((f) => f.name).sort(),
+  };
+}
+
+/**
+ * Who other than a row's owner (and admins) reads a column: the table's
+ * level when that reaches other accounts, else `none`. A private field
+ * (`field` given) reaches only its owner.
+ */
+const othersOf = (e: Exposure, field?: string): ReadLevel =>
+  (e.read === 'anyone' || e.read === 'signedin') && (field === undefined || !e.private.includes(field)) ? e.read : 'none';
+const rank = (l: ReadLevel) => READ_LEVELS.indexOf(l);
+const shownTo: Readonly<Record<ReadLevel, string>> = {
+  none: 'admins only', owner: 'its owner', signedin: 'every signed-in account', anyone: 'anyone',
+};
+
 export interface LockTable {
   readonly name: string;
   readonly fields: readonly LockField[];
+  /** Absent in locks written before exposure was recorded; the next step records it. */
+  readonly expose?: Exposure;
 }
 
 /** A value written into existing rows when a field gains one (never into DDL). */
@@ -59,7 +98,9 @@ export type LockOp =
   | { readonly op: 'addField'; readonly table: string; readonly field: LockField; readonly fill?: Fill }
   | { readonly op: 'dropField'; readonly table: string; readonly field: string }
   | { readonly op: 'renameField'; readonly table: string; readonly field: string; readonly to: string }
-  | { readonly op: 'setField'; readonly table: string; readonly field: LockField; readonly fill?: Fill };
+  | { readonly op: 'setField'; readonly table: string; readonly field: LockField; readonly fill?: Fill }
+  /** No SQL: the generated statements enforce the rules; the lock records them so that widening is reviewed. */
+  | { readonly op: 'expose'; readonly table: string; readonly read: ReadLevel; readonly private: readonly string[] };
 
 export interface LockStep {
   readonly version: number;
@@ -93,6 +134,7 @@ export function storageOf(tables: readonly SpecTable[]): LockTable[] {
       ...(f.type === 'ref' ? { onDelete: onDeleteOf(f) } : {}),
       required: f.required, unique: f.unique, index: f.index || (sortable(f) && !f.unique),
     })),
+    expose: exposureOf(t),
   }));
 }
 
@@ -205,6 +247,18 @@ function checkOp(v: unknown): LockOp {
     case 'renameField':
       keys('field', 'to');
       return { op: 'renameField', table: v.table, field: name(v.field), to: name(v.to) };
+    case 'expose': {
+      keys('read', 'private');
+      if (typeof v.read !== 'string' || !(READ_LEVELS as readonly string[]).includes(v.read)) {
+        throw new LockError(`expose: '${v.table}' has an unknown read level`);
+      }
+      const hidden = v.private;
+      // Sorted and distinct, as plan writes it: one spelling per state.
+      if (!Array.isArray(hidden) || hidden.some((x, i) => typeof x !== 'string' || !NAME.test(x) || (i > 0 && hidden[i - 1] >= x))) {
+        throw new LockError(`expose: '${v.table}' has a malformed private list`);
+      }
+      return { op: 'expose', table: v.table, read: v.read as ReadLevel, private: hidden as string[] };
+    }
     default:
       throw new LockError(`unknown op '${v.op}'`);
   }
@@ -237,7 +291,11 @@ export function parseLock(text: string, digest: (text: string) => string): DataL
   return { format: LOCK_FORMAT, steps, digest: raw.digest };
 }
 
-type Tables = Map<string, Map<string, LockField>>;
+interface TableState {
+  readonly fields: Map<string, LockField>;
+  expose?: Exposure;
+}
+type Tables = Map<string, TableState>;
 
 /** Apply one op to a schema, refusing anything that does not fit it. */
 export function applyOp(tables: Tables, op: LockOp): void {
@@ -260,14 +318,14 @@ export function applyOp(tables: Tables, op: LockOp): void {
         refOk(f, op.table);
         fields.set(f.name, f);
       }
-      tables.set(op.table, fields);
+      tables.set(op.table, { fields });
       return;
     }
     case 'dropTable': {
       need();
-      for (const [name, fields] of tables) {
+      for (const [name, other] of tables) {
         if (name === op.table) continue;
-        for (const f of fields.values()) {
+        for (const f of other.fields.values()) {
           if (f.ref === op.table) throw new LockError(`dropTable: '${name}.${f.name}' still points at '${op.table}'`);
         }
       }
@@ -279,38 +337,50 @@ export function applyOp(tables: Tables, op: LockOp): void {
       if (tables.has(op.to)) throw new LockError(`renameTable: '${op.to}' exists`);
       tables.delete(op.table);
       tables.set(op.to, t);
-      for (const fields of tables.values()) {
+      for (const { fields } of tables.values()) {
         for (const [n, f] of fields) if (f.ref === op.table) fields.set(n, { ...f, ref: op.to });
       }
       return;
     }
     case 'addField': {
-      const t = need();
+      const t = need().fields;
       if (t.has(op.field.name)) throw new LockError(`addField: '${op.table}.${op.field.name}' exists`);
       refOk(op.field);
       t.set(op.field.name, op.field);
       return;
     }
     case 'dropField': {
-      const t = need();
-      if (!t.has(op.field)) throw new LockError(`dropField: no '${op.table}.${op.field}'`);
+      const s = need();
+      if (!s.fields.has(op.field)) throw new LockError(`dropField: no '${op.table}.${op.field}'`);
       // A table may pass through zero fields inside a step (a dropped table's
       // refs go before the table); a final schema never has one, because the
       // file needs a field per table (AZ1230) and must equal it (AZ1701).
-      t.delete(op.field);
+      s.fields.delete(op.field);
+      if (s.expose) s.expose = { ...s.expose, private: s.expose.private.filter((x) => x !== op.field) };
       return;
     }
     case 'renameField': {
-      const t = need();
+      const s = need();
+      const t = s.fields;
       const f = t.get(op.field);
       if (!f) throw new LockError(`renameField: no '${op.table}.${op.field}'`);
       if (t.has(op.to)) throw new LockError(`renameField: '${op.table}.${op.to}' exists`);
       t.delete(op.field);
       t.set(op.to, { ...f, name: op.to });
+      // A private field stays private under its new name.
+      if (s.expose?.private.includes(op.field)) {
+        s.expose = { ...s.expose, private: s.expose.private.map((x) => (x === op.field ? op.to : x)).sort() };
+      }
+      return;
+    }
+    case 'expose': {
+      const s = need();
+      for (const f of op.private) if (!s.fields.has(f)) throw new LockError(`expose: no '${op.table}.${f}'`);
+      s.expose = { read: op.read, private: [...op.private] };
       return;
     }
     case 'setField': {
-      const t = need();
+      const t = need().fields;
       const was = t.get(op.field.name);
       if (!was) throw new LockError(`setField: no '${op.table}.${op.field.name}'`);
       if (was.type !== op.field.type || was.currency !== op.field.currency || was.ref !== op.field.ref) {
@@ -330,7 +400,7 @@ export function replay(steps: readonly LockStep[]): LockTable[] {
 }
 
 const toList = (tables: Tables): LockTable[] =>
-  [...tables].map(([name, fields]) => ({ name, fields: [...fields.values()] }));
+  [...tables].map(([name, s]) => ({ name, fields: [...s.fields.values()], ...(s.expose ? { expose: s.expose } : {}) }));
 
 /* ------------------------------------------------------------------ */
 /* Planning a step                                                     */
@@ -343,17 +413,20 @@ export interface LockFlags {
   readonly drop: readonly string[];
   /** `products.sku` — the field becomes unique. */
   readonly unique: readonly string[];
+  /** `products` — rows already stored become readable by more people (AZ1708). */
+  readonly expose?: readonly string[];
 }
 
 export interface Change {
-  readonly kind: 'safe' | 'destructive';
+  /** `exposes`: no data is lost, but stored rows reach more readers (accepted with --expose). */
+  readonly kind: 'safe' | 'destructive' | 'exposes';
   readonly text: string;
 }
 
 export interface PlanResult {
   readonly ops: LockOp[];
   readonly changes: Change[];
-  /** Changes not allowed without a flag, or never: AZ1702–AZ1705, AZ1707. */
+  /** Changes not allowed without a flag, or never: AZ1702–AZ1705, AZ1707, AZ1708. */
   readonly problems: { readonly code: string; readonly message: string }[];
   /** Flags that name nothing pending — a usage error, not a schema problem. */
   readonly flagErrors: string[];
@@ -370,6 +443,26 @@ function fillOf(f: LockField, spec: SpecTable | undefined): Fill | undefined {
   if (d !== undefined) return d;
   return f.type === 'flag' ? false : undefined;
 }
+
+/** `shown to anyone, private: email` — a table's exposure, for a change line. */
+const shown = (e: Exposure) => `shown to ${shownTo[e.read]}${e.private.length > 0 ? `, private: ${e.private.join(', ')}` : ''}`;
+
+/**
+ * Each way `now` shows rows already stored to more readers than `was` did
+ * (`kept`: the fields both have, by their new names). Empty when nothing
+ * already stored reaches anyone new — narrowing, or only new fields.
+ */
+function widening(table: string, was: Exposure, now: Exposure, kept: readonly string[]): string[] {
+  const out: string[] = [];
+  if (rank(othersOf(now)) > rank(othersOf(was))) out.push(`${table} becomes readable by ${shownTo[now.read]} (it was ${shownTo[was.read]})`);
+  if (othersOf(now) === 'none') return out;
+  for (const f of kept) {
+    if (was.private.includes(f) && !now.private.includes(f)) out.push(`${table}.${f} is no longer private — ${shownTo[now.read]} can read it`);
+  }
+  return out;
+}
+
+const sameExposure = (a: Exposure | undefined, b: Exposure | undefined) => canonical(a ?? null) === canonical(b ?? null);
 
 /**
  * The step that takes the lock's schema to the file's tables, the changes it
@@ -415,6 +508,10 @@ export function plan(lockTables: readonly LockTable[], file: readonly SpecTable[
   }
   const dropped = new Set(flags.drop);
   const uniques = new Set(flags.unique);
+  const exposedFlags = new Set(flags.expose ?? []);
+  // Recorded after every field op, so a private list names fields that exist.
+  const exposes: LockOp[] = [];
+  const exposeOp = (table: string, e: Exposure): LockOp => ({ op: 'expose', table, read: e.read, private: e.private });
 
   for (const [from, to] of tableRename) {
     ops.push({ op: 'renameTable', table: from, to });
@@ -545,6 +642,29 @@ export function plan(lockTables: readonly LockTable[], file: readonly SpecTable[
       }
       if (!blocked) sets.push({ op: 'setField', table: target.name, field: now, ...(fill !== undefined ? { fill } : {}) });
     }
+
+    // What the table shows. A lock from before exposure was recorded has no
+    // older state to compare with: the first record is the baseline.
+    const nowShown = target.expose!;
+    const wasShown = before.expose && { ...before.expose, private: before.expose.private.map((f) => renames.get(f) ?? f).sort() };
+    if (!sameExposure(wasShown, nowShown)) {
+      const kept = target.fields.map((f) => f.name).filter((f) => beforeByName.has(f));
+      const wider = wasShown ? widening(target.name, wasShown, nowShown, kept) : [];
+      if (!wasShown) {
+        changes.push({ kind: 'safe', text: `record what ${target.name} shows: ${shown(nowShown)}` });
+      } else if (wider.length === 0) {
+        changes.push({ kind: 'safe', text: `${target.name} is now ${shown(nowShown)}` });
+      } else if (exposedFlags.has(target.name)) {
+        used.add(`expose:${target.name}`);
+        changes.push({ kind: 'exposes', text: `${wider.join('; ')} — rows stored under the old rules now show` });
+      } else {
+        problems.push({
+          code: 'AZ1708',
+          message: `data: ${wider.join('; ')} — rows stored under the old rules would show; add --expose ${target.name} to az backend schema`,
+        });
+      }
+      exposes.push(exposeOp(target.name, nowShown));
+    }
   }
 
   // New tables: a table is created once every table it points at exists, so
@@ -566,7 +686,10 @@ export function plan(lockTables: readonly LockTable[], file: readonly SpecTable[
     ops.push({ op: 'createTable', table: t.name, fields: t.fields });
     exists.add(t.name);
   }
-  for (const t of fresh) changes.push({ kind: 'safe', text: `create table ${t.name} (${t.fields.length} field${t.fields.length === 1 ? '' : 's'})` });
+  for (const t of fresh) {
+    changes.push({ kind: 'safe', text: `create table ${t.name} (${t.fields.length} field${t.fields.length === 1 ? '' : 's'}), ${shown(t.expose!)}` });
+    exposes.push(exposeOp(t.name, t.expose!));
+  }
 
   // A dropped table's own refs to other dropped tables go first, so the
   // tables can then drop in any order.
@@ -577,10 +700,11 @@ export function plan(lockTables: readonly LockTable[], file: readonly SpecTable[
     }
   }
 
-  ops.push(...deferred, ...adds, ...sets, ...drops, ...dropRefs, ...dropTables.map((t): LockOp => ({ op: 'dropTable', table: t })));
+  ops.push(...deferred, ...adds, ...sets, ...drops, ...dropRefs, ...dropTables.map((t): LockOp => ({ op: 'dropTable', table: t })), ...exposes);
 
   for (const d of flags.drop) if (!used.has(`drop:${d}`)) flagErrors.push(`--drop ${d}: nothing by that name is being removed`);
   for (const u of flags.unique) if (!used.has(`unique:${u}`)) flagErrors.push(`--unique ${u}: that field is not becoming unique`);
+  for (const x of exposedFlags) if (!used.has(`expose:${x}`)) flagErrors.push(`--expose ${x}: nothing already stored in it becomes readable by more people`);
 
   return { ops, changes, problems, flagErrors };
 }
@@ -589,13 +713,13 @@ export function plan(lockTables: readonly LockTable[], file: readonly SpecTable[
 /* The build-time check                                                */
 /* ------------------------------------------------------------------ */
 
-/** Order-free comparison: tables and fields by name. */
+/** Order-free comparison: tables and fields by name, and what each table shows. */
 function sameSchema(a: readonly LockTable[], b: readonly LockTable[]): boolean {
   if (a.length !== b.length) return false;
   const byName = new Map(b.map((t) => [t.name, t]));
   return a.every((t) => {
     const u = byName.get(t.name);
-    if (!u || u.fields.length !== t.fields.length) return false;
+    if (!u || u.fields.length !== t.fields.length || !sameExposure(t.expose, u.expose)) return false;
     const fields = new Map(u.fields.map((f) => [f.name, f]));
     return t.fields.every((f) => {
       const g = fields.get(f.name);
