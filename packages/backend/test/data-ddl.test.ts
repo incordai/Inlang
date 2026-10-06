@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { compile, plan, replay, type LockFlags, type LockStep, type Manifest } from '../../core/src/index.ts';
 import { dataSteps } from '../src/data-ddl.ts';
 import { migrate, openSqlite, type Db } from '../src/server/db.ts';
-import { DestructivePending, GuardFailed, migrateData } from '../src/server/data-migrate.ts';
+import { AUDIT_STEP, DestructivePending, GuardFailed, migrateData } from '../src/server/data-migrate.ts';
 
 const wordsDir = new URL('../../words/', import.meta.url);
 const manifests = new Map<string, Manifest>();
@@ -144,7 +144,8 @@ test('a crashed instance: its half-done step resumes past the statement that lan
   await db.run(step.units.sqlite[0].sql!);
   await db.run('INSERT INTO az_data_migrations (version, step, claimed_at, applied_at) VALUES (1, 1, 1000, NULL)');
   assert.deepEqual(await migrateData(db, [step], { now: () => 1000 + FAST.staleMs + 1, timing: FAST }), [1]);
-  const recorded = await db.all('SELECT step FROM az_data_migrations WHERE applied_at IS NOT NULL');
+  // Version 0 is the server's own audit table (data-spec §11), applied alongside.
+  const recorded = await db.all('SELECT step FROM az_data_migrations WHERE applied_at IS NOT NULL AND version > 0');
   assert.equal(recorded.length, step.units.sqlite.length);
   await db.close();
 });
@@ -156,9 +157,21 @@ test('two instances starting together apply each unit exactly once', async () =>
   const [ra, rb] = await Promise.all([migrateData(a, steps, { timing: FAST }), migrateData(b, steps, { timing: FAST })]);
   assert.ok(ra.length + rb.length >= 2, `a ran ${ra}, b ran ${rb}`);
   const units = steps.reduce((n, s) => n + s.units.sqlite.length, 0);
-  assert.equal(Number((await a.get('SELECT COUNT(*) AS n FROM az_data_migrations WHERE applied_at IS NOT NULL'))!.n), units);
+  assert.equal(Number((await a.get('SELECT COUNT(*) AS n FROM az_data_migrations WHERE applied_at IS NOT NULL AND version > 0'))!.n), units);
+  // The audit table's own step is claimed like any other: applied once, not twice.
+  assert.equal(Number((await a.get('SELECT COUNT(*) AS n FROM az_data_migrations WHERE applied_at IS NOT NULL AND version = 0'))!.n),
+    AUDIT_STEP.units.sqlite.length);
   await a.close();
   await b.close();
+});
+
+test('the admin audit table is created on start, as system step 0, before the site\'s steps', async () => {
+  const db = await fresh();
+  const steps = dataSteps(lockOf([[V1]]));
+  assert.deepEqual(await migrateData(db, steps), [1], 'only the site\'s steps are reported');
+  assert.deepEqual(await columns(db, 'az_data_audit'), ['id', 'admin', 'tbl', 'row_id', 'action', 'at']);
+  assert.deepEqual(await migrateData(db, steps), [], 'CONTROL: a second start applies nothing');
+  await db.close();
 });
 
 test('a renamed table frees its name: a new table may take it', async () => {

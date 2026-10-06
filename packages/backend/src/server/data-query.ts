@@ -2,7 +2,7 @@
  * @az server data-query
  * Purpose: a list request's query string, allow-listed, as one parameterised SELECT with keyset paging and escaped search.
  * Spec: docs/data-spec.md §5.1, §4.7
- * Exports: parseQuery, ListQuery, QueryError, selectList, selectOne, readable, cursorOf, LIMIT_DEFAULT, LIMIT_MAX
+ * Exports: parseQuery, ListQuery, QueryError, selectList, selectOne, readable, cursorOf, adminSelectList, adminSelectOne, adminCount, LIMIT_DEFAULT, LIMIT_MAX
  * Edit guide: an unknown or malformed parameter is a 400 naming it, never ignored; values only as parameters.
  * Tests: packages/backend/test/data-api.test.ts
  */
@@ -193,6 +193,70 @@ export function readable(d: Database, t: Table, user: string | null): { sql: str
     }
   }
   return { sql: cols.join(', '), params };
+}
+
+/**
+ * The columns an ADMIN reads (data-spec §11): every field, private ones
+ * included, and the owner's address from the accounts table. The table is
+ * aliased `r` so the subquery's `u` columns can never shadow a field name.
+ */
+function adminColumns(d: Database, t: Table): string {
+  const cols = ['id', 'owner', 'created', 'updated', ...t.fields.map((f) => f.name)].map((c) => `r.${q(d, c)}`);
+  cols.push(`(SELECT u.${q(d, 'email')} FROM ${q(d, 'az_users')} u WHERE u.${q(d, 'id')} = r.${q(d, 'owner')}) AS ${q(d, 'az_owner_email')}`);
+  return cols.join(', ');
+}
+
+/** The admin list's WHERE: the filters and `mine`, without the keyset — for the page and the count. */
+function adminWhere(d: Database, lq: ListQuery, admin: string): { parts: string[]; params: Value[] } {
+  const parts: string[] = [];
+  const params: Value[] = [];
+  if (lq.mine) {
+    parts.push(`r.${q(d, 'owner')} = ?`);
+    params.push(admin);
+  }
+  for (const f of lq.filters) {
+    parts.push(f.sql(d));
+    params.push(...f.params);
+  }
+  return { parts, params };
+}
+
+/**
+ * An admin page (data-spec §11): no rule predicate — admins see every row —
+ * the same filters, keyset and limit as a list, and the owner's address.
+ */
+export function adminSelectList(d: Database, t: Table, lq: ListQuery, admin: string): { sql: string; params: Value[] } {
+  const w = adminWhere(d, lq, admin);
+  const where = [...w.parts];
+  const params = [...w.params];
+  const key = `r.${q(d, lq.sort.key)}`;
+  const id = `r.${q(d, 'id')}`;
+  const dir = lq.sort.desc ? 'DESC' : 'ASC';
+  if (lq.after) {
+    const cmp = lq.sort.desc ? '<' : '>';
+    where.push(`(${key} ${cmp} ? OR (${key} = ? AND ${id} ${cmp} ?))`);
+    params.push(lq.after[0], lq.after[0], lq.after[1]);
+  }
+  const limit = Math.trunc(lq.limit);
+  if (!(limit >= 1 && limit <= LIMIT_MAX)) throw new Error('adminSelectList: limit out of range');
+  return {
+    sql: `SELECT ${adminColumns(d, t)} FROM ${q(d, physical(t.name))} r${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY ${key} ${dir}, ${id} ${dir} LIMIT ${limit + 1}`,
+    params,
+  };
+}
+
+/** How many rows the admin list's filters match — admins only (§5.1: no public count). */
+export function adminCount(d: Database, t: Table, lq: ListQuery, admin: string): { sql: string; params: Value[] } {
+  const w = adminWhere(d, lq, admin);
+  return {
+    sql: `SELECT COUNT(*) AS n FROM ${q(d, physical(t.name))} r${w.parts.length ? ` WHERE ${w.parts.join(' AND ')}` : ''}`,
+    params: w.params,
+  };
+}
+
+/** One row by id for an admin, with the owner's address. */
+export function adminSelectOne(d: Database, t: Table, id: string): { sql: string; params: Value[] } {
+  return { sql: `SELECT ${adminColumns(d, t)} FROM ${q(d, physical(t.name))} r WHERE r.${q(d, 'id')} = ?`, params: [id] };
 }
 
 /**

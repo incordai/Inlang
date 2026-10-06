@@ -2,7 +2,7 @@
  * @az server data-migrate
  * Purpose: apply the data schema's steps on start: one recorded, claimed, probed statement at a time; destructive steps only when confirmed.
  * Spec: docs/data-spec.md §6.3
- * Exports: migrateData, DataStep, DataUnit, Guard, Param, DestructivePending, GuardFailed, DATA_HISTORY
+ * Exports: migrateData, DataStep, DataUnit, Guard, Param, DestructivePending, GuardFailed, DATA_HISTORY, AUDIT_STEP
  * Edit guide: never run a destructive step without its confirmation; a guard reports a count, never values.
  * Tests: packages/backend/test/data-ddl.test.ts
  */
@@ -55,6 +55,30 @@ export const DATA_HISTORY: { readonly [D in Database]: string } = {
   sqlite: 'CREATE TABLE IF NOT EXISTS az_data_migrations (version INTEGER NOT NULL, step INTEGER NOT NULL, claimed_at INTEGER NOT NULL, applied_at INTEGER, PRIMARY KEY (version, step))',
   postgres: 'CREATE TABLE IF NOT EXISTS az_data_migrations (version INTEGER NOT NULL, step INTEGER NOT NULL, claimed_at BIGINT NOT NULL, applied_at BIGINT, PRIMARY KEY (version, step))',
   mysql: `CREATE TABLE IF NOT EXISTS az_data_migrations (version INT NOT NULL, step INT NOT NULL, claimed_at BIGINT NOT NULL, applied_at BIGINT, PRIMARY KEY (version, step)) ${MYSQL_TABLE}`,
+};
+
+/**
+ * The admin audit table (data-spec §11): who wrote what row, when — never a
+ * value. A system step, version 0, ahead of the site's own steps (which
+ * start at 1); applied once, claimed like any other unit.
+ */
+export const AUDIT_STEP: DataStep = {
+  version: 0,
+  destructive: false,
+  summary: ['create the admin audit table az_data_audit'],
+  units: {
+    sqlite: [
+      { sql: 'CREATE TABLE IF NOT EXISTS az_data_audit (id TEXT PRIMARY KEY, admin TEXT NOT NULL, tbl TEXT NOT NULL, row_id TEXT NOT NULL, action TEXT NOT NULL, at INTEGER NOT NULL)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS az_data_audit_at ON az_data_audit (at, id)' },
+    ],
+    postgres: [
+      { sql: 'CREATE TABLE IF NOT EXISTS az_data_audit (id TEXT PRIMARY KEY, admin TEXT NOT NULL, tbl TEXT NOT NULL, row_id TEXT NOT NULL, action TEXT NOT NULL, at BIGINT NOT NULL)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS az_data_audit_at ON az_data_audit (at, id)' },
+    ],
+    mysql: [
+      { sql: `CREATE TABLE IF NOT EXISTS az_data_audit (id VARCHAR(36) PRIMARY KEY, admin VARCHAR(36) NOT NULL, tbl VARCHAR(63) NOT NULL, row_id VARCHAR(36) NOT NULL, action VARCHAR(8) NOT NULL, at BIGINT NOT NULL, INDEX az_data_audit_at (at, id)) ${MYSQL_TABLE}` },
+    ],
+  },
 };
 
 /** Destructive steps are pending and not confirmed: the server must not start. */
@@ -115,7 +139,7 @@ export async function migrateData(db: Db, steps: readonly DataStep[], options: M
   for (const row of await db.all('SELECT version, COUNT(*) AS n FROM az_data_migrations WHERE applied_at IS NOT NULL GROUP BY version')) {
     done.set(Number(row.version), Number(row.n));
   }
-  const pending = steps.filter((s) => (done.get(s.version) ?? 0) < s.units[db.dialect].length);
+  const pending = [AUDIT_STEP, ...steps].filter((s) => (done.get(s.version) ?? 0) < s.units[db.dialect].length);
   const blocked = pending.filter((s) => s.destructive && s.version > (options.confirm ?? 0));
   const applied: number[] = [];
   for (const step of pending) {
@@ -136,7 +160,8 @@ export async function migrateData(db: Db, steps: readonly DataStep[], options: M
       }, `data step ${step.version}.${i + 1}`, options.now, options.timing);
       if (outcome === 'ran') ran = true;
     }
-    if (ran) applied.push(step.version);
+    // The audit table (version 0) is the server's own; only the site's steps are reported.
+    if (ran && step.version > 0) applied.push(step.version);
   }
   return applied;
 }

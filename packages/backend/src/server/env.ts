@@ -26,6 +26,8 @@ export type EmailWay = 'smtp' | 'api';
 export interface Setup {
   readonly database: Database;
   readonly email: EmailWay;
+  /** The site declares data tables (data-spec): their keys are listed too. */
+  readonly data?: boolean;
 }
 
 export interface KeySpec {
@@ -66,6 +68,7 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_RESET_PATH', about: 'The site page that sets a new password; reset emails link there.', when: always, required: false, example: '/reset' },
   { name: 'AZ_LINK_LANDING', about: 'Where a sign-in link lands on the site once it has signed the visitor in.', when: always, required: false, example: '/' },
   { name: 'AZ_OAUTH_PROVIDERS', about: 'Provider ids, comma-separated (lower-case letters, digits, -). Each needs its own AZ_OAUTH_<ID>_… keys below; empty for none.', when: always, required: false, example: '' },
+  { name: 'AZ_ADMIN_EMAILS', about: 'Who may use /admin: verified account addresses, comma-separated. An unverified account with a listed address is not an admin. Empty: nobody.', when: (s) => s.data === true, required: false, example: '' },
   { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: always, required: false, example: 'deny' },
 ];
 

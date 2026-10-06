@@ -1,6 +1,6 @@
 /**
  * @az server app
- * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth; the /data edge.
+ * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth; the /data and /admin edge.
  * Spec: docs/auth-block-spec.md §3.4 · docs/backend-spec.md §5 · docs/data-spec.md §5.4
  * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES, DataRequest, DataRoutes
  * Edit guide: same answer for unknown account and wrong password; rate-limit before hashing; claim unverified accounts safely.
@@ -61,6 +61,8 @@ export interface DataRequest {
   readonly ip: string;
   /** The signed-in account's id, or null. */
   user(): Promise<string | null>;
+  /** The signed-in account's id, address and whether it is verified — for the admin check. */
+  account(): Promise<{ id: string; email: string; verified: boolean } | null>;
   /** The JSON body, at most `limit` bytes; throws BodyError. */
   body(limit: number): Promise<Record<string, unknown>>;
 }
@@ -455,7 +457,10 @@ export function createApp(deps: AppDeps) {
     }
 
     const data = deps.data;
-    if (data && (url.pathname === '/data' || url.pathname.startsWith('/data/'))) {
+    // The admin routes (data-spec §11) are fetch routes too, with the same edge.
+    const dataPath = url.pathname === '/data' || url.pathname.startsWith('/data/')
+      || url.pathname === '/admin/data' || url.pathname.startsWith('/admin/data/') || url.pathname === '/admin/audit';
+    if (data && dataPath) {
       // A fetch route like /auth: an allowed origin always, and the CSRF
       // header on EVERY method that can change something (data-spec §5.4).
       const origin = req.headers.origin ?? '';
@@ -470,6 +475,11 @@ export function createApp(deps: AppDeps) {
         user: async () => {
           const token = readCookies(req)[names.session];
           return token ? (await store.sessionUser(token))?.user.id ?? null : null;
+        },
+        account: async () => {
+          const token = readCookies(req)[names.session];
+          const u = token ? (await store.sessionUser(token))?.user : undefined;
+          return u ? { id: u.id, email: u.email, verified: u.emailVerified } : null;
         },
         body: (limit) => readJson(req, limit),
       });

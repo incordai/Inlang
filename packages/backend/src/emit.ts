@@ -178,7 +178,8 @@ Then:
 
 /** Everything under `server/` except the copied `src/`. */
 export function backendFiles(siteName: string, backend: SpecBackend, data?: BackendData): BackendFile[] {
-  const setup: Setup = { database: backend.database, email: backend.email };
+  // `data` only when there are tables, so a site without them gets exactly the files it got before.
+  const setup: Setup = { database: backend.database, email: backend.email, ...(data ? { data: true } : {}) };
   const deps = serverDependencies(setup);
   return [
     {
@@ -197,7 +198,7 @@ export function backendFiles(siteName: string, backend: SpecBackend, data?: Back
       path: `${SERVER_DIR}/az.config.json`,
       content: `${JSON.stringify({
         _generated: generatedJson('the backend\'s choices from the .az source: database and email'),
-        siteName, database: setup.database, email: setup.email,
+        siteName, database: setup.database, email: setup.email, ...(setup.data ? { data: true } : {}),
       }, null, 2)}\n`,
     },
     { path: `${SERVER_DIR}/.env.example`, content: `${hashHeader('every backend key with its meaning; copy to .env (az backend init) and fill it')}${envExample(setup)}` },

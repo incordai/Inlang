@@ -35,7 +35,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createApp, type DataRoutes } from '../../backend/src/server/app.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
-import { createData } from '../../backend/src/server/data-api.ts';
+import { createData, parseAdminEmails } from '../../backend/src/server/data-api.ts';
 import { migrateData, type DataStep } from '../../backend/src/server/data-migrate.ts';
 import { loadTables } from '../../backend/src/server/data-values.ts';
 import { createMailer } from '../../backend/src/server/email.ts';
@@ -284,6 +284,9 @@ export async function startDevBackend(
   await migrate(db);
   let data: DataRoutes | undefined;
   if (dataJson !== undefined) {
+    // AZ_ADMIN_EMAILS in backend.env names the dev admins (data-spec §11).
+    const admins = parseAdminEmails(env.AZ_ADMIN_EMAILS);
+    if (!admins.ok) throw new Error(`the dev backend cannot start — fix this in ${DEV_DIR}/backend.env:\n  - ${admins.problem}`);
     // The dev database is disposable (data-spec §6.3): every step applies,
     // the destructive ones too — and what they did is said, not hidden.
     const model = JSON.parse(dataJson) as { steps: DataStep[] };
@@ -291,7 +294,7 @@ export async function startDevBackend(
     for (const step of model.steps.filter((s) => applied.includes(s.version))) {
       print(`az dev: applied data step ${step.version} to ${DEV_DIR}/dev.db: ${step.summary.join('; ')}${step.destructive ? ' (data dropped or changed)' : ''}`);
     }
-    data = createData({ db, tables: loadTables(model) });
+    data = createData({ db, tables: loadTables(model), admins: admins.emails });
   }
   const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs });
   const app = createApp({

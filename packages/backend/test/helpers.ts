@@ -100,6 +100,8 @@ export async function startBackend(
     log?: (line: string) => void;
     mailer?: { send(m: Message): Promise<void> };
     data?: { tables: readonly Table[]; steps: readonly DataStep[] };
+    /** AZ_ADMIN_EMAILS, already parsed (lower-cased). */
+    admins?: readonly string[];
   } = {},
 ): Promise<Harness> {
   const clock = { now: Date.now() };
@@ -126,7 +128,7 @@ export async function startBackend(
     store: createStore(db, config.secret, () => clock.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }),
     mailer: over.mailer ?? { send: async (m) => { mail.push(m); } },
     oidc: createOidc((...a) => fetch(...a), () => clock.now), now: () => clock.now, log: over.log ?? (() => {}),
-    ...(over.data ? { data: createData({ db, tables: over.data.tables, now: () => clock.now }) } : {}),
+    ...(over.data ? { data: createData({ db, tables: over.data.tables, admins: over.admins ?? [], now: () => clock.now }) } : {}),
   });
   server.on('request', (req, res) => { void app.handler(req, res); });
   return { url, mail, clock, config, db, close: async () => { server.close(); await db.close(); } };

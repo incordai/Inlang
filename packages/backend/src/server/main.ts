@@ -100,12 +100,18 @@ let data: DataRoutes | undefined;
 if (existsSync(dataFile)) {
   const { loadTables } = await import('./data-values.ts');
   const { migrateData, DestructivePending, GuardFailed } = await import('./data-migrate.ts');
-  const { createData } = await import('./data-api.ts');
+  const { createData, parseAdminEmails } = await import('./data-api.ts');
   const model = JSON.parse(readFileSync(dataFile, 'utf8')) as { steps: DataStep[] };
   const tables = loadTables(model);
+  // AZ_ADMIN_EMAILS (data-spec §11): a malformed entry stops the server, named.
+  const admins = parseAdminEmails(process.env.AZ_ADMIN_EMAILS);
+  if (!admins.ok) {
+    process.stderr.write(`backend: cannot start — fix this in .env (see .env.example):\n  - ${admins.problem}\n`);
+    process.exit(1);
+  }
   const steps = await orStop(() => migrateData(db, model.steps, { confirm: args.confirm }), [DestructivePending, GuardFailed, MigrationBusy]);
   if (steps.length > 0) process.stdout.write(`backend: applied data steps ${steps.join(', ')}\n`);
-  data = createData({ db, tables });
+  data = createData({ db, tables, admins: admins.emails });
 }
 if (args.migrate) {
   process.stdout.write('backend: migrations are up to date\n');
