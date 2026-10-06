@@ -47,18 +47,18 @@ test('only granted operations; locked fields are not input; private fields are n
   assert.deepEqual(Object.keys(doc.paths['/data/products/{id}']).sort(), ['delete', 'get', 'parameters', 'patch']);
   assert.deepEqual(Object.keys(doc.paths['/data/waitlist']), ['post'], 'no read rule, no list');
   assert.equal(doc.paths['/data/waitlist/{id}'], undefined);
-  assert.deepEqual(Object.keys(doc.components.schemas.ProductInput.properties).sort(), ['contact', 'name', 'price']);
-  assert.deepEqual(doc.components.schemas.ProductInput.required, ['name', 'price']);
+  assert.deepEqual(Object.keys(doc.components.schemas.ProductsRowInput.properties).sort(), ['contact', 'name', 'price']);
+  assert.deepEqual(doc.components.schemas.ProductsRowInput.required, ['name', 'price']);
   const params = doc.paths['/data/products'].get.parameters.map((p: { name: string }) => p.name);
   assert.ok(params.includes('price.gte') && params.includes('q'));
   assert.ok(!params.some((p: string) => p.startsWith('contact')), 'a private field is no filter');
-  assert.deepEqual(doc.components.schemas.Product.properties.price.type, ['integer', 'null']);
+  assert.deepEqual(doc.components.schemas.ProductsRow.properties.price.type, ['integer', 'null']);
 });
 
 test('a write answers with its row only as the read rules grant it (review #4)', () => {
   const doc = JSON.parse(openapi('Shop', tablesOf(SHOP), 1));
   const created = (path: string) => doc.paths[path].post.responses['201'].content['application/json'].schema.properties.item;
-  assert.deepEqual(created('/data/products'), { $ref: '#/components/schemas/Product' });
+  assert.deepEqual(created('/data/products'), { $ref: '#/components/schemas/ProductsRow' });
   assert.equal(created('/data/waitlist').type, 'null', 'nobody reads the waitlist: never the row');
 });
 
@@ -75,8 +75,11 @@ test('the error codes are exactly the ones the server answers on /data', () => {
   assert.deepEqual([...answered].sort(), [...DATA_ERROR_CODES].sort());
 });
 
-test('type names: one row of each table', () => {
-  assert.deepEqual(['products', 'categories', 'boxes', 'notes', 'news', 'glass'].map(typeName), ['Product', 'Category', 'Box', 'Note', 'New', 'Glass']);
+test('type names: one row of each table — never shared between tables, never a built-in (review #6)', () => {
+  assert.deepEqual(['products', 'box', 'boxes', 'records', 'promises'].map(typeName), ['ProductsRow', 'BoxRow', 'BoxesRow', 'RecordsRow', 'PromisesRow']);
+  const doc = JSON.parse(openapi('Shop', tablesOf('  data box\n    n number\n    allow anyone read\n  data boxes\n    n number\n    allow anyone read\n'), 1));
+  assert.deepEqual(Object.keys(doc.components.schemas).sort(), ['BoxRow', 'BoxRowInput', 'BoxesRow', 'BoxesRowInput', 'Error']);
+  assert.deepEqual([doc.paths['/data/box'].get.operationId, doc.paths['/data/boxes'].get.operationId], ['listBox', 'listBoxes']);
 });
 
 test('image fields: { url, width, height } in rows, never in a body; GET/PUT/DELETE on their own path as rules allow', () => {
@@ -93,9 +96,9 @@ test('image fields: { url, width, height } in rows, never in a body; GET/PUT/DEL
     allow signedin create
 `), 1));
   const s = doc.components.schemas;
-  assert.deepEqual(s.Product.properties.photo.type, ['object', 'null']);
-  assert.deepEqual(s.Product.properties.photo.required, ['url', 'width', 'height']);
-  assert.ok(!('photo' in s.ProductInput.properties) && !('badge' in s.ProductInput.properties), 'an image is uploaded, never sent as JSON');
+  assert.deepEqual(s.ProductsRow.properties.photo.type, ['object', 'null']);
+  assert.deepEqual(s.ProductsRow.properties.photo.required, ['url', 'width', 'height']);
+  assert.ok(!('photo' in s.ProductsRowInput.properties) && !('badge' in s.ProductsRowInput.properties), 'an image is uploaded, never sent as JSON');
   const photo = doc.paths['/data/products/{id}/photo'];
   assert.deepEqual(Object.keys(photo).filter((k) => k !== 'parameters').sort(), ['delete', 'get', 'put']);
   assert.deepEqual(Object.keys(photo.put.requestBody.content), ['application/octet-stream']);

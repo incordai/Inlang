@@ -13,7 +13,7 @@
  * opens is always 403 and is left out, as the typed client leaves it out.
  */
 
-import { typeName, writeEcho, type SpecField, type SpecTable } from '../../core/src/data.ts';
+import { pascal, typeName, writeEcho, type SpecField, type SpecTable } from '../../core/src/data.ts';
 import { generatedJson } from '../../core/src/generated.ts';
 
 /** data-spec §5.3, closed. */
@@ -46,7 +46,7 @@ function fieldSchema(f: SpecField): Schema {
       case 'datetime': return { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'epoch milliseconds' };
       case 'flag': return { type: 'boolean' };
       case 'date': return { type: 'string', format: 'date' };
-      case 'ref': return { type: 'string', format: 'uuid', description: `id of a ${typeName(f.ref!)}` };
+      case 'ref': return { type: 'string', format: 'uuid', description: `id of a ${f.ref!} row` };
       case 'image': return {
         type: 'object', required: ['url', 'width', 'height'], additionalProperties: false,
         properties: { url: { type: 'string', format: 'uri' }, width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 } },
@@ -87,6 +87,8 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
   const paths: Record<string, Record<string, unknown>> = {};
   for (const t of tables) {
     const name = typeName(t.name);
+    // Operations are named by the table (one-to-one), schemas by its row type.
+    const op = pascal(t.name);
     const g = granted(t);
     schemas[name] = {
       type: 'object',
@@ -123,7 +125,7 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
     const one: Record<string, unknown> = {};
     if (g.read) {
       collection.get = {
-        operationId: `list${name}`,
+        operationId: `list${op}`,
         parameters: listParameters(t),
         responses: {
           200: {
@@ -136,23 +138,23 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
           ...ERRORS,
         },
       };
-      one.get = { operationId: `get${name}`, responses: { 200: { description: 'the row', ...item }, ...ERRORS, ...notFound } };
+      one.get = { operationId: `get${op}`, responses: { 200: { description: 'the row', ...item }, ...ERRORS, ...notFound } };
     }
     if (g.create) {
       collection.post = {
-        operationId: `create${name}`, requestBody: body,
+        operationId: `create${op}`, requestBody: body,
         responses: { 201: { description: 'created', ...created }, ...ERRORS, 409: errorResponse('taken, with the field'), 413: errorResponse('too_large') },
       };
     }
     if (g.edit) {
       one.patch = {
-        operationId: `update${name}`, requestBody: { ...body, content: { 'application/json': { schema: { $ref: `#/components/schemas/${name}Input`, description: 'any subset of the fields' } } } },
+        operationId: `update${op}`, requestBody: { ...body, content: { 'application/json': { schema: { $ref: `#/components/schemas/${name}Input`, description: 'any subset of the fields' } } } },
         responses: { 200: { description: 'updated', ...edited }, ...ERRORS, ...notFound, 409: errorResponse('taken, with the field'), 413: errorResponse('too_large') },
       };
     }
     if (g.delete) {
       one.delete = {
-        operationId: `remove${name}`,
+        operationId: `remove${op}`,
         responses: { 204: { description: 'deleted' }, ...ERRORS, ...notFound, 409: errorResponse('in_use — another table points at it') },
       };
     }
@@ -161,10 +163,10 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
     if (Object.keys(one).length > 0) paths[`/data/${t.name}/{id}`] = { parameters: idParam, ...one };
     for (const f of t.fields.filter((x) => x.type === 'image')) {
       const ops: Record<string, unknown> = {};
-      const field = typeName(f.name);
+      const field = pascal(f.name);
       if (g.read) {
         ops.get = {
-          operationId: `get${name}${field}`,
+          operationId: `get${op}${field}`,
           parameters: [{ name: 'v', in: 'query', required: false, schema: { type: 'string' }, description: 'the upload this url names; another one is not_found' }],
           responses: {
             200: { description: 'the image, re-encoded as WebP; no Origin needed (an <img> sends none)', content: { 'image/webp': { schema: { type: 'string', format: 'binary' } } } },
@@ -174,7 +176,7 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
       }
       if (g.edit && !f.locked) {
         ops.put = {
-          operationId: `upload${name}${field}`,
+          operationId: `upload${op}${field}`,
           requestBody: { required: true, content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }, description: 'the raw bytes of a JPEG, PNG, WebP or AVIF image, judged by its first bytes' },
           responses: {
             200: { description: 'stored', ...edited }, ...ERRORS, ...notFound,
@@ -182,7 +184,7 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
             415: errorResponse('unsupported_type — not a JPEG, PNG, WebP or AVIF image'),
           },
         };
-        ops.delete = { operationId: `clear${name}${field}`, responses: { 200: { description: 'cleared', ...edited }, ...ERRORS, ...notFound } };
+        ops.delete = { operationId: `clear${op}${field}`, responses: { 200: { description: 'cleared', ...edited }, ...ERRORS, ...notFound } };
       }
       if (Object.keys(ops).length > 0) {
         paths[`/data/${t.name}/{id}/${f.name}`] = { parameters: idParam, ...ops };

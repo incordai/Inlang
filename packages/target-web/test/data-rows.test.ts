@@ -60,9 +60,9 @@ test('rows.tsx: only the tables a block reads, each through its typed list', () 
   const rows = out.get(ROWS_FILE);
   assert.ok(rows, 'generated with a from block');
   assert.match(rows, /import \{ attachRows, type RowSource \} from "\.\.\/az\/rows\.ts";/);
-  assert.match(rows, /"notes": \(query\) => tables\["notes"\]\.list\(query as NoteQuery\),/);
+  assert.match(rows, /"notes": \(query\) => tables\["notes"\]\.list\(query as NotesRowQuery\),/);
   // A table named like a keyword is reached as a string key, never an identifier.
-  assert.match(rows, /"class": \(query\) => tables\["class"\]\.list\(query as ClassQuery\),/);
+  assert.match(rows, /"class": \(query\) => tables\["class"\]\.list\(query as ClassRowQuery\),/);
   assert.equal(rows.includes('unused'), false, 'a table no block reads is not wired');
   const app = out.get('src/App.tsx')!;
   assert.match(app, /import \{ RowsRuntime \} from "\.\/data\/rows\.tsx";/);

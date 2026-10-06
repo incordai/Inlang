@@ -2,7 +2,7 @@
  * @az module data
  * Purpose: `data <table>` declarations: fields, types, modifiers, allow rules → SpecTable, with every check.
  * Spec: docs/data-spec.md §4, §12
- * Exports: buildTables, typeName, writeEcho, sortable, SORT_TYPES, DATA_TYPES, DATA_MODIFIERS, WHO, ACTIONS, TEXT_LIMITS, SpecTable, SpecField, SpecRules, Who, Action, DataType
+ * Exports: buildTables, typeName, pascal, writeEcho, sortable, SORT_TYPES, DATA_TYPES, DATA_MODIFIERS, WHO, ACTIONS, TEXT_LIMITS, SpecTable, SpecField, SpecRules, Who, Action, DataType
  * Edit guide: the vocabulary is closed; a new type needs ddl (packages/backend/src/data-ddl.ts), the server's validator and a description.
  * Tests: packages/core/test/data.test.ts
  */
@@ -556,16 +556,19 @@ export function writeEcho(rules: SpecRules): { readonly create: 'row' | 'none' |
   };
 }
 
+/** `products` → `Products`. Table and field names are lowercase words, so this is one-to-one. */
+export const pascal = (name: string): string => name.charAt(0).toUpperCase() + name.slice(1);
+
 /**
  * The type one row of a table is, for the typed client and openapi.json:
- * `products` → `Product`, `categories` → `Category`, `boxes` → `Box`.
+ * `products` → `ProductsRow`. Built from the table's own name, so two tables
+ * never share a type (`box` and `boxes` were both `Box`), and suffixed, so no
+ * table meets a name the client or the platform already has (`records` was
+ * `Record`, `promises` `Promise`, `responses` `Response`). The client's other
+ * names add to it: `ProductsRowInput`, `ProductsRowPatch`, `ProductsRowQuery`.
  */
 export function typeName(table: string): string {
-  const singular = table.endsWith('ies') ? `${table.slice(0, -3)}y`
-    : /(?:ss|x|ch|sh)es$/.test(table) ? table.slice(0, -2)
-      : table.endsWith('s') && !table.endsWith('ss') ? table.slice(0, -1)
-        : table;
-  return singular.charAt(0).toUpperCase() + singular.slice(1);
+  return `${pascal(table)}Row`;
 }
 
 export function isDate(v: string): boolean {

@@ -169,10 +169,10 @@ page /private
 
 /** The author's component: the typed client, as a site uses it today. */
 const NOTES_COMPONENT = `import { useEffect, useState } from "react";
-import { tables, type Note } from "../../data/client.ts";
+import { tables, type NotesRow } from "../../data/client.ts";
 
 export default function Notes() {
-  const [notes, setNotes] = useState<readonly Note[] | null>(null);
+  const [notes, setNotes] = useState<readonly NotesRow[] | null>(null);
   const [problem, setProblem] = useState("");
   useEffect(() => {
     // For the test to drive the same client the component uses.

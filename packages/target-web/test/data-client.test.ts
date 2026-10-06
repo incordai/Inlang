@@ -63,18 +63,18 @@ test('only granted operations; a table named like a keyword is a key, not a vari
   const klass = /class: \{([\s\S]*?)\n {2}\},/.exec(src)![1];
   assert.deepEqual([...klass.matchAll(/^ {4}(\w+): \(/gm)].map((m) => m[1]), ['create']);
   assert.ok(!/export const class\b/.test(src));
-  assert.match(src, /export interface ProductInput \{\n {2}name: string;\n {2}price: number;\n {2}status\?: "draft" \| "live" \| null;/, 'required without a default is required input; the rest optional');
-  assert.ok(!/ProductInput \{[^}]*stock/.test(src), 'locked fields are not input');
+  assert.match(src, /export interface ProductsRowInput \{\n {2}name: string;\n {2}price: number;\n {2}status\?: "draft" \| "live" \| null;/, 'required without a default is required input; the rest optional');
+  assert.ok(!/ProductsRowInput \{[^}]*stock/.test(src), 'locked fields are not input');
   assert.match(src, /readonly contact: string \| null;/, 'private reads as nullable');
 });
 
 test('a write answers with its row only as the read rules grant it (review #4)', () => {
   const src = dataClient(specOf(`${DATA}  data notes\n    body text\n    allow owner read edit\n    allow signedin create\n  data tips\n    body text\n    allow signedin read\n    allow anyone create\n`).site.data!);
-  assert.match(src, /create: \(input: ProductInput\) => call<\{ item: Product \}>/, 'anyone reads: the row');
-  assert.match(src, /create: \(input: ClassInput\) => call<\{ item: null \}>/, 'nobody reads: never the row');
-  assert.match(src, /create: \(input: NoteInput\) => call<\{ item: Note \}>/, 'the creator owns it and owners read');
-  assert.match(src, /update: \(id: string, changes: NotePatch\) => call<\{ item: Note \}>/);
-  assert.match(src, /create: \(input: TipInput\) => call<\{ item: Tip \| null \}>/, 'signed out, the creator may not read it');
+  assert.match(src, /create: \(input: ProductsRowInput\) => call<\{ item: ProductsRow \}>/, 'anyone reads: the row');
+  assert.match(src, /create: \(input: ClassRowInput\) => call<\{ item: null \}>/, 'nobody reads: never the row');
+  assert.match(src, /create: \(input: NotesRowInput\) => call<\{ item: NotesRow \}>/, 'the creator owns it and owners read');
+  assert.match(src, /update: \(id: string, changes: NotesRowPatch\) => call<\{ item: NotesRow \}>/);
+  assert.match(src, /create: \(input: TipsRowInput\) => call<\{ item: TipsRow \| null \}>/, 'signed out, the creator may not read it');
 });
 
 const IMAGES = `  data products
@@ -91,14 +91,29 @@ const IMAGES = `  data products
     allow signedin create
 `;
 
-test('the generated client type-checks under strict TypeScript — with and without image fields', () => {
-  for (const data of [DATA, IMAGES]) {
+/** Tables named like the platform's own types, and two that once shared a type name (review #6). */
+const CLASHES = ['records', 'promises', 'responses', 'requests', 'errors', 'maps', 'box', 'boxes']
+  .map((t) => `  data ${t}\n    label text required\n    allow anyone read\n    allow signedin create\n    allow owner edit delete\n`).join('');
+
+test('the generated client type-checks under strict TypeScript — with and without image fields, and tables named like built-ins', () => {
+  for (const data of [DATA, IMAGES, CLASHES]) {
     const dir = mkdtempSync(join(tmpdir(), 'az-client-'));
     writeFileSync(join(dir, 'client.ts'), dataClient(specOf(data).site.data!));
+    // A module beside it that uses the client AND the built-ins the tables are named after.
+    if (data === CLASHES) {
+      writeFileSync(join(dir, 'use.ts'), [
+        'import { tables, type RecordsRow, type BoxRow, type BoxesRow } from "./client.ts";',
+        'const byId: Record<string, RecordsRow> = {};',
+        'const wait: Promise<Response> = fetch("/");',
+        'const pair: [BoxRow["label"], BoxesRow["label"]] = ["a", "b"];',
+        'export const used = [byId, wait, pair, tables.box.list, tables.boxes.list, new Map<string, Error>()];',
+        '',
+      ].join('\n'));
+    }
     writeFileSync(join(dir, 'env.d.ts'), 'interface ImportMeta { readonly env: Record<string, string | undefined> }\n');
     const tsc = join(ROOT, 'node_modules/typescript/bin/tsc');
     // Run from the temporary folder: no project tsconfig.json applies there.
-    const r = spawnSync(process.execPath, [tsc, '--noEmit', '--strict', '--target', 'es2022', '--module', 'esnext', '--moduleResolution', 'bundler', '--lib', 'es2022,dom', '--allowImportingTsExtensions', 'client.ts', 'env.d.ts'], { encoding: 'utf8', cwd: dir });
+    const r = spawnSync(process.execPath, [tsc, '--noEmit', '--strict', '--target', 'es2022', '--module', 'esnext', '--moduleResolution', 'bundler', '--lib', 'es2022,dom', '--allowImportingTsExtensions', 'client.ts', 'env.d.ts', ...(data === CLASHES ? ['use.ts'] : [])], { encoding: 'utf8', cwd: dir });
     assert.equal(r.status, 0, r.stdout + r.stderr);
   }
 });
@@ -106,7 +121,7 @@ test('the generated client type-checks under strict TypeScript — with and with
 test('image fields: DataImage | null in rows, never input; upload/clear only where an edit rule opens them, locked ones admin-only', () => {
   const src = dataClient(specOf(IMAGES).site.data!);
   assert.match(src, /readonly photo: DataImage \| null;/);
-  assert.ok(!/ProductInput \{[^}]*(photo|proof|badge)/.test(src) && !/ProductPatch \{[^}]*(photo|proof|badge)/.test(src), 'never sent as JSON');
+  assert.ok(!/ProductsRowInput \{[^}]*(photo|proof|badge)/.test(src) && !/ProductsRowPatch \{[^}]*(photo|proof|badge)/.test(src), 'never sent as JSON');
   const products = /products: \{([\s\S]*?)\n {2}\},/.exec(src)![1];
   assert.deepEqual([...products.matchAll(/^ {4}(\w+): \(/gm)].map((m) => m[1]), ['list', 'get', 'create', 'update', 'remove', 'upload', 'clear']);
   assert.match(products, /upload: \(id: string, field: "photo" \| "proof", file: Blob\)/, 'the locked badge is not offered');
