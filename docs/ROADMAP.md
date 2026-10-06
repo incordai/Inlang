@@ -31,13 +31,13 @@ proxy in `motion-tiers-spec.md` §8. If a mid-range Android is available, run
 the full protocol in VERIFICATION §2 and record it; if not, M0 still completes.
 
 **Exit criteria**
-- [ ] all three tiers render correctly and are visually distinct
+- [x] all three tiers render correctly and are visually distinct — spike `browser.test.ts` (CONTROL: the three tiers render differently)
 - [ ] the probe selects the right tier on every device available, including a
       deliberately throttled one (tests A1b)
-- [ ] zero tier oscillation across a 60s scroll; downgrade ratchets one way
+- [x] zero tier oscillation across a 60s scroll; downgrade ratchets one way — 60s at 4×/6× throttle held rung 0; a synthetic 22ms load stepped 0→5 one way (`m0.test.ts`, proxy)
 - [ ] `full` ≥ 50fps (p5) on a 2021+ laptop
-- [ ] no memory growth across 5 mount/unmount cycles
-- [ ] hand-written hero ≤ ~250 lines, **counted twice and recorded separately**
+- [x] no memory growth across 5 mount/unmount cycles — +1.0 MB JS heap (`m0.test.ts`)
+- [x] hand-written hero ≤ ~250 lines, **counted twice and recorded separately** — 237 structural / 481 with the look (ASSUMPTIONS A2)
       (tests A2): once for scene structure alone, once including the shader and
       buffer code that carries the distinctive look. A2 splits into two claims
       and only the structural one is currently supported
@@ -72,11 +72,11 @@ and read A1b's failure path before starting M1.
 - path sandboxing, escape-on-emit, exact-pin lint, `--ignore-scripts`
 
 **Exit criteria**
-- [ ] a 5-line `.az` compiles to a site that runs
-- [ ] `az build` twice → byte-identical output (automated test)
-- [ ] `az build` succeeds with network disabled (`node_modules` present)
-- [ ] cold compile < 1s on the reference fixture
-- [ ] CI enforces the dependency rules in ARCHITECTURE §2
+- [x] a 5-line `.az` compiles to a site that runs — verify-build builds and renders a 5-line site
+- [x] `az build` twice → byte-identical output (automated test) — `cli.test.ts` DETERMINISM, verify-build
+- [x] `az build` succeeds with network disabled (`node_modules` present) — `m1-exit.test.ts`
+- [x] cold compile < 1s on the reference fixture — `m1-exit.test.ts` (measured 140–260ms)
+- [x] CI enforces the dependency rules in ARCHITECTURE §2 — `deps.test.ts` in `pnpm verify`, run by CI
 
 ---
 
@@ -102,9 +102,9 @@ free while snapshots exist — authoring-experience §2).
 
 **Exit criteria**
 - [x] all 11 blocks pass the 12-point gate, in every variant
-- [ ] all 5 structure keywords implemented and covered by fixtures
-- [ ] `az lint` fails a deliberately non-compliant word (tests A7)
-- [ ] 3 themes, all blocks rendering correctly in each, light and dark
+- [ ] all 5 structure keywords implemented and covered by fixtures — **open: `font` is parsed but the web target ignores it** (2026-10-05)
+- [x] `az lint` fails a deliberately non-compliant word (tests A7) — `lint-migrate.test.ts`
+- [x] 3 themes, all blocks rendering correctly in each, light and dark — `pnpm gate --every-variant`
 - [x] thumbnails generated for every block and every variant
 - [ ] mobile motion vocabulary **designed and written down** (PRD §6.4)
 
