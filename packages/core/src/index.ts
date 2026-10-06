@@ -30,6 +30,7 @@ import { parse } from './parse.ts';
 import { link, type Manifest } from './link.ts';
 import { buildSpec, serialiseSpec, type Spec } from './spec.ts';
 import { secretLiterals } from './literals.ts';
+import { checkLock } from './data-lock.ts';
 
 export type { Diagnostic, Pos, Token } from './lex.ts';
 export type { Arg, Statement, AzFile } from './parse.ts';
@@ -42,6 +43,11 @@ export {
   ACTIONS, DATA_MODIFIERS, DATA_TYPES, WHO, TEXT_LIMITS, buildTables,
   type Action, type DataType, type SpecField, type SpecRules, type SpecTable, type Who,
 } from './data.ts';
+export {
+  LOCK_FORMAT, LockError, applyOp, canonicalSteps, checkLock, parseLock, plan, replay, serialiseLock, storageOf,
+  type Change, type DataLock, type Fill, type LockField, type LockFlags, type LockOp, type LockStep,
+  type LockTable, type PlanResult,
+} from './data-lock.ts';
 export { DESCRIPTION_MAX, STRUCTURE_DESCRIPTIONS, explain, formatExplained } from './describe.ts';
 export type { Explained, ExplainedLine } from './describe.ts';
 export type { BackendDatabase, BackendEmail, SpecBackend } from './backend.ts';
@@ -65,6 +71,20 @@ export interface CompileOptions {
    * bundles them.
    */
   readonly manifests: Map<string, Manifest>;
+  /**
+   * The data schema lock beside the file (data-spec §6.1), read by the
+   * caller. Absent, no lock check runs (the Playground has no lock); present,
+   * the file's tables must equal the lock's final schema (AZ1701, AZ1706).
+   */
+  readonly lock?: {
+    /** The lock's text, or null when the file does not exist. */
+    readonly text: string | null;
+    /** Names for the message: the source and the lock as the author knows them. */
+    readonly source: string;
+    readonly name: string;
+    /** The digest the lock was written with (sha256 hex in the CLI). */
+    readonly digest: (text: string) => string;
+  };
 }
 
 /**
@@ -89,6 +109,14 @@ export function compile(source: string, options: CompileOptions): CompileResult 
     ...built.diagnostics,
     ...secretLiterals(parsed.file.body),
   ];
+  // The lock is compared only with a sound file: one with errors has no
+  // trustworthy tables to compare, and already fails.
+  const lock = options.lock;
+  if (lock && built.spec && !all.some((d) => d.severity === 'error')) {
+    const site = parsed.file.body.find((s) => s.word === 'site');
+    const at = site?.children.find((s) => s.word === 'data')?.pos ?? site?.pos ?? { line: 1, col: 1 };
+    all.push(...checkLock(built.spec.site.data ?? [], lock.text, { source: lock.source, lock: lock.name }, lock.digest, at));
+  }
   const ok = !all.some((d) => d.severity === 'error');
 
   return { spec: built.spec, diagnostics: capped(all), ok };

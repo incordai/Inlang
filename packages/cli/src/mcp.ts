@@ -24,6 +24,7 @@ import { serve } from '../../mcp/src/server.ts';
 import type { Toolbox, ToolDiagnostic, WordEntry } from '../../mcp/src/tools.ts';
 import { build, wordsFor } from './az.ts';
 import { initBackendEnv } from './backend-init.ts';
+import { lockOption } from './data-schema.ts';
 import { lintWords } from './lint.ts';
 import { GRAMMAR_VERSION, migrate } from './migrate.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
@@ -45,7 +46,7 @@ const wordsDir = () => process.env.AZ_WORDS ?? BUNDLED_WORDS;
  */
 function compileFile(file: string) {
   const words = wordsFor({ source: file, wordsDir: wordsDir() }, false);
-  return compile(readFileSync(file, 'utf8'), { manifests: words.manifests });
+  return compile(readFileSync(file, 'utf8'), { manifests: words.manifests, lock: lockOption(file) });
 }
 
 export function toolbox(root: string): Toolbox {

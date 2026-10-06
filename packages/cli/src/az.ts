@@ -40,6 +40,7 @@ import { lintWords } from './lint.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
 import { initBackendEnv } from './backend-init.ts';
+import { lockOption, runDataPlan, runDataSchema } from './data-schema.ts';
 import { writeOutput } from './output.ts';
 // mcp.ts imports build/wordsFor from here; the cycle is safe for the same
 // reason as dev.ts's — nothing is touched until a command runs.
@@ -135,7 +136,7 @@ export const wordsFor = (options: Omit<BuildOptions, 'outDir'>, code = true) => 
 export function build(options: BuildOptions): BuildOutcome {
   const src = readFileSync(options.source, 'utf8');
   const words = wordsFor(options);
-  const result = compile(src, { manifests: words.manifests });
+  const result = compile(src, { manifests: words.manifests, lock: lockOption(options.source) });
 
   const report = result.diagnostics.length
     ? formatDiagnostics(result.diagnostics, options.source)
@@ -266,7 +267,7 @@ function dotenv(dir: string): Record<string, string> {
  */
 export function specOf(options: Omit<BuildOptions, 'outDir'>): { json: string | null; report: string } {
   const src = readFileSync(options.source, 'utf8');
-  const r = compile(src, { manifests: wordsFor(options).manifests });
+  const r = compile(src, { manifests: wordsFor(options).manifests, lock: lockOption(options.source) });
   const report = r.diagnostics.length ? formatDiagnostics(r.diagnostics, options.source) : '';
   return { json: r.ok && r.spec ? serialiseSpec(r.spec) : null, report };
 }
@@ -285,6 +286,9 @@ const USAGE = `az — words to a website
   az migrate <file.az>             upgrade the file to this grammar version
   az eject <word> [--dir project]  take ownership of a word's source — one-way
   az backend init <server-dir>     write the backend's .env with a fresh secret
+  az backend plan <file.az>        show the data schema step the file needs
+  az backend schema <file.az> [--rename a=b] [--drop x] [--unique t.f]
+                                   record that step in <file>.data.json
   az mcp   [--root dir]            serve these tools to an AI agent (MCP, stdio)
   az explain <term...>             one line per term: az explain hero center
 `;
@@ -298,8 +302,20 @@ const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'e
  * second init would silently rotate the secret and sign everyone out.
  */
 function runBackend(sub: string, rest: string[]): number {
+  const io = { out: (s: string) => process.stdout.write(s), err: (s: string) => process.stderr.write(s) };
+  if ((sub === 'plan' || sub === 'schema') && rest[0]) {
+    if (!existsSync(rest[0])) {
+      process.stderr.write(`az: ${rest[0]} does not exist — try: az backend ${sub} site.az\n`);
+      return EXIT.missing;
+    }
+    // Manifests only: planning a schema never runs the project's word code.
+    const manifests = wordsFor({ source: rest[0], wordsDir: process.env.AZ_WORDS ?? BUNDLED_WORDS }, false).manifests;
+    return sub === 'plan'
+      ? runDataPlan(rest[0], manifests, io)
+      : runDataSchema(rest[0], manifests, rest.slice(1), io);
+  }
   if (sub !== 'init' || !rest[0]) {
-    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build)\n');
+    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az or az backend schema site.az\n');
     return EXIT.config;
   }
   const r = initBackendEnv(resolve(rest[0]));
