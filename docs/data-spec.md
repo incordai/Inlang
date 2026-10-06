@@ -960,7 +960,7 @@ field.
 | 5 | — | A JSON body never carries an image key, not even `null` (`400 invalid`); clearing is `DELETE …/<field>` | One way to change an image, so a file never outlives its key unnoticed |
 | 11 | admin upload/replace/clear | `GET/PUT/DELETE /admin/data/<t>/<id>/<field>`, any row, `locked` included; audited as `edit`; counted in the 30 uploads an hour per account | The admin twin of the public route, as for rows |
 | 5 | — | A server with image fields allows 120 s per request (15 s otherwise) | A 20 MB upload over a slow link needs longer than a JSON body |
-| 10 | `media`/`src` from an image field | Not done: D4 refuses image mappings (AZ1214 in `core/src/from.ts`) and `gallery` has no rows shell yet | D4 landed while D3 was built and its worker is still changing those files; the mapping needs the rows runtime to read `{ url, width, height }` (follow-up) |
+| 10.2 | `gallery` and `feature` map image fields | `feature` `media` and `gallery` `src` fill from an image field: the rows runtime reads `{ url, width, height }`, puts the URL through the `src` rule and sets the `<img>` size. `gallery` fills in `grid` and `masonry`; `orbit`, `carousel` and `lightbox` with `from` are AZ1214 ("not available yet") | Those three are built from the images the page shipped (the ring, the step buttons, the dialog); filling them from rows is its own piece of work, refused by name rather than compiled into something that does nothing |
 
 **Finding — CORP `same-site` and IP addresses.** Chromium treats two
 IP-literal origins (`http://127.0.0.1:A` → `http://127.0.0.1:B`) as never
@@ -1000,6 +1000,7 @@ admin-values tests), `pnpm test:backend-db` (three columns through create,
 add, rename and drop; upload, two replacements at once leaving one file,
 private reads, clear, delete, the sweep — PostgreSQL 18.6, MySQL 8.4.11),
 `pnpm test:data` (Chromium and Firefox: a phone photo uploaded through the
+typed client fills a `from` gallery on the page; a phone photo uploaded through the
 typed client is shown by an `<img>` on the site's page from the server's
 origin, stored without metadata, served with the §8 headers; renamed SVG and
 another account refused; the admin editor uploads, previews, refuses an SVG

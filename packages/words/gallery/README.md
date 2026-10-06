@@ -71,9 +71,11 @@ Rules: `orbit` requires `poster`.
 
 `gallery` declares `from <table>` (data-spec §10.2): `src` ← an `image` field
 and `alt` ← a `text` field (both required), `caption` ← a `text` field,
-`limit` up to 100. Image fields ship with uploads (D3), so today every
-gallery `from` is refused at compile time (AZ1214, naming D3) and the
-emitter has no shell for it yet; `az explain gallery from` lists the terms.
+`limit` up to 100. `grid` and `masonry` fill from rows after the page: a
+skeleton at the gallery's ratio, then one image per row (a row without an
+image is not shown), each `<img>` given the stored width and height.
+`orbit`, `carousel` and `lightbox` do not fill from rows yet and are refused
+with `from` (AZ1214); `az explain gallery from` lists the terms.
 
 ## Accessibility
 

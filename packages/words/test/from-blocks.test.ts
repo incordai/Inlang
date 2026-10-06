@@ -26,7 +26,7 @@ for (const w of readdirSync(WORDS).filter((d) => existsSync(join(WORDS, d, 'word
 const T = resolve(THEMES.midnight, 'dark') as unknown as ThemeLike;
 
 const HEAD = ['az 1', 'site shop', '  auth', '    adapter azbackend', '  backend', '    database sqlite', '    email smtp',
-  '  data notes', '    title text required', '    body longtext', '    allow anyone read',
+  '  data notes', '    title text required', '    body longtext', '    photo image', '    allow anyone read',
   '  data questions', '    question text required', '    answer longtext required', '    allow owner read', '    allow signedin create',
   'page /', '  hero center', '    title "x"'];
 const TAIL = ['page /login', '  auth login', ''];
@@ -122,4 +122,26 @@ test('reveal: a from block rises as one unit — no skeleton or template item is
   const out = emit(block(['  feature grid reveal', ...FEATURE.slice(1)], 'feature'));
   assert.ok(has(out, 'data-az-reveal'));
   assert.equal(walk(out).some((n) => has(n, 'data-az-reveal-item')), false);
+});
+
+test('gallery: grid fills from a table — the template is the word\'s own image with markers, never an asset path', () => {
+  const out = emit(block(['  gallery grid', '    from notes', '      src photo', '      alt title', '      caption title', '      limit 6'], 'gallery'));
+  const host = part(out, 'data-az-from')!;
+  const config = JSON.parse(host.attrs!['data-az-from']);
+  assert.deepEqual([config.label, config.map, config.types], ['src', { alt: 'title', caption: 'title', src: 'photo' }, { alt: 'text', caption: 'text', src: 'image' }]);
+  assert.equal(part(out, 'data-az-from-skeleton')!.children?.length, 6);
+  const template = part(out, 'data-az-from-template')!;
+  const img = walk(template).find((n) => n.tag === 'img')!;
+  assert.deepEqual([img.attrs!.src, img.attrs!.alt, img.attrs!.loading], [fromMark('src'), fromMark('alt'), 'lazy']);
+  assert.ok(walk(template).some((n) => n.tag === 'figcaption' && texts(n).includes(fromMark('caption'))), 'the caption marker');
+  assert.equal(template.attrs!.class.split(' ').includes('az-gallery-items'), true, 'the word\'s own list');
+  const plain = emit(block(['  gallery grid', '    image ./a.webp', '      alt "A"', '    image ./b.webp', '      alt "B"'], 'gallery'));
+  assert.equal(part(plain, 'data-az-from'), undefined, 'CONTROL: no shell without from');
+});
+
+test('feature: media fills from an image field (rows), as a marker the runtime replaces', () => {
+  const out = emit(block(['  feature rows', '    from notes', '      title title', '      media photo'], 'feature'));
+  const template = part(out, 'data-az-from-template')!;
+  const img = walk(template).find((n) => n.tag === 'img')!;
+  assert.equal(img.attrs!.src, fromMark('media'));
 });

@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attributeValue, markerProp, paragraphs, parseRowsConfig, problemCopy, rowText, safeUrl,
+  attributeValue, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, safeUrl,
 } from '../src/runtime/rows-logic.ts';
 
 const MARK = (prop: string) => `\u{E000}${prop}\u{E000}`;
@@ -86,4 +86,17 @@ test('a marker is exactly one prop between the private-use marks', () => {
   assert.equal(markerProp(`${MARK('title')}${MARK('text')}`), null);
   assert.equal(markerProp('title'), null);
   assert.equal(markerProp(MARK('Title')), null);
+});
+
+test('an image field fills by its URL and size; anything else a server should never send is no image', () => {
+  const url = 'https://api.shop.test/data/notes/x/photo?v=1';
+  assert.deepEqual(rowImage({ photo: { url, width: 640, height: 480 } }, 'photo'), { url, width: 640, height: 480 });
+  assert.deepEqual(rowImage({ photo: { url, width: -1, height: 1.5 } }, 'photo'), { url, width: 0, height: 0 }, 'a bad size is no size');
+  for (const v of [null, 'https://x.test/a.webp', { url: '' }, { url: 5 }, [url], undefined]) {
+    assert.equal(rowImage({ photo: v }, 'photo'), null, JSON.stringify(v));
+  }
+  assert.equal(rowImage({}, 'photo'), null);
+  assert.equal(rowText({ photo: { url, width: 1, height: 1 } }, 'photo'), null, 'CONTROL: an image is never text');
+  // The URL still passes the src rule: a javascript: URL from a server is dropped.
+  assert.equal(attributeValue('src', MARK('src'), () => rowImage({ p: { url: 'javascript:alert(1)', width: 1, height: 1 } }, 'p')!.url, 'https://shop.test/'), null);
 });

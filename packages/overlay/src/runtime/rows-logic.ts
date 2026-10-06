@@ -2,7 +2,7 @@
  * @az runtime rows-logic
  * Purpose: the decisions of a `from` block's runtime as pure functions: its config, values, links, copy.
  * Spec: docs/data-spec.md §10.3, §13 (stored XSS, dangerous links)
- * Exports: parseRowsConfig, rowText, safeUrl, attributeValue, paragraphs, problemCopy, markerProp, RowsConfig
+ * Exports: parseRowsConfig, rowText, rowImage, safeUrl, attributeValue, paragraphs, problemCopy, markerProp, RowsConfig
  * Edit guide: keep pure (no DOM); every decision here has a unit test; never turn a value into markup.
  * Tests: packages/overlay/test/rows.test.ts
  */
@@ -86,6 +86,18 @@ export function rowText(row: unknown, field: string): string | null {
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
   return null;
+}
+
+/**
+ * A row's image field (data-spec §8: `{ url, width, height }` or null) — its
+ * URL and size, or null. The URL still goes through safeUrl where it is used.
+ */
+export function rowImage(row: unknown, field: string): { url: string; width: number; height: number } | null {
+  if (!isRecord(row) || !Object.hasOwn(row, field)) return null;
+  const v = row[field];
+  if (!isRecord(v) || typeof v.url !== 'string' || v.url === '') return null;
+  const size = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n > 0 ? n : 0);
+  return { url: v.url, width: size(v.width), height: size(v.height) };
 }
 
 /**

@@ -85,11 +85,13 @@ const SORT_DIRECTIONS: readonly string[] = ['asc', 'desc'];
 /** System columns every row has (data-spec §4.4) that a block may sort by. */
 const SYSTEM_SORT = ['created', 'updated'];
 /**
- * Field types the data grammar does not accept yet: data.ts refuses `image`
- * until uploads ship (data-spec §15, D3), so a mapping that only an image
- * can fill is named and refused here too (AZ1214), never compiled.
+ * A gallery's layouts that do not fill from rows yet (data-spec §10.2):
+ * `orbit` draws a ring of the images the page shipped, `carousel` wires its
+ * step buttons to the shipped track, `lightbox` builds its dialog from the
+ * shipped images. With `from` they are named and refused (AZ1214), never
+ * compiled into something that does nothing; grid and masonry fill.
  */
-const DEFERRED_TYPES: ReadonlySet<string> = new Set(['image']);
+export const GALLERY_FROM_REFUSED = { variants: ['orbit', 'carousel'], modifiers: ['lightbox'] } as const;
 
 /** The raw `from` line and its children, as link.ts keeps them. */
 export interface FromLine {
@@ -187,15 +189,10 @@ export function buildFrom(
       if (!once(c)) continue;
       const arg = oneValue(c, '<field>');
       if (!arg) continue;
-      if (target.types.every((t) => DEFERRED_TYPES.has(t))) {
-        err('AZ1214', `'${c.word}' from a table is not available yet — image fields arrive with uploads (D3)`, c.pos);
-        continue;
-      }
       const f = fieldOf(arg);
       if (!f) continue;
       if (!target.types.includes(f.type)) {
-        const fits = target.types.filter((t) => !DEFERRED_TYPES.has(t));
-        err('AZ1262', `'${c.word}' needs ${article(fits[0])} ${fits.join(' or ')} field, '${f.name}' is ${f.type}`, arg.pos);
+        err('AZ1262', `'${c.word}' needs ${article(target.types[0])} ${target.types.join(' or ')} field, '${f.name}' is ${f.type}`, arg.pos);
         continue;
       }
       if (f.private && !own) {

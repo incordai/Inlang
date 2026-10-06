@@ -131,11 +131,29 @@ test('AZ1262 — a field of a type the slot prop cannot show', () => {
   assert.equal(found(faq, 'AZ1262')[0]?.message, "faq: 'text' needs a longtext field, 'question' is text");
 });
 
-test('AZ1214 — an image mapping is refused, naming D3, until uploads ship', () => {
-  const [d] = found(site(FEATURE.replace('      sort', '      media  name\n      sort')), 'AZ1214');
-  assert.equal(d?.message, "feature: 'media' from a table is not available yet — image fields arrive with uploads (D3)");
-  const gallery = site('  gallery grid\n    from products\n      src name\n      alt name\n');
-  assert.ok(found(gallery, 'AZ1214').length === 1, 'gallery src too');
+test('image fields map to media and src (D3); a text field there is AZ1262', () => {
+  const withPhoto = TABLES.replace('    featured flag\n', '    featured flag\n    photo    image\n');
+  const src = (body: string) => site(body).replace(TABLES, withPhoto);
+  const feature = src(FEATURE.replace('      sort', '      media  photo\n      sort'));
+  assert.deepEqual(errors(feature), []);
+  const from = run(feature).spec!.pages[0].blocks[0].from!;
+  assert.deepEqual([from.map.media, from.types.media], ['photo', 'image']);
+  const gallery = src('  gallery grid\n    from products\n      src photo\n      alt name\n');
+  assert.deepEqual(errors(gallery), []);
+  assert.equal(found(src('  gallery grid\n    from products\n      src name\n      alt name\n'), 'AZ1262')[0]?.message,
+    "gallery: 'src' needs an image field, 'name' is text");
+});
+
+test('AZ1214 — gallery orbit, carousel and lightbox with from are named as not available yet; grid and masonry compile', () => {
+  const withPhoto = TABLES.replace('    featured flag\n', '    featured flag\n    photo    image\n');
+  const src = (head: string) => site(`  ${head}\n    from products\n      src photo\n      alt name\n`).replace(TABLES, withPhoto);
+  assert.deepEqual(found(src('gallery orbit').replace('gallery orbit', 'gallery orbit\n    poster ./p.webp'), 'AZ1214').map((d) => d.message),
+    ["gallery: 'orbit' with 'from' is not available yet — use grid or masonry"]);
+  assert.deepEqual(found(src('gallery carousel'), 'AZ1214').map((d) => d.message),
+    ["gallery: 'carousel' with 'from' is not available yet — use grid or masonry"]);
+  assert.deepEqual(found(src('gallery grid lightbox'), 'AZ1214').map((d) => d.message),
+    ["gallery: 'lightbox' with 'from' is not available yet — use grid or masonry"]);
+  for (const ok of ['gallery grid', 'gallery masonry']) assert.deepEqual(errors(src(ok)), [], `CONTROL: ${ok}`);
 });
 
 test('AZ1263 — static items and from in one block', () => {

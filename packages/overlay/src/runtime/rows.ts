@@ -32,7 +32,7 @@
  * Imports only its siblings.
  */
 
-import { attributeValue, markerProp, paragraphs, parseRowsConfig, problemCopy, rowText, type RowsConfig } from './rows-logic.ts';
+import { attributeValue, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, type RowsConfig } from './rows-logic.ts';
 
 /** What a table's list answers: the generated client's DataResult, narrowed to what this needs. */
 export type RowsResult =
@@ -115,7 +115,10 @@ function suffixIds(root: Element, suffix: string): void {
  * when the marker was all that element held (an item's text paragraph).
  */
 function fillRow(doc: Document, item: Element, row: unknown, config: RowsConfig, suffix: string): Element | null {
-  const valueOf = (prop: string) => (Object.hasOwn(config.map, prop) ? rowText(row, config.map[prop]) : null);
+  const image = (prop: string) => (config.types[prop] === 'image' ? rowImage(row, config.map[prop]) : null);
+  // An image field fills by its URL; every other field by its text.
+  const valueOf = (prop: string) => (!Object.hasOwn(config.map, prop) ? null
+    : config.types[prop] === 'image' ? image(prop)?.url ?? null : rowText(row, config.map[prop]));
   if (config.label !== null && valueOf(config.label) === null) return null;
   const copy = item.cloneNode(true) as Element;
 
@@ -150,6 +153,15 @@ function fillRow(doc: Document, item: Element, row: unknown, config: RowsConfig,
   }
 
   const base = doc.baseURI;
+  // An image filled from a row reserves its box: its stored width and height (data-spec §8).
+  for (const img of copy.querySelectorAll('img')) {
+    const prop = markerProp(img.getAttribute('src') ?? '');
+    const size = prop === null ? null : image(prop);
+    if (size && size.width > 0 && size.height > 0) {
+      img.setAttribute('width', String(size.width));
+      img.setAttribute('height', String(size.height));
+    }
+  }
   for (const el of [copy, ...copy.querySelectorAll('*')]) {
     for (const attr of [...el.attributes]) {
       if (!attr.value.includes('\uE000')) continue;

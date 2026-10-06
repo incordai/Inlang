@@ -2,7 +2,7 @@
  * @az module emit-contract
  * Purpose: the word-emitter contract: EmittedNode, EmitContext, style variants, helpers.
  * Spec: docs/ARCHITECTURE.md §4.3
- * Exports: EmittedNode, EmitContext, ThemeLike, px, visuallyHidden, componentNode, fromShell, fromFill, fromMark, skeletonLine
+ * Exports: EmittedNode, EmitContext, ThemeLike, px, visuallyHidden, componentNode, fromShell, fromFill, fromMark, isFromMark, skeletonLine
  * Edit guide: a contract change touches every emitter and target-web; update ARCHITECTURE §4.3 in the same commit.
  * Tests: packages/target-web/test/stylesheet.test.ts, packages/words/test/words.test.ts
  */
@@ -338,6 +338,8 @@ export const visuallyHidden = (text: string): EmittedNode => ({
  * happens to contain one is never read as a marker.
  */
 export const fromMark = (prop: string): string => `\uE000${prop}\uE000`;
+/** A value that is a row marker (fromMark), not the author's: never an asset path to resolve. */
+export const isFromMark = (value: string): boolean => /^\uE000[a-z][a-z0-9]*\uE000$/.test(value);
 
 /**
  * The id a template fill's own ids start from (a word builds the rest from

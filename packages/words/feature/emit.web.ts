@@ -15,7 +15,7 @@
  * Modifiers: reveal — data-az-reveal on the block, data-az-reveal-item on items; the overlay runtime hides by script, once.
  * Props: title → h2.az-feature-title · sub → p.az-feature-sub · columns → grid tracks ·
  *   item title/text/icon/media/lead → the item parts above; item link → div.az-feature-item-link ·
- *   from → rows of a table fill the items after the page (data-spec §10): title ← text, text ← text/longtext.
+ *   from → rows of a table fill the items after the page (data-spec §10): title ← text, text ← text/longtext, media ← image.
  * Styling: theme tokens only; row gap larger than column gap; below.md / below.sm track counts;
  *   icons inlined and sanitised (ctx.inlineSvg) so they take the text colour.
  * Behaviour: none; section buttons by target-web/src/actions.ts; `from` rows by the overlay runtime's rows.ts.
@@ -35,7 +35,7 @@
 
 import type { SpecBlock } from '../../core/src/spec.ts';
 import {
-  framed, fromFill, fromShell, px, revealed, skeletonLine, type EmitContext, type EmittedNode,
+  framed, fromFill, fromShell, isFromMark, px, revealed, skeletonLine, type EmitContext, type EmittedNode,
 } from '../../core/src/emit-contract.ts';
 
 /** The manifest's `columns` default. */
@@ -65,7 +65,8 @@ function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitC
     ? {
         tag: 'img',
         attrs: {
-          src: ctx.asset(item.props.media),
+          // From a table, the row's image URL fills it after the page (data-spec §10).
+          src: isFromMark(item.props.media) ? item.props.media : ctx.asset(item.props.media),
           alt: '',
           class: 'az-feature-media',
           loading: 'lazy',

@@ -89,7 +89,7 @@ feature grid
 |---|---|---|
 | `title` | a `text` field (required) | each item's heading |
 | `text` | a `text` or `longtext` field | each item's paragraph; a longtext keeps its paragraphs |
-| `media` | an `image` field | not available until image uploads ship (D3): AZ1214 |
+| `media` | an `image` field | each item's picture, in `rows` and `bento` (the stored width and height reserve its box) |
 | `sort` | `created`, `updated` or a required field, then `asc`/`desc` | row order |
 | `limit` | 1–12, default 6 | rows shown; the skeleton shows this many |
 | `filter` | a `choice` or `flag` field and a value, at most two | only matching rows |

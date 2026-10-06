@@ -15,7 +15,8 @@
  * Modifiers: lightbox — images become buttons opening the dialog · reveal — data-az-reveal on the block, data-az-reveal-item on images; the overlay runtime hides by script, once.
  * Props: title → h2 · sub → p · columns → grid tracks · ratio → aspect-ratio (ASPECT table) ·
  *   poster → orbit's still image · image src/alt/caption/focus → img, alt, figcaption, object-position ·
- *   from → declared (word.json) but refused at compile until image fields ship (D3, AZ1214); no shell here yet.
+ *   from → grid and masonry fill from a table after the page (data-spec §10): src ← image, alt/caption ← text;
+ *   div.az-from (core fromShell) in place of the list. orbit, carousel and lightbox with from: AZ1214 at compile.
  * Styling: theme tokens only; responsive tracks via below; focus rings via states; lazy images after row one.
  * Behaviour: packages/overlay runtime (carousel steps, lightbox); 3D ring by packages/scene-runtime.
  * Edit guide: one image → galleryImage(); carousel → carousel(); lightbox → lightboxDialog().
@@ -33,7 +34,9 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { framed, px, revealed, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import {
+  framed, fromFill, fromShell, isFromMark, px, revealed, visuallyHidden, type EmitContext, type EmittedNode,
+} from '../../core/src/emit-contract.ts';
 import { closeButton, popup } from '../../overlay/src/index.ts';
 
 /** The track's name when the gallery has no title to lend it. */
@@ -204,6 +207,14 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
   }
 
+  if (block.from) {
+    // data-spec §10: images load from a table after the page (grid and
+    // masonry; core refuses the rest with from). The template is one image
+    // rendered by galleryImage() itself, so a row is an image of the set.
+    const template = galleryImage(fromFill(block.from), 0, false, Object.hasOwn(block.from.map, 'caption'), aspect, variant, false, ctx);
+    children.push(fromShell(block.from, galleryList(block, variant, false, [template], ctx), skeletonImage(aspect, ctx), ctx));
+  }
+
   const sources = block.children.filter((c) => c.word === 'image');
   const shown = variant === 'orbit' ? sources.slice(0, ORBIT_MAX) : sources;
   // §10: <figure> + <figcaption> when captions exist; a plain list when not.
@@ -216,64 +227,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // §6/§10: a carousel — and orbit's phone fallback — steps with real buttons.
   const steps = variant === 'carousel' || variant === 'orbit';
   if (images.length > 0) {
-    const track: EmittedNode = {
-      tag: 'ul',
-      attrs: {
-        class: 'az-gallery-items',
-        ...(steps ? { 'data-az-track': '' } : {}),
-        'data-ratio': block.props.ratio ?? DEFAULT_RATIO,
-        // §9: while the ring draws, the list stays in the DOM for search
-        // engines and screen readers — visually hidden, never removed.
-        ...(variant === 'orbit' ? { 'data-az-live-part': '' } : {}),
-        // §10: a scrolling track is named and the keyboard can reach it —
-        // focused, the arrow keys scroll it. `orbit` becomes this carousel
-        // below sm (§6). §10 says role="group"; on the <ul> that would strip
-        // the list its <li>s need, so the track stays a list with a name.
-        ...(variant === 'carousel' || variant === 'orbit'
-          ? { 'aria-label': block.props.title ?? GALLERY_LABEL, tabindex: '0' }
-          : {}),
-      },
-      style: {
-        // §2, four genuinely different jobs:
-        //   grid      a set of peers, one uniform crop
-        //   masonry   mixed ratios you refuse to crop; column-major, so it is
-        //             wrong for anything sequential
-        //   carousel  a SEQUENCE with a beginning, in one screen of vertical
-        //             space — a scrolling row that snaps, not a grid
-        //   orbit     a small theatrical set; the most expensive thing in the
-        //             spec, capped at 16 images and pulling the 3D runtime
-        display: variant === 'carousel' ? 'flex' : 'grid',
-        gridTemplateColumns: variant === 'grid'
-          ? `repeat(${block.props.columns ?? '3'}, minmax(0, 1fr))`
-          : variant === 'masonry'
-            ? `repeat(auto-fill, minmax(${px(t.size['column-min'])}, 1fr))`
-            : undefined,
-        // A carousel scrolls horizontally and snaps; without the snap it is a
-        // row that stops between slides, which is worse than a grid.
-        overflowX: variant === 'carousel' ? 'auto' : undefined,
-        scrollSnapType: variant === 'carousel' ? 'x mandatory' : undefined,
-        gap: px(t.space[16]),
-        listStyle: 'none', padding: 0, margin: 0,
-      },
-      // §6. Between sm and md, grid and masonry cap at three columns. Below
-      // sm: grid and masonry are TWO columns, not one (full-width photos
-      // turn a gallery into a long scroll); carousel keeps its row; orbit
-      // falls back to the carousel — a 3D ring is unreadable at 390px.
-      below: {
-        md: variant === 'grid' || variant === 'masonry'
-          ? { gridTemplateColumns: `repeat(${Math.min(Number(block.props.columns ?? DEFAULT_COLUMNS), MD_MAX_COLUMNS)}, minmax(0, 1fr))` }
-          : undefined,
-        sm: variant === 'grid' || variant === 'masonry'
-          ? { gridTemplateColumns: `repeat(${SM_COLUMNS}, minmax(0, 1fr))` }
-          : variant === 'orbit'
-            ? { display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory' }
-            : undefined,
-      },
-      states: variant === 'orbit'
-        ? { live: { position: 'absolute', width: '1px', height: '1px', margin: '-1px', overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } }
-        : undefined,
-      children: images,
-    };
+    const track = galleryList(block, variant, steps, images, ctx);
     children.push(steps ? carousel(track, variant, shown.length, ctx) : track);
     if (lightbox) children.push(lightboxDialog(shown, block.props.title ?? GALLERY_LABEL, ctx));
   }
@@ -312,7 +266,88 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // The mobile gutter below sm (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']) } },
     children,
-  }, 'az-gallery-item');
+  }, block.from ? undefined : 'az-gallery-item');
+}
+
+/**
+ * The list of images: the static set's, or a `from` block's template and
+ * skeleton (fromShell) — one list node, so rows look like the images.
+ */
+function galleryList(block: SpecBlock, variant: string, steps: boolean, children: EmittedNode[], ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  return {
+    tag: 'ul',
+    attrs: {
+      class: 'az-gallery-items',
+      ...(steps ? { 'data-az-track': '' } : {}),
+      'data-ratio': block.props.ratio ?? DEFAULT_RATIO,
+      // §9: while the ring draws, the list stays in the DOM for search
+      // engines and screen readers — visually hidden, never removed.
+      ...(variant === 'orbit' ? { 'data-az-live-part': '' } : {}),
+      // §10: a scrolling track is named and the keyboard can reach it —
+      // focused, the arrow keys scroll it. `orbit` becomes this carousel
+      // below sm (§6). §10 says role="group"; on the <ul> that would strip
+      // the list its <li>s need, so the track stays a list with a name.
+      ...(variant === 'carousel' || variant === 'orbit'
+        ? { 'aria-label': block.props.title ?? GALLERY_LABEL, tabindex: '0' }
+        : {}),
+    },
+    style: {
+      // §2, four genuinely different jobs:
+      //   grid      a set of peers, one uniform crop
+      //   masonry   mixed ratios you refuse to crop; column-major, so it is
+      //             wrong for anything sequential
+      //   carousel  a SEQUENCE with a beginning, in one screen of vertical
+      //             space — a scrolling row that snaps, not a grid
+      //   orbit     a small theatrical set; the most expensive thing in the
+      //             spec, capped at 16 images and pulling the 3D runtime
+      display: variant === 'carousel' ? 'flex' : 'grid',
+      gridTemplateColumns: variant === 'grid'
+        ? `repeat(${block.props.columns ?? '3'}, minmax(0, 1fr))`
+        : variant === 'masonry'
+          ? `repeat(auto-fill, minmax(${px(t.size['column-min'])}, 1fr))`
+          : undefined,
+      // A carousel scrolls horizontally and snaps; without the snap it is a
+      // row that stops between slides, which is worse than a grid.
+      overflowX: variant === 'carousel' ? 'auto' : undefined,
+      scrollSnapType: variant === 'carousel' ? 'x mandatory' : undefined,
+      gap: px(t.space[16]),
+      listStyle: 'none', padding: 0, margin: 0,
+    },
+    // §6. Between sm and md, grid and masonry cap at three columns. Below
+    // sm: grid and masonry are TWO columns, not one (full-width photos
+    // turn a gallery into a long scroll); carousel keeps its row; orbit
+    // falls back to the carousel — a 3D ring is unreadable at 390px.
+    below: {
+      md: variant === 'grid' || variant === 'masonry'
+        ? { gridTemplateColumns: `repeat(${Math.min(Number(block.props.columns ?? DEFAULT_COLUMNS), MD_MAX_COLUMNS)}, minmax(0, 1fr))` }
+        : undefined,
+      sm: variant === 'grid' || variant === 'masonry'
+        ? { gridTemplateColumns: `repeat(${SM_COLUMNS}, minmax(0, 1fr))` }
+        : variant === 'orbit'
+          ? { display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory' }
+          : undefined,
+    },
+    states: variant === 'orbit'
+      ? { live: { position: 'absolute', width: '1px', height: '1px', margin: '-1px', overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } }
+      : undefined,
+    children,
+  };
+}
+
+/** A loading image (data-spec §10.3): the image's own box at the gallery's ratio, so rows replace it in place. */
+function skeletonImage(aspect: string | undefined, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  return {
+    tag: 'li',
+    attrs: { class: 'az-gallery-item az-from-skeleton-item' },
+    style: { listStyle: 'none' },
+    children: [{
+      tag: 'span',
+      attrs: { class: 'az-from-line' },
+      style: { display: 'block', width: '100%', aspectRatio: aspect ?? ORBIT_FALLBACK_RATIO, background: t.color.surface, borderRadius: px(t.radius.md) },
+    }],
+  };
 }
 
 /**
@@ -331,7 +366,8 @@ function galleryImage(
   const img: EmittedNode = {
     tag: 'img',
     attrs: {
-      src: ctx.asset(image.args[0]?.value ?? ''),
+      // From a table, the row's image URL fills it after the page (data-spec §10).
+      src: isFromMark(image.args[0]?.value ?? '') ? image.args[0].value : ctx.asset(image.args[0]?.value ?? ''),
       alt: image.props.alt ?? '',
       class: 'az-gallery-img',
       // The textures of `orbit`'s ring are the list's own images (§9).

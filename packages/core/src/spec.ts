@@ -29,7 +29,7 @@ import type { Diagnostic, Pos } from './lex.ts';
 import type { SpecBlock } from './spec-block.ts';
 import { LIST_SEPARATOR, type LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
-import { buildFrom, type FromContext } from './from.ts';
+import { buildFrom, GALLERY_FROM_REFUSED, type FromContext } from './from.ts';
 import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
 
 /**
@@ -154,6 +154,18 @@ function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteS
   const from = fromLine && m?.from && page
     ? buildFrom(w.word, w.props, fromLine, m.from, page.route, page.data)
     : null;
+  if (from && w.word === 'gallery' && page) {
+    const refused = [
+      ...GALLERY_FROM_REFUSED.variants.filter((v) => w.variant === v),
+      ...GALLERY_FROM_REFUSED.modifiers.filter((x) => w.modifiers.includes(x)),
+    ];
+    for (const r of refused) {
+      page.data.report({
+        code: 'AZ1214', severity: 'error', pos: fromLine!.pos,
+        message: `gallery: '${r}' with 'from' is not available yet — use grid or masonry`,
+      });
+    }
+  }
 
   for (const [key, arg] of Object.entries(w.props)) props[key] = arg.value;
 

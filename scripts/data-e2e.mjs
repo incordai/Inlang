@@ -130,6 +130,16 @@ page /mine
       mine
       empty "Sign in to see your notes"
 
+page /photos
+  hero center
+    title "Photos"
+  gallery grid
+    title "Photos"
+    from notes
+      src     photo
+      alt     title
+      empty   "No photos yet"
+
 page /private
   hero center
     title "Private"
@@ -339,6 +349,18 @@ async function imageFlow(name, owner, other) {
   await img.waitFor();
   await owner.waitForFunction((alt) => { const i = document.querySelector(`img[alt="${alt}"]`); return i?.complete && i.naturalWidth > 0; }, `Photo for ${name} with photo`);
   check(`${name}: the site's page shows it with an <img> from the server's origin`, await img.evaluate((i) => i.naturalWidth === 320 && i.naturalHeight === 640));
+  // A `from` gallery (data-spec §10): one image per row that has one, sized from the row.
+  await owner.goto(`${host.url}/photos`);
+  const gallery = await settled(owner, 'gallery');
+  const shown = owner.locator('section.az-gallery [data-az-from-rows] img');
+  await owner.waitForFunction(() => [...document.querySelectorAll('section.az-gallery [data-az-from-rows] img')].every((i) => i.complete && i.naturalWidth > 0));
+  const pics = await shown.evaluateAll((is) => is.map((i) => ({ alt: i.alt, w: i.getAttribute('width'), h: i.getAttribute('height'), nw: i.naturalWidth, src: i.src })));
+  check(`${name}: a from gallery shows the row's image — sized from the row, alt from its title; rows without one are not shown`,
+    gallery.state === 'rows' && pics.length === 1 && pics[0].alt === `${name} with photo` && pics[0].w === '320' && pics[0].h === '640'
+      && pics[0].nw === 320 && pics[0].src === up.item.photo.url, JSON.stringify({ gallery, pics }));
+  const galleryAxe = await axeViolations(owner);
+  check(`${name}: axe finds nothing on the from gallery`, galleryAxe.length === 0, galleryAxe.join(', '));
+  await owner.goto(`${host.url}/notes`);
   const svg = await uploadVia(owner, made.item.id, SVG);
   check(`${name}: an SVG sent as a photo is refused as unsupported_type`, svg.ok === false && svg.code === 'unsupported_type' && svg.field === 'photo', JSON.stringify(svg));
   const theirs = await uploadVia(other, made.item.id, await plainJpeg(20, 20));
