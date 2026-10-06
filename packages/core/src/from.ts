@@ -199,6 +199,12 @@ export function buildFrom(
         err('AZ1266', `'${c.word}' maps a private field — it would be blank for everyone but its owner`, arg.pos);
         continue;
       }
+      // An image's text alternative is never empty (WCAG 1.1.1): only a field
+      // every row must fill can carry it.
+      if (c.word === 'alt' && !f.required) {
+        err('AZ1262', `'alt' needs a required field — '${f.name}' may be empty; add 'required' to it`, arg.pos);
+        continue;
+      }
       map[c.word] = f.name;
       types[c.word] = f.type;
       continue;

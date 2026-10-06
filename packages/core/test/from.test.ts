@@ -144,6 +144,14 @@ test('image fields map to media and src (D3); a text field there is AZ1262', () 
     "gallery: 'src' needs an image field, 'name' is text");
 });
 
+test('AZ1262 — a gallery alt maps only to a required field: an image\'s text alternative is never empty (review #2)', () => {
+  const withPhoto = TABLES.replace('    featured flag\n', '    featured flag\n    photo    image\n    caption  text\n');
+  const src = (alt: string) => site(`  gallery grid\n    from products\n      src photo\n      alt ${alt}\n`).replace(TABLES, withPhoto);
+  assert.deepEqual(found(src('caption'), 'AZ1262').map((d) => d.message),
+    ["gallery: 'alt' needs a required field — 'caption' may be empty; add 'required' to it"]);
+  assert.deepEqual(errors(src('name')), [], 'CONTROL: a required text field');
+});
+
 test('AZ1214 — gallery orbit, carousel and lightbox with from are named as not available yet; grid and masonry compile', () => {
   const withPhoto = TABLES.replace('    featured flag\n', '    featured flag\n    photo    image\n');
   const src = (head: string) => site(`  ${head}\n    from products\n      src photo\n      alt name\n`).replace(TABLES, withPhoto);
