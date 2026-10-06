@@ -15,6 +15,7 @@ import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync } fro
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { closeWithin } from './lib/bounded.mjs';
 import { createImages } from '../packages/backend/src/server/data-images.ts';
 import { plainJpeg } from '../packages/backend/test/image-fixtures.ts';
 import { compile, plan, replay } from '../packages/core/src/index.ts';
@@ -24,6 +25,9 @@ import { createData } from '../packages/backend/src/server/data-api.ts';
 import { loadTables } from '../packages/backend/src/server/data-values.ts';
 import { isUniqueViolation } from '../packages/backend/src/server/db.ts';
 import { selectList, parseQuery } from '../packages/backend/src/server/data-query.ts';
+
+/** A database connection that will not close is abandoned after this (rule 13: bound every wait). */
+const DB_CLOSE_MS = 15_000;
 
 const wordsDir = new URL('../packages/words/', import.meta.url);
 const manifests = new Map();
@@ -138,7 +142,7 @@ export async function dataSuite(engine, db, openAgain, check, info) {
     const recorded = Number((await db.get('SELECT COUNT(*) AS n FROM az_data_migrations WHERE version BETWEEN 101 AND 199 AND applied_at IS NOT NULL')).n);
     check(`${engine}: two migrators at once — both finish, each unit recorded once`, results.every((r) => r.status === 'fulfilled') && recorded === units,
       `${results.map((r) => r.status)} ${recorded}/${units}`);
-  } finally { await other.close(); }
+  } finally { await closeWithin(other, DB_CLOSE_MS, `${engine} second connection close`); }
 
   // ---- the routes, on this engine ---------------------------------------
   const shop = lockOf([[`  data items

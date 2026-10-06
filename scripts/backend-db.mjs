@@ -19,6 +19,10 @@ import { loadConfig } from '../packages/backend/src/server/env.ts';
 import { createOidc } from '../packages/backend/src/server/oidc.ts';
 import { createStore } from '../packages/backend/src/server/store.ts';
 import { dataSuite } from './backend-db-data.mjs';
+import { closeWithin } from './lib/bounded.mjs';
+
+/** A database connection that will not close is abandoned after this (rule 13: bound every wait). */
+const DB_CLOSE_MS = 15_000;
 
 /** Pinned images — the current PostgreSQL release and MySQL's long-term-support line. */
 const IMAGES = { postgres: 'postgres:18.6-alpine', mysql: 'mysql:8.4.11' };
@@ -142,7 +146,7 @@ async function suite(engine) {
     // The data tables on this engine (data-spec §14).
     await dataSuite(engine, db, () => (engine === 'postgres' ? openPostgres(c.url, false) : openMysql(c.url, false)), check, info);
   } finally {
-    await db?.close().catch(() => {});
+    if (db) await closeWithin(db, DB_CLOSE_MS, `${engine} connection close`);
     docker('rm', '-f', c.id);
   }
 }
