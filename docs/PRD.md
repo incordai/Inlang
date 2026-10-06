@@ -450,6 +450,12 @@ Explicitly out — say no now, or the phase never ships:
 - the AI front-end (Phase 4) · Go/Rust backend targets
 - **anything mobile-app-specific** (Phase 3)
 
+*Decision, 2026-10-05 (owner):* **data tables are in.** `data <table>` under
+`site` generates database tables, a REST API, a typed client and a protected
+admin area, and existing blocks can show rows (`from <table>`) — the design is
+docs/data-spec.md. This narrows "CMS / content editing" above: checkout,
+payments and a visual page editor stay out.
+
 ---
 
 ## 7. Technical decisions
