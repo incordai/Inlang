@@ -259,6 +259,32 @@ import {
   type FieldInfo, type TableInfo,
 } from "./admin-values.ts";
 
+/** How long a live region stays empty before its message, so a repeat is heard again. */
+const ANNOUNCE_GAP_MS = 100;
+
+/**
+ * A live region's text: every message is set after the region is cleared and
+ * a pause, so a screen reader announces the same sentence twice in a row
+ * ("Saved …" after another save). The region itself is always in the page.
+ */
+function useAnnounce(): [string, (text: string) => void] {
+  const [text, setText] = useState("");
+  const timer = useRef(0);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const announce = (next: string) => {
+    window.clearTimeout(timer.current);
+    setText("");
+    if (next) timer.current = window.setTimeout(() => setText(next), ANNOUNCE_GAP_MS);
+  };
+  return [text, announce];
+}
+
+/** An editor field's id: its own namespace, so no table or field name meets the filter form's ids. */
+const fieldId = (table: string, field: string) => "az-admin-edit-" + table + "-" + field;
+
+/** Focus fell to the page: the element that had it is gone. */
+const focusLost = () => !document.activeElement || document.activeElement === document.body;
+
 /** The admin area: the route decides which page. */
 export function Admin({ route }: { route: string }) {
   const name = route.startsWith("/admin/") ? route.slice("/admin/".length) : null;
@@ -340,10 +366,15 @@ function Audit() {
       setState("ready");
     });
   };
+  const heading = useRef<HTMLHeadingElement>(null);
+  /** An older page was asked for: its button may go once the oldest is in. */
+  const paged = useRef(false);
   useEffect(() => { load(null); }, []);
+  // The oldest page is in: "Show older changes" is gone, and its focus goes to the heading, not the page.
+  useEffect(() => { if (paged.current && next === null && focusLost()) heading.current?.focus(); }, [next]);
   return (
     <section aria-labelledby="az-admin-audit">
-      <h2 id="az-admin-audit">Recent admin changes</h2>
+      <h2 id="az-admin-audit" ref={heading} tabIndex={-1}>Recent admin changes</h2>
       {state !== "ready" && state !== "loading" ? <p role="alert">{problemText(state)}</p> : null}
       {state === "ready" && items.length === 0 ? <p>No admin has changed a row yet.</p> : null}
       {items.length > 0 ? (
@@ -358,7 +389,10 @@ function Audit() {
         </ul>
       ) : null}
       <p role="status" className="az-admin-status">{state === "loading" ? "Loading the changes…" : ""}</p>
-      {next && state === "ready" ? <button type="button" className="az-admin-button" onClick={() => load(next)}>Show older changes</button> : null}
+      {next ? (
+        <button type="button" className="az-admin-button" aria-disabled={state === "loading" || undefined}
+          onClick={() => { if (state !== "loading") { paged.current = true; load(next); } }}>Show older changes</button>
+      ) : null}
     </section>
   );
 }
@@ -394,12 +428,20 @@ function TablePage({ table }: { table: TableInfo }) {
   const [tick, setTick] = useState(0);
   const [page, setPage] = useState<{ items: AdminRow[]; next: string | null; count: number } | null>(null);
   const [refused, setRefused] = useState<DataErrorCode | null>(null);
-  const [message, setMessage] = useState("");
+  /** A list that could not load: said where the rows are, with Try again — the editor and its values stay. */
+  const [listError, setListError] = useState<DataErrorCode | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [message, announce] = useAnnounce();
   const [editing, setEditing] = useState<AdminRow | "new" | null>(null);
   const [doomed, setDoomed] = useState<AdminRow | null>(null);
   const countRef = useRef<HTMLParagraphElement>(null);
   const settle = useRef(false);
   const confirmRef = useRef<HTMLDialogElement>(null);
+  const loaded = useRef(false);
+  /** The row whose editor just closed ("" for a new row): focus returns to its Edit button. */
+  const returnTo = useRef<string | null>(null);
+  /** A reload may take away the element focus is on: once it renders, focus that fell to the page goes to the count. */
+  const refocus = useRef(false);
 
   const cursor = cursors[cursors.length - 1];
   useEffect(() => {
@@ -410,13 +452,18 @@ function TablePage({ table }: { table: TableInfo }) {
     if (cursor) query.after = cursor;
     void admin.list(table.name, query).then((r) => {
       if (!alive) return;
+      setRetrying(false);
       if (r.ok) {
+        loaded.current = true;
         setPage({ items: r.items, next: r.next, count: r.count });
-        setRefused(null);
+        setListError(null);
       } else if (r.code === "bad_query") {
-        setMessage(problemText(r.code));
-      } else {
+        announce(problemText(r.code));
+      } else if (!loaded.current && (r.code === "forbidden" || r.code === "signin_required")) {
+        // Not an admin (or no longer signed in) before anything loaded: the page ends, nothing is lost.
         setRefused(r.code);
+      } else {
+        setListError(r.code);
       }
       // After a delete the row's button is gone: focus lands on the count, not
       // <body>. While the confirm is still closing, it would hand focus back
@@ -431,29 +478,58 @@ function TablePage({ table }: { table: TableInfo }) {
     return () => { alive = false; };
   }, [table.name, sort, search, filters, cursor, tick]);
 
+  // The editor closed: focus goes back to the row's Edit button, or to the
+  // count when there is none (a new row) — never to the page.
+  useEffect(() => {
+    const id = returnTo.current;
+    if (editing !== null || id === null) return;
+    returnTo.current = null;
+    const back = id ? document.querySelector<HTMLElement>("[data-az-admin-edit=\\"" + id + "\\"]") : null;
+    (back ?? countRef.current)?.focus();
+  }, [editing]);
+
+  // A reload that took away the focused element (a saved row that left the
+  // page, a Try again that worked) hands focus to the count.
+  useEffect(() => {
+    if (!refocus.current || retrying) return;
+    refocus.current = false;
+    if (focusLost()) countRef.current?.focus();
+  }, [page, listError, retrying]);
+
   // A followed ref (?row=<id>) opens that row's editor.
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("row");
     if (!id) return;
-    if (!UUID.test(id)) { setMessage(problemText("not_found")); return; }
+    if (!UUID.test(id)) { announce(problemText("not_found")); return; }
     void admin.get(table.name, id).then((r) => {
-      if (r.ok) setEditing(r.item); else setMessage(problemText(r.code));
+      if (r.ok) setEditing(r.item); else announce(problemText(r.code));
     });
   }, [table.name]);
 
   const restart = () => setCursors([null]);
+
+  const closeEditor = (id: string) => {
+    returnTo.current = id;
+    setEditing(null);
+  };
+
+  const retry = () => {
+    refocus.current = true;
+    setRetrying(true);
+    setTick((n) => n + 1);
+  };
 
   const remove = async () => {
     const row = doomed;
     if (!row) return;
     const r = await admin.remove(table.name, row.id);
     if (r.ok) {
-      setMessage("Deleted “" + rowName(table, row) + "”.");
+      announce("Deleted “" + rowName(table, row) + "”.");
       if (editing !== null && editing !== "new" && editing.id === row.id) setEditing(null);
       settle.current = true;
       setTick((n) => n + 1);
     } else {
-      setMessage(problemText(r.code));
+      announce(problemText(r.code));
     }
   };
 
@@ -473,8 +549,8 @@ function TablePage({ table }: { table: TableInfo }) {
           // A ref filter is a row id: checked here, as the server would, before it is sent.
           const refs = filtersOf(table).filter((f) => f.type === "ref");
           const bad = refs.find((f) => (refIds[f.name] ?? "") !== "" && !UUID.test(refIds[f.name]));
-          if (bad) { setMessage(problemText("invalid", bad.name)); return; }
-          setMessage("");
+          if (bad) { announce(problemText("invalid", bad.name)); return; }
+          announce("");
           setFilters({ ...filters, ...Object.fromEntries(refs.map((f) => [f.name, refIds[f.name] ?? ""])) });
           setSearch(typed.trim());
           restart();
@@ -515,17 +591,20 @@ function TablePage({ table }: { table: TableInfo }) {
       </form>
 
       <div className="az-admin-actions">
-        <button type="button" className="az-admin-button az-admin-button--primary" onClick={() => setEditing("new")}>New row</button>
+        <button type="button" className="az-admin-button az-admin-button--primary" data-az-admin-edit="new"
+          onClick={() => setEditing("new")}>New row</button>
       </div>
       <p role="status" className="az-admin-status">{message}</p>
 
       {editing ? (
         <Editor key={editing === "new" ? "new" : editing.id} table={table} row={editing === "new" ? null : editing}
-          onCancel={() => setEditing(null)}
+          onCancel={() => closeEditor(editing === "new" ? "new" : editing.id)}
           onImage={() => setTick((n) => n + 1)}
           onSaved={(row, created) => {
-            setEditing(null);
-            setMessage((created ? "Created “" : "Saved “") + rowName(table, row) + "”.");
+            // A new row has no Edit button yet: focus goes to the count.
+            closeEditor(created ? "" : row.id);
+            refocus.current = true;
+            announce((created ? "Created “" : "Saved “") + rowName(table, row) + "”.");
             setTick((n) => n + 1);
           }} />
       ) : null}
@@ -533,6 +612,10 @@ function TablePage({ table }: { table: TableInfo }) {
       <p ref={countRef} tabIndex={-1} className="az-admin-count">
         {page ? countText(page.count, Boolean(search) || Object.values(filters).some(Boolean)) : "Loading rows…"}
       </p>
+      <div className="az-admin-actions">
+        <p role="alert" className="az-admin-error">{listError && !retrying ? problemText(listError) : ""}</p>
+        {listError ? <button type="button" className="az-admin-button" onClick={retry}>Try again</button> : null}
+      </div>
       {page && page.items.length > 0 ? (
         <div className="az-admin-scroll" role="region" aria-label={table.name + " rows"} tabIndex={0}>
           <table className="az-admin-table">
@@ -559,7 +642,7 @@ function TablePage({ table }: { table: TableInfo }) {
                   <td>
                     <div className="az-admin-actions">
                       <button type="button" className="az-admin-button" aria-label={"Edit “" + rowName(table, row) + "”"}
-                        onClick={() => setEditing(row)}>Edit</button>
+                        data-az-admin-edit={row.id} onClick={() => setEditing(row)}>Edit</button>
                       <button type="button" className="az-admin-button" aria-controls="az-admin-confirm"
                         aria-label={"Delete “" + rowName(table, row) + "”"} onClick={() => setDoomed(row)}>Delete</button>
                     </div>
@@ -572,9 +655,10 @@ function TablePage({ table }: { table: TableInfo }) {
       ) : page ? <p>No rows.</p> : null}
 
       <nav className="az-admin-actions" aria-label="Pages">
-        <button type="button" className="az-admin-button" disabled={cursors.length < 2}
-          onClick={() => setCursors(cursors.slice(0, -1))}>Previous page</button>
-        <button type="button" className="az-admin-button" disabled={!page?.next}
+        {/* aria-disabled, not disabled: the last page turns Next off while it has focus, and a disabled button drops it. */}
+        <button type="button" className="az-admin-button" aria-disabled={cursors.length < 2 || undefined}
+          onClick={() => { if (cursors.length >= 2) setCursors(cursors.slice(0, -1)); }}>Previous page</button>
+        <button type="button" className="az-admin-button" aria-disabled={!page?.next || undefined}
           onClick={() => { if (page?.next) setCursors([...cursors, page.next]); }}>Next page</button>
       </nav>
 
@@ -609,7 +693,7 @@ function hintOf(f: FieldInfo): string {
 function FieldInput({ table, f, value, error, onChange }: {
   table: TableInfo; f: FieldInfo; value: string | boolean; error: string; onChange: (v: string | boolean) => void;
 }): ReactNode {
-  const id = "az-admin-" + table.name + "-" + f.name;
+  const id = fieldId(table.name, f.name);
   const hint = hintOf(f);
   const describedBy = [hint ? id + "-hint" : "", error ? id + "-error" : ""].filter(Boolean).join(" ") || undefined;
   const common = {
@@ -658,14 +742,16 @@ const IMAGE_TYPES = "image/jpeg,image/png,image/webp,image/avif";
 function ImageField({ table, row, f, onChanged }: {
   table: TableInfo; row: AdminRow | null; f: FieldInfo; onChanged: () => void;
 }): ReactNode {
-  const id = "az-admin-" + table.name + "-" + f.name;
+  const id = fieldId(table.name, f.name);
   const [image, setImage] = useState(row ? imageOf(row[f.name]) : null);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useAnnounce();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  // A refusal moves focus to the file input — once it is enabled again, after the render.
+  // A refusal moves focus to the file input, after the render that shows it.
   useEffect(() => { if (error) input.current?.focus(); }, [error]);
+  // Removed: the Remove button that had focus is gone, so focus goes to the upload control.
+  useEffect(() => { if (!image && focusLost()) input.current?.focus(); }, [image]);
   const hint = [hintOf(f), "JPEG, PNG, WebP or AVIF. It is stored as WebP, without its metadata, such as where a photo was taken."]
     .filter(Boolean).join(" ");
   if (!row) {
@@ -677,6 +763,7 @@ function ImageField({ table, row, f, onChanged }: {
     );
   }
   const act = async (run: () => ReturnType<typeof admin.clear>, done: string) => {
+    if (busy) return;
     setBusy(true);
     setError("");
     setStatus("Saving…");
@@ -699,8 +786,10 @@ function ImageField({ table, row, f, onChanged }: {
         ? <img className="az-admin-preview" src={image.url} width={image.width} height={image.height} alt={"The current " + f.name} />
         : <p className="az-admin-hint">No image yet.</p>}
       <label htmlFor={id}>{image ? "Replace with another file" : "Upload a file"}</label>
-      <input ref={input} id={id} type="file" accept={IMAGE_TYPES} disabled={busy}
+      {/* Busy is aria-disabled with a guard, never disabled: a disabled control drops the focus it has. */}
+      <input ref={input} id={id} type="file" accept={IMAGE_TYPES} aria-disabled={busy || undefined}
         aria-describedby={id + "-hint" + (error ? " " + id + "-error" : "")} aria-invalid={error ? true : undefined}
+        onClick={(e) => { if (busy) e.preventDefault(); }}
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) void act(() => admin.upload(table.name, row.id, f.name, file), label(f.name) + " saved.");
@@ -708,7 +797,7 @@ function ImageField({ table, row, f, onChanged }: {
       <p id={id + "-hint"} className="az-admin-hint">{hint}</p>
       {image ? (
         <div className="az-admin-actions">
-          <button type="button" className="az-admin-button" disabled={busy}
+          <button type="button" className="az-admin-button" aria-disabled={busy || undefined}
             onClick={() => { void act(() => admin.clear(table.name, row.id, f.name), label(f.name) + " removed."); }}>
             {"Remove " + f.name}
           </button>
@@ -728,7 +817,7 @@ function Editor({ table, row, onCancel, onSaved, onImage }: {
   const start = () => Object.fromEntries(fields.map((f) => [f.name, toInput(f, row ? row[f.name] : f.default)]));
   const [values, setValues] = useState<Record<string, string | boolean>>(start);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState("");
+  const [formError, setFormError] = useAnnounce();
   const [busy, setBusy] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -737,11 +826,13 @@ function Editor({ table, row, onCancel, onSaved, onImage }: {
   const showErrors = (found: Record<string, string>) => {
     setErrors(found);
     const first = fields.find((f) => found[f.name]);
-    if (first) form.current?.querySelector<HTMLElement>("#az-admin-" + table.name + "-" + first.name)?.focus();
+    if (first) form.current?.querySelector<HTMLElement>("#" + fieldId(table.name, first.name))?.focus();
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    // Busy is aria-disabled with this guard, never disabled: the submit keeps its focus while the save runs.
+    if (busy) return;
     const body: Record<string, unknown> = {};
     const found: Record<string, string> = {};
     for (const f of fields) {
@@ -783,7 +874,7 @@ function Editor({ table, row, onCancel, onSaved, onImage }: {
       ))}
       <p role="alert" className="az-admin-error">{formError}</p>
       <div className="az-admin-actions">
-        <button type="submit" className="az-admin-button az-admin-button--primary" disabled={busy} aria-busy={busy || undefined}>
+        <button type="submit" className="az-admin-button az-admin-button--primary" aria-disabled={busy || undefined} aria-busy={busy || undefined}>
           {row ? "Save changes" : "Create row"}
         </button>
         <button type="button" className="az-admin-button" onClick={onCancel}>Cancel</button>
@@ -834,7 +925,7 @@ export function adminCss(t: ThemeLike): string {
 .az-admin-button--primary:hover { background: var(--az-color-accent-hover); border-color: var(--az-color-accent-hover); }
 .az-admin-button--danger { color: var(--az-color-danger-contrast); background: var(--az-color-danger); border-color: var(--az-color-danger); }
 .az-admin-button--danger:hover { background: var(--az-color-danger); text-decoration: underline; }
-.az-admin-button:disabled { color: var(--az-color-muted); background: var(--az-color-surface-alt); border-color: var(--az-color-border); cursor: not-allowed; }
+.az-admin-button:is(:disabled, [aria-disabled="true"]) { color: var(--az-color-muted); background: var(--az-color-surface-alt); border-color: var(--az-color-border); cursor: not-allowed; }
 .az-admin-actions { display: flex; flex-wrap: wrap; gap: ${px(t.space[8])}; align-items: center; }
 .az-admin-tools { display: flex; flex-wrap: wrap; gap: ${px(t.space[16])}; align-items: end; }
 .az-admin-field { display: grid; gap: ${px(t.space[4])}; min-width: 0; }
@@ -849,7 +940,9 @@ export function adminCss(t: ThemeLike): string {
 .az-admin-field--check > :not(label, input) { grid-column: 1 / -1; }
 .az-admin-hint { color: var(--az-color-muted); font-size: ${t.typeSize.sm}; }
 .az-admin-error { color: var(--az-color-danger); font-size: ${t.typeSize.sm}; font-weight: ${t.type['weight-bold']}; }
-.az-admin-error:empty, .az-admin-status:empty { display: none; }
+/* An empty live region stays in the page, out of sight and out of the layout: a region that appears with its message may not be heard. */
+.az-admin-error:empty, .az-admin-status:empty { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0; }
 .az-admin-editor { display: grid; gap: ${px(t.space[16])}; max-width: ${t.size['measure-body']}ch; padding: ${px(t.space[24])};
   background: var(--az-color-surface); border: 1px solid var(--az-color-border); border-radius: ${px(t.radius.md)}; }
 .az-admin-count { font-size: ${t.typeSize.sm}; color: var(--az-color-muted); }
@@ -865,6 +958,7 @@ export function adminCss(t: ThemeLike): string {
 .az-admin-preview { display: block; max-width: 100%; height: auto; max-height: ${px(t.space[128] * 2)}; object-fit: contain;
   background: var(--az-color-surface-alt); border: 1px solid var(--az-color-border); border-radius: ${px(t.radius.sm)}; }
 .az-admin-image input[type="file"] { min-height: ${px(t.size.tap)}; font: inherit; max-width: 100%; }
+.az-admin-image input[type="file"][aria-disabled="true"] { color: var(--az-color-muted); cursor: not-allowed; }
 .az-admin-confirm { ${decls(confirm.style)} }
 .az-admin-confirm[data-state="open"] { ${decls(confirm.states.open)} }
 .az-admin-confirm > * + * { margin-top: ${px(t.space[16])}; }

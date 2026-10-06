@@ -16,8 +16,10 @@ import { pathToFileURL } from 'node:url';
 import { compile, type Manifest } from '../../core/src/index.ts';
 import { emitProject } from '../src/emit.ts';
 import { dataClient } from '../src/data-client.ts';
-import { adminValuesTs } from '../src/data-admin.ts';
+import { adminCss, adminTsx, adminValuesTs } from '../src/data-admin.ts';
 import { checkValue, loadTables } from '../../backend/src/server/data-values.ts';
+import type { ThemeLike } from '../../core/src/emit-contract.ts';
+import { resolve, THEMES } from '../../theme/src/index.ts';
 
 const wordsDir = new URL('../../words/', import.meta.url);
 const manifests = new Map<string, Manifest>();
@@ -191,4 +193,19 @@ test('every closed code has its own sentence; none shows a raw code', async () =
   }
   assert.equal(sentences.size, codes.length, 'each code reads differently');
   assert.equal(v.problemText('required', 'name'), 'Name is required.');
+});
+
+test('live regions stay in the page while empty; busy and paging controls are aria-disabled, never disabled', () => {
+  const css = adminCss(resolve(THEMES.midnight, 'dark') as unknown as ThemeLike);
+  const empty = css.split('\n').filter((l) => l.includes(':empty'));
+  assert.ok(empty.length > 0, 'an empty status or error has its own rule');
+  for (const rule of empty) assert.doesNotMatch(rule, /display:\s*none/, 'a region shown only with its message may not be heard');
+  assert.match(css, /\.az-admin-status:empty \{ position: absolute/, 'out of sight, out of the layout');
+  assert.match(css, /\.az-admin-button:is\(:disabled, \[aria-disabled="true"\]\)/, 'aria-disabled looks disabled');
+  const tsx = adminTsx();
+  assert.doesNotMatch(tsx, /\sdisabled=\{/, 'no control is disabled while it may hold focus');
+  assert.match(tsx, /aria-disabled=\{busy \|\| undefined\}/);
+  // The editor's ids have their own namespace, apart from the filter form's.
+  assert.match(tsx, /"az-admin-edit-" \+ table \+ "-" \+ field/);
+  assert.doesNotMatch(tsx, /"az-admin-" \+ table\.name \+ "-" \+ f\.name/);
 });

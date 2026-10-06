@@ -93,6 +93,9 @@ site notebook
     also    ref      notes
     allow anyone   read
     allow signedin create
+  data filter
+    label   text     required
+    state   choice   open closed default open
 
 page /
   hero center
@@ -606,7 +609,34 @@ async function adminFlow(b, name, owner) {
   const heading = page.locator('#az-admin-editor-title');
   await heading.waitFor();
   check(`${name} admin: the editor opens with focus on its heading`, await heading.evaluate((h) => document.activeElement === h));
-  const title = page.locator('#az-admin-notes-title');
+  // Live regions are in the page before any message — out of sight, never display:none.
+  const regions = await page.evaluate(() => [...document.querySelectorAll('.az-admin [role="status"], .az-admin [role="alert"]')]
+    .map((el) => ({ role: el.getAttribute('role'), text: el.textContent, display: getComputedStyle(el).display })));
+  check(`${name} admin: every live region is rendered while empty, before its first message`,
+    regions.length >= 3 && regions.every((r) => r.display !== 'none') && regions.some((r) => r.role === 'status' && r.text === ''),
+    JSON.stringify(regions));
+  // The same sentence twice is announced twice: the region empties, then takes it again.
+  await page.evaluate(() => {
+    const said = (globalThis.azSaid = []);
+    const watch = new MutationObserver(() => { for (const el of document.querySelectorAll('.az-admin [role="alert"], .az-admin [role="status"]')) if (el.textContent) said.push(el.textContent); });
+    watch.observe(document.querySelector('.az-admin'), { childList: true, subtree: true, characterData: true });
+  });
+  const save = page.getByRole('button', { name: 'Save changes' });
+  await save.click();
+  await page.getByText('Nothing has changed.').waitFor();
+  await save.click();
+  const twice = await page.waitForFunction(() => globalThis.azSaid.filter((t) => t === 'Nothing has changed.').length >= 2, null, { timeout: 5_000 })
+    .then(() => true, () => false);
+  check(`${name} admin: a repeated message is announced again (cleared, then set)`, twice, JSON.stringify(await page.evaluate(() => globalThis.azSaid)));
+  check(`${name} admin: Save keeps focus while it works and after it refuses`, await save.evaluate((el) => document.activeElement === el));
+  // Cancel: focus goes back to the row's Edit button, never to the page.
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const back = await page.waitForFunction((label) => document.activeElement?.getAttribute('aria-label') === label, `Edit “${name} for review”`, { timeout: 5_000 })
+    .then(() => true, () => false);
+  check(`${name} admin: Cancel closes the editor with focus on the row's Edit button`, back, await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80) ?? 'none'));
+  await page.getByRole('button', { name: `Edit “${name} for review”` }).click();
+  await heading.waitFor();
+  const title = page.locator('#az-admin-edit-notes-title');
   await title.fill('');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await page.getByText('Title is required.').waitFor();
@@ -617,16 +647,16 @@ async function adminFlow(b, name, owner) {
   await page.getByText('Title is too long.').waitFor();
   check(`${name} admin: over the limit is too long, as the API says it`, true);
   await title.fill(`${name} edited by admin`);
-  await page.locator('#az-admin-notes-contact').fill('not-an-address');
+  await page.locator('#az-admin-edit-notes-contact').fill('not-an-address');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await page.getByText('Contact is not valid.').waitFor();
   check(`${name} admin: a value only the server refuses comes back as the same sentence, on its field`,
-    await page.locator('#az-admin-notes-contact').getAttribute('aria-invalid') === 'true');
+    await page.locator('#az-admin-edit-notes-contact').getAttribute('aria-invalid') === 'true');
   const editorAxe = await axeViolations(page);
   check(`${name} admin: axe finds nothing with the editor and its errors open`, editorAxe.length === 0, editorAxe.join(', '));
 
   // The image field: saved on its own, at once — upload, refused type, replace, remove.
-  const photoInput = page.locator('#az-admin-notes-photo');
+  const photoInput = page.locator('#az-admin-edit-notes-photo');
   /** The image requests the page made, with what the server answered — named when a preview does not show. */
   const imageAnswers = [];
   page.on('response', (r) => { if (r.request().resourceType() === 'image') imageAnswers.push(`${r.status()} ${r.headers()['content-type'] ?? ''} ${r.headers()['cross-origin-resource-policy'] ?? ''}`); });
@@ -659,12 +689,47 @@ async function adminFlow(b, name, owner) {
   await page.getByRole('button', { name: 'Remove photo' }).click();
   await page.getByText('Photo removed.').waitFor();
   check(`${name} admin: Remove clears it; no preview remains`, (await preview.count()) === 0 && (await use(owner, 'get', target.item.id)).item?.photo === null);
+  check(`${name} admin: after Remove, focus is on the upload control, not the page`, await photoInput.evaluate((el) => document.activeElement === el),
+    await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80) ?? 'none'));
+
+  // The list fails to reload (an image save reloads it): the error is said
+  // where the rows are, with Try again; the editor and its unsaved values stay.
+  const listRoute = (u) => u.origin === serverUrl && u.pathname === '/admin/data/notes';
+  await page.route(listRoute, (route) => (route.request().method() === 'GET' ? route.abort() : route.continue()));
   await photoInput.setInputFiles({ name: 'keep.jpg', mimeType: 'image/jpeg', buffer: await plainJpeg(64, 64) });
   await page.getByText('Photo saved.').waitFor();
+  const tryAgain = page.getByRole('button', { name: 'Try again' });
+  const inline = await tryAgain.waitFor({ timeout: 5_000 }).then(() => true, () => false);
+  const kept = await page.evaluate(() => ({
+    editor: document.querySelector('#az-admin-editor-title') !== null,
+    title: document.querySelector('#az-admin-edit-notes-title')?.value ?? null,
+    contact: document.querySelector('#az-admin-edit-notes-contact')?.value ?? null,
+    alert: [...document.querySelectorAll('.az-admin [role="alert"]')].map((el) => el.textContent).filter(Boolean),
+    focusOnBody: document.activeElement === document.body,
+  }));
+  check(`${name} admin: a list that cannot load shows an inline error with Try again; the editor, its unsaved values and focus stay`,
+    inline && kept.editor && kept.title === `${name} edited by admin` && kept.contact === 'not-an-address' && !kept.focusOnBody
+      && kept.alert.includes('Something went wrong. Check the connection and try again.'), JSON.stringify(kept));
+  const errorAxe = await axeViolations(page);
+  check(`${name} admin: axe finds nothing with the list error shown`, errorAxe.length === 0, errorAxe.join(', '));
+  await page.unroute(listRoute);
+  await tryAgain.focus();
+  await page.keyboard.press('Enter');
+  const recovered = await page.waitForFunction(() => document.querySelector('.az-admin-table') !== null
+    && ![...document.querySelectorAll('.az-admin button')].some((b) => b.textContent === 'Try again'), null, { timeout: 10_000 }).then(() => true, () => false);
+  const afterRetry = await page.evaluate(() => ({ count: document.activeElement?.classList.contains('az-admin-count') ?? false, editor: document.querySelector('#az-admin-editor-title') !== null }));
+  check(`${name} admin: Try again recovers the rows; focus moves to the count, the editor is still open`,
+    recovered && afterRetry.count && afterRetry.editor, JSON.stringify(afterRetry));
 
-  await page.locator('#az-admin-notes-contact').fill(SECRET_CONTACT);
+  await page.locator('#az-admin-edit-notes-contact').fill(SECRET_CONTACT);
   await page.getByRole('button', { name: 'Save changes' }).click();
   await page.getByText(`Saved “${name} edited by admin”.`).waitFor();
+  // The saved row leaves the search ("… for review"): focus lands on the count once the rows reload, never on the page.
+  await page.locator('.az-admin-count', { hasText: '0 rows match' }).waitFor();
+  const landed = await page.waitForFunction(() => document.activeElement?.classList.contains('az-admin-count'), null, { timeout: 5_000 })
+    .then(() => true, () => false);
+  check(`${name} admin: after Save the editor closes; its row left the page, so focus is on the count`, landed,
+    await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80) ?? 'none'));
   const seen = await use(owner, 'get', target.item.id);
   check(`${name} admin: the edit is the owner's row now, still theirs`, seen.ok === true && seen.item.title === `${name} edited by admin` && seen.item.mine === true, JSON.stringify(seen).slice(0, 120));
 
@@ -710,6 +775,26 @@ async function adminFlow(b, name, owner) {
   await page.locator('#az-admin-confirm').getByRole('button', { name: 'Delete' }).click();
   await page.getByText('Deleted “spam@junk.test”.').waitFor();
   check(`${name} admin: a stranger's row in an anyone-create table is moderated away`, true);
+
+  // A table named `filter`: its editor's field ids never meet the filter form's (az-admin-filter-<field>).
+  await page.goto(`${host.url}/admin/filter`);
+  await page.getByRole('button', { name: 'New row' }).click();
+  await page.locator('#az-admin-editor-title').waitFor();
+  const duplicateIds = await page.evaluate(() => {
+    const seen = new Map();
+    for (const el of document.querySelectorAll('[id]')) seen.set(el.id, (seen.get(el.id) ?? 0) + 1);
+    return [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+  });
+  const stateLabel = await page.locator('.az-admin-editor').getByLabel('State').evaluate((el) => el.closest('.az-admin-editor') !== null).catch(() => false);
+  check(`${name} admin: a table named filter — every id on the page is unique; the editor's State label names the editor's control`,
+    duplicateIds.length === 0 && stateLabel, duplicateIds.join(', '));
+  // Cancel on a new row: focus goes back to New row.
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const toNew = await page.waitForFunction(() => document.activeElement?.getAttribute('data-az-admin-edit') === 'new', null, { timeout: 5_000 })
+    .then(() => true, () => false);
+  check(`${name} admin: Cancel on a new row returns focus to New row`, toNew, await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80) ?? 'none'));
+  const filterAxe = await axeViolations(page);
+  check(`${name} admin: axe finds nothing on a table named filter`, filterAxe.length === 0, filterAxe.join(', '));
 
   // The audit: who and what happened, never a value.
   await page.goto(`${host.url}/admin`);
@@ -791,8 +876,8 @@ async function fromSignedOut(b, name) {
   // The shell as it ships: no rows in the HTML, a skeleton, the noscript line.
   if (name === 'chromium') {
     const html = await (await fetch(`${host.url}/board/`)).text();
-    check('from: /board ships a shell — skeleton, busy, noscript line, no row in the HTML',
-      html.includes('data-az-from-skeleton') && html.includes('aria-busy="true"') && html.includes('Turn on JavaScript to load this list.')
+    check('from: /board ships a shell — skeleton, noscript line, never aria-busy (the runtime sets it), no row in the HTML',
+      html.includes('data-az-from-skeleton') && !html.includes('aria-busy') && html.includes('Turn on JavaScript to load this list.')
         && !html.includes('First seeded note') && !html.includes('How long does it take?'), String(html.length));
   }
   const off = await b.newContext({ javaScriptEnabled: false });
@@ -800,7 +885,8 @@ async function fromSignedOut(b, name) {
   await still.goto(`${host.url}/board`);
   const noscript = await still.locator('.az-from-noscript').first().isVisible();
   const skeletonShown = await still.locator('section.az-feature [data-az-from-skeleton]').isVisible();
-  check(`${name} from: without JavaScript the skeleton and the noscript line show`, noscript && skeletonShown);
+  const busyOff = await still.locator('[data-az-from][aria-busy]').count();
+  check(`${name} from: without JavaScript the skeleton and the noscript line show; no block is busy forever`, noscript && skeletonShown && busyOff === 0, String(busyOff));
   await off.close();
 
   const ctx = await b.newContext();
