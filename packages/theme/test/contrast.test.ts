@@ -14,7 +14,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { THEMES, type ThemeName } from '../src/themes.ts';
-import { type Scheme, VEIL_PERCENT } from '../src/tokens.ts';
+import { type Scheme, type Theme, VEIL_PERCENT } from '../src/tokens.ts';
+import { ACCENT_NAMES, withAccent } from '../src/accent.ts';
 
 /* ---------------- colour maths ---------------- */
 
@@ -96,37 +97,46 @@ const PAIRS: Array<[fg: keyof typeof THEMES.midnight.color.light,
 const NAMES = Object.keys(THEMES) as ThemeName[];
 const SCHEMES: Scheme[] = ['light', 'dark'];
 
+/**
+ * PRD §6.1a: `theme accent` regenerates the accent tokens, and "a step that
+ * fails the floor is not offered". So every pair below must hold for every
+ * hue a site can name, not only each theme's own accent (`own`).
+ */
+const VARIANTS: { label: string; theme: Theme }[] = NAMES.flatMap((name) =>
+  [null, ...ACCENT_NAMES].map((hue) => ({ label: `${name}+${hue ?? 'own'}`, theme: withAccent(THEMES[name], hue) })));
+
 test('CONTROL: the ratio function is correct on known values', () => {
   // Without this, every pass below could mean the maths is broken.
   assert.equal(ratio('hsl(0 0% 100%)', 'hsl(0 0% 0%)'), 21);
   assert.equal(ratio('hsl(0 0% 100%)', 'hsl(0 0% 100%)'), 1);
 });
 
-for (const name of NAMES) {
+for (const { label, theme } of VARIANTS) {
   for (const scheme of SCHEMES) {
-    test(`${name}/${scheme}: every pair clears its floor`, () => {
-      const c = THEMES[name].color[scheme];
+    test(`${label}/${scheme}: every pair clears its floor`, () => {
+      const c = theme.color[scheme];
       const failures: string[] = [];
       for (const [fg, bg, floor] of PAIRS) {
         const r = ratio(c[fg], c[bg]);
         if (r < floor) failures.push(`${fg} on ${bg} = ${r}:1 (needs ${floor})`);
       }
-      assert.deepEqual(failures, [], `${name}/${scheme}\n  ` + failures.join('\n  '));
+      assert.deepEqual(failures, [], `${label}/${scheme}\n  ` + failures.join('\n  '));
     });
   }
 }
 
-test(`all ${PAIRS.length * NAMES.length * SCHEMES.length} pairs were actually computed`, () => {
+test(`all ${PAIRS.length * VARIANTS.length * SCHEMES.length} pairs were actually computed`, () => {
   // theme-spec §6's own lesson: a table is only evidence if it is allowed to
   // fail. Counting the comparisons proves the loop ran rather than skipped.
   let n = 0;
-  for (const name of NAMES) {
+  for (const { theme } of VARIANTS) {
     for (const scheme of SCHEMES) {
-      const c = THEMES[name].color[scheme];
+      const c = theme.color[scheme];
       for (const [fg, bg] of PAIRS) { ratio(c[fg], c[bg]); n++; }
     }
   }
-  assert.equal(n, PAIRS.length * NAMES.length * SCHEMES.length);
+  assert.equal(VARIANTS.length, NAMES.length * (ACCENT_NAMES.length + 1), 'every theme × (own + each hue)');
+  assert.equal(n, PAIRS.length * VARIANTS.length * SCHEMES.length);
 });
 
 test('CONTROL: a deliberately bad pair IS caught', () => {
@@ -160,10 +170,10 @@ const EXTREMES: [string, [number, number, number]][] = [['white', [255, 255, 255
 /** What reads on the veil: text, muted text and links at 4.5:1, outlines at 3:1 (WCAG 1.4.11). */
 const VEIL_PAIRS: [string, number][] = [['text', 4.5], ['muted', 4.5], ['accent', 4.5], ['border-strong', 3]];
 
-for (const name of NAMES) {
+for (const { label, theme } of VARIANTS) {
   for (const scheme of SCHEMES) {
-    test(`${name}/${scheme}: the veil keeps every reading pair above its floor over any backdrop`, () => {
-      const c = THEMES[name].color[scheme] as unknown as Record<string, string>;
+    test(`${label}/${scheme}: the veil keeps every reading pair above its floor over any backdrop`, () => {
+      const c = theme.color[scheme] as unknown as Record<string, string>;
       for (const [fg, floor] of VEIL_PAIRS) {
         for (const [label, pixel] of EXTREMES) {
           const r = ratioRgb(c[fg], overPixel(c.bg, VEIL_PERCENT, pixel));

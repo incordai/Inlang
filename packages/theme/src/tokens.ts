@@ -80,6 +80,46 @@ export const MOTION = {
  */
 export const VEIL_PERCENT = 92;
 
+/**
+ * `theme pattern` (PRD §6.1a): the background SHAPE; its colour is the accent.
+ * Geometry is data, so raw values live here (theme-spec §4).
+ *
+ * Every shape's peak ink is at most PATTERN_MAX_ALPHA. The hero's text sits on
+ * the pattern, so the cap is set by contrast, not taste: 12% is the largest
+ * whole percent at which text, muted and accent (4.5:1) and border-strong
+ * (3:1) hold over accent-on-bg for every theme × accent × scheme; 10 keeps
+ * the veil's two-point margin. theme/test/pattern.test.ts proves both, and
+ * that the spike's original 55% glow fails.
+ */
+export const PATTERN_MAX_ALPHA = 0.1;
+
+export const PATTERN_SHAPES = ['none', 'glow', 'spotlight', 'ramp', 'grid', 'hatch', 'dots'] as const;
+export type PatternShape = (typeof PATTERN_SHAPES)[number];
+
+export const PATTERN_ORIGINS = ['top', 'bottom', 'left', 'right', 'center'] as const;
+export type PatternOrigin = (typeof PATTERN_ORIGINS)[number];
+
+export const PATTERN = {
+  /** Peak ink per shape, a fraction of the accent; each ≤ PATTERN_MAX_ALPHA. */
+  alpha: { glow: 0.1, spotlight: 0.1, ramp: 0.1, grid: 0.09, hatch: 0.08, dots: 0.1 },
+  /** Where the light sits, per origin — a CSS position. */
+  at: { top: '50% 8%', bottom: '50% 92%', left: '8% 50%', right: '92% 50%', center: '50% 50%' },
+  /** Which way a `ramp` travels, per origin. */
+  toward: { top: 'to bottom', bottom: 'to top', left: 'to right', right: 'to left', center: 'to bottom' },
+  /** Lattice pitch for grid / hatch / dots, and the line and dot weights. */
+  pitch: '32px',
+  hairline: '1px',
+  dot: '1.2px',
+  dotFade: '1.4px',
+  hatchAngle: '45deg',
+  /** Where each radial or linear fade reaches clear ground. */
+  glowEllipse: '125% 125%',
+  glowStart: '38%',
+  spotEllipse: '60% 55%',
+  spotEnd: '72%',
+  rampEnd: '68%',
+} as const;
+
 /** CONVENTIONS §4 bans raw z-index; overlays-spec §1 needs a layer manager. */
 export const LAYER = {
   behind: -1, base: 0, raised: 10, scrim: 20, sticky: 100, dropdown: 200,

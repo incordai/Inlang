@@ -2,7 +2,7 @@
  * @az module theme-css
  * Purpose: colour schemes as CSS custom properties: default scheme, OS preference, data-scheme.
  * Spec: docs/theme-spec.md §3
- * Exports: schemeCss, schemeReferences
+ * Exports: schemeCss, schemeReferences, patternCss, PATTERN_REFERENCES
  * Edit guide: words read var(--az-color-*) references; declarations are generated here only.
  * Tests: packages/theme/test/css.test.ts
  */
@@ -22,6 +22,7 @@
  */
 
 import { VEIL_PERCENT, type ColorTokens, type Scheme, type ShadowTokens, type Theme } from './tokens.ts';
+import type { PatternLayers } from './pattern.ts';
 
 /** The per-scheme token groups — the only ones that change with the scheme. */
 const SCHEMED = ['color', 'shadow'] as const;
@@ -76,4 +77,34 @@ export function schemeCss(theme: Theme): string {
     // Built on var(), so it follows the scheme without a copy per scheme.
     `:root { ${VEIL}: color-mix(in srgb, var(${property('color', 'bg')}) ${VEIL_PERCENT}%, transparent); }`,
   ].join('\n\n') + '\n';
+}
+
+/** The pattern's three properties (PRD §6.1a), set once per site. */
+const PATTERN_PROPERTY = {
+  image: '--az-pattern-image',
+  size: '--az-pattern-size',
+  position: '--az-pattern-position',
+} as const;
+
+/** What a word reads to paint the site's pattern: references, never the gradient. */
+export const PATTERN_REFERENCES: PatternLayers = {
+  image: `var(${PATTERN_PROPERTY.image})`,
+  size: `var(${PATTERN_PROPERTY.size})`,
+  position: `var(${PATTERN_PROPERTY.position})`,
+};
+
+/**
+ * The declarations behind PATTERN_REFERENCES, or nothing when the site has no
+ * pattern — then no word paints one, so a site without `pattern` is unchanged.
+ */
+export function patternCss(layers: PatternLayers | null): string {
+  if (layers === null) return '';
+  return [
+    '/* theme pattern — PRD §6.1a; ink is the accent token */',
+    ':root {',
+    `  ${PATTERN_PROPERTY.image}: ${layers.image};`,
+    `  ${PATTERN_PROPERTY.position}: ${layers.position};`,
+    `  ${PATTERN_PROPERTY.size}: ${layers.size};`,
+    '}',
+  ].join('\n') + '\n';
 }

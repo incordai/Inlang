@@ -383,6 +383,7 @@ Mechanically:
 |---|---|---|---|---|
 | `packages/theme/themes/**` | **legal** | **legal** | **legal** | **legal** |
 | `packages/theme/tokens/**` | legal | legal | legal | legal |
+| `packages/theme/src/ramps.ts` (generated accent ramps) | legal | legal | legal | legal |
 | `packages/theme/*.ts` (resolver) | **banned** | banned | banned | banned |
 | `packages/words/**` | banned | banned | banned | banned |
 | `packages/target-*/**` | banned | banned | banned | banned |

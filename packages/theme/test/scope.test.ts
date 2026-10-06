@@ -24,8 +24,14 @@ function sources(dir: string): string[] {
   });
 }
 
-/** The theme's data files: the one place raw values are legal (§4). */
-const THEME_DATA = new Set(['packages/theme/src/tokens.ts', 'packages/theme/src/themes.ts']);
+/**
+ * The theme's data files: the one place raw values are legal (§4). ramps.ts is
+ * GENERATED data (scripts/gen-ramps.mjs); theme/test/ramps.test.ts proves it
+ * holds exactly the generator's output and nothing hand-written.
+ */
+const THEME_DATA = new Set([
+  'packages/theme/src/tokens.ts', 'packages/theme/src/themes.ts', 'packages/theme/src/ramps.ts',
+]);
 
 const BANNED = [
   ...sources(join(ROOT, 'packages/target-web/src')),
