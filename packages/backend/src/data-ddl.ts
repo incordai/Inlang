@@ -29,7 +29,7 @@
  */
 
 import type { Database } from './server/env.ts';
-import type { DataStep, DataUnit, Param } from './server/data-migrate.ts';
+import type { DataStep, DataUnit, Guard, Param } from './server/data-migrate.ts';
 import type { Fill, LockField, LockOp, LockStep } from '../../core/src/data-lock.ts';
 
 export const DESTRUCTIVE_OPS: ReadonlySet<LockOp['op']> = new Set(['dropTable', 'dropField', 'renameTable', 'renameField']);
@@ -119,14 +119,32 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
       return s;
     };
 
-    const createIndex = (table: string, s: TableState, key: string, cols: readonly string[], unique: boolean) => {
+    const createIndex = (table: string, s: TableState, key: string, cols: readonly string[], unique: boolean, guard?: (d: Database) => Guard) => {
       const ix = name('x');
       s.indexes.set(key, ix);
       const t = physical(table);
       all((d) => ({
         sql: `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${q(d, ix)} ON ${q(d, t)} (${cols.map((c) => q(d, c)).join(', ')})`,
         probe: { kind: 'index', table: t, name: ix, done: 'present' },
+        ...(guard ? { guard: guard(d) } : {}),
       }));
+    };
+    /**
+     * A unique index on a table that may hold rows: the duplicate count and
+     * the index are ONE claimed unit, so nothing writes between a passing
+     * count and the index (data-migrate.ts recounts if the index still
+     * fails). A pending fill counts as the value its empty rows will hold —
+     * the guard runs before any fill is written.
+     */
+    const uniqueGuard = (table: string, col: string, fill: Fill | undefined) => (d: Database): Guard => {
+      const t = physical(table);
+      const v = fill === undefined ? q(d, col) : `COALESCE(${q(d, col)}, ?)`;
+      return {
+        sql: `SELECT COUNT(*) AS n FROM (SELECT ${q(d, 'v')} FROM (SELECT ${v} AS ${q(d, 'v')} FROM ${q(d, t)}) ${q(d, 'filled')} `
+          + `WHERE ${q(d, 'v')} IS NOT NULL GROUP BY ${q(d, 'v')} HAVING COUNT(*) > 1) ${q(d, 'dupes')}`,
+        params: fill === undefined ? [] : [fillValue(fill)],
+        message: `${table}.${col} has values held by more than one row`,
+      };
     };
     const dropIndex = (table: string, s: TableState, key: string) => {
       const ix = s.indexes.get(key);
@@ -209,11 +227,18 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
               probe: { kind: 'fk', table: t, name: fk, done: 'present' },
             });
           }
+          if (f.unique && op.fill !== undefined) {
+            // Every existing row would take the one fill value (AZ1236 refuses
+            // `unique` with `default`; a lock is checked here as well): the
+            // guard stops it, counted, before anything is written.
+            destructive = true;
+            createIndex(op.table, s, `unique:${f.name}`, [f.name], true, uniqueGuard(op.table, f.name, op.fill));
+          }
           if (op.fill !== undefined) {
             const v = fillValue(op.fill);
             all((d) => ({ sql: `UPDATE ${q(d, t)} SET ${q(d, f.name)} = ? WHERE ${q(d, f.name)} IS NULL`, params: [v] }));
           }
-          fieldIndexes(op.table, s, f);
+          if (!s.indexes.has(`unique:${f.name}`)) fieldIndexes(op.table, s, f);
           summary.push(`add ${op.table}.${f.name}`);
           break;
         }
@@ -298,25 +323,20 @@ export function dataSteps(steps: readonly LockStep[]): DataStep[] {
             }));
             summary.push(`remove ${removed.join(', ')} from ${op.table}.${col}`);
           }
+          // The duplicate guard and the unique index come before any fill,
+          // as one unit: a fill written first could not be taken back.
+          if (!was.unique && now.unique) {
+            destructive = true;
+            createIndex(op.table, s, `unique:${col}`, [col], true, uniqueGuard(op.table, col, op.fill));
+            summary.push(`make ${op.table}.${col} unique`);
+          }
           if (op.fill !== undefined) {
             const v = fillValue(op.fill);
             all((d) => ({ sql: `UPDATE ${q(d, t)} SET ${q(d, col)} = ? WHERE ${q(d, col)} IS NULL`, params: [v] }));
           }
-          if (!was.unique && now.unique) {
-            destructive = true;
-            all((d) => ({
-              guard: {
-                sql: `SELECT COUNT(*) AS n FROM (SELECT ${q(d, col)} FROM ${q(d, t)} WHERE ${q(d, col)} IS NOT NULL GROUP BY ${q(d, col)} HAVING COUNT(*) > 1) ${q(d, 'dupes')}`,
-                params: [],
-                message: `${op.table}.${col} has values held by more than one row`,
-              },
-            }));
-            summary.push(`make ${op.table}.${col} unique`);
-          }
           const wantPlain = !now.unique && (now.index || now.type === 'ref');
           if (was.unique && !now.unique) dropIndex(op.table, s, `unique:${col}`);
           if (s.indexes.has(`plain:${col}`) && !wantPlain) dropIndex(op.table, s, `plain:${col}`);
-          if (!was.unique && now.unique) createIndex(op.table, s, `unique:${col}`, [col], true);
           if (wantPlain && !s.indexes.has(`plain:${col}`)) createIndex(op.table, s, `plain:${col}`, [col, 'id'], false);
           s.fields.set(col, now);
           if (summary.length === 0 || !summary[summary.length - 1].includes(`${op.table}.${col}`)) summary.push(`change ${op.table}.${col}`);

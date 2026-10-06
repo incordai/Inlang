@@ -225,3 +225,55 @@ test('foreign keys: a ref target in use cannot be deleted; deleting the owner ac
   assert.equal((await db.all('SELECT id FROM azd_products')).length, 0, 'owner cascade');
   await db.close();
 });
+
+test('a new unique: the duplicate count and the index are one unit, ahead of any fill (review #2, #7)', () => {
+  const [, step] = dataSteps(lockOf([[V1], [V1.replace('sku text', 'sku text unique'), { unique: ['products.sku'] }]]));
+  for (const d of ['sqlite', 'postgres', 'mysql'] as const) {
+    const units = step.units[d];
+    const ix = units.findIndex((u) => /CREATE UNIQUE INDEX/.test(u.sql ?? ''));
+    assert.ok(ix >= 0, d);
+    assert.match(units[ix].guard?.sql ?? '', /HAVING COUNT\(\*\) > 1/, `${d}: the guard rides with the index`);
+    assert.ok(!units.some((u) => u.guard && u.sql === undefined), `${d}: no guard alone, apart from its index`);
+  }
+});
+
+/** A step written by hand, as a lock could hold it: `code` arrives unique with a fill. */
+const ADD_UNIQUE_FILLED: LockStep = {
+  version: 2,
+  ops: [{ op: 'addField', table: 'products', field: { name: 'code', type: 'text', required: true, unique: true, index: false }, fill: 'X' }],
+};
+
+test('a unique field added with a fill: refused with a count before any row is filled; one row applies (review #2)', async () => {
+  const db = await fresh();
+  const steps = dataSteps([...lockOf([[V1]]), ADD_UNIQUE_FILLED]);
+  assert.equal(steps[1].destructive, true, 'it may be refused, so it waits for --confirm');
+  const units = steps[1].units.sqlite;
+  const ix = units.findIndex((u) => u.guard !== undefined);
+  const fill = units.findIndex((u) => /^UPDATE/.test(u.sql ?? ''));
+  assert.ok(ix >= 0 && fill > ix, 'the guard runs before the fill');
+  await migrateData(db, steps.slice(0, 1));
+  await db.run("INSERT INTO azd_products (id, owner, created, updated, name) VALUES ('a', NULL, 1, 1, 'x'), ('b', NULL, 1, 1, 'y')");
+  await assert.rejects(migrateData(db, steps, { confirm: 2 }), (e: unknown) => e instanceof GuardFailed && /more than one row — 1 row;/.test(e.message));
+  assert.deepEqual((await db.all('SELECT code FROM azd_products')).map((r) => r.code), [null, null], 'nothing filled');
+  await db.run("DELETE FROM azd_products WHERE id = 'b'");
+  assert.deepEqual(await migrateData(db, steps, { confirm: 2 }), [2], 'CONTROL: one row takes the fill');
+  assert.equal((await db.get("SELECT code FROM azd_products WHERE id = 'a'"))!.code, 'X');
+  await db.close();
+});
+
+test('a unique index that still fails is a GuardFailed with a count, never the driver message with the value (review #2, #7)', async () => {
+  const db = await fresh();
+  const steps = dataSteps(lockOf([[V1], [V1.replace('sku text', 'sku text unique'), { unique: ['products.sku'] }]]));
+  await migrateData(db, steps.slice(0, 1));
+  await db.run("INSERT INTO azd_products (id, owner, created, updated, name, sku) VALUES ('a', NULL, 1, 1, 'x', 'SECRET-SKU'), ('b', NULL, 1, 1, 'y', 'SECRET-SKU')");
+  // The race: the first count sees no duplicate (a row lands after it).
+  let counts = 0;
+  const racing: Db = Object.create(db, {
+    get: { value: (sql: string, p: never[]) => (/HAVING/.test(sql) && counts++ === 0 ? Promise.resolve({ n: 0 }) : db.get(sql, p)) },
+  });
+  await assert.rejects(migrateData(racing, steps, { confirm: 2 }),
+    (e: unknown) => e instanceof GuardFailed && /more than one row — 1 row;/.test(e.message) && !/SECRET/.test(e.message));
+  assert.equal(counts, 2, 'counted again after the index failed');
+  assert.equal((await db.all('SELECT * FROM az_data_migrations WHERE applied_at IS NULL')).length, 0, 'claim released');
+  await db.close();
+});

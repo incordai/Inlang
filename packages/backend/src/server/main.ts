@@ -81,18 +81,26 @@ function migrateArgs(argv: readonly string[]): { migrate: boolean; confirm: numb
 }
 const args = migrateArgs(process.argv.slice(2));
 
-/** A refusal to migrate is the operator's to act on: its message, then exit — never a stack. */
-async function orStop<T>(run: () => Promise<T>, refusals: readonly (new (...a: never[]) => Error)[]): Promise<T> {
+/**
+ * A refusal to migrate is the operator's to act on: its message, then exit —
+ * never a stack. Any other failure is named by class and code only: a driver's
+ * message may quote a row's value (a duplicate key), and the log is no place
+ * for it.
+ */
+async function orStop<T>(run: () => Promise<T>, refusals: readonly (new (...a: never[]) => Error)[], what: string): Promise<T> {
   try {
     return await run();
   } catch (e) {
-    if (!refusals.some((r) => e instanceof r)) throw e;
-    process.stderr.write(`backend: cannot start — ${(e as Error).message}\n`);
+    const err = e as { name?: unknown; code?: unknown; message?: unknown };
+    const said = refusals.some((r) => e instanceof r)
+      ? String(err.message)
+      : `${what} failed (${typeof err?.name === 'string' ? err.name : 'Error'}${typeof err?.code === 'string' ? ` ${err.code}` : ''}) — fix the database, then start again`;
+    process.stderr.write(`backend: cannot start — ${said}\n`);
     process.exit(1);
   }
 }
 
-const applied = await orStop(() => migrate(db), [MigrationBusy]);
+const applied = await orStop(() => migrate(db), [MigrationBusy], 'the auth migration');
 if (applied.length > 0) process.stdout.write(`backend: applied migrations ${applied.join(', ')}\n`);
 
 // The data tables, only when the site declares them: `data.json` and the
@@ -112,7 +120,7 @@ if (existsSync(dataFile)) {
     process.stderr.write(`backend: cannot start — fix this in .env (see .env.example):\n  - ${admins.problem}\n`);
     process.exit(1);
   }
-  const steps = await orStop(() => migrateData(db, model.steps, { confirm: args.confirm }), [DestructivePending, GuardFailed, MigrationBusy]);
+  const steps = await orStop(() => migrateData(db, model.steps, { confirm: args.confirm }), [DestructivePending, GuardFailed, MigrationBusy], 'the data migration');
   if (steps.length > 0) process.stdout.write(`backend: applied data steps ${steps.join(', ')}\n`);
   // The image library loads only when a table has an image field (data-spec §8).
   const images = config.setup.images === true

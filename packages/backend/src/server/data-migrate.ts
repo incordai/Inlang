@@ -149,14 +149,25 @@ export async function migrateData(db: Db, steps: readonly DataStep[], options: M
     for (let i = 0; i < units.length; i++) {
       const unit = units[i];
       const outcome = await runClaimed(unitClaim(db, step.version, i + 1), async () => {
-        if (unit.guard) {
-          const row = await db.get(unit.guard.sql, unit.guard.params);
-          const n = Number(row?.n ?? 0);
-          if (n > 0) throw new GuardFailed(`data step ${step.version}: ${unit.guard.message} — ${n} row${n === 1 ? '' : 's'}; change them first`);
-        }
+        if (unit.sql !== undefined && unit.probe && (await probeDone(db, unit.probe))) return;
+        const guard = unit.guard;
+        const counted = async () => {
+          if (!guard) return;
+          const n = Number((await db.get(guard.sql, guard.params))?.n ?? 0);
+          if (n > 0) throw new GuardFailed(`data step ${step.version}: ${guard.message} — ${n} row${n === 1 ? '' : 's'}; change them first`);
+        };
+        await counted();
         if (unit.sql === undefined) return;
-        if (unit.probe && (await probeDone(db, unit.probe))) return;
-        await db.run(unit.sql, unit.params ?? []);
+        try {
+          await db.run(unit.sql, unit.params ?? []);
+        } catch (e) {
+          // A row written between the count and a unique index: count again,
+          // and say how many. The driver's own message is never passed on —
+          // some engines quote the duplicated value in it.
+          if (!guard || !isUniqueViolation(e)) throw e;
+          await counted();
+          throw new GuardFailed(`data step ${step.version}: ${guard.message} — rows changed while it ran; start the server again`);
+        }
       }, `data step ${step.version}.${i + 1}`, options.now, options.timing);
       if (outcome === 'ran') ran = true;
     }
