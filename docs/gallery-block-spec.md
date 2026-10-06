@@ -137,6 +137,36 @@ compiler knows and hand-written galleries always get wrong. 200 images × 4
 widths = 800 encodes, so output is content-hashed and cached, or CONVENTIONS §6's
 byte-identical rebuild stops being cheap.
 
+> **Status (rule 1 built, rule 3 awaiting a decision).** Rule 1 ships: the
+> CLI reads the first 1MB of each image the build copies, through the asset
+> sandbox, and `target-web/src/image-size.ts` reads its size from the
+> header — PNG, GIF, JPEG (EXIF orientation applied), WebP (VP8, VP8L,
+> VP8X), AVIF/HEIF (the primary item's `ispe`, turned by `irot`) and SVG
+> (`width`/`height` in px, else the `viewBox`). It applies to every `<img>`
+> any word emits through the sandbox — gallery images and poster, feature
+> media, hero and cta media, nav and footer logos, markdown images — not
+> only this word's. A header the parser cannot read gives no attributes
+> (never wrong ones) and a warning:
+> `image: can't read the size of './x.bmp' — the page will shift as it loads; export it as WebP, AVIF, JPEG, PNG or GIF`.
+>
+> Rule 3 needs pixels, not a header: four widths means decoding and
+> re-encoding every image, which the compiler cannot do today without a new
+> dependency — and a new compiler dependency is the owner's call. The
+> options:
+>
+> | Option | Cost | Gain |
+> |---|---|---|
+> | **A. Resize at build** with a vetted image library in the CLI | a native dependency in the compiler (prebuilt binaries per platform, ~10–30MB installed); encode output must be pinned (library + codec versions) or CONVENTIONS §6's byte-identical rebuild breaks; 800 encodes for a 200-image gallery, so a content-hashed cache is required | the full rule: a phone downloads a 480w file instead of the original |
+> | **B. Skip `srcset`, ship one file** (today) | every visitor downloads the original; the author must export at a sensible size — §11's 500KB image-budget warning is the guard, and it is specified but not built yet | no dependency, deterministic, offline, zero build cost |
+> | **C. Resize on the generated server** (its image library is already vetted there) | only sites with a backend; output stops being static files; first request per width pays the encode | no compiler dependency |
+>
+> **Recommendation: A**, gated behind the dependency review — the same
+> library the generated server already ships is the natural candidate, with
+> its version pinned and output hashed into a cache under the build folder.
+> Until then the build ships **B**: one size, `width`/`height` exact; the
+> 500KB budget warning (§11) should land with it, as B's only guard. `sizes` without `srcset` means nothing,
+> so neither attribute is written yet.
+
 **4 — `content-visibility: auto` with `contain-intrinsic-size` per row.**
 Offscreen rows skip layout and paint entirely, and the intrinsic size comes free
 from rule 1 — so the scrollbar stays honest.
@@ -235,6 +265,7 @@ What is specific to `orbit`:
 | >200 images | `gallery: 240 images is an archive, not a section — paginate it with 'content'` |
 | `orbit` >16 images | `gallery: 'orbit' caps at 16 images, got 30 — use 'grid', or cut the set` |
 | `orbit` <4 images | `gallery: 'orbit' needs at least 4 images to read as a ring — use 'grid'` |
+| image size unreadable (§7 rule 1) | `image: can't read the size of './x.bmp' — the page will shift as it loads; export it as WebP, AVIF, JPEG, PNG or GIF` (an SVG: `give its <svg> a viewBox, or width and height in px`) |
 | image over budget | `gallery: 'bench.webp' is 4.2MB — export it under 500KB or the gallery blocks the page` |
 | missing `alt` | `gallery: 'lasts.webp' has no alt text — add: alt "lasts on a shelf", or alt "" if the caption says it` |
 | `alt` equals `caption` | `gallery: alt and caption are identical on 'welt.webp' — set alt "" so it isn't read twice` |
