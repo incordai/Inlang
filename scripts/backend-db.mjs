@@ -18,6 +18,7 @@ import { migrate, openMysql, openPostgres } from '../packages/backend/src/server
 import { loadConfig } from '../packages/backend/src/server/env.ts';
 import { createOidc } from '../packages/backend/src/server/oidc.ts';
 import { createStore } from '../packages/backend/src/server/store.ts';
+import { dataSuite } from './backend-db-data.mjs';
 
 /** Pinned images — the current PostgreSQL release and MySQL's long-term-support line. */
 const IMAGES = { postgres: 'postgres:18.6-alpine', mysql: 'mysql:8.4.11' };
@@ -38,6 +39,8 @@ const check = (name, pass, detail = '') => {
   if (!pass) failures++;
   console.log(`${pass ? 'PASS ' : 'FAIL '} ${name}${detail ? `   ${detail}` : ''}`);
 };
+/** A finding recorded as observed — not a pass or a fail. */
+const info = (line) => console.log(`INFO  ${line}`);
 
 async function until(fn, what) {
   const start = Date.now();
@@ -135,6 +138,9 @@ async function suite(engine) {
     const again = await post('/auth/password', { token: t, password: 'third-long-password', passwordConfirm: 'third-long-password' });
     check(`${engine} HTTP: …once`, (await again.json()).error === 'expired_token');
     server.close();
+
+    // The data tables on this engine (data-spec §14).
+    await dataSuite(engine, db, () => (engine === 'postgres' ? openPostgres(c.url, false) : openMysql(c.url, false)), check, info);
   } finally {
     await db?.close().catch(() => {});
     docker('rm', '-f', c.id);

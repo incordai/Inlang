@@ -48,7 +48,10 @@ const NOT_FOUND = fail(404, 'not_found');
 /** A foreign-key violation, whichever engine raised it. */
 export function isForeignKeyViolation(e: unknown): boolean {
   const err = e as { code?: unknown; errno?: unknown; errcode?: unknown; message?: unknown };
-  return err?.code === '23503'                                    // PostgreSQL foreign_key_violation
+  // PostgreSQL raises restrict_violation (23001) for ON DELETE RESTRICT and
+  // foreign_key_violation (23503) for a missing target — found on the real
+  // engine (scripts/backend-db-data.mjs), not in the driver's docs.
+  return err?.code === '23503' || err?.code === '23001'
     || err?.errno === 1451 || err?.errno === 1452                  // MySQL row is referenced / no referenced row
     || err?.errcode === 787                                        // SQLite SQLITE_CONSTRAINT_FOREIGNKEY
     || (typeof err?.message === 'string' && /FOREIGN KEY constraint failed/.test(err.message));

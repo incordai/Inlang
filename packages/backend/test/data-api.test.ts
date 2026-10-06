@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { client, SITE, startBackend, type Harness } from './helpers.ts';
 import { dataOf } from './data-fixture.ts';
+import { isForeignKeyViolation } from '../src/server/data-api.ts';
 
 const GOOD = 'a-long-enough-password';
 const MINUTE = 60 * 1000;
@@ -442,6 +443,14 @@ test('routes: an unknown table, a malformed id, PUT and nested paths are 404', a
       assert.deepEqual([r.status, await r.json()], [404, { error: 'not_found' }], `${method} ${path}`);
     }
   } finally { await h.close(); }
+});
+
+test('foreign-key refusals are recognised on every engine, ON DELETE RESTRICT included', () => {
+  assert.ok(isForeignKeyViolation({ code: '23001' }), 'PostgreSQL restrict_violation — what RESTRICT raises (found on 18.6)');
+  assert.ok(isForeignKeyViolation({ code: '23503' }), 'PostgreSQL foreign_key_violation');
+  assert.ok(isForeignKeyViolation({ errno: 1451 }) && isForeignKeyViolation({ errno: 1452 }), 'MySQL');
+  assert.ok(isForeignKeyViolation({ errcode: 787 }) && isForeignKeyViolation({ message: 'FOREIGN KEY constraint failed' }), 'SQLite');
+  assert.ok(!isForeignKeyViolation({ code: '23505' }) && !isForeignKeyViolation(new Error('x')), 'CONTROL: a unique violation is not one');
 });
 
 test('CONTROL: a backend without data answers /data exactly as before (404 unknown)', async () => {
