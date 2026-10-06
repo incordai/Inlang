@@ -152,6 +152,17 @@ export function azMd(m: MapInput): string {
     out.push('(it records the step in `<file>.data.json`, the reviewed history), then rebuild.');
     out.push('- `server/src/data-api.ts` — the routes; `data-query.ts` — parameters, paging, search; `data-values.ts` — every value checked');
     out.push('- `server/src/data-migrate.ts` — applies `server/data.json`\'s steps; one that loses data waits for `--migrate --confirm`');
+    out.push('', '## Admin', '');
+    out.push('Generated pages, not pages of the .az file (data-spec §11): `/admin` lists the tables, their row counts and the');
+    out.push(`audit log; ${m.data.map((t) => `\`/admin/${t.name}\``).join(', ')} list rows (search, sort, filter, pages), create, edit and delete.`);
+    out.push('They carry `noindex` and sit inside `<Protected>`. `page /admin` in the .az file is an error (AZ1268).', '');
+    out.push('- Who is an admin: a **verified** account whose address is in the server\'s `AZ_ADMIN_EMAILS` (`server/.env`).');
+    out.push('  Empty: nobody. Read when the server starts: a change needs a restart, never a rebuild.');
+    out.push('- The pages are UX, not security: the server checks every `/admin/...` request. Admins bypass `allow`, never validation;');
+    out.push('  `locked` fields are writable. Every admin write is a row of `az_data_audit` (who, table, row, action, time — no values).');
+    out.push(`- \`${DATA_DIR}/admin.tsx\` — the pages; \`${DATA_DIR}/admin-values.ts\` — the tables as data, inputs ↔ API values, codes → sentences`);
+    out.push(`- \`${DATA_DIR}/client.ts\` — \`admin.tables()\`, \`list\`, \`get\`, \`create\`, \`update\`, \`remove\`, \`audit\``);
+    out.push('- `server/src/data-api.ts` — the `/admin` routes (`handleAdmin`) and the audit; `.az-admin-*` styles are in `src/theme.css`');
   }
   return out.join('\n') + '\n';
 }

@@ -1,6 +1,6 @@
 /**
  * @az module data-client
- * Purpose: src/data/client.ts — the site's typed client for its data tables: types and list/get/create/update/remove per table.
+ * Purpose: src/data/client.ts — the typed client for the data tables: list/get/create/update/remove per table, and the admin routes.
  * Spec: docs/data-spec.md §7
  * Exports: DATA_DIR, dataClient
  * Edit guide: only the actions some rule grants; no dependency; results are { ok } unions with the closed error codes.
@@ -180,6 +180,51 @@ ${tables.map(tableBlock).join('\n')}
  */
 export const tables = {
 ${tables.map(tableRoutes).join('\n')}
+} as const;
+
+/** A table's name, as the admin routes take it. */
+export type TableName = ${tables.map((t) => str(t.name)).join(' | ')};
+
+/** A row as an admin reads it: every field, private ones too, and the owner's address. */
+export interface AdminRow {
+  readonly id: string;
+  readonly created: number;
+  readonly updated: number;
+  readonly mine: boolean;
+  readonly ownerEmail: string | null;
+  readonly [field: string]: unknown;
+}
+
+/** One admin write: who, which row, when — never a value (data-spec §11). */
+export interface AuditEntry {
+  readonly id: string;
+  readonly table: TableName;
+  readonly row: string;
+  readonly action: "create" | "edit" | "delete";
+  readonly at: number;
+  /** The admin's address; null once that account is gone. */
+  readonly admin: string | null;
+}
+
+/**
+ * The admin routes (data-spec §11): every table and row, rules bypassed,
+ * values still checked. The server answers only a verified account listed in
+ * its AZ_ADMIN_EMAILS — anyone else gets \`forbidden\`, whatever calls this.
+ */
+export const admin = {
+  /** Every table with its row count. */
+  tables: () => call<{ tables: { name: TableName; count: number }[] }>("GET", "/admin/data"),
+  /** A page of rows, with \`count\`: the rows the query matches. */
+  list: (table: TableName, query: Record<string, string | number | boolean> = {}) =>
+    call<{ items: AdminRow[]; next: string | null; count: number }>("GET", \`/admin/data/\${table}\${search(query)}\`),
+  get: (table: TableName, id: string) => call<{ item: AdminRow }>("GET", \`/admin/data/\${table}/\${encodeURIComponent(id)}\`),
+  create: (table: TableName, input: Record<string, unknown>) => call<{ item: AdminRow }>("POST", \`/admin/data/\${table}\`, input),
+  update: (table: TableName, id: string, changes: Record<string, unknown>) =>
+    call<{ item: AdminRow }>("PATCH", \`/admin/data/\${table}/\${encodeURIComponent(id)}\`, changes),
+  remove: (table: TableName, id: string) => call<Record<string, never>>("DELETE", \`/admin/data/\${table}/\${encodeURIComponent(id)}\`),
+  /** Admin writes, newest first; pass \`next\` back as \`after\`. */
+  audit: (query: { limit?: number; after?: string } = {}) =>
+    call<{ items: AuditEntry[]; next: string | null }>("GET", \`/admin/audit\${search(query)}\`),
 } as const;
 `;
 }

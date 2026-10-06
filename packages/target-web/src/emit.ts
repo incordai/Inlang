@@ -41,6 +41,7 @@ import {
   AUTH_DIR, GUARD_DIR, authConfig, authCss, authPlan, authReact, guardTs, requiredEnv, type AuthPlan,
 } from './auth.ts';
 import { DATA_DIR, dataClient } from './data-client.ts';
+import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminValuesTs } from './data-admin.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
 
 /**
@@ -217,7 +218,7 @@ function layOut(page: { route: string; nodes: EmittedNode[] }): LaidOut {
 
 function appTsx(
   spec: Spec, pages: { route: string; nodes: EmittedNode[] }[], modules: string[], theme: ThemeLike,
-  plan: AuthPlan | null,
+  plan: AuthPlan | null, admin: readonly string[] = [],
 ): string {
   // Identifiers are derived from position, never from the author's path, and
   // the path reaches the source only through JSON.stringify (CONVENTIONS §6).
@@ -232,6 +233,14 @@ function appTsx(
 /** Pages whose content is wrapped in <Protected>. */
 const PROTECT = new Set<string>(${stableJson(plan.protect)});
 ` : '';
+  // The admin pages (data-spec §11): generated routes, not pages of the
+  // file, always inside <Protected>. The server checks every request; this
+  // only spares a signed-out visitor an empty page.
+  const adminImport = plan && admin.length > 0 ? `import { Admin } from "./data/admin.tsx";
+
+/** The generated admin routes (data-spec §11). */
+const ADMIN = new Set<string>(${stableJson(admin)});
+` : '';
   const content = plan
     ? `PROTECT.has(page.route)
               ? <Protected lead={null}>{nodes(page, page.lead, page.nodes.length - page.tail)}</Protected>
@@ -240,7 +249,7 @@ const PROTECT = new Set<string>(${stableJson(plan.protect)});
   const laidOut = pages.map(layOut);
   return `${generated('every page of the site as data (routes, blocks, styles); rendered by runtime.tsx')}import { Components, Node, NotFound, Page, Site } from "./runtime.tsx";
 import type { Custom, EmittedNode } from "./runtime.tsx";
-${auth}${imports}
+${auth}${adminImport}${imports}
 /**
  * Every page: its nodes, how many lead (nav, before <main>) and how many
  * tail (footer, after </main>), and its layout (nav-spec §10 Q2: \`side\`).
@@ -281,7 +290,9 @@ export default function App({ route }: { route: string }) {
         width=${jsxValue(spec.site.width)}
         theme=${jsxValue(spec.site.theme)}
       >
-        {page
+        {${adminImport ? `ADMIN.has(routeOf(route))
+          ? <Page route={routeOf(route)}><Protected lead={null}><Admin route={routeOf(route)} /></Protected></Page>
+          : ` : ''}page
           ? <Page route={page.route} layout={page.layout}
               lead={nodes(page, 0, page.lead)} tail={nodes(page, page.nodes.length - page.tail, page.nodes.length)}>
               {${content}}
@@ -643,7 +654,16 @@ function themeFor(named: Theme, fonts: Readonly<Record<string, string>> = {}, pa
  * the way asset paths are — nothing may climb out of the project.
  */
 function htmlFiles(spec: Spec): string[] {
-  return spec.pages.map((page) => htmlFileFor(page.route)).sort();
+  return [...spec.pages.map((page) => page.route), ...adminOf(spec)].map(htmlFileFor).sort();
+}
+
+/**
+ * The generated admin routes (data-spec §11): a site with tables has them.
+ * Tables need the built-in backend, which needs the azbackend adapter
+ * (AZ1507), so <Protected> is always there to wrap them.
+ */
+function adminOf(spec: Spec): string[] {
+  return spec.site.data && authPlan(spec) ? adminRoutes(spec.site.data) : [];
 }
 
 /** One route's HTML file — the rule htmlFiles applies, for AZ.md's page map too. */
@@ -667,14 +687,15 @@ function htmlEntries(spec: Spec): Record<string, string> {
 // `lang` is "en": the grammar has no site locale to take it from — `site`
 // declares none, and pricing's `locale` formats money, not the page. When
 // the site gains one, this is where it lands.
-function indexHtml(spec: Spec): string {
+// An admin page (data-spec §11) is kept out of search results and says so in its title.
+function indexHtml(spec: Spec, admin = false): string {
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <title>${escapeHtml(spec.site.name)}</title>
+${admin ? '    <meta name="robots" content="noindex, nofollow" />\n' : ''}    <title>${admin ? 'Admin · ' : ''}${escapeHtml(spec.site.name)}</title>
   </head>
   <body>
     <div id="root"></div>
@@ -852,8 +873,11 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   // path: sandboxed, type-checked, normalised, copied into USER_DIR.
   const plan = planned && { ...planned, impl: planned.impl ? component(planned.impl) : null };
   const moduleList = [...modules].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+  // The admin pages (data-spec §11), only with tables: none of this otherwise.
+  const admin = adminOf(spec);
+  const adminFiles = new Set(admin.map(htmlFileFor));
   const files: EmittedFile[] = [
-    { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme, plan) },
+    { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme, plan, admin) },
     // The build guard, for every site (auth-spec §4): nothing may ship a key.
     { path: `${GUARD_DIR}/guard.ts`, content: guardTs(requiredEnv(plan), plan?.adapter ?? null) },
     ...(plan ? [
@@ -862,6 +886,10 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     ] : []),
     // The typed data client only with tables (data-spec §7).
     ...(spec.site.data ? [{ path: `${DATA_DIR}/client.ts`, content: dataClient(spec.site.data) }] : []),
+    ...(spec.site.data && admin.length > 0 ? [
+      { path: ADMIN_FILE, content: adminTsx() },
+      { path: ADMIN_VALUES_FILE, content: adminValuesTs(spec.site.data) },
+    ] : []),
     { path: 'src/runtime.tsx', content: runtimeTsx() },
     { path: 'src/entry-server.tsx', content: entryServer() },
     { path: 'az-vite/build.mjs', content: buildScript() },
@@ -935,7 +963,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${frameCss(theme)}${schemeCss(named)}${patternCss(pattern)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
+${frameCss(theme)}${schemeCss(named)}${patternCss(pattern)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${admin.length > 0 ? adminCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
     },
     {
       /**
@@ -1007,7 +1035,7 @@ export default defineConfig({
         include: ['src'],
       }, null, 2) + '\n',
     },
-    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec) })),
+    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec, adminFiles.has(path)) })),
     {
       path: 'AZ.md',
       content: azMd({

@@ -192,3 +192,14 @@ test('CONTROL: inherited object keys are not currencies or types', () => {
   assert.ok(codes(site('  data notes\n    p tostring\n')).includes('AZ1231'));
   assert.deepEqual(errors(site('  data notes\n    body text\n')), []);
 });
+
+test('AZ1268: a page on /admin or below it collides with the generated admin pages', () => {
+  const at = (route: string, data = '  data notes\n    body text\n') =>
+    `${HEAD}${data}page /\n  hero center\n    title "Shop"\npage ${route}\n  hero center\n    title "Mine"\n`;
+  for (const route of ['/admin', '/admin/notes', '/admin/x/y']) {
+    const found = run(at(route)).diagnostics.filter((x) => x.code === 'AZ1268');
+    assert.deepEqual(found.map((x) => [x.message, x.severity]), [[`page: '${route}' is generated for data — use another route`, 'error']], route);
+  }
+  assert.ok(!codes(at('/administration')).includes('AZ1268'), 'CONTROL: a route that only starts with the letters');
+  assert.ok(!codes(at('/admin', '')).includes('AZ1268'), 'CONTROL: without tables there are no admin pages');
+});

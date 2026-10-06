@@ -331,6 +331,16 @@ export function buildSpec(
   const dataReport = buildTables(kids.filter((w) => w.word === 'data'), backend !== null || declared !== undefined);
   diagnostics.push(...dataReport.diagnostics);
   const tables = dataReport.tables;
+  // data-spec §11: with tables, the build generates /admin and /admin/<table>;
+  // an author's page there would collide with them (AZ1268).
+  if (tables.length > 0) {
+    for (const p of pageWords) {
+      const route = p.args[0]?.value;
+      if (route === '/admin' || route?.startsWith('/admin/')) {
+        diagnostics.push({ code: 'AZ1268', message: `page: '${route}' is generated for data — use another route`, pos: p.args[0]?.pos ?? p.pos, severity: 'error' });
+      }
+    }
+  }
 
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');
   const patternWord = themeWord?.children.find((w) => w.word === 'pattern');
