@@ -302,8 +302,12 @@ styled by the same generated classes; `fromShell(from, list, skeleton, ctx)`
 — the pre-rendered shell around that template (skeleton × limit, an empty
 rows container, the hidden template list, a `role=status` line, retry and
 sign-in controls, a `<noscript>` line); and `skeletonLine` for the word's
-loading item. The overlay runtime's `rows.ts` fills copies of the template
-with text and checked attributes only, never markup. A word never fetches.
+loading item. A mapped prop that would be an asset path (an image's `src`)
+is a marker, never an asset: the word checks `isFromMark(value)` before
+`ctx.asset`. The overlay runtime's `rows.ts` fills copies of the template
+with text and checked attributes only, never markup — an image field by its
+URL (through the `src` rule) and its stored width and height. A word never
+fetches.
 
 ### 4.4 The theme rule
 
