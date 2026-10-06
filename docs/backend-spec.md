@@ -167,6 +167,8 @@ one schema for all three readers:
 | `AZ_RESET_PATH`, `AZ_LINK_LANDING` | optional | site paths for the two emailed links |
 | `AZ_OAUTH_PROVIDERS`, `AZ_OAUTH_SIGNUP` | optional | provider ids; `allow` lets a provider create accounts |
 | `AZ_ADMIN_EMAILS` | sites with `data` | verified addresses that may use `/admin` (data-spec §11); empty = nobody |
+| `AZ_FILES_DIR` | sites with an `image` field | where uploaded images are stored (`./data/files`), outside anything served statically (data-spec §8) |
+| `AZ_UPLOAD_MAX_MB` | sites with an `image` field | the largest upload, 1–20 MB (default 5) |
 | `AZ_OAUTH_<ID>_…` | per provider | `LABEL`, `TYPE` (oidc/oauth2), `ISSUER` or the three URLs, `CLIENT_ID`, `CLIENT_SECRET`, `SCOPES`, `EMAIL_FIELD`, `VERIFIED_FIELD` |
 
 **Nothing here reaches a browser.** No key carries the `AZ_PUBLIC_` prefix a
@@ -229,7 +231,7 @@ For a site with `backend`, beside the site:
 
 ```
 server/
-  package.json        exact pins, only the drivers the setup uses; "start": "node src/main.ts"
+  package.json        exact pins, only the drivers the setup uses (and the image library only with an image field); "start": "node src/main.ts"
   az.config.json      site name and the two choices — no secrets
   .env.example        §4
   .gitignore          .env, data/, node_modules/
@@ -247,9 +249,12 @@ Node ≥ 22.18 runs the TypeScript directly. `/health` answers `{"ok":true}`.
 | `pg` | 8.23.0 | MIT | the de facto PostgreSQL driver, pure JS | none mature enough |
 | `mysql2` | 3.24.4 | MIT | the de facto MySQL driver, pure JS | the older `mysql` (unmaintained) |
 | `nodemailer` | 10.0.10 | MIT-0 | mature SMTP client, zero dependencies, handles TLS/STARTTLS/auth | a hand-rolled SMTP client (rejected: security-sensitive) |
+| `sharp` | 0.35.5 | Apache-2.0; bundles libvips 8.18.7, **LGPL-3.0-or-later** (dynamically linked, unmodified) | image uploads (data-spec §8): decodes JPEG/PNG/WebP/AVIF under a loader allow-list and re-encodes to WebP without metadata, so a photo's GPS never reaches the disk; prebuilt per platform, ~20 MB installed (19–29 MB measured across macOS, Linux glibc/musl, Windows); installs with `--ignore-scripts` | the same libvips as WebAssembly (measured ~2× slower and ~3× the memory on a 24 MP photo; full-size output failed); a metadata-only stripper (rejected: keeps the uploaded bytes, so polyglots and malformed files pass) — `docs/stack-evaluation.md` §14 |
 
 A generated server installs only what its setup uses — SQLite + API installs
-nothing. `packages/backend/test/emit.test.ts` ties these pins to the versions
+nothing; only a site with an `image` field installs `sharp`. LGPL obligations
+for libvips are met by shipping it unmodified as the separate shared library
+the package installs, which the operator can replace. `packages/backend/test/emit.test.ts` ties these pins to the versions
 the repository tests against.
 
 ## 10. Tests
@@ -258,7 +263,7 @@ the repository tests against.
   the `backend` keyword's codes, the emitted files, `az backend init`, and
   that a site without `backend` gets no `server/`.
 - `pnpm test:backend-db` — the store and routes against real PostgreSQL
-  18.6 and MySQL 8.4.11 in containers (needs Docker).
+  18.6 and MySQL 8.4.11 in containers (needs Docker), image fields included.
 - `pnpm test:auth` — the real generated server as its own process, with the
   site's forms in Chromium: sign-up with retype and location, sign-in,
   sign-out, reset from a captured SMTP email, provider sign-in through a

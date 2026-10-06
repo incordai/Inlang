@@ -858,3 +858,57 @@ taken individually instead.
 generated site: the file is parsed at build and the site receives nodes. The
 `text` manifest pins the same set so the gate's exact-pin check covers it, and
 `packages/target-web/test/pins.test.ts` keeps the two lists equal.
+
+---
+
+## 14. Image library for uploads — **ADOPT `sharp` 0.35.5, server-only, only with an image field**
+
+Decided 2026-10-06 for data-spec §8 / §16 Q6 (owner approval recorded in the
+D3 work). Vetted before adoption, measured on this machine and in Linux
+containers; the vetting harness lived outside the repository.
+
+**What it is.** `sharp` 0.35.5 (Apache-2.0) with its prebuilt libvips 8.18.7
+(**LGPL-3.0-or-later**, shipped unmodified as a separate shared library per
+platform; ~20 MB installed, 19–29 MB measured across macOS arm64, Linux
+x64/arm64 glibc, Linux x64 musl and Windows x64). It installs from optional
+platform packages with no install script: it loads under
+`--ignore-scripts`, the flag the repository's installs use.
+
+**Advisories checked.** GHSA-rgj7-g3m4-5g8c (fixed 0.35.4),
+GHSA-f88m-g3jw-g9cj (fixed 0.35.0), GHSA-54xq-cgqr-rpm3 (fixed 0.32.6),
+CVE-2022-29256 (fixed 0.30.5): none affects 0.35.5.
+
+**The pipeline it is used in** (`server/src/data-images.ts`), every step tested:
+
+1. the type from the first bytes only — JPEG, PNG, WebP, AVIF; HEIC named and
+   refused (no HEVC decoder);
+2. every loader blocked (`VipsForeignLoad`), then only the JPEG, PNG, WebP and
+   HEIF loaders unblocked — SVG, GIF, TIFF and the rest cannot decode in the
+   process at all;
+3. the header read alone: each side ≤ 8000, width × height ≤ 40 MP;
+4. decode with `limitInputPixels: 40 000 000`, `failOn: 'error'`,
+   `sequentialRead`; `autoOrient()`; fit inside 2048 × 2048 without
+   enlarging; re-encode to WebP — never `keepMetadata`/`withMetadata`/`withExif`;
+5. `sharp.cache(false)`, `sharp.concurrency(1)`, and one image at a time
+   through a queue of 8 (beyond it, `429`).
+
+**Measured (vetting, macOS arm64).** 24 MP JPEG fit to 2048: 478–514 ms, peak
+RSS 148 MB; 40 MP: 471 ms, 137 MB; header bombs (100 000², 65 000²) refused in
+1–2 ms; output byte-identical across the platforms above. **In the repository
+(`packages/backend/test/data-images.test.ts`, fresh process):** nine 24 MP
+uploads at once through the queue grew RSS by +19 MB over ~160 MB, against
++100 MB for the same nine run unqueued (the CONTROL).
+
+**Alternatives.** The same libvips compiled to WebAssembly: on the same 24 MP
+photo 871–914 ms and ~450 MB RSS, and full-size output failed — rejected. A
+pure-JS decoder was set up but not measured to completion. A metadata-only
+stripper (no decoding) was rejected on principle: it stores the uploaded
+bytes, so a polyglot or malformed file survives and a decompression bomb is
+never seen.
+
+**Where it lives.** `BACKEND_PINS.sharp` in `packages/backend/src/emit.ts`,
+written into a generated server's `package.json` only when a table has an
+`image` field (a site without one is byte-identical); the repository's
+`devDependencies` pin the same version for the tests
+(`packages/backend/test/emit.test.ts` ties the two).
+
