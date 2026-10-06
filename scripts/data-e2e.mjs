@@ -7,7 +7,9 @@
  * codes through the browser's own cookie, CORS and CSRF handling; image
  * uploads (data-spec §8) through the client and the admin editor, shown by
  * an <img> across origins, stored without a photo's location, and removed
- * with their row.
+ * with their row. An account planted under someone else's address loses
+ * its rows when the address's owner claims it; a field made public is
+ * refused by the CLI until --expose names its table (data-spec §18.7).
  *
  *     pnpm test:data
  *
@@ -25,10 +27,10 @@
 
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
@@ -280,6 +282,36 @@ if (!site.dist) {
   process.exit(1);
 }
 
+// Exposure (data-spec §18.7), with the real CLI on a copy of the site: a
+// private field made public on a table anyone reads would show every stored
+// row's value. The build refuses (AZ1701), plan and schema name AZ1708, and
+// only --expose records it.
+{
+  const dir = join(work, 'exposure');
+  mkdirSync(join(dir, 'custom'), { recursive: true });
+  writeFileSync(join(dir, 'custom/Notes.tsx'), NOTES_COMPONENT);
+  const file = join(dir, 'site.az');
+  const lock = join(dir, 'site.data.json');
+  writeFileSync(file, SITE.replace('    contact email    private\n', '    contact email\n'));
+  copyFileSync(join(site.dir, 'site.data.json'), lock);
+  const az = (...args) => spawnSync(process.execPath, [CLI, ...args], {
+    env: { ...process.env, AZ_WORDS: WORDS }, encoding: 'utf8', timeout: COMPILE_MS, killSignal: 'SIGKILL',
+  });
+  const recorded = readFileSync(lock, 'utf8');
+  const checked = az('check', file);
+  check('exposure: a private field made public fails the check against the lock (AZ1701)', checked.status === 1 && /AZ1701/.test(checked.stderr), checked.stderr.trim().split('\n')[0]);
+  const planned = az('backend', 'plan', file);
+  check('exposure: plan names it AZ1708 and the flag', planned.status === 1
+    && /AZ1708 {2}data: notes\.contact is no longer private — anyone can read it — rows stored under the old rules would show; add --expose notes to az backend schema/.test(planned.stderr),
+  planned.stderr.trim());
+  const refused = az('backend', 'schema', file);
+  check('exposure: schema without --expose writes nothing', refused.status === 1 && readFileSync(lock, 'utf8') === recorded, refused.stderr.trim().split('\n').pop());
+  const accepted = az('backend', 'schema', file, '--expose', 'notes');
+  check('exposure: with --expose notes it is recorded as an exposes step, and the check passes',
+    accepted.status === 0 && /recorded step 2 .*\n {2}exposes {6}notes\.contact is no longer private/.test(accepted.stdout) && az('check', file).status === 0,
+    (accepted.stdout + accepted.stderr).trim());
+}
+
 /** The browsers that run signed-in flows (WebKit drops the Secure cookie here — see the header). */
 const BROWSERS = ['chromium', 'firefox'];
 const adminEmail = (browser) => `boss-${browser}@notebook.test`;
@@ -403,12 +435,17 @@ const use = (page, op, ...args) => page.evaluate(async ([o, a]) => {
 }, [op, args]);
 
 /**
- * Sign up with `email`, then prove the address as a person would: ask for a
- * sign-in link, open it from the mail. The account is then verified — the
- * only way an address in AZ_ADMIN_EMAILS makes an admin (data-spec §11).
+ * Sign up with `email`, then prove the address as a person would. The
+ * account is then verified — the only way an address in AZ_ADMIN_EMAILS
+ * makes an admin (data-spec §11).
  */
 async function verifiedAccount(page, name, email) {
   await signUp(page, name, email);
+  await proveAddress(page, email);
+}
+
+/** Ask for a sign-in link to `email` from this page, and open it from the mail. */
+async function proveAddress(page, email) {
   const before = smtp.messages.length;
   const status = await page.evaluate(async ([base, address]) => (await fetch(`${base}/auth/link`, {
     method: 'POST', credentials: 'include',
@@ -424,6 +461,41 @@ async function verifiedAccount(page, name, email) {
   if (status !== 200 || !link) throw new Error(`no sign-in link for ${email} (status ${status})`);
   await page.goto(link);
   await page.waitForURL((u) => u.origin === host.url);
+}
+
+/**
+ * A planted account (data-spec §18.7): `planter` signed up with `email`,
+ * which is not theirs, and was never verified; it writes a row. When the
+ * address's owner proves the mailbox with a sign-in link, the claim deletes
+ * that row with the planter's password and session — nothing is left under
+ * the owner's address. An account already signed up plays the planter: one
+ * more sign-up would pass the server's limit of 10 an hour per IP.
+ */
+async function squatFlow(b, name, planter, email) {
+  const ownerCtx = await b.newContext();
+  try {
+    await planter.goto(`${host.url}/notes`);
+    const planted = await use(planter, 'create', { title: `${name} planted under another address` });
+    check(`${name} squat: an unverified account writes a row under an address it does not own`, planted.ok === true, JSON.stringify(planted).slice(0, 120));
+
+    const owner = await ownerCtx.newPage();
+    owner.on('pageerror', (e) => errors.push(`${name} squat: ${e.message}`));
+    await owner.goto(`${host.url}/`);
+    await proveAddress(owner, email);
+    await owner.goto(`${host.url}/notes`);
+    const after = await use(owner, 'get', planted.item.id);
+    const listed = await use(owner, 'list', { q: `${name} planted` });
+    const planterSession = await planter.evaluate(async (base) =>
+      (await (await fetch(`${base}/auth/session`, { credentials: 'include' })).json()).session, serverUrl);
+    check(`${name} squat: the owner's sign-in link claims the address — the planted row is gone, the planter signed out`,
+      after.ok === false && after.code === 'not_found' && listed.ok === true && listed.items.length === 0 && planterSession === null,
+      JSON.stringify([after, listed.ok && listed.items.length, planterSession]).slice(0, 200));
+    const mine = await use(owner, 'create', { title: `${name} the owner's own` });
+    check(`${name} squat: CONTROL — the owner then writes under the address, and it stays`, mine.ok === true && (await use(owner, 'get', mine.item.id)).ok === true);
+    await use(owner, 'remove', mine.item.id);
+  } finally {
+    closed = (await closeWithin(ownerCtx, CLOSE_MS, `${name} squat owner close`)) && closed;
+  }
 }
 
 /** axe on the page as it is now: violations as "rule×count", none expected. */
@@ -857,7 +929,8 @@ try {
       const otherCtx = await b.newContext();
       const other = await otherCtx.newPage();
       other.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
-      await signUp(other, `Bo${name}`);
+      const otherEmail = `bo-${name}-${randomBytes(3).toString('hex')}@notebook.test`;
+      await signUp(other, `Bo${name}`, otherEmail);
       await other.goto(`${host.url}/notes`);
       const seen = await use(other, 'get', made.item.id);
       check(`${name}: another account reads the row with its private field null`, seen.ok === true && seen.item.contact === null && seen.item.mine === false, JSON.stringify(seen).slice(0, 160));
@@ -875,6 +948,7 @@ try {
       check(`${name}: then it is not_found`, gone.ok === false && gone.code === 'not_found');
       await imageFlow(name, owner, other);
       await adminFlow(b, name, owner);
+      await squatFlow(b, name, other, otherEmail);
     } finally {
       closed = (await closeWithin(b, CLOSE_MS, `${name}.close`)) && closed;
     }

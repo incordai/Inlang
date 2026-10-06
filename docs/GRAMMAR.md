@@ -525,8 +525,15 @@ connection string is told where it belongs) · AZ1506 declared twice · AZ1507
 the site's `auth` must use `adapter azbackend`.
 
 `data`'s diagnostics are AZ1226–AZ1249 and AZ1415 at the link stage (data-spec
-§12), plus AZ1701–AZ1707 when the file and its schema lock `<site>.data.json`
-disagree or the lock is damaged (data-spec §6).
+§12) — AZ1236, the modifier conflict, includes `unique` with `private` (a
+`taken` answer would reveal others' values) and `unique` with `default`
+(data-spec §18.6) — plus AZ1701–AZ1708 when the file and its schema lock
+`<site>.data.json` disagree, the lock is damaged, or a change needs its flag:
+AZ1708 is a read rule or a removed `private` that shows stored rows to more
+people, until `az backend schema --expose <table>` (data-spec §6, §18.7).
+`from <table>` in a block is AZ1260–AZ1269 (data-spec §10, §12): a gallery's
+`alt` maps only to a `required` field (AZ1262), and a site with data owns
+`/admin`, so a page there is AZ1268 (§5.5).
 
 ### 3.4 Deferred constructs
 
@@ -808,6 +815,12 @@ compiled into a page that always says "not found" (AZ1413):
 | `page /about/` | `page: '/about/' ends with '/' — write: page /about` |
 | `page "about"` | `page: 'about' is not a route — write: page /about` |
 | `page "/a b"`, `page "/café"` | `page: '/a b' has characters an address would change — use letters, digits and - . _ ~ between slashes` |
+| `page /admin`, `page /Admin/x` in a site with `data` | `page: '/admin' is generated for data — use another route` (AZ1268, any case) |
+
+Routes compare **case-insensitively** when checked for collisions: `/About`
+beside `/about` is AZ1509 (`page: '/About' and '/about' differ only in case —
+rename one`): each page is a folder in the build, and on a case-insensitive
+disk the two would be one folder.
 
 ---
 

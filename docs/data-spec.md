@@ -473,10 +473,16 @@ ordered steps and the schema each one produces.
 | `az backend schema <file.az>` | appends the safe changes as one new step; refuses if anything destructive is pending and lists the flags that would allow it |
 | `… --rename products.title=name` | records a rename (column or table: `--rename products=items`) |
 | `… --drop products.stock` | records a drop of that one field (or table) — named one at a time, never "all" |
+| `… --expose products` | accepts that rows already stored in that table become readable by more people (§18.7, AZ1708) |
 
 **Safe (automatic):** new table; new optional field; new required field
-**with** `default`; new index; `search`/`private`/`locked` changes (no SQL);
-adding a value to a `choice`; adding an `allow` line.
+**with** `default`; new index; `search`/`locked` changes (no SQL);
+adding a value to a `choice`; adding an `allow` line that widens no read;
+narrowing a read or adding `private` (a step with no SQL, §18.7).
+
+**Exposing (explicit flag, `--expose <table>`):** a read rule, or a removed
+`private`, that shows rows already stored to more people — the lock records
+what each table exposes, so this is a reviewed step (AZ1708, §18.7).
 
 **Destructive (explicit flag):** dropping a field or table; renaming;
 removing a `choice` value (rows may hold it — refused while any row does);
@@ -742,6 +748,8 @@ a row.
 | AZ1704 | error | `data: products.price changed type — add a new field, copy, then --drop the old one` |
 | AZ1705 | error | `data: products.sku is now required with no default — add: default "…"` |
 | AZ1706 | error | `data: products.data.json is edited by hand or damaged — restore it from version control` (hash check) |
+| AZ1707 | error | `data: products.sku becomes unique — rows may already share a value; add --unique products.sku to az backend schema` |
+| AZ1708 | error | `data: products becomes readable by anyone (it was its owner) — rows stored under the old rules would show; add --expose products to az backend schema` (also `products.email is no longer private — …`) |
 
 Each code gets a fixture that triggers it (CONVENTIONS §9).
 
@@ -885,7 +893,7 @@ the decision; the table is kept as the record of what was weighed.
 | 4.3 | `url` is `VARCHAR(2048)` on MySQL | `TEXT` on MySQL | MySQL counts each VARCHAR's full width (×4 bytes) against a 65,535-byte row: seven url fields would fill a table. A url is never indexed, so TEXT costs nothing |
 | 4.5 | `default` writes the column default | Defaults are applied by the server on insert; a field added (or made required) with a default fills existing rows with a parameterised `UPDATE … WHERE col IS NULL` | No value ever appears in DDL text — the "no value in SQL" scanner holds for every statement |
 | 5.1 | `ESCAPE '\'` | `ESCAPE '!'` | A backslash inside a MySQL string literal is itself an escape character (default `sql_mode`); `!` means the same on all three engines |
-| 6.1 | the lock holds "the schema each step produces" | The lock holds storage only: per field name, type, currency, choices, ref, required, unique, index — and a sha256 `digest` over its canonical steps | Rules, `search`, `private`, `locked` and `default` change no storage; locking them would make every rule edit a migration. The digest makes AZ1706 decidable |
+| 6.1 | the lock holds "the schema each step produces" | The lock holds storage only: per field name, type, currency, choices, ref, required, unique, index — and a sha256 `digest` over its canonical steps | Rules, `search`, `private`, `locked` and `default` change no storage; locking them would make every rule edit a migration. The digest makes AZ1706 decidable. **Since §18.7** the lock also records what each table exposes (its read level and private fields), so widening it is a reviewed step |
 | 6.2 | flags `--rename`, `--drop` | also `--unique t.f`, and `--drop t.f.value` for a removed choice value | §6.2 lists adding `unique` and removing a choice value as destructive "explicit flag" changes but names no flag for them. A new unique without its flag is a new code, AZ1707 |
 | 6.1 | the build writes `server/src/data-migrations.ts` | It writes `server/data.json` (the tables, rules and every step's SQL units) and copies the `data-*.ts` modules only for a site with tables | Data, not code: `main.ts` reads it, and a site without tables gets exactly the files it got before |
 | 6.3 | `az_data_migrations (version, step, applied_at)` | adds `claimed_at`; in-progress auth migrations are a negative `applied_at` in the existing table | Claim-before-run needs the claim time to take over a crashed instance's claim safely; the auth table's existing rows keep reading as applied |
@@ -1070,6 +1078,17 @@ Each row has a test that failed on the code before it and a control.
 | Row types collided: `box`/`boxes` were both `Box`; `records`, `promises`, `responses` shadowed `Record`, `Promise`, `Response` | The type is the table's own name plus `Row` (`ProductsRow`, `…Input`, `…Patch`, `…Query`); openapi operations are named by the table (`listProducts`) | openapi.test.ts; data-client.test.ts compiles, under strict tsc, a client for such tables beside code using the built-ins |
 | `/Admin` escaped AZ1268; `/About` beside `/about` compiled | Routes compare case-insensitively: AZ1268 any case; two routes differing only in case are **AZ1509** | core/test/data.test.ts, hardening.test.ts |
 | Harness: the backend-db HTTP server closed only on success; the watchdog only sent SIGTERM | backend-db.mjs: server closed (bounded) in `finally`, run watchdog, bounded docker calls, connects and fetches. bounded.mjs `stopChild`: SIGTERM, then SIGKILL after 3 s; the watchdog stops `progress.children` that way. spike-m0 has its own `scripts/bounded.ts` (its own package) and test:snapshot uses it | scripts/lib/bounded.test.mjs (in `pnpm test`), spike `pnpm test:snapshot` |
+
+### 18.7 Exposure gating and pre-claim rows as built (2026-10-06)
+
+Two gaps closed. Each row has a test that failed on the code before it and a control.
+
+| Gap | Built | Proof |
+|---|---|---|
+| A read rule or a removed `private` could show rows stored under narrower rules to more people with no reviewed step: rules were read from the file at build time only (§18.1, row 6.1) | The lock records what each table **exposes**: an `expose` op `{ table, read, private }` — `read` is the widest read rule (`none` < `owner` < `signedin` < `anyone`), `private` the sorted private fields. It carries no SQL (data-ddl.ts: zero units, never destructive). The build compares it like storage, so a widened file fails with **AZ1701** until a step records it. `az backend plan` and `schema` call a change a **widening** when a column already stored reaches readers beyond its owner it did not reach before: the table's level rising to `signedin` or `anyone`, or a field losing `private` on a table others read. A widening is **AZ1708** (a new code in the lock range; no existing code fits) until `--expose <table>` names it, one table at a time like `--drop`; it then prints as `exposes`. Narrowing, `none` → `owner`, a field going private, and new fields (nothing stored yet) are safe steps with no flag. Renames carry `private` with the field. A lock from before this has no exposure: its next step records a baseline, safe whatever the rules — there is no older state to compare. `--expose` naming a table that widens nothing is a usage error (exit 2) | core/test/data-lock.test.ts (each widening, the flag, narrowing and new-field controls, renames, the baseline, AZ1701 at build, a damaged `expose` op), cli/test/data-schema.test.ts (build, plan, schema end to end), `pnpm test:backend-db` EXPOSE (an `expose` step applies with no statement on both engines), `pnpm test:data` (the real CLI refuses a field made public until `--expose notes`) |
+| `claimUnverified` dropped the planter's password and sessions but kept the rows they wrote — under the real owner's address once claimed | The claim deletes every data row the unverified account owns, with its sessions, in **one transaction** guarded by the conditional `UPDATE`: `Db.guarded(first, then)` runs `first`, and only when it changed exactly one row runs the rest and commits; otherwise, or on any error, nothing commits. SQLite: `BEGIN IMMEDIATE` … `COMMIT` with no await in between (one connection, nothing interleaves); PostgreSQL and MySQL: one pooled connection, `BEGIN`/`START TRANSACTION` … `COMMIT`, rolled back on error and the connection discarded if the rollback fails — pooler-safe like `allWithin`. The statements are one `DELETE … WHERE owner = ?` per table (`ownedRowDeletes`, data-values.ts), passed to `createStore` by `main.ts` and the dev backend. Rows of other accounts pointing at a deleted row follow their ref (§18.6: required cascades, optional is cleared); image files of deleted rows go in the orphan sweep (§8) | backend/test/security.test.ts (a planted row is gone after the owner's sign-in link, a reply cascades, a mention is cleared, the bystander's row stays; a failing statement rolls back the account, its session and its rows), `pnpm test:backend-db` CLAIM (both engines: rollback, then commit; the pool answers after), `pnpm test:data` (Chromium and Firefox: a planted note vanishes when the owner opens the link; the planter is signed out) |
+
+Foreign keys that still RESTRICT (a lock from before §18.6) do not meet this code: a build with it fails AZ1701 until the relink step is recorded, and the server does not start until that step is confirmed (§6.3). Were such a key left, a planted row another account points at would make the claim fail as a whole — the sign-in errors and nothing changes — never half-apply.
 
 ---
 

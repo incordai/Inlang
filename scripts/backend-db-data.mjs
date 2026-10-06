@@ -6,6 +6,8 @@
  * through every migration kind, upload, replace under a race, clear, delete
  * and the orphan sweep), a
  * unique race, foreign keys, keyset order, search case per engine — and
+ * the claim of a planted account (its rows go, in one transaction), an
+ * exposure step with no SQL, and
  * the spec's three INFERENCES settled on the engines themselves (CHECK on
  * MySQL, LOWER outside ASCII, a driver's `LIMIT ?`). Run by backend-db.mjs
  * inside its containers.
@@ -22,7 +24,8 @@ import { compile, plan, replay } from '../packages/core/src/index.ts';
 import { dataSteps } from '../packages/backend/src/data-ddl.ts';
 import { DestructivePending, GuardFailed, migrateData } from '../packages/backend/src/server/data-migrate.ts';
 import { createData } from '../packages/backend/src/server/data-api.ts';
-import { loadTables } from '../packages/backend/src/server/data-values.ts';
+import { loadTables, ownedRowDeletes } from '../packages/backend/src/server/data-values.ts';
+import { createStore } from '../packages/backend/src/server/store.ts';
 import { isUniqueViolation, QueryTimeout } from '../packages/backend/src/server/db.ts';
 import { selectList, parseQuery } from '../packages/backend/src/server/data-query.ts';
 
@@ -173,6 +176,18 @@ export async function dataSuite(engine, db, openAgain, check, info) {
   check(`${engine} RELINK: a required ref cascades, an optional one is cleared`, kids.join() === 'k2:q2:null', kids.join());
   check(`${engine} RELINK: applying again is a no-op`, (await migrateData(db, relinked, { confirm: 503 })).length === 0);
 
+  // ---- exposure: recorded in the lock, no SQL (data-spec §18.7) ---------
+  const narrow = '  data shown\n    title text required\n    allow owner read\n    allow signedin create\n';
+  const wide = narrow.replace('allow owner read', 'allow anyone read');
+  let widened = null;
+  try { lockOf([[narrow], [wide]], 600); } catch (e) { widened = e; }
+  check(`${engine} EXPOSE: widening a read rule is refused without --expose (AZ1708)`, /AZ1708/.test(widened?.message ?? ''), widened?.message);
+  const exposed = lockOf([[narrow], [wide, { expose: ['shown'] }]], 600).steps;
+  check(`${engine} EXPOSE: with --expose the step is recorded, has no statement and is not destructive`,
+    exposed.length === 2 && exposed[1].units[engine].length === 0 && !exposed[1].destructive, JSON.stringify(exposed.map((s) => s.units[engine].length)));
+  check(`${engine} EXPOSE: it applies beside the table's step — only the table's SQL runs`, (await migrateData(db, exposed)).join() === '601'
+    && (await columns(db, 'azd_shown')).join() === 'id,owner,created,updated,title');
+
   // ---- the routes, on this engine ---------------------------------------
   const shop = lockOf([[`  data items
     name text required search
@@ -248,6 +263,35 @@ export async function dataSuite(engine, db, openAgain, check, info) {
   check(`${engine} DEADLINE: a read past its deadline is cancelled by the database`, cancelled instanceof QueryTimeout && took < 5_000, `${cancelled?.name ?? 'finished'} after ${took} ms`);
   const control = await db.allWithin('SELECT 1 AS n', [], 2_000);
   check(`${engine} DEADLINE: CONTROL — the next read on the pool answers`, Number(control[0]?.n) === 1, JSON.stringify(control));
+
+  // ---- claiming a planted account takes its rows (data-spec §18.7) -------
+  // One transaction on one pooled connection: the guard UPDATE, the
+  // sessions, every table's rows. A failing statement rolls all of it back.
+  const squatter = randomUUID();
+  const squatter2 = randomUUID();
+  for (const [id, email] of [[squatter, 'victim@data.test'], [squatter2, 'victim2@data.test']]) {
+    await db.run('INSERT INTO az_users (id, email, name, password_hash, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 1, 1)', [id, email, 'Planted', 'planted-hash']);
+  }
+  const plantedItem = (await call('POST', '/data/items', squatter, { name: 'planted', price: 1 })).body.item.id;
+  const replyTo = (await call('POST', '/data/notes', users[1], { item: plantedItem })).body.item.id;
+  await call('POST', '/data/items', squatter2, { name: 'planted too', price: 1 });
+  const ownedBy = async (who) => Number((await db.get(`SELECT COUNT(*) AS n FROM ${engine === 'mysql' ? '`azd_items`' : '"azd_items"'} WHERE owner = ?`, [who])).n);
+  const othersBefore = await ownedBy(users[0]);
+  const claimSecret = Buffer.alloc(32, 7);
+  const failing = createStore(db, claimSecret, Date.now, undefined, [...ownedRowDeletes(engine, shop.tables), `DELETE FROM ${engine === 'mysql' ? '`azd_missing`' : '"azd_missing"'} WHERE owner = ?`]);
+  const failed = await failing.claimUnverified(squatter2).then(() => null, (e) => e);
+  const kept = await failing.userById(squatter2);
+  check(`${engine} CLAIM: a failing statement rolls the whole claim back — still unverified, password and rows kept`,
+    failed !== null && kept?.emailVerified === false && kept?.passwordHash === 'planted-hash' && (await ownedBy(squatter2)) === 1,
+    `${failed?.name} ${kept?.emailVerified} ${await ownedBy(squatter2)}`);
+  const claimer = createStore(db, claimSecret, Date.now, undefined, ownedRowDeletes(engine, shop.tables));
+  check(`${engine} CLAIM: CONTROL — the pool answers after the rollback, and the claim commits`, (await claimer.claimUnverified(squatter)) === true);
+  const claimed = await claimer.userById(squatter);
+  check(`${engine} CLAIM: the planted rows are gone, the account verified with no password`,
+    (await ownedBy(squatter)) === 0 && claimed?.emailVerified === true && claimed?.passwordHash === null, `${await ownedBy(squatter)} ${claimed?.emailVerified}`);
+  check(`${engine} CLAIM: another account's row pointing at a planted row follows its ref (required: deleted)`, (await call('GET', `/data/notes/${replyTo}`, null)).status === 404);
+  check(`${engine} CLAIM: CONTROL — other accounts' rows stay`, (await ownedBy(users[0])) === othersBefore && (await ownedBy(squatter2)) === 1);
+  check(`${engine} CLAIM: a verified account is never claimed again`, (await claimer.claimUnverified(squatter)) === false);
 
   // ---- the admin routes (data-spec §11), on this engine -----------------
   const boss = randomUUID();
