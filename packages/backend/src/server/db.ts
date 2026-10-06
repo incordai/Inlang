@@ -4,7 +4,7 @@
  * Spec: docs/backend-spec.md §3
  * Exports: openSqlite, openPostgres, openMysql, migrate, Db
  * Edit guide: parameterised queries only; unnamed statements (pooler-safe).
- * Tests: packages/backend/test/backend.test.ts
+ * Tests: packages/backend/test/backend.test.ts, packages/backend/test/claim.test.ts
  */
 
 /**
@@ -23,6 +23,7 @@
 
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { probeDone, probeFor, runClaimed, type ClaimStore, type ClaimTiming } from './claim.ts';
 import { loadDriver } from './drivers.ts';
 import { MIGRATIONS } from './migrations.ts';
 import type { Database } from './env.ts';
@@ -128,16 +129,52 @@ export async function openMysql(url: string, tls: boolean, ca?: string): Promise
   };
 }
 
-/** Apply every migration not yet recorded, in order. Safe to run on every start. */
-export async function migrate(db: Db): Promise<number[]> {
+/**
+ * A version's row in az_schema_migrations as a claim (claim.ts). The table
+ * predates claims, so "in progress" is a NEGATIVE applied_at — minus the
+ * claim time — and every row written before claims existed (positive) reads
+ * as applied, unchanged.
+ */
+function authClaim(db: Db, version: number): ClaimStore {
+  return {
+    async read() {
+      const row = await db.get('SELECT applied_at FROM az_schema_migrations WHERE version = ?', [version]);
+      if (!row) return null;
+      const at = Number(row.applied_at);
+      return { claimedAt: -at, applied: at > 0 };
+    },
+    async claim(at) {
+      try {
+        await db.run('INSERT INTO az_schema_migrations (version, applied_at) VALUES (?, ?)', [version, -at]);
+        return true;
+      } catch (e) {
+        if (isUniqueViolation(e)) return false;
+        throw e;
+      }
+    },
+    refresh: async (from, to) =>
+      (await db.run('UPDATE az_schema_migrations SET applied_at = ? WHERE version = ? AND applied_at = ?', [-to, version, -from])) === 1,
+    finish: async (held, at) =>
+      (await db.run('UPDATE az_schema_migrations SET applied_at = ? WHERE version = ? AND applied_at = ?', [at, version, -held])) === 1,
+  };
+}
+
+/**
+ * Apply every migration not yet recorded, in order. Safe to run on every
+ * start, and on several instances starting at once: each version is claimed
+ * before it runs (data-spec §6.3), and a statement whose effect is already
+ * present — a crashed instance's last one — is not run again.
+ */
+export async function migrate(db: Db, now: () => number = Date.now, timing?: ClaimTiming): Promise<number[]> {
   await db.run(MIGRATIONS.table[db.dialect]);
-  const done = new Set((await db.all('SELECT version FROM az_schema_migrations')).map((r) => Number(r.version)));
   const applied: number[] = [];
   for (const m of MIGRATIONS.steps) {
-    if (done.has(m.version)) continue;
-    for (const statement of m.sql[db.dialect]) await db.run(statement);
-    await db.run('INSERT INTO az_schema_migrations (version, applied_at) VALUES (?, ?)', [m.version, Date.now()]);
-    applied.push(m.version);
+    const outcome = await runClaimed(authClaim(db, m.version), async () => {
+      for (const statement of m.sql[db.dialect]) {
+        if (!(await probeDone(db, probeFor(statement)))) await db.run(statement);
+      }
+    }, `migration ${m.version}`, now, timing);
+    if (outcome === 'ran') applied.push(m.version);
   }
   return applied;
 }
