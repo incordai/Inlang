@@ -360,7 +360,7 @@ auth-block-spec §3.4 is the protocol the backend implements, and
 three engines. Open: the real-provider login, and a login against the real
 backend once it implements §3.4.
 
-**Data (data-spec) — D1 and D2 built 2026-10-05; D3 (images) built 2026-10-06.** `data <table>`
+**Data (data-spec) — D1 and D2 built 2026-10-05; D3 (images) and D4 (`from` in blocks) built 2026-10-06.** `data <table>`
 under `site` declares fields and closed `allow` rules (AZ1226–AZ1249, AZ1415);
 `az backend plan` / `az backend schema` record each schema change in the
 `<site>.data.json` lock, which `az build` checks and never writes
@@ -387,8 +387,15 @@ re-encoded as WebP without metadata (`sharp` 0.35.5, vetted —
 stack-evaluation §14); replace, clear and row deletes remove the old file, an
 hourly sweep removes orphans; the typed client and the admin editor upload,
 replace and remove. Measured in `pnpm test`, `pnpm test:backend-db` and
-`pnpm test:data` — data-spec §18.4. Open: image fields in `from <table>`
-blocks (D4 refuses them, AZ1214, until the rows runtime reads images).
+`pnpm test:data` — data-spec §18.4.
+D4, `from <table>` in `feature`, `faq` and `gallery` (grid, masonry):
+compile-time checks against the tables (AZ1260–AZ1267, AZ1269), a
+pre-rendered shell (skeleton, status line, Try again, Sign in, noscript),
+rows filled as text — images as checked URLs — by the behaviour runtime
+through the typed client as the visitor — data-spec §18.5; measured in
+`pnpm test` and `pnpm test:data` (three engines, axe in every state).
+Open: gate snapshots of the `from` states; gallery `carousel`, `orbit` and
+`lightbox` with `from` (AZ1214 today).
 
 **M5 — not started.**
 

@@ -2,7 +2,7 @@
 
 **Status** approved 2026-10-05 (§16) · **D1 built 2026-10-05** — what was
 built differently, and what the real databases showed, is §18 · **D2 (admin)
-built 2026-10-05**, §18.3 · D3–D4 not built · Extends backend-spec.md and
+built 2026-10-05**, §18.3 · **D3 (images) built 2026-10-06**, §18.4 · **D4 (`from` in blocks) built 2026-10-06**, §18.5 · Extends backend-spec.md and
 auth-block-spec §3.4
 
 The owner's goal: **a few words in the `.az` file give a ready backend with an
@@ -1010,6 +1010,47 @@ before and after D3: the 27 without a backend byte-identical; a backend site
 without tables differs only in shared server sources; a site with tables but
 no image field keeps `server/package.json`, `az.config.json`,
 `.env.example`, `README.md`, `data.json` and `openapi.json` byte for byte.
+
+### 18.5 D4 — `from <table>` in blocks as built (2026-10-06)
+
+Compiler: `core/src/from.ts` (checks, `SpecFrom` on `SpecBlock.from`), each
+word's `from` entry in `word.json` (slot, limit, mappings with field types,
+props `from` decides), `link.ts` (keeps the line raw, AZ1263, the slot's
+count rows skipped). Site: `fromShell`/`fromFill`/`skeletonLine` in
+`emit-contract.ts`, used by `feature` and `faq` with their own item
+functions; `overlay/src/runtime/rows.ts` + `rows-logic.ts` (shipped only with
+a `from` block); `src/data/rows.tsx`; AZ.md "Data in blocks".
+
+| § | Spec said | Built | Why |
+|---|---|---|---|
+| 10.1 | `sort -created` | `sort created desc` (`asc` default); compiled to the API's `-created` | `-created` does not lex: a word starts with a letter or digit (GRAMMAR §1.4); changing the lexer for one setting was out of scope |
+| 10.2 | image mappings (`media`, gallery `src`) | Built with D3, recorded in §18.4: `gallery` in `grid`/`masonry`; `orbit`, `carousel`, `lightbox` with `from` are AZ1214 | — |
+| 10.2 | bento/orbit below their minimum fall back to grid at runtime | No runtime fallback: the manifest's count rows do not run on a `from` slot | feature's `bento` renders the same tracks as `grid` (only `lead` differs, which rows cannot set); gallery `orbit` with `from` is AZ1214 (§18.4) |
+| 12 | AZ1266 private field mapped = error | Error unless every row read is the visitor's own (`mine`, or a table only owners read) | The server returns private values exactly then (data-query.ts); refusing it would block a "my orders" block that is correct |
+| 12 | AZ1267 warning | Warning as specified; an **error** with the same code when no allow line reads the table at all | The client has no `list` for such a table — the block could never load |
+| 12 | AZ1269 filter | Also used for sort keys (`created`, `updated`, a required sortable field) and for a private filter outside `mine` | The same allow-list idea; the server answers 400 otherwise |
+| 10.3 | errors map `network` | `unknown` (the client's network failure), `rate_limited`, and one sentence for every other code | The reason belongs in the server's log, not the page |
+| 10.3 | skeleton sized from limit and layout | One skeleton item per `limit`; a faq skeleton row is as tall as a closed row (measured equal in three engines); a feature skeleton approximates title + two lines | Fewer rows than `limit` still shrink the block; known until a snapshot pre-render exists (§15 Later) |
+| 14 | visual snapshots of skeleton/empty/error in the gate | Not in `pnpm gate`: the states are checked by `pnpm test:data` against the real generated server (axe in each state, no-JS, three engines) | Gate previews are static builds with no server and no schema lock; a stub server there would test a fake API. Recorded as an open item |
+| — | default `limit`, empty copy | feature/faq default 6, gallery 12; empty default "Nothing here yet." | Not stated in §10 |
+
+Security as built: rows are written with `textContent` / `setAttribute`
+only; a URL attribute keeps only an http(s) URL after the URL parser's own
+normalisation; `on*`, `style`, `srcset` never take a value; the shell's
+config is re-validated before use; each row's ids get a suffix and every
+reference is rewritten.
+
+Proved: `pnpm test` (core/test/from.test.ts — every code with a control;
+words/test/from-blocks.test.ts — the template item deep-equals the item the
+word emits for the same values; overlay/test/rows.test.ts — config, values,
+URLs, attributes, paragraphs; target-web/test/data-rows.test.ts — rows.tsx,
+App wiring, AZ.md, determinism), `pnpm test:data` (public rows, an HTML
+payload stays text, longtext paragraphs, FAQ rows collapsed and opening,
+unique ids, skeleton height, empty, error + Try again with focus kept,
+`mine` signed out → Sign in, signed in on a page and behind `<Protected>`,
+no-JS, no console error on hydration, axe in every state — Chromium, Firefox,
+WebKit; WebKit signed-out only). The 26 word previews built by the
+compiler before D4 and with it: byte-identical, every file.
 
 ---
 
