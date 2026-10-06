@@ -36,6 +36,7 @@ import { PUBLIC_ENV_PREFIX } from '../../core/src/index.ts';
 import {
   AUTH_DIR, GUARD_DIR, authConfig, authCss, authPlan, authReact, guardTs, requiredEnv, type AuthPlan,
 } from './auth.ts';
+import { DATA_DIR, dataClient } from './data-client.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
 
 /**
@@ -839,6 +840,8 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
       { path: `${AUTH_DIR}/config.ts`, content: authConfig(plan, USER_DIR.replace(/^src\//, '')) },
       { path: `${AUTH_DIR}/react.tsx`, content: authReact() },
     ] : []),
+    // The typed data client only with tables (data-spec §7).
+    ...(spec.site.data ? [{ path: `${DATA_DIR}/client.ts`, content: dataClient(spec.site.data) }] : []),
     { path: 'src/runtime.tsx', content: runtimeTsx() },
     { path: 'src/entry-server.tsx', content: entryServer() },
     { path: 'az-vite/build.mjs', content: buildScript() },
@@ -999,6 +1002,7 @@ export default defineConfig({
         modules: moduleList,
         assets: [...used].sort(),
         backend: spec.site.backend ?? null,
+        data: spec.site.data ?? null,
       }),
     },
   ];

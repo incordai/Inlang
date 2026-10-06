@@ -2,7 +2,7 @@
  * @az module openapi
  * Purpose: server/openapi.json — every /data route, parameter, body and error as OpenAPI 3.1, deterministic.
  * Spec: docs/data-spec.md §7, §5
- * Exports: openapi, DATA_ERROR_CODES, typeName, granted
+ * Exports: openapi, DATA_ERROR_CODES, granted
  * Edit guide: describe only what data-api.ts accepts; keys sorted, no timestamps.
  * Tests: packages/backend/test/openapi.test.ts
  */
@@ -13,7 +13,7 @@
  * opens is always 403 and is left out, as the typed client leaves it out.
  */
 
-import type { SpecField, SpecTable } from '../../core/src/data.ts';
+import { typeName, type SpecField, type SpecTable } from '../../core/src/data.ts';
 import { generatedJson } from '../../core/src/generated.ts';
 
 /** data-spec §5.3, closed. */
@@ -23,15 +23,6 @@ export const DATA_ERROR_CODES = [
 ] as const;
 
 const LIMITS: Partial<Record<SpecField['type'], number>> = { text: 200, longtext: 10_000, email: 254, url: 2048 };
-
-/** `products` → `Product`, `categories` → `Category`: the type a row is. */
-export function typeName(table: string): string {
-  const singular = table.endsWith('ies') ? `${table.slice(0, -3)}y`
-    : /(?:ss|x|ch|sh)es$/.test(table) ? table.slice(0, -2)
-      : table.endsWith('s') && !table.endsWith('ss') ? table.slice(0, -1)
-        : table;
-  return singular.charAt(0).toUpperCase() + singular.slice(1);
-}
 
 /** The actions some rule grants on this table. */
 export const granted = (t: SpecTable) => ({

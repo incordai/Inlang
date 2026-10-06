@@ -8,7 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { compile } from '../../core/src/index.ts';
-import { DATA_ERROR_CODES, openapi, typeName } from '../src/openapi.ts';
+import { DATA_ERROR_CODES, openapi } from '../src/openapi.ts';
+import { typeName } from '../../core/src/data.ts';
 import { dataSite, manifests } from './data-fixture.ts';
 
 const tablesOf = (data: string) => {

@@ -10,6 +10,8 @@
 import type { EmittedNode } from '../../core/src/emit-contract.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 import { generatedMd } from './generated.ts';
+import type { SpecTable } from '../../core/src/data.ts';
+import { DATA_DIR } from './data-client.ts';
 
 export interface MapInput {
   readonly site: string;
@@ -26,6 +28,8 @@ export interface MapInput {
   readonly modules: readonly string[];
   readonly assets: readonly string[];
   readonly backend: { readonly database: string; readonly email: string } | null;
+  /** The data tables (data-spec §4), or null without any. */
+  readonly data: readonly SpecTable[] | null;
 }
 
 /** `header.az-hero.az-hero--center.az-s-1a2b` — how a root element looks in the DOM. */
@@ -90,6 +94,7 @@ export function azMd(m: MapInput): string {
   if (m.modules.length > 0) out.push(`- \`${m.dirs.user}/\` — your components: ${m.modules.map((x) => `\`${x}\``).join(', ')}`);
   if (m.assets.length > 0) out.push(`- \`public/\` — your files, copied as-is: ${m.assets.map((x) => `\`${x}\``).join(', ')}`);
   if (m.backend) out.push(`- \`server/\` — the built-in backend (${m.backend.database}, email ${m.backend.email}); see \`server/README.md\``);
+  if (m.data) out.push(`- \`${DATA_DIR}/client.ts\` — the typed client for the data tables: \`tables.<name>.list()\`, \`get\`, \`create\`, \`update\`, \`remove\``);
   out.push('');
 
   out.push('## Environment', '');
@@ -118,9 +123,28 @@ export function azMd(m: MapInput): string {
     out.push('- `server/src/main.ts` — start: config, migrations, store, routes, HTTP server');
     out.push('- `server/src/app.ts` — the routes; `server/src/http.ts` — JSON, cookies, CORS, security headers, rate limits');
     out.push('- `server/src/store.ts`, `db.ts`, `migrations.ts`, `drivers.ts` — accounts, sessions, tokens over the database');
+    out.push('- `server/src/claim.ts` — each migration claimed before it runs, so one of several starting servers applies it');
     out.push('- `server/src/email.ts` — reset and sign-in emails; `server/src/oidc.ts` — provider sign-in');
     out.push('- `server/src/env.ts` — every key, validated; `server/src/crypto.ts` — passwords, tokens, PKCE');
     out.push('- Change the backend\'s database or email in the .az source (`backend` under `site`), then rebuild');
+  }
+  if (m.data) {
+    out.push('', '## Data', '');
+    out.push('Tables from `data <name>` in the .az source, served at `/data/<name>` (data-spec §5; `server/openapi.json`).');
+    out.push('Who may read, create, edit and delete is each table\'s `allow` lines, enforced inside every statement.', '');
+    out.push('| Table | Fields | allow |', '|---|---|---|');
+    for (const t of m.data) {
+      const fields = t.fields.map((f) => `${f.name} ${f.type}${f.required ? '*' : ''}${f.private ? ' (private)' : ''}`).join(', ');
+      const allow = (['anyone', 'signedin', 'owner'] as const)
+        .map((who) => [who, (['read', 'create', 'edit', 'delete'] as const).filter((a) => t.rules[a].includes(who))] as const)
+        .filter(([, actions]) => actions.length > 0)
+        .map(([who, actions]) => `${who} ${actions.join(' ')}`).join('; ');
+      out.push(`| \`${t.name}\` | ${fields} | ${allow || 'admins only'} |`);
+    }
+    out.push('', '`*` required. Change a table in the .az source, run `az backend plan <file.az>` then `az backend schema <file.az>`');
+    out.push('(it records the step in `<file>.data.json`, the reviewed history), then rebuild.');
+    out.push('- `server/src/data-api.ts` — the routes; `data-query.ts` — parameters, paging, search; `data-values.ts` — every value checked');
+    out.push('- `server/src/data-migrate.ts` — applies `server/data.json`\'s steps; one that loses data waits for `--migrate --confirm`');
   }
   return out.join('\n') + '\n';
 }

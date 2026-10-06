@@ -2,7 +2,7 @@
  * @az module data
  * Purpose: `data <table>` declarations: fields, types, modifiers, allow rules → SpecTable, with every check.
  * Spec: docs/data-spec.md §4, §12
- * Exports: buildTables, DATA_TYPES, DATA_MODIFIERS, WHO, ACTIONS, TEXT_LIMITS, SpecTable, SpecField, SpecRules, Who, Action, DataType
+ * Exports: buildTables, typeName, DATA_TYPES, DATA_MODIFIERS, WHO, ACTIONS, TEXT_LIMITS, SpecTable, SpecField, SpecRules, Who, Action, DataType
  * Edit guide: the vocabulary is closed; a new type needs ddl (packages/backend/src/data-ddl.ts), the server's validator and a description.
  * Tests: packages/core/test/data.test.ts
  */
@@ -526,6 +526,18 @@ export function textOk(v: string, max: number, paragraphs: boolean): boolean {
 }
 
 /** A real calendar day between 0001-01-01 and 9999-12-31. */
+/**
+ * The type one row of a table is, for the typed client and openapi.json:
+ * `products` → `Product`, `categories` → `Category`, `boxes` → `Box`.
+ */
+export function typeName(table: string): string {
+  const singular = table.endsWith('ies') ? `${table.slice(0, -3)}y`
+    : /(?:ss|x|ch|sh)es$/.test(table) ? table.slice(0, -2)
+      : table.endsWith('s') && !table.endsWith('ss') ? table.slice(0, -1)
+        : table;
+  return singular.charAt(0).toUpperCase() + singular.slice(1);
+}
+
 export function isDate(v: string): boolean {
   const m = DATE.exec(v);
   if (!m) return false;
