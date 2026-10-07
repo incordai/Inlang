@@ -112,7 +112,9 @@ export async function walkShipped(dir: string, base: string = dir): Promise<Ship
 /**
  * The shipped files that are byte-for-byte a file an installed package
  * published. Found by name (the hash removed) in `packages` (a project's
- * node_modules), links not followed, then compared whole.
+ * node_modules), then compared whole. The folder itself may be a link — a
+ * project sharing one install, as the gate's sites do — so it is resolved
+ * first; links inside it are not followed.
  */
 export async function publishedCopies(packages: string, files: readonly Shipped[]): Promise<Set<string>> {
   const out = new Set<string>();
@@ -123,8 +125,10 @@ export async function publishedCopies(packages: string, files: readonly Shipped[
     const name = base.replace(HASHED, '$1');
     wanted.set(name, [...(wanted.get(name) ?? []), f]);
   }
-  if (wanted.size === 0 || !(await isRealDir(packages))) return out;
-  const pending = [packages];
+  if (wanted.size === 0) return out;
+  const root = await realpath(packages).catch(() => null);
+  if (root === null || !(await isRealDir(root))) return out;
+  const pending = [root];
   let seen = 0;
   while (pending.length > 0 && seen < MAX_PACKAGE_ENTRIES) {
     const at = pending.pop()!;

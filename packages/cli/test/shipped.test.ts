@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { scanText } from '../../core/src/secrets.ts';
@@ -61,6 +61,19 @@ test('a package\'s published file, shipped byte-for-byte, is judged by key shape
   const r = await scan(dir);
   assert.deepEqual(r.where, [], 'the entropy rule does not judge a published file');
   assert.deepEqual([...r.published], ['assets/draco_decoder-AbCd1234.js']);
+});
+
+test('a node_modules that is a link to a shared install is read through it, as the gate\'s sites use one', async () => {
+  const decoder = `var d="${DENSE}";`;
+  const shared = project({}, { 'pkg/libs/draco_decoder.js': decoder });
+  const dir = project({ 'assets/draco_decoder-AbCd1234.js': decoder });
+  rmSync(join(dir, 'node_modules'), { recursive: true, force: true });
+  symlinkSync(join(shared, 'node_modules'), join(dir, 'node_modules'), 'dir');
+  const r = await scan(dir);
+  assert.deepEqual(r.where, [], 'the published copy is found through the linked folder');
+  // CONTROL: no install at all — the entropy rule judges it.
+  rmSync(join(dir, 'node_modules'));
+  assert.deepEqual((await scan(dir)).where, ['assets/draco_decoder-AbCd1234.js (entropy)']);
 });
 
 test('a planted key shape in a vendored decoder copy is still caught — byte-identical or not', async () => {
