@@ -249,10 +249,18 @@ not build is one failing `output` line, never an empty pass. Severity follows
 | backend CSP | the built server's header-setting files (`http.ts`, `app.ts`, `main.ts`) differ from az's (warn: not vouched for); else az's own headers lack `default-src 'none'`, `frame-ancestors`, `nosniff` or a referrer policy (fail). No project code is loaded | rebuild — the server's files are generated |
 | new-tab links | a `target="_blank"` link without `rel="noopener"` or `noreferrer` (warn — §2 B reverse tabnabbing) | add `rel="noopener noreferrer"` |
 
-**Findings, not fixed here.** The build guard scans the bundle's chunks and
-its text assets only: files Vite copies from `public/` and assets it reads as
-bytes (the 3D decoder) are never scanned at build — `az audit` is the first
-check that reads them. And generated pages ship **no CSP** today, which §2 B
+**Findings.** *Fixed (b627fe5):* the build guard scanned the bundle's chunks
+and its text assets only, so files Vite copies from `public/` and assets it
+reads as bytes (the 3D decoder) shipped unscanned. It now reads the output
+folder back once Vite has written it and scans every text file, with
+`az audit`'s own walk and published-copy rule (`cli/src/shipped.ts`, copied
+verbatim into `az-vite/`); a key there fails the build as in the bundle, and
+a file it cannot read (over 16MB, past 20 000 files) fails it too. The
+pre-rendered pages are written after the guard runs, so `az audit` remains
+the check that reads them. *Fixed (8f2c955):* the backend's last-line 500
+(`writeHead(500)` in `main.ts`) sent no security headers; it is now
+`http.ts` `requestListener`, through `send()` like every other response.
+*Open:* generated pages ship **no CSP** today, which §2 B
 asks for (`emit a sane default CSP header/meta`). `az audit` reports it as a
 warning on every build; emitting one is target-web work — the pages carry
 inline `style` attributes, so a policy must allow them or they must move.
