@@ -33,6 +33,7 @@ import { emitPages, type EmitterMap } from './tree.ts';
 import { sanitizeSvg, SvgError } from './svg.ts';
 import { markdownToNodes, MarkdownError } from './markdown.ts';
 import { compileStyles } from './stylesheet.ts';
+import { pageDescription } from './head.ts';
 import { uniqueIds } from './ids.ts';
 import { COMPONENT_EXT } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
@@ -709,14 +710,19 @@ function htmlEntries(spec: Spec): Record<string, string> {
 // declares none, and pricing's `locale` formats money, not the page. When
 // the site gains one, this is where it lands.
 // An admin page (data-spec §11) is kept out of search results and says so in its title.
-function indexHtml(spec: Spec, admin = false): string {
+// `description` is the page's own lead copy (head.ts); a page without one has no tag.
+// The icon: the grammar has no site icon yet, so the page says it has none
+// (an empty data: URL) rather than leave the browser to request
+// /favicon.ico — a 404 and a console error on every page view.
+function indexHtml(spec: Spec, admin = false, description: string | null = null): string {
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-${admin ? '    <meta name="robots" content="noindex, nofollow" />\n' : ''}    <title>${admin ? 'Admin · ' : ''}${escapeHtml(spec.site.name)}</title>
+${admin ? '    <meta name="robots" content="noindex, nofollow" />\n' : ''}${description ? `    <meta name="description" content="${escapeHtml(description)}" />\n` : ''}    <link rel="icon" href="data:," />
+    <title>${admin ? 'Admin · ' : ''}${escapeHtml(spec.site.name)}</title>
   </head>
   <body>
     <div id="root"></div>
@@ -913,6 +919,11 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   // The admin pages (data-spec §11), only with tables: none of this otherwise.
   const admin = adminOf(spec);
   const adminFiles = new Set(admin.map(htmlFileFor));
+  // Each page's description from its content — between the nav and the footer.
+  const descriptions = new Map(pages.map((p) => {
+    const { lead, tail, nodes } = layOut(p);
+    return [htmlFileFor(p.route), pageDescription(nodes.slice(lead, nodes.length - tail))] as const;
+  }));
   // The tables `from` blocks read (data-spec §10.3); none, and no rows runtime is wired.
   const rowTables = spec.site.data ? fromTables(spec) : [];
   const files: EmittedFile[] = [
@@ -1075,7 +1086,7 @@ export default defineConfig({
         include: ['src'],
       }, null, 2) + '\n',
     },
-    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec, adminFiles.has(path)) })),
+    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec, adminFiles.has(path), descriptions.get(path) ?? null) })),
     {
       path: 'AZ.md',
       content: azMd({

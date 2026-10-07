@@ -290,6 +290,23 @@ try {
     routes.every((r) => (rendered[r].match(/<main/g) ?? []).length === 1 && rendered[r].includes(`data-route="${r}"`)));
   check('an unknown path renders not-found, not a site page',
     /az-not-found/.test(notFound) && !/data-route="\/"/.test(notFound));
+  // pnpm test:lighthouse (pre-M5): every page lacked a description, and the
+  // browser's /favicon.ico request was a 404 and a console error. The head
+  // as it ships: the hero's sub describes /, the text body describes
+  // /legal, and every page — /login too — declares its (empty) icon.
+  {
+    const head = (r) => {
+      const file = readFileSync(join(proj, 'dist', r === '/' ? '' : r.slice(1), 'index.html'), 'utf8');
+      return file.slice(0, file.indexOf('</head>'));
+    };
+    const described = (r) => /<meta name="description" content="([^"]*)"/.exec(head(r))?.[1] ?? null;
+    check('A6: a page ships its lead copy as its meta description — / its hero sub, /legal its text body',
+      described('/') === 'Handmade. Forty pairs a month.' &&
+        described('/legal') === 'We keep your order and your address, and nothing else.',
+      `${described('/')} | ${described('/legal')}`);
+    check('every page declares its icon, so the browser requests no /favicon.ico',
+      routes.every((r) => head(r).includes('<link rel="icon" href="data:," />')));
+  }
   check('the build and its pre-render report nothing (React warnings fail it)', buildLog.trim() === '', buildLog.trim().split('\n')[0]);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
 
