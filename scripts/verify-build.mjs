@@ -310,6 +310,43 @@ try {
   check('the build and its pre-render report nothing (React warnings fail it)', buildLog.trim() === '', buildLog.trim().split('\n')[0]);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
 
+  /* ---- word-quality-gate §5: `az audit` on the shipped build ------------ */
+  // Offline (no --online): the advisory query is the one network call.
+  {
+    const audit = (out) => {
+      const r = spawnSync(process.execPath, [CLI, 'audit', '--out', out, '--json'], {
+        cwd: work, encoding: 'utf8', env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH }, timeout: COMMAND_MS, killSignal: 'SIGKILL',
+      });
+      if (r.error || r.signal) throw new Error(`az audit was stopped: ${r.error?.message ?? r.signal}`);
+      return { status: r.status, out: r.stdout, report: JSON.parse(r.stdout) };
+    };
+    const by = (r, id) => r.report.checks.find((c) => c.id === id) ?? {};
+    const clean = audit(proj);
+    check('az audit: the shipped build has no key-shaped string (the public key allowed, as by the guard)',
+      by(clean, 'bundle-secrets').status === 'pass', by(clean, 'bundle-secrets').line);
+    // A finding, not a gate: word-quality-gate §2 B asks for a CSP the pages do not ship yet.
+    check('az audit: the pages\' missing CSP is reported, and only warns', clean.status === 0 && by(clean, 'page-csp').status === 'warn',
+      by(clean, 'page-csp').line);
+    check('az audit: the advisory query is skipped without --online', by(clean, 'dependencies').status === 'skip');
+
+    const planted = join(work, 'proj-audit');
+    mkdirSync(planted);
+    cpSync(join(proj, 'dist'), join(planted, 'dist'), { recursive: true });
+    cpSync(join(proj, '.az-manifest.json'), join(planted, '.az-manifest.json'));
+    // The 3D decoder's published originals, so the copy is judged as the build is.
+    const libs = 'node_modules/three/examples/jsm/libs';
+    cpSync(join(proj, libs), join(planted, libs), { recursive: true });
+    const key = `sk_live_${'P1a'.repeat(10)}`;
+    const js = readdirSync(join(planted, 'dist/assets')).find((f) => /^main-.*\.js$/.test(f));
+    writeFileSync(join(planted, 'dist/assets', js), `${readFileSync(join(planted, 'dist/assets', js), 'utf8')}\nconst k="${key}";\n`);
+    const leaked = audit(planted);
+    check('az audit: a key planted in the shipped bundle fails, by file and offset — never by value',
+      leaked.status === 1 && by(leaked, 'bundle-secrets').line.startsWith('bundle secrets: 1 key-shaped string in the built site')
+        && (by(leaked, 'bundle-secrets').fix ?? []).some((f) => f.startsWith(`dist/assets/${js}:`) && f.endsWith('(secret-prefix)'))
+        && !leaked.out.includes(key) && !leaked.out.includes('P1aP1a'),
+      by(leaked, 'bundle-secrets').line);
+  }
+
   /* ---- M3: the escape hatch mounts author components with the theme --- */
   {
     const home = rendered['/'];

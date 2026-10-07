@@ -205,6 +205,9 @@ Tier A blocks (11, buttons-and-sections §2), informed by what M5 actually
 needed. Add the missing words M5 revealed. `az deploy`. `az doctor` —
 **built early, 2026-10-07** (word-quality-gate §5.4: the checks, what was
 left out and why; `packages/cli/test/doctor.test.ts`, `az_doctor` in `az mcp`).
+`az audit` — **built early, 2026-10-07** (word-quality-gate §5.5: the checks,
+what was left out and why, the CSP finding; `packages/cli/test/audit.test.ts`,
+`az_audit` in `az mcp`, and an audit of the shipped fixture in verify-build).
 
 ## Phase 2 — ~6 weeks
 

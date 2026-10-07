@@ -30,6 +30,7 @@ import { GRAMMAR_VERSION, migrate } from './migrate.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { doctor } from './doctor-checks.ts';
 import { systemProbe } from './doctor.ts';
+import { audit } from './audit.ts';
 import { findNpmCli } from './serve.ts';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
@@ -149,6 +150,9 @@ export function toolbox(root: string): Toolbox {
     doctor: (file, outDir) => doctor({
       source: file, outDir, cwd: realpathSync(root), wordsDir: wordsDir(), probe: systemProbe(findNpmCli), projectModules: false,
     }),
+
+    // The build's output, read only; the advisory query only when asked.
+    audit: (outDir, online) => audit({ outDir, cwd: realpathSync(root), probe: systemProbe(findNpmCli), online }),
 
     // Manifests only (no project code runs), like every read-only tool.
     explain: (terms) => explain(terms, loadWords(wordsDir(), projectWords, { code: false }).manifests),

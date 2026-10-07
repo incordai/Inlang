@@ -1,6 +1,6 @@
 /**
  * @az module az
- * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, doctor.
+ * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, doctor, audit.
  * Spec: docs/PRD.md §6.7 · docs/ARCHITECTURE.md §1a
  * Exports: main, build, specOf, wordsFor, parseDotenv, DOTENV_FILES, EXIT
  * Edit guide: filesystem work lives here, never in core; a new command needs USAGE, COMMANDS and a test.
@@ -54,6 +54,8 @@ import { runMcp } from './mcp.ts';
 // doctor-checks.ts imports compileReader, wordsFor and the .env reader from here; the same.
 import { doctor } from './doctor-checks.ts';
 import { formatReport, systemProbe } from './doctor.ts';
+// audit.ts imports the .env reader from here; the same.
+import { audit } from './audit.ts';
 import { formatFindings } from '../../theme/src/lint.ts';
 
 const MB = 1024 * 1024;
@@ -411,9 +413,11 @@ const USAGE = `az — words to a website
   az explain <term...>             one line per term: az explain hero center
   az doctor [file.az] [--out dir] [--json]
                                    check this machine and project; changes nothing
+  az audit [--out dir] [--online] [--json]
+                                   check a build's output; changes nothing
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'doctor']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'doctor', 'audit']);
 
 /**
  * `az backend init <server-dir>` — write `.env` beside a generated server's
@@ -507,6 +511,37 @@ function runDoctor(args: string[]): number {
     process.exitCode = r.exit;
   }, (e: unknown) => {
     process.stderr.write(`az: doctor: ${(e as Error).message}\n`);
+    process.exitCode = EXIT.config;
+  });
+  return EXIT.ok;
+}
+
+/**
+ * `az audit [--out dir] [--online] [--json]` — word-quality-gate §5: the
+ * built output, checked. Reads only; the advisory query is the one network
+ * call and runs only with --online. Exit 0 when nothing failed, 1 when
+ * something did, 2 for a usage error; set when every check has answered.
+ */
+function runAudit(args: string[]): number {
+  let json = false;
+  let online = false;
+  let out = '.az-build';
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--json') json = true;
+    else if (a === '--online') online = true;
+    else if (a === '--out' && args[i + 1] && !args[i + 1].startsWith('--')) out = args[++i];
+    else {
+      const hint = a.endsWith('.az') ? ' — audit reads a build, not the .az file' : '';
+      process.stderr.write(`az: audit: unexpected '${a}'${hint} — try: az audit [--out dir] [--online] [--json]\n`);
+      return EXIT.config;
+    }
+  }
+  void audit({ outDir: resolve(out), cwd: process.cwd(), probe: systemProbe(findNpmCli), online }).then((r) => {
+    process.stdout.write(json ? `${JSON.stringify(r, null, 2)}\n` : formatReport(r, 'az audit'));
+    process.exitCode = r.exit;
+  }, (e: unknown) => {
+    process.stderr.write(`az: audit: ${(e as Error).message}\n`);
     process.exitCode = EXIT.config;
   });
   return EXIT.ok;
@@ -649,6 +684,7 @@ export function main(argv: string[]): number {
   if (cmd === 'lint') return runLint(file ?? process.env.AZ_WORDS ?? 'words');
   if (cmd === 'explain') return runExplain(argv.slice(1));
   if (cmd === 'doctor') return runDoctor(argv.slice(1));
+  if (cmd === 'audit') return runAudit(argv.slice(1));
   if (cmd === 'mcp') {
     // stdin keeps the process alive; the server ends when the client closes it.
     const rootFlag = argv.indexOf('--root');

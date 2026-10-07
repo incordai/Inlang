@@ -1,10 +1,10 @@
 /**
  * @az module doctor
- * Purpose: az doctor's frame: the check contract, the machine probe, deadlines, and the text and JSON reports.
+ * Purpose: the frame az doctor and az audit share: the check contract, the machine probe, deadlines, and the text and JSON reports.
  * Spec: docs/word-quality-gate.md §5 (§5.1 detect everything, install almost nothing; §5.2 exit codes)
- * Exports: Check, CheckResult, Finding, Status, Probe, RunResult, DoctorContext, DoctorReport, runChecks, systemProbe, report, formatReport, shellQuote, DEADLINE_MS, CHILD_MS
+ * Exports: Check, CheckResult, Command, Finding, Status, Probe, RunResult, DoctorContext, DoctorReport, runChecks, systemProbe, report, formatReport, shellQuote, DEADLINE_MS, CHILD_MS
  * Edit guide: a check reaches the machine only through Probe, so a test can fake it; nothing here installs or writes; never print an environment value.
- * Tests: packages/cli/test/doctor.test.ts
+ * Tests: packages/cli/test/doctor.test.ts, packages/cli/test/audit.test.ts
  */
 
 /**
@@ -41,11 +41,12 @@ export interface Finding extends CheckResult {
   readonly id: string;
 }
 
-export interface Check {
+/** One check of `az doctor` (DoctorContext) or `az audit` (its own context): the frame runs either. */
+export interface Check<C = DoctorContext> {
   readonly id: string;
   /** Used when the check itself cannot answer: "<title>: no answer after 20s". */
   readonly title: string;
-  readonly run: (ctx: DoctorContext) => Promise<CheckResult>;
+  readonly run: (ctx: C) => Promise<CheckResult>;
 }
 
 /** How a child process ended. Output is cut at CHILD_OUTPUT_BYTES. */
@@ -105,14 +106,17 @@ const CHILD_OUTPUT_BYTES = 64 * 1024;
 
 const seconds = (ms: number) => `${Math.round(ms / 100) / 10}s`;
 
+/** The command a report and its "run it again" lines name. */
+export type Command = 'az doctor' | 'az audit';
+
 /** One check under its deadline: whatever happens, a Finding comes back. */
-function bounded(check: Check, ctx: DoctorContext, deadlineMs: number): Promise<Finding> {
+function bounded<C>(check: Check<C>, ctx: C, deadlineMs: number, command: Command): Promise<Finding> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<CheckResult>((done) => {
     timer = setTimeout(() => done({
       status: 'fail',
       line: `${check.title}: no answer after ${seconds(deadlineMs)}`,
-      fix: ['something on this machine did not answer — run az doctor again; if this line repeats, run the step it names by hand'],
+      fix: [`something on this machine did not answer — run ${command} again; if this line repeats, run the step it names by hand`],
     }), deadlineMs);
   });
   const ran = Promise.resolve()
@@ -120,7 +124,7 @@ function bounded(check: Check, ctx: DoctorContext, deadlineMs: number): Promise<
     .catch((e: unknown): CheckResult => ({
       status: 'fail',
       line: `${check.title}: the check stopped (${String((e as Error)?.message ?? e).split('\n')[0]})`,
-      fix: ['run az doctor again; if this line repeats, report it with the line above'],
+      fix: [`run ${command} again; if this line repeats, report it with the line above`],
     }));
   return Promise.race([ran, late]).then((r) => {
     clearTimeout(timer);
@@ -129,8 +133,8 @@ function bounded(check: Check, ctx: DoctorContext, deadlineMs: number): Promise<
 }
 
 /** Every check at once, each under its deadline, reported in the order given. */
-export function runChecks(checks: readonly Check[], ctx: DoctorContext, deadlineMs = DEADLINE_MS): Promise<Finding[]> {
-  return Promise.all(checks.map((c) => bounded(c, ctx, deadlineMs)));
+export function runChecks<C>(checks: readonly Check<C>[], ctx: C, deadlineMs = DEADLINE_MS, command: Command = 'az doctor'): Promise<Finding[]> {
+  return Promise.all(checks.map((c) => bounded(c, ctx, deadlineMs, command)));
 }
 
 /** Run a child: never a shell, killed at its timeout, output capped. */
@@ -218,14 +222,14 @@ const MARK: Record<Status, string> = { pass: '✓', warn: '!', fail: '✗', skip
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** The terminal form: one line per check, its fix indented beneath, then the count. */
-export function formatReport(r: DoctorReport): string {
-  const lines = ['az doctor'];
+export function formatReport(r: DoctorReport, command: Command = 'az doctor'): string {
+  const lines: string[] = [command];
   for (const c of r.checks) {
     lines.push(`  ${MARK[c.status]} ${c.line}`);
     for (const f of c.fix ?? []) lines.push(`      ${f}`);
   }
   const { pass, warn, fail, skip } = r.counts;
-  lines.push(`az doctor: ${plural(fail, 'failure', 'failures')}, ${plural(warn, 'warning', 'warnings')}, ${pass} passed, ${skip} skipped`);
+  lines.push(`${command}: ${plural(fail, 'failure', 'failures')}, ${plural(warn, 'warning', 'warnings')}, ${pass} passed, ${skip} skipped`);
   return `${lines.join('\n')}\n`;
 }
 

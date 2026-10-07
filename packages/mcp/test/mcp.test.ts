@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -72,7 +72,7 @@ test('CONTROL: an unknown protocol version is answered with the newest supported
 test('tools/list offers every tool with a schema, and marks the ones that write', async () => {
   const [, r] = await session(project(), [INIT, { jsonrpc: '2.0', id: 1, method: 'tools/list' }]);
   const tools = r.result.tools as { name: string; inputSchema: { type: string }; annotations: { readOnlyHint: boolean } }[];
-  assert.deepEqual(tools.map((t) => t.name).sort(), ['az_backend_init', 'az_build', 'az_check', 'az_doctor', 'az_eject',
+  assert.deepEqual(tools.map((t) => t.name).sort(), ['az_audit', 'az_backend_init', 'az_build', 'az_check', 'az_doctor', 'az_eject',
     'az_explain', 'az_grammar', 'az_lint', 'az_migrate', 'az_spec', 'az_word_docs', 'az_words']);
   for (const t of tools) assert.equal(t.inputSchema.type, 'object');
   const writers = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
@@ -200,6 +200,30 @@ test('az_doctor reports every check with its fix, writes nothing, and never retu
   // CONTROL: without a file only the machine is checked.
   const bare = await tool(root, 'az_doctor');
   assert.equal(bare.structuredContent.checks.find((c: { id: string }) => c.id === 'compile').status, 'skip');
+});
+
+test('az_audit reports each check of a build\'s output, never a secret\'s value, and asks nothing online unless told', async () => {
+  const root = project();
+  const built = spawnSync(process.execPath, [...process.execArgv, BIN, 'build', 'site.az'], { cwd: root, encoding: 'utf8', timeout: REPLY_TIMEOUT_MS });
+  assert.equal(built.status, 0, built.stderr);
+  const key = `sk_live_${'M3w'.repeat(12)}`;
+  mkdirSync(join(root, '.az-build/dist/assets'), { recursive: true });
+  writeFileSync(join(root, '.az-build/dist/index.html'), '<!doctype html><html><head><title>t</title></head><body></body></html>');
+  writeFileSync(join(root, '.az-build/dist/assets/index.js'), `const k="${key}";`);
+  const r = await tool(root, 'az_audit');
+  assert.equal(r.isError, false, r.content[0].text);
+  const checks = r.structuredContent.checks as { id: string; status: string; line: string; fix?: string[] }[];
+  const by = (id: string) => checks.find((c) => c.id === id)!;
+  assert.equal(r.structuredContent.ok, false);
+  assert.equal(by('bundle-secrets').status, 'fail');
+  assert.equal(by('bundle-secrets').fix?.[0], 'dist/assets/index.js:9 (secret-prefix)');
+  assert.equal(by('page-csp').status, 'warn');
+  assert.equal(by('dependencies').status, 'skip', 'no network unless online is "true"');
+  assert.ok(!JSON.stringify(r).includes(key) && !JSON.stringify(r).includes('M3wM3w'), 'no secret value in the result');
+  assert.equal((await tool(root, 'az_audit', { online: 'yes' })).isError, true);
+  // CONTROL: a folder that is not a build is one failing line, not an empty pass.
+  const none = await tool(root, 'az_audit', { out: 'elsewhere' });
+  assert.deepEqual(none.structuredContent.checks.map((c: { id: string }) => c.id), ['output']);
 });
 
 /* ---- the sandbox -------------------------------------------------------- */

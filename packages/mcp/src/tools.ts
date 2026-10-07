@@ -85,6 +85,12 @@ export interface Toolbox {
     counts: Record<string, number>;
     checks: readonly { id: string; status: string; line: string; fix?: readonly string[] }[];
   }>;
+  /**
+   * az audit (word-quality-gate §5): a build's output, one line and a fix
+   * per check. Reads only; a secret is reported by file, offset and shape,
+   * never by value; the network only when `online`.
+   */
+  readonly audit: (outDir: string, online: boolean) => ReturnType<Toolbox['doctor']>;
   /** One line per term (`hero center` → hero, center); unknown terms get a suggestion. */
   readonly explain: (terms: string[]) => {
     lines: { term: string; kind: string; of: string; text: string }[];
@@ -105,7 +111,7 @@ export interface ToolDef {
   readonly inputSchema: Schema;
   /** MCP tool annotations: whether the tool can change files. */
   readonly annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
-  /** May answer later (az_doctor waits on bounded child processes); the server awaits it. */
+  /** May answer later (az_doctor and az_audit wait on bounded child processes); the server awaits it. */
   readonly run: (args: Record<string, string>, box: Toolbox, sb: Sandbox) => unknown;
 }
 
@@ -197,6 +203,16 @@ export const TOOLS: ToolDef[] = [
     inputSchema: obj({ file: 'Optional .az file, relative to the project root; without it only the machine is checked.', out: 'Output folder of a build, relative to the project root. Default: .az-build' }, []),
     annotations: READ,
     run: ({ file, out }, box, sb) => box.doctor(file ? existing(sb, file) : null, sb.resolve(out ?? '.az-build')),
+  },
+  {
+    name: 'az_audit',
+    description: 'Check a build\'s output (the folder az_build wrote, after its own npm run build): key-shaped strings in the files the site ships (file and offset only, never the value), Content-Security-Policy on every page and on the backend\'s responses, links that open a new tab without rel="noopener", and — only with online "true", a network call — dependency advisories for the build\'s lockfiles. Each check: pass, warn, fail or skip, one line and the exact fix. Installs nothing, writes nothing.',
+    inputSchema: obj({ out: 'Output folder of a build, relative to the project root. Default: .az-build', online: '"true" to ask the advisory service for the dependencies (a network call); default "false".' }, []),
+    annotations: READ,
+    run: ({ out, online }, box, sb) => {
+      if (online !== undefined && online !== 'true' && online !== 'false') throw new ToolFailure('online is "true" or "false"');
+      return box.audit(sb.resolve(out ?? '.az-build'), online === 'true');
+    },
   },
   {
     name: 'az_word_docs',

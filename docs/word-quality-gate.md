@@ -230,6 +230,41 @@ not yet. **Tier 2 installs** (`--yes`) — doctor prints the command instead;
 nothing in it installs. **Texture weight in a GLB** — no texture budget is
 specified yet (ASSUMPTIONS A8, stack-evaluation §15 Q4).
 
+### 5.5 What `az audit` checks — built 2026-10-07
+
+`az audit [--out dir] [--online] [--json]` (also the `az_audit` MCP tool)
+audits a build's output: the folder `az build` wrote, after the project's own
+`npm run build` has put the site in `dist/`. Read-only: nothing is written,
+fixed or installed. It runs in doctor's frame — the same `pass`/`warn`/`fail`/
+`skip` lines, fixes, 20s deadline per check, 15s per child, and exit codes
+(`0` nothing failed, `1` something did, `2` a usage error). A folder az did
+not build is one failing `output` line, never an empty pass. Severity follows
+§2: what §2 calls critical or high fails; medium warns.
+
+| Check | Fails / warns when | Fix it prints |
+|---|---|---|
+| bundle secrets | a key-shaped string in any file `dist/` ships (fail) — §4 rule 2's scanner, `scanText`, the build guard's own, now also over the pre-rendered pages; `AZ_PUBLIC_` values (the output folder's `.env*`, then the environment) allowed, as by the guard. A file that is byte-for-byte one an installed package published (the 3D decoder, found by name in the output's `node_modules`) is judged by the key-shape rules only — compiled decoders are dense, and the entropy rule is for inlined values. **Location and shape only** (`dist/assets/a.js:1234 (secret-prefix)`); a file name or link shaped like a key is printed by its length. `dist/` missing fails; a file over 16MB is a warning, not read | remove it, rebuild, rotate it if deployed |
+| dependencies | **only with `--online`** — the one network call: the package manager's read-only advisory query (`npm audit --json`) per lockfile, the site's and the server's, at once. High or critical fails; moderate or low warns; no lockfile warns; offline or a 15s silence warns `could not reach the advisory service` | `npm audit` for the detail |
+| page CSP | no page sets a `Content-Security-Policy` meta (warn — §2 B, medium); a weak one: no script or default source, `'unsafe-inline'` without a hash or nonce, `'unsafe-eval'`, a wildcard or scheme source, `object-src` not `'none'`, no `base-uri` (the bundle is referenced relatively) | the gap, per page; a header the host sends is not visible here |
+| backend CSP | the built server's header-setting files (`http.ts`, `app.ts`, `main.ts`) differ from az's (warn: not vouched for); else az's own headers lack `default-src 'none'`, `frame-ancestors`, `nosniff` or a referrer policy (fail). No project code is loaded | rebuild — the server's files are generated |
+| new-tab links | a `target="_blank"` link without `rel="noopener"` or `noreferrer` (warn — §2 B reverse tabnabbing) | add `rel="noopener noreferrer"` |
+
+**Findings, not fixed here.** The build guard scans the bundle's chunks and
+its text assets only: files Vite copies from `public/` and assets it reads as
+bytes (the 3D decoder) are never scanned at build — `az audit` is the first
+check that reads them. And generated pages ship **no CSP** today, which §2 B
+asks for (`emit a sane default CSP header/meta`). `az audit` reports it as a
+warning on every build; emitting one is target-web work — the pages carry
+inline `style` attributes, so a policy must allow them or they must move.
+
+Not built, and why: **the axe pass** (§5) — it needs a browser and the
+accessibility engine, which are this repository's dev tools, not az's
+dependencies; `pnpm test:visual` and `pnpm test:data` run it on the
+fixtures. **External link checks** (footer-block-spec §12 Q4 recommends them
+for audit) — still an open question, and a request to every linked host.
+**A lockfile resolved for a fresh build** — the advisory query reads the
+lockfile `npm install` writes; audit would have to install to make one.
+
 ---
 
 ## 6. Sequencing — don't front-load this
@@ -239,7 +274,7 @@ specified yet (ASSUMPTIONS A8, stack-evaluation §15 Q4).
 | Now (M1) | path sandboxing, escape-on-emit, exact pins, `--ignore-scripts` |
 | M2 | the 12-point gate in CI |
 | M4 (auth) | secret-leak detection, adapter key docs |
-| M5 | `az doctor` (built early, §5.4), `az audit` |
+| M5 | `az doctor` (built early, §5.4), `az audit` (built early, §5.5) |
 | **Before the registry opens** | trust tiers, pack source lint |
 
 The last row is the hard gate. **Everything else can be added incrementally;
