@@ -635,7 +635,8 @@ try {
   // The GRAMMAR §8 fixture's images are placeholders too small to resize, so
   // a gallery of real photographs — made here, in a cache of its own —
   // goes through the real build, and the checks read the pages it ships.
-  // A feature's `rows` media and a cta's `split` media use the same files.
+  // A feature's `rows` media and a cta's `split` media use the same files,
+  // and so do the hero posters: `full` on / and `split` on /reserve.
   const gallerySite = join(work, 'gallery.az');
   mkdirSync(join(work, 'photos'));
   const photo = (w, h) => sharp({ create: { width: w, height: h, channels: 3, background: { r: 120, g: 60, b: 30 } } })
@@ -646,11 +647,13 @@ try {
   // A header that parses over data that does not decode.
   writeFileSync(join(work, 'photos/broken.jpg'), (await photo(900, 600).jpeg().toBuffer()).subarray(0, 700));
   writeFileSync(gallerySite,
-    'az 1\nsite photos\n\npage /\n  hero center\n    title "Photos"\n  gallery grid lightbox\n    columns 3\n' +
+    'az 1\nsite photos\n\npage /\n  hero full 3d\n    title "Photos"\n    poster ./photos/big.jpg\n    describe "A circle of light"\n' +
+    '  gallery grid lightbox\n    columns 3\n' +
     ['big.jpg', 'mid.png', 'small.webp', 'broken.jpg'].map((f) => `    image ./photos/${f}\n      alt "${f}"\n`).join('') +
     '  feature rows\n' +
     ['big.jpg', 'mid.png'].map((f) => `    item "${f}"\n      text "A photograph."\n      media ./photos/${f}\n`).join('') +
-    '  cta split\n    title "Reserve"\n    media ./photos/big.jpg\n    cta "Reserve a pair" /reserve\n\npage /reserve\n');
+    '  cta split\n    title "Reserve"\n    media ./photos/big.jpg\n    cta "Reserve a pair" /reserve\n\npage /reserve\n' +
+    '  hero split 3d\n    title "Reserve"\n    poster ./photos/mid.png\n    describe "A circle of light"\n');
   const galleryProj = join(work, 'gallery');
   const galleryReport = azBuild(gallerySite, galleryProj, work, { AZ_IMAGE_CACHE: join(work, 'image-cache-a') });
   cpSync(join(proj, 'node_modules'), join(galleryProj, 'node_modules'), { recursive: true });
@@ -660,8 +663,9 @@ try {
     // HTML attribute names are case-blind, and React writes `srcSet`.
     const attr = (tag, name) => new RegExp(`\\s${name}="([^"]*)"`, 'i').exec(tag)?.[1]
       ?.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-    const tags = [...page.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
-    const MEDIA = /\baz-(?:feature-media|cta-media-img)\b/;
+    const imgTags = (html) => [...html.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+    const tags = imgTags(page);
+    const MEDIA = /\baz-(?:feature-media|cta-media-img|hero-poster)\b/;
     const of = (file) => tags.filter((t) => attr(t, 'src') === `/photos/${file}` && !MEDIA.test(attr(t, 'class') ?? ''));
     const set = (t) => (attr(t, 'srcset') ?? '').split(', ').filter(Boolean).map((c) => {
       const [url, w] = c.split(' ');
@@ -689,7 +693,8 @@ try {
         existsSync(join(galleryProj, 'dist/photos/broken.jpg')), galleryReport.trim());
     // Every candidate a shipped page names is a file in dist/, exactly as
     // wide as it says and narrower than its original.
-    const named = tags.flatMap((t) => set(t).map((c) => ({ ...c, original: Number(attr(t, 'width')), src: attr(t, 'src') })));
+    const reserve = imgTags(shippedRoot(galleryProj, '/reserve'));
+    const named = [...tags, ...reserve].flatMap((t) => set(t).map((c) => ({ ...c, original: Number(attr(t, 'width')), src: attr(t, 'src') })));
     const wrong = [];
     for (const c of named) {
       const file = join(galleryProj, 'dist', c.url);
@@ -715,9 +720,43 @@ try {
       !!ctaBig && set(ctaBig).map((c) => c.width).join() === '480,768,1200,1800' &&
         attr(ctaBig, 'sizes') === '(width < 768px) 100vw, min(50vw, 720px)' && attr(ctaBig, 'height') === '1600',
       ctaBig ? `${attr(ctaBig, 'srcset')} | ${attr(ctaBig, 'sizes')}` : 'no cta media');
-    // gallery 4 + lightbox 4 + 3, feature 4 + 3, cta 4: every one checked against the file it names.
+    // hero-spec §8: the poster, with the sizes of its own box — `full` is
+    // full-bleed, so never capped by the frame; `split` is its column.
+    const heroFull = media('az-hero-poster', 'big.jpg');
+    check('hero §8: a full poster ships the four widths, edge to edge (100vw), loading as before',
+      !!heroFull && set(heroFull).map((c) => c.width).join() === '480,768,1200,1800' &&
+        attr(heroFull, 'srcset') === attr(big, 'srcset') && attr(heroFull, 'sizes') === '100vw' &&
+        attr(heroFull, 'width') === '2400' && attr(heroFull, 'loading') === undefined &&
+        attr(heroFull, 'fetchpriority') === undefined,
+      heroFull ? `${attr(heroFull, 'srcset')} | ${attr(heroFull, 'sizes')}` : 'no hero poster');
+    const heroSplit = reserve.find((t) => attr(t, 'src') === '/photos/mid.png' &&
+      (attr(t, 'class') ?? '').split(' ').includes('az-hero-poster'));
+    check('hero §8: a split poster is never upscaled — 480 and 768, then its 1000px self — at its column\'s sizes',
+      !!heroSplit && set(heroSplit).map((c) => c.width).join() === '480,768,1000' &&
+        set(heroSplit)[2]?.url === '/photos/mid.png' && attr(heroSplit, 'srcset') === attr(mid, 'srcset') &&
+        attr(heroSplit, 'sizes') === '(width < 768px) 100vw, min(50vw, 720px)',
+      heroSplit ? `${attr(heroSplit, 'srcset')} | ${attr(heroSplit, 'sizes')}` : 'no hero poster');
+    // The renderer preloads every eager image from the page's head, the
+    // poster included: that preload must carry the poster's own srcset and
+    // sizes, or the browser fetches a second file before the <img> asks for
+    // its own — and no preload may name the original by href alone.
+    const preloads = (route) => {
+      const file = join(galleryProj, 'dist', route === '/' ? '' : route.slice(1), 'index.html');
+      return [...readFileSync(file, 'utf8').matchAll(/<link\b[^>]*>/g)].map((m) => m[0])
+        .filter((l) => /\srel="preload"/i.test(l) && /\sas="image"/i.test(l));
+    };
+    for (const [route, poster] of [['/', heroFull], ['/reserve', heroSplit]]) {
+      const links = preloads(route);
+      const matching = links.filter((l) => !!poster &&
+        attr(l, 'imagesrcset') === attr(poster, 'srcset') && attr(l, 'imagesizes') === attr(poster, 'sizes'));
+      const byHref = links.filter((l) => !!poster && attr(l, 'href') === attr(poster, 'src'));
+      check(`hero §8: ${route}'s poster preload carries the poster's srcset and sizes, and none names the original alone`,
+        matching.length === 1 && byHref.length === 0, links.join(' ') || 'no image preload');
+    }
+    // gallery 4 + lightbox 4 + 3, feature 4 + 3, cta 4, hero full 4 (/), hero split 3 (/reserve):
+    // every one checked against the file it names.
     check('§7 rule 3: every srcset candidate ships, at its stated width, none upscaled',
-      named.length === 4 + 4 + 3 + 4 + 3 + 4 && wrong.length === 0, wrong.join('; ') || `${named.length} candidates`);
+      named.length === 4 + 4 + 3 + 4 + 3 + 4 + 4 + 3 && wrong.length === 0, wrong.join('; ') || `${named.length} candidates`);
   }
 
   /* ---- determinism ------------------------------------------------------ */

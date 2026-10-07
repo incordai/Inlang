@@ -159,11 +159,12 @@ byte-identical rebuild stops being cheap.
 >
 > - **Which images.** An `<img>` whose word gives a `sizes` — the gallery's
 >   `grid`, `masonry` and `carousel` images and its lightbox image, a
->   `feature`'s `rows` and `bento` media and a `cta`'s `split` media — of a
+>   `feature`'s `rows` and `bento` media, a `cta`'s `split` media and a
+>   `3d` hero's poster, in every variant — of a
 >   JPEG, PNG, WebP or AVIF file (by its first bytes). SVG and GIF are never
 >   resized. `orbit` gives no `sizes`: its ring's textures are the original
 >   files, so a resized copy for the hidden list would be a second download
->   of every image. The hero's media gives none yet, so it keeps one file.
+>   of every image.
 > - **Logos give no `sizes`, by decision.** The nav logo is drawn
 >   `space.32` tall (`space.24` shrunk) and the footer's `space.24`, with
 >   `width: auto` — so its drawn width is that height times the file's own
@@ -189,7 +190,23 @@ byte-identical rebuild stops being cheap.
 >   text), then half the row (two equal columns); `bento` media is
 >   `(width < 768px) 100vw`, then `(width < 1024px)` at up to two tiles'
 >   share, then `columns`' share; `cta` `split` media is
->   `(width < 768px) 100vw`, then half the section (its two columns).
+>   `(width < 768px) 100vw`, then half the section (its two columns). The
+>   hero poster follows its visual's box (hero-spec §8): `full` is `100vw`
+>   — the visual fills the full-bleed header behind the type, so the frame
+>   does not cap it; `split` is `(width < 768px) 100vw`, then one of its two
+>   columns; `center`, `stack` and `minimal` are the content's width,
+>   `min(100vw, <frame>px)`. The poster keeps its loading (eager, no
+>   priority hint; the text is the LCP element, hero-spec §8). No word
+>   writes a `<link rel=preload>`; the server renderer preloads every eager
+>   image from the page's head, and its preload carries the image's own
+>   `srcset` and `sizes` as `imagesrcset`/`imagesizes`, so it asks for the
+>   file the `<img>` picks (verify:build checks the poster's on both pages).
+>   Not measured by `sizes`: an `object-fit: cover` crop draws the image
+>   wider than its box when the file's aspect is wider than the box's — a
+>   `full` poster on a portrait phone most of all — and the word cannot
+>   see the file's aspect (as for logos, below), so the browser may pick a
+>   narrower file than the crop draws. The gallery's cropped `ratio` tiles
+>   share this.
 > - **The site frame caps `sizes`.** `sizes` cannot read `--az-frame` (a
 >   CSS variable), but the frame is a compile-time value: the target writes
 >   it from `site width` and theme tokens (`default` = `size.container`,
@@ -237,7 +254,6 @@ byte-identical rebuild stops being cheap.
 >   no width variants. So a row's `<img>` (gallery `grid`/`masonry`,
 >   feature media) gets no `sizes` and no srcset. Variants at upload are a
 >   server change of their own (data-spec §8).
-> - **Not yet.** srcset for the hero's media.
 
 **4 — `content-visibility: auto` with `contain-intrinsic-size` per row.**
 Offscreen rows skip layout and paint entirely, and the intrinsic size comes free

@@ -63,7 +63,7 @@
         ".png",
         ".webp"
       ],
-      "description": "Still image for the static tier and loading"
+      "description": "Still for static tier and loading; resized at build"
     },
     "describe": {
       "type": "string",
@@ -141,7 +141,8 @@
     "type.body",
     "motion.*",
     "size.ring",
-    "color.veil"
+    "color.veil",
+    "breakpoint.sm"
   ],
   "deps": {
     "three": "0.186.0"

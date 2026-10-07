@@ -10,13 +10,13 @@
  *   split wraps them as div.az-hero-text + div.az-hero-media (visual goes in media).
  * Variants: center — centred column, centred text · split — two-column grid text|media, one column below sm ·
  *   full — scrim background, on-scrim type, visual absolutely behind · stack — column from the top, visual below ·
- *   minimal — centred column, larger display type (display-lg).
+ *   minimal — one column at the start edge, larger display type (display-lg).
  * Modifiers: 3d — emits the visual box + poster for the page renderer · scroll / parallax — set data-az-camera ·
  *   glass — blurred veil over a backdrop (translucent.states.overBackdrop).
  * Props: eyebrow → p.az-hero-eyebrow · title → h1.az-hero-title · sub → p.az-hero-sub ·
  *   height → min-height in svh (HEIGHT table) + data-height · poster → img.az-hero-poster via ctx.asset ·
  *   describe → poster alt and the visual's aria-label · model → data-az-model via ctx.asset ·
- *   focus → the poster's object-position (the crop's focal point).
+ *   focus → the poster's object-position (the crop's focal point); the poster's `sizes` → posterSizes().
  * Styling: theme tokens only; below.sm mobile gutter (+ split one column); actions below.xs stack;
  *   states.live hides the poster (full: the header clears, the scrim layer stays);
  *   states.overBackdrop gives the veil;
@@ -40,7 +40,9 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { framed, glassSurface, px, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import {
+  contentShare, framed, glassSurface, px, type EmitContext, type EmittedNode,
+} from '../../core/src/emit-contract.ts';
 
 /** §6 — height is a WORD, and the emitter supplies the unit. */
 const HEIGHT: Record<string, number> = {
@@ -62,6 +64,30 @@ const HEIGHT: Record<string, number> = {
  * proves both stops.
  */
 export const SCRIM = { bottom: 88, top: 65 } as const;
+
+/** §2: `split`'s text and media share the hero in two equal columns, from sm up. */
+const SPLIT_COLUMNS = 2;
+
+/**
+ * gallery-spec §7 rule 3: how wide the poster is drawn at each viewport —
+ * the `sizes` the target writes beside the srcset it builds. It follows the
+ * visual's box (§8): `full` puts it behind the type over the whole header,
+ * which is full-bleed — the frame only insets the type — so it is the
+ * viewport, never capped. `split` is the whole content below sm (restacked
+ * under the text, §10), then one of the two equal columns. `center`,
+ * `stack` and `minimal` give it the content's full width. Each value is an
+ * upper bound — gaps and gutters only shrink the box — and a share of the
+ * viewport is capped by the same share of the site frame.
+ */
+function posterSizes(variant: string, ctx: EmitContext): string {
+  const t = ctx.theme;
+  const frame = ctx.site.frame;
+  if (variant === 'full') return contentShare(1, undefined);
+  if (variant === 'split') {
+    return `(width < ${px(t.breakpoint.sm)}) ${contentShare(1, frame, t.breakpoint.sm)}, ${contentShare(SPLIT_COLUMNS, frame)}`;
+  }
+  return contentShare(1, frame);
+}
 
 /** §4 — display type is fluid; `full` and `minimal` get the larger step. */
 const bigDisplay = (variant: string | null) =>
@@ -180,6 +206,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
             class: 'az-hero-poster',
             decoding: 'async',
             'data-az-live-part': '',
+            // The layout's widths, for the srcset the build writes. Loading
+            // stays as above: eager, no priority hint.
+            sizes: posterSizes(variant, ctx),
           },
           // §10: the poster is cropped to its box — wide on a desktop, tall
           // on a phone under `full` — so `focus` names the part it keeps,
@@ -268,7 +297,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       //   stack  a tall visual or a UI shot: type first, media below the fold
       //          line at full width. One column, and the type does not centre
       //          vertically or the media is pushed off screen.
-      //   center/full/minimal  a single centred column of type.
+      //   center/full  a single centred column of type.
+      //   minimal      a single column of type at the start edge (§2).
       display: variant === 'split' ? 'grid' : 'flex',
       gridTemplateColumns: variant === 'split' ? 'minmax(0, 1fr) minmax(0, 1fr)' : undefined,
       columnGap: variant === 'split' ? px(t.space[48]) : undefined,

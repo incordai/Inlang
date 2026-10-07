@@ -57,7 +57,7 @@ Combine freely.
 | `title` | string |  |  | ≤ 12 words, required | the page's `<h1>` |
 | `sub` | string |  |  | ≤ 30 words | one supporting line |
 | `model` | path |  |  | .glb | an optional `.glb` model for `3d` |
-| `poster` | path |  |  | .jpg, .png, .webp | the static image a `3d` hero shows at the static tier and while loading |
+| `poster` | path |  |  | .jpg, .png, .webp | the static image a `3d` hero shows at the static tier and while loading; resized at build to its box (`srcset`) |
 | `describe` | string |  |  | ≤ 20 words | the poster's alt text |
 | `focus` | enum | `center` / `top` / `bottom` / `left` / `right` | `center` |  | which part of the poster a crop keeps — on a phone, `full` crops it tall |
 | `height` | enum | `compact` / `peek` / `tall` / `full` | `peek` |  | `compact`, `peek`, `tall` or `full` |
@@ -91,6 +91,9 @@ Known gaps:
 - Responsive (§10): `split` restacks to one column below 768px and the actions stack full-width below 480px, checked in a browser by `test:visual` (preview.split.az)
 - Responsive (§10): `full` crops its poster from `focus`, and its scrim over the visual runs 88% → 65% of `scrim` at every width (65% is the stop that holds 4.5:1 over a white pixel in every theme), checked at 375, 768 and 1440px over the darkest and lightest poster by `test:visual` (preview.full.az), and live over the drawing scene by `test:3d` (the scrim above the canvas, every line at 4.5:1)
 - Layout (§2): `center` and `full` centre the title, sub and actions on one axis, checked within 1px at 1440 and 375px by `test:visual` (`centred`)
+- Layout (§2): `stack` and `minimal` set their column at the start edge, not centred (unit-tested in `responsive-pilot.test.ts`)
+- Images (§8, gallery-spec §7 rule 3): the poster ships a `srcset` resized at build, never upscaled, with a `sizes` from its box — `full` 100vw (full-bleed, no frame cap), `split` 100vw below 768px then half the frame, `center`/`stack`/`minimal` the frame's width; loading unchanged (eager, no priority hint); the page's preload of it carries the same srcset and sizes, checked by `verify:build`
+- Not sized: a `full` poster cropped tall on a phone (`object-fit: cover`) is drawn wider than 100vw, by its own aspect, which the word cannot see — the browser may pick a file narrower than the crop draws
 - Not measured: the live scrim over a scene's lightest possible frame — `test:3d` reads the procedural scene as it draws, and the white-pixel case rests on the poster fixtures and the unit test
 
 ## Tested

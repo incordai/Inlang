@@ -349,8 +349,12 @@ media and cta `split` media ship the same srcset with their own layouts'
 `reading` stay uncapped). Logos ship one file by decision (fixed height:
 their drawn width is the file's aspect, gallery-spec §7). `from` rows ship
 the backend's one stored size — the upload pipeline makes no width variants
-(data-spec §8). Not yet: srcset on the hero's media, `orbit`, and variants
-at upload for `from` rows.
+(data-spec §8). The `3d` hero's poster ships the same srcset in every
+variant, with its box's `sizes` (`full` 100vw, uncapped; `split` its column;
+`center`/`stack`/`minimal` the frame), its loading unchanged, and the
+page's preload of it carrying the same srcset and sizes (hero-spec §8,
+verify:build). Not yet: `orbit`, variants at upload for
+`from` rows, and `sizes` that account for a `cover` crop wider than its box.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape

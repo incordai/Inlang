@@ -55,6 +55,14 @@ stretches back to the full width (§5). Checked in a browser by `test:visual`'s
 `centred` check: at 1440 and 375px the sub's and the actions' centres are
 within 1px of the title's.
 
+**`stack` and `minimal` are not centred (implemented).** Only `center` and
+`full` are centred columns. `stack` sets its type from the top at the start
+edge, above its media; `minimal` is one column of type at the start edge,
+centred vertically in the hero's height — the editorial, type-led layout the
+table above names, set in the larger display step (§4). Their title, sub and
+actions share the start edge. `packages/words/test/responsive-pilot.test.ts`
+holds both to it (no `align-items`, no `text-align: center`).
+
 ---
 
 ## 3. Width and measure
@@ -243,6 +251,27 @@ object (`split`), or lay a gradient scrim over it.
 
 **Ship a poster.** Every 3D hero compiles a static poster image used for: the
 `static` tier, the loading state, and OpenGraph. One asset, three jobs.
+
+**The poster is resized at build (implemented).** gallery-spec §7 rule 3:
+the poster ships a `srcset` of the fixed widths narrower than its file
+(480, 768, 1200, 1800 — never upscaled; the original stays the `src`), with
+a `sizes` from the visual's box above: `full` is `100vw` — the visual fills
+the full-bleed header behind the type, and the site frame only insets the
+type, so it is never capped; `split` is `(width < 768px) 100vw` (restacked,
+§10), then one of its two columns, `min(50vw, <frame / 2>px)`; `center`,
+`stack` and `minimal` are the content's width, `min(100vw, <frame>px)`.
+Its loading is unchanged: not lazy, no `fetchpriority` — the text is the LCP
+element. The server renderer preloads every eager image from the page's
+head; the poster's preload carries the same `imagesrcset` and
+`imagesizes`, so it asks for the file the `<img>` picks, never the
+original. `focus` and the scrim are untouched. Checked by
+`packages/target-web/test/image-srcset.test.ts` (every variant and site
+width) and `verify:build` (shipped widths and files, no upscaling, the
+matching preload on a `full` and a `split` page). Not measured by `sizes`:
+`object-fit: cover` draws a poster wider than its box when the file is
+wider than the box's aspect — a `full` poster on a portrait phone most of
+all — and the word cannot see the file's aspect (gallery-spec §7), so the
+browser may pick a narrower file than the crop draws.
 
 **`dispose()` on unmount.** Geometries, materials, textures. Without it, a
 route change leaks memory until the tab dies. This is exactly the failure a

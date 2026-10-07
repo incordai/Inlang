@@ -289,8 +289,64 @@ test('build: cta split media is the whole content below sm, then its column, cap
   assert.equal(full.sizes, '(width < 768px) 100vw, 50vw', 'a full site has no frame to cap with');
 });
 
-test('build: feature and cta with no resizer ship no srcset and no sizes — as before the rule', () => {
-  for (const source of [featureSource('rows'), featureSource('bento'), ctaSplit()]) {
+/* ---- hero poster --------------------------------------------------------------- */
+
+const heroPoster = (variant: string, width?: string, poster = 'one.png') => page(`hero ${variant} 3d
+    title "Built in the dark"
+    poster ./assets/${poster}
+    describe "A boot on a bench"
+    focus top`, width);
+
+const posterOf = (source: string, resize?: Resize) =>
+  imgs(buildSource(source, resize)).find((a) => (a.class ?? '').split(' ').includes('az-hero-poster'))!;
+
+test('build: hero full\'s poster is edge to edge — 100vw on every site width, never capped by the frame', () => {
+  for (const width of [undefined, ...Object.keys(SITE_WIDTHS)]) {
+    const poster = posterOf(heroPoster('full', width), fakeResize());
+    assert.equal(poster.sizes, '100vw', `site width ${width ?? 'default'}`);
+    assert.match(poster.srcset, /-480\.webp 480w, .*-1800\.webp 1800w$/, 'past 1800 the largest variant tops the set');
+    assert.equal(poster.src, '/assets/one.png', 'the original stays the src');
+    assert.equal(poster.width, '2400', 'width and height stay the original\'s');
+  }
+});
+
+test('build: hero split\'s poster is the whole content below sm, then its column, capped by the frame', () => {
+  assert.equal(posterOf(heroPoster('split'), fakeResize()).sizes, '(width < 768px) 100vw, min(50vw, 720px)');
+  assert.equal(posterOf(heroPoster('split', 'narrow'), fakeResize()).sizes, '(width < 768px) 100vw, min(50vw, 512px)');
+  assert.equal(posterOf(heroPoster('split', 'full'), fakeResize()).sizes, '(width < 768px) 100vw, 50vw',
+    'a full site has no frame to cap with');
+});
+
+test('build: hero center, stack and minimal draw the poster the content\'s width, capped by the frame', () => {
+  for (const variant of ['center', 'stack', 'minimal']) {
+    assert.equal(posterOf(heroPoster(variant), fakeResize()).sizes, 'min(100vw, 1440px)', variant);
+    assert.equal(posterOf(heroPoster(variant, 'full'), fakeResize()).sizes, '100vw', `${variant} on a full site`);
+  }
+});
+
+test('build: hero\'s poster is never upscaled — a 1000px original gets 480 and 768, then itself', () => {
+  const asked: [string, readonly number[]][] = [];
+  const poster = posterOf(heroPoster('full', undefined, 'two.png'), fakeResize(asked));
+  assert.match(poster.srcset, /-480\.webp 480w, .*-768\.webp 768w, \/assets\/two\.png 1000w$/);
+  assert.deepEqual(asked, [['assets/two.png', [480, 768]]]);
+  assert.equal(posterOf(heroPoster('full', undefined, 'three.png'), fakeResize()).sizes, undefined,
+    'a 400px original is not resized, and keeps no sizes');
+});
+
+test('build: the srcset leaves the poster\'s loading, alt and live part as they were', () => {
+  for (const variant of ['full', 'split']) {
+    const plain = posterOf(heroPoster(variant));
+    const sized = posterOf(heroPoster(variant), fakeResize());
+    const { srcset, sizes, ...rest } = sized;
+    assert.ok(srcset && sizes, variant);
+    assert.deepEqual(rest, plain, `${variant}: only srcset and sizes are added`);
+    assert.equal(rest.loading, undefined, 'never lazy: it is in the first viewport');
+    assert.equal(rest.fetchpriority, undefined, 'no priority hint: the text is the LCP element');
+  }
+});
+
+test('build: feature, cta and hero with no resizer ship no srcset and no sizes — as before the rule', () => {
+  for (const source of [featureSource('rows'), featureSource('bento'), ctaSplit(), heroPoster('full'), heroPoster('split')]) {
     assert.doesNotMatch(buildSource(source), /"srcset"|"sizes"/);
   }
 });

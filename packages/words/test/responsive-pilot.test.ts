@@ -57,8 +57,12 @@ test('hero-spec §2: center and full centre their boxes on one axis, not only th
     assert.equal(out.style?.alignItems, 'center', v);
     assert.equal(out.style?.textAlign, 'center', v);
   }
+  // §2: only center and full are centred columns; stack and minimal set their
+  // boxes and their text at the start edge.
   for (const v of ['stack', 'minimal']) {
-    assert.equal(hero(block('hero', v), context()).style?.alignItems, undefined, `CONTROL: ${v} keeps the start edge`);
+    const out = hero(block('hero', v), context());
+    assert.equal(out.style?.alignItems, undefined, `CONTROL: ${v} keeps its boxes at the start edge`);
+    assert.equal(out.style?.textAlign, undefined, `CONTROL: ${v} keeps its text at the start edge`);
   }
 });
 
