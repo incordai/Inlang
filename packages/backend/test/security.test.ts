@@ -17,10 +17,11 @@ import { migrate, openSqlite } from '../src/server/db.ts';
 import { migrateData } from '../src/server/data-migrate.ts';
 import { ownedRowDeletes } from '../src/server/data-values.ts';
 import { createStore } from '../src/server/store.ts';
-import { clientIp, createLimiter, rateKey } from '../src/server/http.ts';
+import { clientIp, createLimiter, rateKey, requestListener, SECURITY_HEADERS } from '../src/server/http.ts';
 import { isEmail, isSitePath } from '../src/server/app.ts';
 import { loadConfig } from '../src/server/env.ts';
-import type { IncomingMessage } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 const GOOD = 'a-long-enough-password';
 const VICTIM = 'victim@studio.test';
@@ -363,4 +364,36 @@ test('SECURITY sessions: an idle session expires, activity keeps it, and the abs
     h.clock.now += 55 * 60 * 1000;
     assert.equal(await sessionOf(active), null, 'past 5 hours: ended however active');
   } finally { await h.close(); }
+});
+
+/* ---- the last-line 500 ------------------------------------------------- */
+
+/** A real server over requestListener, its handler failing as `fail` says; closed by the caller. */
+async function failing(fail: (res: ServerResponse) => void) {
+  const lines: string[] = [];
+  const server = createServer(requestListener(async (_req, res) => { fail(res); throw new TypeError('handler broke'); }, (l) => lines.push(l)));
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const close = () => new Promise<void>((ok) => { server.closeAllConnections(); server.close(() => ok()); });
+  return { url, lines, close };
+}
+
+test('SECURITY fallback 500: a handler that throws past its own catch is answered with the full security set', async () => {
+  const s = await failing(() => {});
+  try {
+    const r = await fetch(`${s.url}/auth/session`, { signal: AbortSignal.timeout(5_000) });
+    assert.equal(r.status, 500);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) assert.equal(r.headers.get(k), v, k);
+    assert.deepEqual(await r.json(), { error: 'unknown' });
+    assert.deepEqual(s.lines, ['request failed: TypeError'], 'the error class is logged, never its message');
+  } finally { await s.close(); }
+});
+
+test('CONTROL fallback: headers already sent are not rewritten — the response is ended', async () => {
+  const s = await failing((res) => { res.writeHead(200, { ...SECURITY_HEADERS }); res.write('partial'); });
+  try {
+    const r = await fetch(s.url, { signal: AbortSignal.timeout(5_000) });
+    assert.equal(r.status, 200);
+    assert.equal(await r.text(), 'partial');
+  } finally { await s.close(); }
 });

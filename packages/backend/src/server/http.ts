@@ -2,7 +2,7 @@
  * @az server http
  * Purpose: the HTTP edge: JSON bodies, cookies, CORS, security headers, rate limits, client IP.
  * Spec: docs/backend-spec.md §5
- * Exports: readJson, readRaw, sendFile, cookie, corsHeaders, clientIp, createLimiter
+ * Exports: readJson, readRaw, sendFile, cookie, corsHeaders, clientIp, createLimiter, requestListener
  * Edit guide: trust X-Forwarded-For only by hop count; exact-origin CORS; cap limiter memory.
  * Tests: packages/backend/test/security.test.ts
  */
@@ -156,6 +156,24 @@ export function send(res: ServerResponse, status: number, body: unknown, headers
 export function redirect(res: ServerResponse, to: string, headers: Record<string, string | string[]> = {}): void {
   res.writeHead(302, { ...SECURITY_HEADERS, location: to, ...headers });
   res.end();
+}
+
+/**
+ * The server's request listener. The handler answers its own failures; this
+ * catch is the last line, so one request can never become an unhandled
+ * rejection that ends the process — and its 500 goes through send(), with
+ * the security set, like every other answer.
+ */
+export function requestListener(
+  handle: (req: IncomingMessage, res: ServerResponse) => Promise<void>,
+  log: (line: string) => void,
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
+    handle(req, res).catch((e: unknown) => {
+      log(`request failed: ${(e as Error)?.name ?? 'Error'}`);
+      if (!res.headersSent) send(res, 500, { error: 'unknown' }); else res.end();
+    });
+  };
 }
 
 /**

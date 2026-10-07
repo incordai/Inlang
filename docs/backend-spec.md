@@ -195,7 +195,7 @@ gives a server setting a public name (`AZ_PUBLIC_…PASSWORD`,
 | Robustness | a request line the URL parser rejects (`GET //`) is answered 400; the request handler never rejects; provider values longer than their columns are `oauth_failed`, not 500 | `//`, `//?`, `//%`, `//[` → 400, server still up; a 300-character subject |
 | Retype | re-checked on sign-up and password set, before the token is spent | `password_mismatch`; a mistype does not burn the link |
 | Provider sign-in | `site` allow-listed, `next` a site path; state bound to the browser by cookie and single use; PKCE S256; OIDC nonce; id_token signature (RS256, PS256, ES256, EdDSA via JWKS; HS256 only with the client secret), `iss`, `aud`/`azp`, `exp`, `iat`; JWKS cached, refetched on an unknown `kid`; accounts link by **verified** email only; no new account unless `AZ_OAUTH_SIGNUP=allow` | `none`, algorithm confusion, wrong audience, wrong issuer, expired, wrong nonce, missing/replayed state, unverified email, key rotation |
-| Headers | `Cache-Control: no-store`, `nosniff`, `Referrer-Policy: no-referrer`, `CSP default-src 'none'`, HSTS, CORP | asserted |
+| Headers | `Cache-Control: no-store`, `nosniff`, `Referrer-Policy: no-referrer`, `CSP default-src 'none'`, HSTS, CORP — on every response the server writes, the last-line 500 (`requestListener`) included | asserted; a handler that throws past its own catch still answers 500 with the full set |
 | Bodies | JSON objects only, 16 KB cap | refused otherwise |
 | Logs | route and error class/code only — never a password, token, secret, address, or a provider's or mail server's reply text | the browser run checks the server's log; a mail failure quoting the recipient logs only its class |
 
