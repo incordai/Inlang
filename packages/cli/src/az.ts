@@ -54,8 +54,6 @@ import { runMcp } from './mcp.ts';
 // doctor-checks.ts imports compileReader, wordsFor and the .env reader from here; the same.
 import { doctor } from './doctor-checks.ts';
 import { formatReport, systemProbe } from './doctor.ts';
-// audit.ts imports the .env reader from here; the same.
-import { audit } from './audit.ts';
 import { formatFindings } from '../../theme/src/lint.ts';
 
 const MB = 1024 * 1024;
@@ -537,7 +535,8 @@ function runAudit(args: string[]): number {
       return EXIT.config;
     }
   }
-  void audit({ outDir: resolve(out), cwd: process.cwd(), probe: systemProbe(findNpmCli), online }).then((r) => {
+  // Loaded only for this command: every az build starts without it (m1-exit's cold budget).
+  void import('./audit.ts').then(({ audit }) => audit({ outDir: resolve(out), cwd: process.cwd(), probe: systemProbe(findNpmCli), online })).then((r) => {
     process.stdout.write(json ? `${JSON.stringify(r, null, 2)}\n` : formatReport(r, 'az audit'));
     process.exitCode = r.exit;
   }, (e: unknown) => {

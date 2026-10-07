@@ -30,7 +30,6 @@ import { GRAMMAR_VERSION, migrate } from './migrate.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { doctor } from './doctor-checks.ts';
 import { systemProbe } from './doctor.ts';
-import { audit } from './audit.ts';
 import { findNpmCli } from './serve.ts';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
@@ -152,7 +151,8 @@ export function toolbox(root: string): Toolbox {
     }),
 
     // The build's output, read only; the advisory query only when asked.
-    audit: (outDir, online) => audit({ outDir, cwd: realpathSync(root), probe: systemProbe(findNpmCli), online }),
+    // Loaded on the first call, so az's start-up does not carry it.
+    audit: async (outDir, online) => (await import('./audit.ts')).audit({ outDir, cwd: realpathSync(root), probe: systemProbe(findNpmCli), online }),
 
     // Manifests only (no project code runs), like every read-only tool.
     explain: (terms) => explain(terms, loadWords(wordsDir(), projectWords, { code: false }).manifests),
