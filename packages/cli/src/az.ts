@@ -276,6 +276,8 @@ export function build(options: BuildOptions): BuildOutcome {
     // Its rows module only with a `from` block (data-spec §10.3).
     ...copied('../../overlay/src/runtime/', RUNTIME_DIR, (f) => project.rows || !ROWS_RUNTIME_FILES.includes(f)),
     ...copied('../../core/src/', GUARD_DIR, (f) => f === 'secrets.ts'),
+    // And the walk that reads back what the build wrote (az audit's too).
+    ...copied('./', GUARD_DIR, (f) => f === 'shipped.ts'),
     ...(project.auth ? copied('../../auth-runtime/src/runtime/', AUTH_DIR) : []),
     // The 3D runtime only with a site whose pages declare a 3D view (scene-spec §5).
     ...(project.three ? copied('../../scene-runtime/src/runtime/', THREE_DIR) : []),

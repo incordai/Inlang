@@ -23,7 +23,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -392,6 +392,55 @@ try {
       bundled !== null && /a service-key pattern was found in the built bundle/.test(bundled));
     // CONTROL: the untouched project built above, with its public key shipped.
     check('CONTROL: the clean build (public key present) passed the same guard', existsSync(join(proj, 'dist/index.html')));
+
+    // word-quality-gate §5.5, fixed: the guard reads back every file the build
+    // wrote. A project file az build copies into public/ — which Vite copies
+    // into dist/ outside the bundle — fails the build like the bundle does.
+    const pubWork = join(work, 'pub');
+    mkdirSync(pubWork);
+    cpSync(site, join(pubWork, 'site.az'));
+    cpSync(join(ROOT, 'packages/core/test/fixture-assets'), pubWork, { recursive: true });
+    const pubKey = `sk_live_${'Pb7'.repeat(10)}`;
+    const logo = join(pubWork, 'assets/logo.svg');
+    writeFileSync(logo, `${readFileSync(logo, 'utf8')}<!-- ${pubKey} -->\n`);
+    const pubProj = join(pubWork, 'proj');
+    node(CLI, ['build', join(pubWork, 'site.az'), '--out', pubProj], pubWork);
+    cpSync(join(proj, 'node_modules'), join(pubProj, 'node_modules'), { recursive: true });
+    const inPublic = existsSync(join(pubProj, 'public/assets/logo.svg'));
+    const pubOut = failing(process.execPath, [join(pubProj, 'node_modules/vite/bin/vite.js'), 'build'], pubProj);
+    check('§5.5 fixed: a key in a project file az build copies into public/ FAILS the build, by file — never by value',
+      inPublic && pubOut !== null && /found in the built bundle — remove it from source and rebuild \(assets\/logo\.svg@\d+, secret-prefix/.test(pubOut)
+        && !pubOut.includes(pubKey),
+      pubOut === null ? 'the build succeeded' : pubOut.split('\n').find((l) => l.includes('logo.svg')) ?? pubOut.split('\n')[0]);
+
+    // The 3D decoder ships byte-for-byte from three's own files: the clean
+    // build above passed with it read (key shape only, as az audit judges it).
+    // A key shape planted in the vendored copy is still caught.
+    const libs = join(proj, 'node_modules/three/examples/jsm/libs');
+    const filesUnder = (dir) => readdirSync(dir, { withFileTypes: true })
+      .flatMap((e) => (e.isDirectory() ? filesUnder(join(dir, e.name)) : e.isFile() ? [join(dir, e.name)] : []));
+    const published = filesUnder(libs);
+    // A script: the guard does not read binary formats (a .wasm), so only a text copy proves anything.
+    const decoder = readdirSync(join(proj, 'dist/assets')).filter((f) => f.endsWith('.js')).flatMap((f) => {
+      const name = f.replace(/-[A-Za-z0-9_-]{8}(\.[^./]+)$/, '$1');
+      const text = readFileSync(join(proj, 'dist/assets', f), 'utf8');
+      const src = published.find((p) => basename(p) === name && readFileSync(p, 'utf8') === text);
+      return src ? [{ shipped: f, src }] : [];
+    })[0];
+    check('CONTROL: the clean build shipped a package\'s file verbatim (the 3D decoder) and the guard passed it',
+      decoder !== undefined, decoder?.shipped ?? 'no shipped file matches a file under three/examples/jsm/libs');
+    if (decoder) {
+      const vendored = join(work, 'proj-decoder');
+      cpSync(proj, vendored, { recursive: true, filter: (f) => !f.startsWith(join(proj, 'dist')) });
+      const copy = join(vendored, relative(proj, decoder.src));
+      const decoderKey = `sk_live_${'Dc4'.repeat(10)}`;
+      writeFileSync(copy, `${readFileSync(copy, 'utf8')}\n// ${decoderKey}\n`);
+      const decoderOut = failing(process.execPath, [join(vendored, 'node_modules/vite/bin/vite.js'), 'build'], vendored);
+      const stem = basename(decoder.src).replace(/\.[^.]+$/, '');
+      check('§5.5 fixed: a key shape planted in the vendored decoder copy still FAILS the build',
+        decoderOut !== null && new RegExp(`\\(assets/${stem}-[A-Za-z0-9_-]{8}\\.[a-z]+@\\d+, secret-prefix`).test(decoderOut) && !decoderOut.includes(decoderKey),
+        decoderOut === null ? 'the build succeeded' : decoderOut.split('\n').find((l) => l.includes(stem)) ?? decoderOut.split('\n')[0]);
+    }
   }
 
   /* ---- M4: `azbackend` — the build refuses a URL the cookie cannot cross -- */

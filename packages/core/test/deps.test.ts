@@ -161,6 +161,12 @@ test('the secret scanner imports nothing — it is copied whole into every site 
   assert.deepEqual(importsOf(file), []);
 });
 
+test('the output walk imports only node built-ins — it is copied whole into every site beside the scanner (§4)', () => {
+  const specs = importsOf(join(ROOT, 'packages/cli/src/shipped.ts'));
+  assert.ok(specs.length > 0, 'CONTROL: its imports are read');
+  for (const spec of specs) assert.ok(spec.startsWith('node:'), `shipped.ts imports '${spec}' — only node:*`);
+});
+
 test('mcp imports only its siblings and node built-ins — the CLI injects every operation', () => {
   const files = sources('packages/mcp');
   assert.ok(files.length >= 3, 'CONTROL: the mcp sources are found');

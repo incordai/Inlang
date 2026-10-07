@@ -13,20 +13,21 @@
  * doctor.ts gives both commands: each check is one line and its fix, under
  * the same deadlines, with the same exit codes.
  *
- * The secret scan is the one the generated build's guard runs on its
- * bundle (core secrets.ts, scanText) — here over every file the built site
- * ships, after the pre-render has written its pages, with the same public
- * values allowed. The advisory check is the only one that uses the network,
+ * The secret scan is the one the generated build's guard runs over what
+ * Vite wrote (shipped.ts, with core secrets.ts's scanText) — here again,
+ * after the pre-render has written its pages, with the same public values
+ * allowed. The advisory check is the only one that uses the network,
  * so it runs only when asked (`--online`).
  */
 
-import { lstat, readdir, readFile, stat } from 'node:fs/promises';
-import { extname, join, relative, sep } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
+import { FILE_MAX_BYTES, MAX_FILES, readRegular, shippedSecrets, walkShipped, type Shipped } from './shipped.ts';
 import {
   CHILD_MS, report, runChecks, shellQuote,
   type Check, type CheckResult, type DoctorReport, type Probe, type RunResult,
@@ -44,29 +45,12 @@ const DIST = 'dist';
 /** Written by every az build (output.ts); its absence means the folder is not one. */
 const BUILD_MANIFEST = '.az-manifest.json';
 
-/** A shipped file larger than this is not read: it is reported as unscanned instead. */
-const FILE_MAX_BYTES = 16 * 1024 * 1024;
-/** A built site with more files than this is not walked further; the rest are reported as unscanned. */
-const MAX_FILES = 20_000;
 /** How many locations a line lists before "and N more". */
 const SHOW = 5;
-
-/** Formats that cannot carry a readable key in text; everything else is scanned. */
-const BINARY = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.ico', '.bmp',
-  '.glb', '.bin', '.ktx2', '.woff', '.woff2', '.ttf', '.otf', '.eot',
-  '.mp4', '.webm', '.mov', '.mp3', '.ogg', '.wav', '.pdf', '.zip', '.gz', '.br', '.wasm',
-]);
 
 /** az's own copies of the server files that set response headers — a build copies them verbatim. */
 const SERVER_SOURCE = fileURLToPath(new URL('../../backend/src/server/', import.meta.url));
 const HEADER_FILES = ['http.ts', 'app.ts', 'main.ts'] as const;
-
-/** One file of the built site, as read. */
-interface Shipped {
-  readonly path: string;
-  readonly text: string;
-}
 
 /** The built site, walked once for every check; `unread` names what was too large or past the cap. */
 type Site =
@@ -102,54 +86,14 @@ const more = (list: readonly string[]) => (list.length > SHOW ? [...list.slice(0
  */
 const named = (path: string) => (scanText(path).some((f) => f.rule !== 'entropy') ? `<a secret-looking name, ${path.length} characters>` : path);
 
-/** A file's text, or null when it is missing or not a regular file (a named pipe would block the read). */
-async function readRegular(path: string): Promise<string | null> {
-  const s = await stat(path).catch(() => null);
-  return s?.isFile() ? readFile(path, 'utf8') : null;
-}
-
-/** A real folder, not a link to one: a walk that starts through a link could read outside the build. */
-const isRealDir = (path: string) => lstat(path).then((s) => s.isDirectory(), () => false);
-
 /**
- * Every regular file under dist/, depth first. Links are not followed — a
- * Dirent is the link itself, and dist/ itself must not be one — so nothing
- * outside the folder is read.
+ * Every text file under dist/, paths from the output folder (`dist/…`);
+ * links are not followed (shipped.ts).
  */
 async function walkSite(outDir: string): Promise<Site> {
   const dir = join(outDir, DIST);
-  if (!(await isRealDir(dir))) return { kind: 'missing', dir };
-  const files: Shipped[] = [];
-  const unread: string[] = [];
-  const pending = [dir];
-  let seen = 0;
-  while (pending.length > 0) {
-    const at = pending.pop()!;
-    const entries = await readdir(at, { withFileTypes: true });
-    entries.sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
-    for (const e of entries) {
-      const path = join(at, e.name);
-      if (e.isDirectory()) {
-        pending.push(path);
-        continue;
-      }
-      if (!e.isFile()) continue;
-      const rel = relative(outDir, path).split(sep).join('/');
-      if (++seen > MAX_FILES) {
-        unread.push(named(rel));
-        continue;
-      }
-      if (BINARY.has(extname(e.name).toLowerCase())) continue;
-      const s = await stat(path);
-      if (s.size > FILE_MAX_BYTES) {
-        unread.push(named(rel));
-        continue;
-      }
-      files.push({ path: rel, text: await readFile(path, 'utf8') });
-    }
-  }
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return { kind: 'site', dir, files, unread };
+  const tree = await walkShipped(dir, outDir);
+  return tree === null ? { kind: 'missing', dir } : { kind: 'site', dir, files: tree.files, unread: tree.unread.map(named) };
 }
 
 const notBuilt = (ctx: AuditContext, site: { dir: string }): CheckResult => ({
@@ -175,47 +119,6 @@ async function publicValues(ctx: AuditContext): Promise<Set<string>> {
   return new Set(Object.entries(merged).filter(([k, v]) => k.startsWith(PUBLIC_ENV_PREFIX) && v).map(([, v]) => v as string));
 }
 
-/** Vite names an emitted asset `<name>-<8-character hash><ext>` (its default assetFileNames). */
-const HASHED = /-[A-Za-z0-9_-]{8}(\.[^./]+)$/;
-/** The installed packages' folder is walked at most this far looking for a published original. */
-const MAX_PACKAGE_ENTRIES = 200_000;
-
-/**
- * The shipped files that are byte-for-byte a file an installed package
- * published — the 3D runtime's decoder, emitted from its dependency. The
- * entropy rule is a heuristic for a value inlined into the bundle; a
- * published file is not one, and compiled decoders are dense by nature. The
- * key-shape rules still apply to them. Found by name (the hash removed) in
- * the output's node_modules, links not followed, then compared whole.
- */
-async function publishedCopies(outDir: string, files: readonly Shipped[]): Promise<Set<string>> {
-  const out = new Set<string>();
-  const wanted = new Map<string, Shipped[]>();
-  for (const f of files) {
-    const base = f.path.split('/').pop() ?? '';
-    if (!HASHED.test(base)) continue;
-    const name = base.replace(HASHED, '$1');
-    wanted.set(name, [...(wanted.get(name) ?? []), f]);
-  }
-  const packages = join(outDir, 'node_modules');
-  if (wanted.size === 0 || !(await isRealDir(packages))) return out;
-  const pending = [packages];
-  let seen = 0;
-  while (pending.length > 0 && seen < MAX_PACKAGE_ENTRIES) {
-    const at = pending.pop()!;
-    const entries = await readdir(at, { withFileTypes: true }).catch(() => []);
-    for (const e of entries) {
-      if (++seen > MAX_PACKAGE_ENTRIES) break;
-      if (e.isDirectory()) pending.push(join(at, e.name));
-      else if (e.isFile() && wanted.has(e.name)) {
-        const text = await readRegular(join(at, e.name));
-        for (const f of wanted.get(e.name) ?? []) if (text === f.text) out.add(f.path);
-      }
-    }
-  }
-  return out;
-}
-
 const bundleSecrets: Check<AuditContext> = {
   id: 'bundle-secrets',
   title: 'bundle secrets',
@@ -223,12 +126,10 @@ const bundleSecrets: Check<AuditContext> = {
     const site = await ctx.site();
     if (site.kind === 'missing') return notBuilt(ctx, site);
     const allow = await publicValues(ctx);
-    const found = site.files.map((f) => ({ f, found: scanText(f.text, allow) }));
-    const published = await publishedCopies(ctx.outDir, found.filter((x) => x.found.some((s) => s.rule === 'entropy')).map((x) => x.f));
+    // A file a package published is judged by key shape only (shipped.ts).
+    const { hits: found, published } = await shippedSecrets(site.files, join(ctx.outDir, 'node_modules'), (text) => scanText(text, allow));
     // file:offset and the rule (the key's shape) — never a character of the value.
-    const hits = found.flatMap(({ f, found: list }) => list
-      .filter((s) => !(s.rule === 'entropy' && published.has(f.path)))
-      .map((s) => `${named(f.path)}:${s.where.replace(/^@/, '')} (${s.rule})`));
+    const hits = found.map(({ path, finding: s }) => `${named(path)}:${s.where.replace(/^@/, '')} (${s.rule})`);
     if (hits.length > 0) {
       return {
         status: 'fail',
