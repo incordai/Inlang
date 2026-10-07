@@ -39,8 +39,9 @@ import { COMPONENT_EXT, ICON_FORMATS } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 import { PUBLIC_ENV_PREFIX } from '../../core/src/index.ts';
 import {
-  AUTH_DIR, GUARD_DIR, authConfig, authCss, authPlan, authReact, guardTs, requiredEnv, type AuthPlan,
+  AUTH_DIR, BACKEND_ENV, GUARD_DIR, HOSTED_ENV, authConfig, authCss, authPlan, authReact, guardTs, requiredEnv, type AuthPlan,
 } from './auth.ts';
+import type { PageNeeds } from './csp.ts';
 import { DATA_DIR, dataClient } from './data-client.ts';
 import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminValuesTs } from './data-admin.ts';
 import { ROWS_FILE, fromTables, rowsTsx } from './data-rows.ts';
@@ -771,12 +772,22 @@ export function render(route: string): string {
  *
  * Any React warning while rendering fails the build: a warning here is a
  * page that renders differently from what the browser will hydrate.
+ *
+ * Each page then gets its Content-Security-Policy (csp.ts, copied beside
+ * this file): `needs` is what each page's nodes ask for, keyed by its HTML
+ * file; the hashes come from the page as filled. Only the built page gets
+ * one — the dev server serves the template, which has none (Vite's dev
+ * client injects styles and its own scripts as it goes).
  */
-function buildScript(): string {
-  return `${generated('the build: client bundle, then every route pre-rendered into dist/')}import { build } from "vite";
+function buildScript(needs: Readonly<Record<string, PageNeeds>>): string {
+  return `${generated('the build: client bundle, then every route pre-rendered into dist/ with its policy')}import { build, loadEnv } from "vite";
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { pagePolicy, withPolicy } from "./csp.ts";
+
+/** What each page loads beyond its own files (csp.ts PageNeeds), by its file in dist/. */
+const NEEDS = ${stableJson(needs)};
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dist = join(root, "dist");
@@ -794,8 +805,10 @@ await build({
   build: { ssr: "src/entry-server.tsx", outDir: server, emptyOutDir: true },
 });
 
-// 3. Every page's HTML, filled with its route's markup.
+// 3. Every page's HTML, filled with its route's markup, then given its
+//    policy: hashes of what it carries inline, origins from the public env.
 const { render } = await import(pathToFileURL(join(server, "entry-server.js")).href);
+const env = loadEnv("production", root, ${JSON.stringify(PUBLIC_ENV_PREFIX)});
 const pages = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
   e.isDirectory() ? (e.name === "assets" ? [] : pages(join(dir, e.name)))
     : e.name === "index.html" ? [join(dir, e.name)] : []);
@@ -804,11 +817,15 @@ const report = console.error;
 console.error = (...args) => { warnings.push(args.map(String).join(" ")); };
 try {
   for (const file of pages(dist)) {
-    const at = relative(dist, file).split(sep).slice(0, -1).join("/");
+    const path = relative(dist, file).split(sep).join("/");
+    const at = path.split("/").slice(0, -1).join("/");
     const route = at === "" ? "/" : "/" + at;
     const html = readFileSync(file, "utf8");
     if (!html.includes('<div id="root"></div>')) throw new Error("prerender: " + route + " has no empty root to fill");
-    writeFileSync(file, html.replace('<div id="root"></div>', '<div id="root">' + render(route) + "</div>"));
+    const page = NEEDS[path];
+    if (!page) throw new Error("csp: " + path + " is not a page this site emitted");
+    const filled = html.replace('<div id="root"></div>', '<div id="root">' + render(route) + "</div>");
+    writeFileSync(file, withPolicy(filled, pagePolicy(page, filled, env)));
   }
 } finally {
   console.error = report;
@@ -818,6 +835,42 @@ if (warnings.length > 0) {
   throw new Error("prerender: React reported while rendering — the page would not match what the browser hydrates:\\n" + warnings.join("\\n"));
 }
 `;
+}
+
+/**
+ * What each page loads beyond its own files, by its HTML file — the input
+ * to its Content-Security-Policy (csp.ts). From the page's nodes, not its
+ * built markup: a page behind <Protected> draws its content only in the
+ * browser, so its markup says nothing about it.
+ *
+ * - every page of a site with auth calls the adapter's origin (the session
+ *   check runs on each); `session` is same-origin, and a `custom` adapter
+ *   is the author's code, which the build cannot see into: same-origin only;
+ * - uploaded images (data-spec §8) come from the backend, on the admin
+ *   pages, the pages whose `from` blocks show rows, and the pages with an
+ *   author component (`raw`/`slot`), which may show rows through the client;
+ * - a 3D model may be compressed, and its decoder is WebAssembly in a worker.
+ */
+function pageNeeds(
+  spec: Spec, pages: readonly { route: string; nodes: EmittedNode[] }[], admin: readonly string[], dataIcon: boolean,
+): Record<string, PageNeeds> {
+  const plan = authPlan(spec);
+  const connect = plan?.adapter === 'hosted' ? [HOSTED_ENV[0]] : plan?.adapter === 'azbackend' ? [BACKEND_ENV[0]] : [];
+  const images = (spec.site.data ?? []).some((t) => t.fields.some((f) => f.type === 'image')) ? [BACKEND_ENV[0]] : [];
+  const reads = new Set(spec.pages.filter((p) => p.blocks.some((b) => b.from)).map((p) => p.route));
+  const has = (test: (n: EmittedNode) => boolean) => {
+    const walk = (n: EmittedNode | string): boolean => typeof n !== 'string' && (test(n) || (n.children ?? []).some(walk));
+    return (nodes: readonly EmittedNode[]) => nodes.some(walk);
+  };
+  const model = has((n) => n.attrs?.['data-az-model'] !== undefined);
+  const component = has((n) => n.tag === COMPONENT_TAG);
+  const out: Record<string, PageNeeds> = {};
+  for (const p of pages) {
+    const shows = reads.has(p.route) || component(p.nodes);
+    out[htmlFileFor(p.route)] = { dataIcon, connect, images: shows ? images : [], decoder: model(p.nodes) };
+  }
+  for (const route of admin) out[htmlFileFor(route)] = { dataIcon, connect, images, decoder: false };
+  return out;
 }
 
 /**
@@ -971,7 +1024,7 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     ] : []),
     { path: 'src/runtime.tsx', content: runtimeTsx() },
     { path: 'src/entry-server.tsx', content: entryServer() },
-    { path: 'az-vite/build.mjs', content: buildScript() },
+    { path: 'az-vite/build.mjs', content: buildScript(pageNeeds(spec, pages, admin, icon === null)) },
     {
       path: 'src/main.tsx',
       content: seeded.used ? threeMain(generated('browser entry: hydrates the page, then loads 3D if a view needs it')) : `${generated('browser entry: hydrates the pre-rendered page')}import { StrictMode } from "react";

@@ -463,14 +463,16 @@ export async function textContrast(page, text) {
         out.push({ q, color: getComputedStyle(el).color, rects });
       }
     }
-    const hide = document.createElement('style');
-    hide.id = 'az-text-over-poster';
-    hide.textContent = `${text.flatMap((q) => [q, `${q} *`]).join(', ')} { color: transparent !important; text-shadow: none !important; }`;
-    document.head.append(hide);
+    // A constructed sheet, not a <style> element: the page's policy
+    // (word-quality-gate §2 B) refuses an inline style it did not hash.
+    const hide = new CSSStyleSheet();
+    hide.replaceSync(`${text.flatMap((q) => [q, `${q} *`]).join(', ')} { color: transparent !important; text-shadow: none !important; }`);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, hide];
     return out;
   }, text);
   const png = await page.screenshot({ fullPage: true, animations: 'disabled' });
-  await page.evaluate(() => document.getElementById('az-text-over-poster')?.remove());
+  // The page adopts no sheet of its own, so the probe is the last one.
+  await page.evaluate(() => { document.adoptedStyleSheets = document.adoptedStyleSheets.slice(0, -1); });
   const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const scale = info.width / await page.evaluate(() => document.documentElement.clientWidth);
   for (const line of lines) {

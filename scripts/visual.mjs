@@ -38,6 +38,7 @@ import {
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { crc32, deflateSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer, textOverPoster, centredUnder, PHONE_WIDTH } from './visual/checks.mjs';
@@ -50,6 +51,7 @@ import { behaviourSelfTest } from './visual/behaviour-selftest.mjs';
 import { withVariant } from './thumbnails.mjs';
 import { COMPILE_MS, INSTALL_MS, PROJECT_BUILD_MS } from './visual/pipeline.mjs';
 import { Overdue, within, closeWithin, watchdog, human, slowest } from './lib/bounded.mjs';
+import { cspResult, watchCsp } from './visual/csp.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
@@ -120,7 +122,7 @@ const CHECKS = ['compile', 'deadline', 'overflow', 'axe', 'keyboard', 'reduced-m
   'no-js', 'hydration', 'image-shift', 'over-media', 'centred',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
-  'firefox', 'webkit'];
+  'firefox', 'webkit', 'csp'];
 
 /**
  * Responsive-table rows the gate measures, per word and variant: the
@@ -423,13 +425,15 @@ async function open(page, path, server) {
  * A page that can be thrown away and replaced: its context, its settings,
  * and the site page it shows. When a check misses its deadline the page is
  * presumed stuck — `reset` closes it (bounded) and opens a fresh one in the
- * same state, so the next check runs on a live page.
+ * same state, so the next check runs on a live page. Given `csp`, every
+ * policy violation on any of its pages is collected there (visual/csp.mjs).
  */
-async function surface(browser, server, path, init = {}) {
+async function surface(browser, server, path, init = {}, csp = null) {
   const sf = { ctx: null, page: null, media: null, viewport: init.viewport ?? null };
   sf.reset = async (reopen = true) => {
     if (sf.ctx) await closeWithin(sf.ctx, CLOSE_MS, 'context.close');
     sf.ctx = await within(CHECK_MS, 'newContext', () => browser.newContext(init));
+    if (csp) await within(CHECK_MS, 'watchCsp', () => watchCsp(sf.ctx, csp));
     sf.page = await within(CHECK_MS, 'newPage', () => sf.ctx.newPage());
     sf.page.setDefaultTimeout(NAV_TIMEOUT_MS);
     if (sf.viewport) await within(CHECK_MS, 'setViewportSize', () => sf.page.setViewportSize(sf.viewport));
@@ -474,7 +478,10 @@ async function checkSite(s, browsers, server) {
   const tracks = {};
 
   const guarded = (sf, engine, check, where, fn) => guardedCheck(sf, s.word, engine, check, where, fn);
-  const sf = await surface(browsers.chromium, server, s.path);
+  // word-quality-gate §2 B: every page load below, in every engine, is
+  // watched for a policy violation; any one fails the site's `csp` check.
+  const csp = { chromium: [], firefox: [], webkit: [] };
+  const sf = await surface(browsers.chromium, server, s.path, {}, csp.chromium);
   /** A chromium check whose result is recorded as returned (a null result is "not applicable"). */
   const checked = async (check, where, fn) => {
     const r = await guarded(sf, 'chromium', check, where, fn);
@@ -605,7 +612,7 @@ async function checkSite(s, browsers, server) {
   // them — a behaviour that works only in Chromium is not built.
   for (const engine of ['chromium', 'firefox', 'webkit']) {
     for (const width of [390, 1440]) {
-      const bsf = await surface(browsers[engine], server, s.path, { viewport: { width, height: 900 } });
+      const bsf = await surface(browsers[engine], server, s.path, { viewport: { width, height: 900 } }, csp[engine]);
       const checks = width === 390 ? { drawer, carousel, 'sheet-drag': sheetDrag } : { dropdown, solid, 'hide-shrink': hideShrink, 'scroll-padding': scrollPadding, faq, 'faq-deep-link': faqDeepLink, carousel, lightbox, copy, play, billing, year, reveal };
       for (const [name, fn] of Object.entries(checks)) {
         const where = `${s.label}/${engine}/light/${width}`;
@@ -621,7 +628,7 @@ async function checkSite(s, browsers, server) {
 
   // The smaller pass: another engine at one width, overflow and page errors.
   for (const [name, width] of [['firefox', 1440], ['webkit', 390]]) {
-    const osf = await surface(browsers[name], server, s.path, { viewport: { width, height: 900 } });
+    const osf = await surface(browsers[name], server, s.path, { viewport: { width, height: 900 } }, csp[name]);
     const errors = [];
     osf.page.on('pageerror', (e) => errors.push(e.message));
     const where = `${s.label}/light/${width}`;
@@ -637,6 +644,30 @@ async function checkSite(s, browsers, server) {
     }
     await osf.close();
   }
+
+  // §2 B: the checks above load the word's page; every other page the site
+  // ships is loaded once per engine too, so no page goes unwatched. Then
+  // each engine's violations, from every load, are the `csp` result.
+  const others = shippedRoutes(s.dist).filter((r) => r !== s.path);
+  for (const engine of ['chromium', 'firefox', 'webkit']) {
+    if (others.length > 0) {
+      const psf = await surface(browsers[engine], server, s.path, { viewport: { width: 1440, height: 900 } }, csp[engine]);
+      for (const route of others) {
+        const where = `${s.label}/${engine}${route}`;
+        await guarded(psf, engine, 'csp', where, (page) => open(page, route, server).catch((e) =>
+          record(s.word, 'csp', where, { pass: false, detail: `${engine}: did not load: ${String(e.message).split('\n')[0]}` })));
+      }
+      await psf.close();
+    }
+    record(s.word, 'csp', `${s.label}/${engine}`, cspResult(csp[engine]));
+  }
+}
+
+/** Every page a built site ships, as the URL path that serves it: `/`, `/work/`. */
+function shippedRoutes(dist, prefix = '/') {
+  return readdirSync(join(dist, prefix), { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? (e.name === 'assets' && prefix === '/' ? [] : shippedRoutes(dist, `${prefix}${e.name}/`))
+      : e.name === 'index.html' ? [prefix] : []);
 }
 
 /* ---- self-test: every check must be able to fail, and to pass ----------- */
@@ -981,6 +1012,33 @@ async function selfTest() {
       expect(`hero §2 the column centres on one axis (${centred ? 'centred' : 'start-edge'} page, ${width}px)`,
         await within(CHECK_MS, 'centred self-test', () => centredUnder(page, { title: '.t', under: ['.s', '.a'] })), centred);
       await closeWithin(ctx, CLOSE_MS, 'context.close');
+    }
+  }
+  // word-quality-gate §2 B: the violation watch must catch one. A page whose
+  // policy leaves its inline script unhashed FAILs; the same page with the
+  // script's hash PASSes — in every engine the real run watches.
+  for (const [name, hashed] of [['csp-unhashed', false], ['csp-hashed', true]]) {
+    const inline = "document.documentElement.setAttribute('data-az-ready', '');";
+    const digest = `'sha256-${createHash('sha256').update(inline, 'utf8').digest('base64')}'`;
+    const policy = `default-src 'self'; script-src 'self'${hashed ? ` ${digest}` : ''}; style-src 'self'; object-src 'none'; base-uri 'self'`;
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'), `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="${policy}" /><title>csp</title></head>
+  <body><main><h1>Policy</h1></main><script>${inline}</script></body></html>`);
+    server.serve(join(dir, name));
+    for (const [engine, type] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
+      const b = engine === 'chromium' ? browser : await within(CHECK_MS, `${engine}.launch`, () => type.launch());
+      const ctx = await b.newContext();
+      const sink = await watchCsp(ctx);
+      const page = await ctx.newPage();
+      await within(CHECK_MS, 'csp self-test', async () => {
+        await page.goto(server.url, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+        // One round trip, so every console message the load produced has arrived.
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => done(null))));
+      });
+      expect(`§2 B no policy violation, ${engine} (${hashed ? 'hashed' : 'unhashed'} inline script)`, cspResult(sink), hashed);
+      await closeWithin(ctx, CLOSE_MS, 'context.close');
+      if (b !== browser) await closeWithin(b, CLOSE_MS, `${engine}.close`);
     }
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');

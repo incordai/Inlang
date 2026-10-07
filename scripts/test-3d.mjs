@@ -28,6 +28,7 @@ import { ROOT, buildSites } from './visual/pipeline.mjs';
 import { startServer } from './visual/serve.mjs';
 import { Overdue, within, closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { textContrast } from './visual/checks.mjs';
+import { watchCsp } from './visual/csp.mjs';
 import { SCRIM } from '../packages/words/hero/emit.web.ts';
 
 /** Bound on every wait for the runtime to reach a state. */
@@ -270,9 +271,17 @@ const server = await startServer();
 const browser = await chromium.launch({ args: GL_ARGS });
 
 /** Open a page of a site, recording every request and page error. */
+/**
+ * Every Content-Security-Policy violation on the pages opened through
+ * `open` and the model's page (word-quality-gate §2 B): the decoder runs
+ * under the policy the build gave the page, so one it lacks shows here.
+ */
+const violations = [];
+
 async function open(site, path, { reducedMotion = 'no-preference' } = {}) {
   server.serve(site.dist);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion });
+  await watchCsp(context, violations);
   const page = await context.newPage();
   const requests = [];
   const errors = [];
@@ -477,6 +486,8 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
   server.serve(fixture.dist);
   const origin = new URL(server.url).origin;
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const watched = violations.length;
+  await watchCsp(context, violations);
   const page = await context.newPage();
   const foreign = [];
   // Anything not from the site itself is refused and recorded.
@@ -494,6 +505,11 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
   check('the Draco decoder is self-hosted: exactly one wasm, from the site', wasm.length === 1 && wasm[0].startsWith(origin), wasm.join(' '));
   check('nothing is fetched from another origin', foreign.length === 0, foreign.join(' '));
   check('CONTROL: the model file itself was fetched', requests.some((u) => u.endsWith('/assets/shoe.glb')));
+  // The decoder compiles WebAssembly in a blob: worker: refused, the model never draws.
+  const decoded = await waitFor(page, () => Number((document.documentElement.getAttribute('data-az3d-gpu') ?? '0').split(',')[0]) > 0);
+  const gpu = await page.evaluate(() => document.documentElement.getAttribute('data-az3d-gpu'));
+  check('§2 B: the model decodes under the page\'s policy — no violation, its geometry on the GPU',
+    violations.length === watched && decoded, `${violations.slice(watched)[0] ?? ''} gpu ${gpu}`);
   await context.close();
 }
 
@@ -742,10 +758,13 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
         && getComputedStyle(document.querySelector('.az-hero-poster')).visibility === 'hidden');
       await page.evaluate(() => document.fonts.ready.then(() => undefined));
       await page.waitForTimeout(SETTLE_MS);
+      // Probes are constructed sheets, not <style> elements: the page's
+      // policy (word-quality-gate §2 B) refuses an inline style it did not
+      // hash, and the CSSOM is not governed by it.
       const stack = await page.evaluate(() => {
-        const probe = document.createElement('style');
-        probe.textContent = '.az-3d-canvas, .az-hero-scrim { pointer-events: auto !important; }';
-        document.head.append(probe);
+        const probe = new CSSStyleSheet();
+        probe.replaceSync('.az-3d-canvas, .az-hero-scrim { pointer-events: auto !important; }');
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, probe];
         try {
           const r = document.querySelector('.az-hero-title').getBoundingClientRect();
           const hits = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2);
@@ -757,7 +776,7 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
             opacity: cs?.opacity ?? null, visibility: cs?.visibility ?? null, image: cs?.backgroundImage ?? '',
           };
         } finally {
-          probe.remove();
+          document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => sheet !== probe);
         }
       });
       const order = `title ${stack.title}, scrim ${stack.scrim}, visual ${stack.visual}, canvas ${stack.canvas} (0 is on top)`;
@@ -776,10 +795,9 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
       // CONTROL: the same read with the scrim taken away is worse, so it is
       // the scrim, over real canvas pixels, that the read above measured.
       await page.evaluate(() => {
-        const off = document.createElement('style');
-        off.id = 'az-no-scrim';
-        off.textContent = '.az-hero-scrim { display: none !important; }';
-        document.head.append(off);
+        const off = new CSSStyleSheet();
+        off.replaceSync('.az-hero-scrim { display: none !important; }');
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, off];
       });
       const bare = await textContrast(page, TEXT);
       check(`CONTROL: full live (${scheme}) without its scrim reads lower`, bare.worst < held.worst,
@@ -823,6 +841,7 @@ for (const [name, engine] of [['firefox', firefox], ['webkit', webkit]]) {
   if (other) closed = (await closeWithin(other, CLOSE_MS, `${name}.close`)) && closed;
 }
 
+check('§2 B: no Content-Security-Policy violation on any page opened in Chromium', violations.length === 0, violations.slice(0, 3).join(' | '));
 closed = (await closeWithin(server, CLOSE_MS, 'server.close')) && closed;
 run.clear();
 if (failures === 0) rmSync(work, { recursive: true, force: true });

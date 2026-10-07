@@ -92,6 +92,14 @@ imports only its own files because the CLI copies it verbatim into
 `src/az-auth/`, exactly as it copies `overlay`'s runtime; the target emits
 only the wiring (`target-web/src/auth.ts`). `core/src/secrets.ts` is copied
 the same way, into every site's build guard, and so imports nothing.
+`target-web/src/csp.ts` is copied beside it into `az-vite/` (it imports only
+`node:crypto`): after the pre-render, `az-vite/build.mjs` gives every page a
+`<meta http-equiv="Content-Security-Policy">` as the first tag after its
+charset — what the page loads beyond its own files from the emitter's
+per-page needs (written into `build.mjs`), and a `sha256` hash of every
+inline script, inline style and `style` attribute the filled page carries
+(word-quality-gate §2 B, §5.5). Only the built page has one; the dev
+server's template has none.
 
 `scene-runtime` is the 3D runtime a generated site runs (scene-spec §5): the
 page's one WebGL renderer (`stage.ts`), the tier ladder and probe ported from

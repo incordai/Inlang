@@ -269,8 +269,9 @@ export function build(options: BuildOptions): BuildOutcome {
   const tables = result.spec.site.data;
   // The behaviour runtime ships with every site, copied verbatim from the
   // overlay package into RUNTIME_DIR — part of the output, so it is written
-  // and checked like any emitted file. The build guard's scanner ships with
-  // every site too; the auth runtime only with a site that uses auth.
+  // and checked like any emitted file. The build guard's scanner and the
+  // page policy ship with every site too; the auth runtime only with a site
+  // that uses auth.
   const files = [
     ...project.files,
     // Its rows module only with a `from` block (data-spec §10.3).
@@ -278,6 +279,8 @@ export function build(options: BuildOptions): BuildOutcome {
     ...copied('../../core/src/', GUARD_DIR, (f) => f === 'secrets.ts'),
     // And the walk that reads back what the build wrote (az audit's too).
     ...copied('./', GUARD_DIR, (f) => f === 'shipped.ts'),
+    // And the page policy the build gives every page (word-quality-gate §2 B).
+    ...copied('../../target-web/src/', GUARD_DIR, (f) => f === 'csp.ts'),
     ...(project.auth ? copied('../../auth-runtime/src/runtime/', AUTH_DIR) : []),
     // The 3D runtime only with a site whose pages declare a 3D view (scene-spec §5).
     ...(project.three ? copied('../../scene-runtime/src/runtime/', THREE_DIR) : []),

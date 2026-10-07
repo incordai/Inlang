@@ -26,6 +26,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSyn
 import { join, dirname, basename, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { chromium } from 'playwright';
@@ -307,6 +308,54 @@ try {
     check('every page declares its icon, so the browser requests no /favicon.ico',
       routes.every((r) => head(r).includes('<link rel="icon" href="data:," />')));
   }
+  /* ---- word-quality-gate §2 B: each page's Content-Security-Policy ------ */
+  // Recomputed here from the shipped bytes, independently of csp.ts: every
+  // inline script and style attribute a page carries is allowed by the hash
+  // of exactly its text, and each page asks for only what it does.
+  {
+    const shippedPage = (r) => readFileSync(join(proj, 'dist', r === '/' ? '' : r.slice(1), 'index.html'), 'utf8');
+    const policyOf = (text) => /<meta http-equiv="Content-Security-Policy" content="([^"]*)" \/>/.exec(text)?.[1]
+      .replace(/&quot;/g, '"').replace(/&amp;/g, '&') ?? null;
+    const sources = (policy, name) => new RegExp(`(?:^|; )${name} ([^;]*)`).exec(policy ?? '')?.[1].split(' ') ?? [];
+    const hash = (text) => `'sha256-${createHash('sha256').update(Buffer.from(text, 'utf8')).digest('base64')}'`;
+    const policies = Object.fromEntries(routes.map((r) => [r, policyOf(shippedPage(r))]));
+    check('§2 B: every shipped page carries its policy, before any script or stylesheet it loads',
+      routes.every((r) => {
+        const text = shippedPage(r);
+        const at = text.indexOf('http-equiv="Content-Security-Policy"');
+        return policies[r] !== null && at > 0 && at < text.indexOf('<script') && at < text.indexOf('<link rel="stylesheet"');
+      }), routes.filter((r) => policies[r] === null).join(' '));
+    check('§2 B: the build ships csp.ts verbatim beside build.mjs',
+      readFileSync(join(proj, 'az-vite/csp.ts'), 'utf8') === readFileSync(join(ROOT, 'packages/target-web/src/csp.ts'), 'utf8'));
+    // The fixture's / carries two author components with inline styles (M3);
+    // a pre-rendered page carries no inline script of its own.
+    const decoded = (v) => v.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const styles = (text) => [...text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').matchAll(/<[a-z][^>]*\sstyle="([^"]*)"/g)].map((m) => decoded(m[1]));
+    const scripts = (text) => [...text.matchAll(/<script(?![^>]*\bsrc=)(?![^>]*type="application\/ld\+json")[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    const hashed = (policy, name) => sources(policy, name).filter((x) => x.startsWith("'sha256-"));
+    const exact = routes.map((r) => {
+      const text = shippedPage(r);
+      const want = (list) => JSON.stringify([...new Set(list.map(hash))].sort());
+      const ok = want(styles(text)) === JSON.stringify(hashed(policies[r], 'style-src'))
+        && want(scripts(text)) === JSON.stringify(hashed(policies[r], 'script-src'));
+      return { r, ok, n: styles(text).length + scripts(text).length };
+    });
+    check('§2 B: each page\'s hashes are exactly its inline styles and scripts, byte for byte',
+      exact.every((e) => e.ok) && exact.find((e) => e.r === '/')?.n === 2, exact.map((e) => `${e.r}:${e.ok ? e.n : 'MISMATCH'}`).join(' '));
+    check('§2 B: unsafe-hashes only where a style attribute is; never unsafe-inline or unsafe-eval',
+      routes.every((r) => sources(policies[r], 'style-src').includes("'unsafe-hashes'") === (styles(shippedPage(r)).length > 0))
+        && routes.every((r) => !/'unsafe-inline'|'unsafe-eval'/.test(policies[r])));
+    // The hero's model (/) is a Draco .glb: its decoder is WebAssembly in a blob: worker. Nowhere else.
+    check('§2 B: the decoder\'s wasm-unsafe-eval and blob: worker on the model\'s page only',
+      sources(policies['/'], 'script-src').includes("'wasm-unsafe-eval'") && sources(policies['/'], 'worker-src').join(' ') === "'self' blob:"
+        && routes.filter((r) => r !== '/').every((r) => !/wasm-unsafe-eval|worker-src|blob:/.test(policies[r])), policies['/']);
+    // `adapter hosted`: the session check calls the provider from every page — its origin, from the public env.
+    check('§2 B: connect-src is self plus the auth origin from the public env, on every page',
+      routes.every((r) => sources(policies[r], 'connect-src').filter((x) => x !== 'blob:').join(' ') === "'self' https://auth.invalid"));
+    check('§2 B: no frame-ancestors in a meta (ignored there, and logged) — the host sends it',
+      routes.every((r) => !/frame-ancestors/.test(policies[r])));
+    for (const r of routes) console.log(`        policy ${r}: ${policies[r]}`);
+  }
   check('the build and its pre-render report nothing (React warnings fail it)', buildLog.trim() === '', buildLog.trim().split('\n')[0]);
   check('the app renders a non-trivial DOM', html.length > 1000, `${html.length} bytes`);
 
@@ -324,9 +373,9 @@ try {
     const clean = audit(proj);
     check('az audit: the shipped build has no key-shaped string (the public key allowed, as by the guard)',
       by(clean, 'bundle-secrets').status === 'pass', by(clean, 'bundle-secrets').line);
-    // A finding, not a gate: word-quality-gate §2 B asks for a CSP the pages do not ship yet.
-    check('az audit: the pages\' missing CSP is reported, and only warns', clean.status === 0 && by(clean, 'page-csp').status === 'warn',
-      by(clean, 'page-csp').line);
+    // word-quality-gate §2 B: every shipped page carries a policy audit grades strict.
+    check('az audit: every shipped page has a strict CSP', clean.status === 0 && by(clean, 'page-csp').status === 'pass'
+      && by(clean, 'page-csp').line === `page CSP: ${routes.length} pages, each with a strict policy`, by(clean, 'page-csp').line);
     check('az audit: the advisory query is skipped without --online', by(clean, 'dependencies').status === 'skip');
 
     const planted = join(work, 'proj-audit');

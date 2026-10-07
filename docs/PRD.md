@@ -225,6 +225,20 @@ decoder allow-list — so an SVG icon, a PNG under 180px or a non-square
 one gives no touch icon and warns (AZ1422); nothing is upscaled. Without
 a resizer the pages are as before (GRAMMAR §4.4).
 
+*Built (2026-10-07): a Content-Security-Policy on every page* (word-quality-gate
+§2 B, §5.5). The build writes it as a `<meta http-equiv>` straight after the
+charset, made per page once the page is pre-rendered: `default-src 'self'`,
+`script-src 'self'` plus the hash of any inline script, `style-src 'self'`
+plus `'unsafe-hashes'` and the hash of each `style` attribute the page
+carries (only an author component writes one), `img-src 'self'` (and
+`data:` for the empty icon), `connect-src 'self'` plus the auth adapter's or
+the backend's origin from the build's public settings, `object-src 'none'`,
+`base-uri 'self'`, `form-action 'self'`. A page showing a 3D model adds
+`'wasm-unsafe-eval'` and a `blob:` worker for its decoder. Never
+`'unsafe-inline'` or `'unsafe-eval'`. `frame-ancestors` cannot be sent in a
+meta: the host must send it as a header (the built-in backend already sends
+`frame-ancestors 'none'` on every response it serves; it serves no pages).
+
 **`theme accent`** — selects the hue whose ramp the theme draws from. Steps are
 addressed as tokens (`color.accent-700`), and every step states its contrast
 against both schemes (theme-spec §6). A step that fails the floor is not

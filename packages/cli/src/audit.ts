@@ -16,7 +16,8 @@
  * The secret scan is the one the generated build's guard runs over what
  * Vite wrote (shipped.ts, with core secrets.ts's scanText) — here again,
  * after the pre-render has written its pages, with the same public values
- * allowed. The advisory check is the only one that uses the network,
+ * allowed — and, in a file, the digests of what it carries inline (a page's
+ * policy pins them). The advisory check is the only one that uses the network,
  * so it runs only when asked (`--online`).
  */
 
@@ -26,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
+import { inlineScripts, inlineStyles, sha256Source, styleAttributes } from '../../target-web/src/csp.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
 import { FILE_MAX_BYTES, MAX_FILES, readRegular, shippedSecrets, walkShipped, type Shipped } from './shipped.ts';
 import {
@@ -119,6 +121,16 @@ async function publicValues(ctx: AuditContext): Promise<Set<string>> {
   return new Set(Object.entries(merged).filter(([k, v]) => k.startsWith(PUBLIC_ENV_PREFIX) && v).map(([, v]) => v as string));
 }
 
+/**
+ * The digests a page's own policy pins — `sha256-…` of each inline script,
+ * inline style and style attribute the text carries (target-web csp.ts).
+ * Derived from the same text, so a digest is allowed only where it is the
+ * hash of something that file really holds; any other value is judged.
+ */
+function ownDigests(text: string): string[] {
+  return [...inlineScripts(text), ...inlineStyles(text), ...styleAttributes(text)].map((t) => sha256Source(t).slice(1, -1));
+}
+
 const bundleSecrets: Check<AuditContext> = {
   id: 'bundle-secrets',
   title: 'bundle secrets',
@@ -127,7 +139,11 @@ const bundleSecrets: Check<AuditContext> = {
     if (site.kind === 'missing') return notBuilt(ctx, site);
     const allow = await publicValues(ctx);
     // A file a package published is judged by key shape only (shipped.ts).
-    const { hits: found, published } = await shippedSecrets(site.files, join(ctx.outDir, 'node_modules'), (text) => scanText(text, allow));
+    const scan = (text: string) => {
+      const own = ownDigests(text);
+      return scanText(text, own.length > 0 ? new Set([...allow, ...own]) : allow);
+    };
+    const { hits: found, published } = await shippedSecrets(site.files, join(ctx.outDir, 'node_modules'), scan);
     // file:offset and the rule (the key's shape) — never a character of the value.
     const hits = found.map(({ path, finding: s }) => `${named(path)}:${s.where.replace(/^@/, '')} (${s.rule})`);
     if (hits.length > 0) {
@@ -282,6 +298,17 @@ function directives(policy: string): Map<string, string[]> {
 /** Sources that let a script come from anywhere, or any page inject one. */
 const OPEN_SOURCES = new Set(['*', 'http:', 'https:', 'data:', 'blob:']);
 
+/** A hash or a nonce: with one, a browser that knows them ignores 'unsafe-inline' in that directive. */
+const PINNED = /^'(?:nonce-|sha256-|sha384-|sha512-)/;
+
+/**
+ * The weaker tier: scripts pinned, but any inline style applies. Injected
+ * markup can restyle the page — overlay it, or read attribute values out
+ * through selectors — though it cannot run code. Named apart so a page with
+ * only this is reported as what it is.
+ */
+const STYLE_INLINE = "'unsafe-inline' in style-src — injected markup can restyle the page";
+
 /**
  * What a page's policy leaves open, one phrase each; empty when it is
  * strict. A hash, a nonce or 'strict-dynamic' disables 'unsafe-inline' in
@@ -295,7 +322,7 @@ export function cspProblems(policy: string): string[] {
     out.push('no script-src or default-src — any script may load');
   } else {
     if (script.includes("'unsafe-eval'")) out.push("'unsafe-eval' in script-src — strings run as code");
-    const pinned = script.some((s) => /^'(?:nonce-|sha256-|sha384-|sha512-)/.test(s) || s === "'strict-dynamic'");
+    const pinned = script.some((s) => PINNED.test(s) || s === "'strict-dynamic'");
     if (script.includes("'unsafe-inline'") && !pinned) out.push("'unsafe-inline' in script-src — an injected script runs");
     const open = script.filter((s) => OPEN_SOURCES.has(s) || s.startsWith('http://'));
     if (open.length > 0) out.push(`script-src allows ${open.map(quotable).join(' ')} — scripts from anywhere`);
@@ -304,6 +331,8 @@ export function cspProblems(policy: string): string[] {
   if (!(object && object.length === 1 && object[0] === "'none'")) out.push("object-src is not 'none' — plugin content may load");
   // The bundle is referenced relatively (base "./"): an injected <base> would move it.
   if (!d.has('base-uri')) out.push('no base-uri — an injected <base> moves every relative script');
+  const style = d.get('style-src') ?? d.get('default-src');
+  if (style?.includes("'unsafe-inline'") && !style.some((s) => PINNED.test(s))) out.push(STYLE_INLINE);
   return out;
 }
 
@@ -340,6 +369,7 @@ const pageCsp: Check<AuditContext> = {
     if (pages.length === 0) return { status: 'skip', line: 'page CSP: the built site has no pages' };
     const bare: string[] = [];
     const weak: string[] = [];
+    const styled: string[] = [];
     for (const p of pages) {
       const policies = tags(p.text, 'meta')
         .filter((a) => a.get('http-equiv')?.toLowerCase() === 'content-security-policy')
@@ -351,7 +381,7 @@ const pageCsp: Check<AuditContext> = {
       // Several policies are all enforced: a page is open only where every one of them is.
       const each = policies.map(cspProblems);
       const open = each[0].filter((x) => each.every((list) => list.includes(x)));
-      if (open.length > 0) weak.push(`${route(p.path)}: ${open.join('; ')}`);
+      if (open.length > 0) (open.every((x) => x === STYLE_INLINE) ? styled : weak).push(`${route(p.path)}: ${open.join('; ')}`);
     }
     const host = 'a policy your host sends as a header is not visible here — check it in the browser\'s network panel';
     if (bare.length === pages.length) {
@@ -359,14 +389,19 @@ const pageCsp: Check<AuditContext> = {
       return {
         status: 'warn',
         line: `page CSP: none of ${count(pages.length, 'page')} sets a Content-Security-Policy — an injected script would run`,
-        fix: ['word-quality-gate §2 B asks for a default policy; az does not emit one yet — until it does, have the host send a Content-Security-Policy header', host],
+        fix: ['az build gives every page one (word-quality-gate §2 B): rebuild with this az, then npm run build in the output — or have the host send a Content-Security-Policy header', host],
       };
     }
-    if (bare.length > 0 || weak.length > 0) {
+    if (bare.length > 0 || weak.length > 0 || styled.length > 0) {
+      const parts = [
+        bare.length > 0 ? `${count(bare.length, 'page')} without a policy` : '',
+        weak.length > 0 ? `${count(weak.length, 'page')} with a weak one` : '',
+        styled.length > 0 ? `${count(styled.length, 'page')} allowing any inline style (scripts pinned)` : '',
+      ];
       return {
         status: 'warn',
-        line: `page CSP: ${[bare.length > 0 ? `${count(bare.length, 'page')} without a policy` : '', weak.length > 0 ? `${count(weak.length, 'page')} with a weak one` : ''].filter(Boolean).join(', ')}`,
-        fix: [...more([...bare.map((r) => `${r}: no policy`), ...weak]), host],
+        line: `page CSP: ${parts.filter(Boolean).join(', ')}`,
+        fix: [...more([...bare.map((r) => `${r}: no policy`), ...weak, ...styled]), host],
       };
     }
     return { status: 'pass', line: `page CSP: ${count(pages.length, 'page')}, each with a strict policy` };

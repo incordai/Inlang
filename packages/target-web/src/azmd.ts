@@ -95,7 +95,7 @@ export function azMd(m: MapInput): string {
   out.push('- `index.html`, `<route>/index.html` — one per page; the build pre-renders each, so it reads without JS');
   out.push('- `src/App.tsx` — every page as data (routes, blocks, styles)');
   out.push('- `src/runtime.tsx` — renders that data with React; `src/main.tsx` — browser entry (hydrates)');
-  out.push('- `src/entry-server.tsx`, `az-vite/build.mjs` — the build: bundle, then pre-render every route');
+  out.push('- `src/entry-server.tsx`, `az-vite/build.mjs` — the build: bundle, then pre-render every route and give it its Content-Security-Policy (`az-vite/csp.ts`)');
   out.push('- `src/az.css` — every block style as generated classes; `src/theme.css` — reset and colour schemes');
   out.push(`- \`${m.dirs.guard}/guard.ts\` — refuses any build that would ship a secret`);
   out.push('- `vite.config.ts`, `tsconfig.json`, `package.json` — tooling (exact pins)');

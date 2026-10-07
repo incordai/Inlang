@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { AUDIT_CHECKS, audit, backendHeaderProblems, cspProblems, readAdvisory, type AuditOptions } from '../src/audit.ts';
 import { formatReport, runChecks, systemProbe, type Check, type Probe, type RunOptions, type RunResult } from '../src/doctor.ts';
 import { findNpmCli } from '../src/serve.ts';
+import { pagePolicy, sha256Source, withPolicy, type PageNeeds } from '../../target-web/src/csp.ts';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
@@ -33,9 +34,13 @@ const PAGE = (head = '', body = '<div id="root"><p>hi</p></div>') =>
 const STRICT = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; object-src 'none'; base-uri 'self'" />`;
 
 /** A real az build of `source`, with `dist` files planted where the project's own build would write them. */
-function built(source: string, dist: Record<string, string> | null = { 'index.html': PAGE(), 'assets/index.js': 'console.log("hi");\n' }) {
+function built(
+  source: string, dist: Record<string, string> | null = { 'index.html': PAGE(), 'assets/index.js': 'console.log("hi");\n' },
+  files: Record<string, string> = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), 'az-audit-'));
   writeFileSync(join(dir, 'site.az'), source);
+  for (const [path, content] of Object.entries(files)) writeFileSync(join(dir, path), content);
   const r = spawnSync(process.execPath, [BIN, 'build', 'site.az'], { cwd: dir, encoding: 'utf8', env: { ...process.env, AZ_WORDS: WORDS }, timeout: 60_000 });
   assert.equal(r.status, 0, r.stderr);
   const out = join(dir, '.az-build');
@@ -133,6 +138,20 @@ test('bundle secrets: an unbuilt site fails with the install-and-build command; 
   assert.equal(c.line, 'bundle secrets: none in 1 shipped text file — the build guard\'s patterns, after pre-render');
 });
 
+test('bundle secrets: a page\'s policy may pin digests of what it carries inline; any other digest is judged', async () => {
+  const style = 'color:var(--az-color-accent)';
+  const own = sha256Source(style);
+  const pinned = (digest: string) => PAGE(`<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-hashes' ${digest}; object-src 'none'; base-uri 'self'" />`,
+    `<div id="root"><p style="${style}">hi</p></div>`);
+  const ok = await check('bundle-secrets', built(SITE, { 'index.html': pinned(own), 'assets/index.js': 'console.log("hi");\n' }));
+  assert.equal(ok.status, 'pass', ok.line);
+  // CONTROL: the same shape, but the digest of nothing on the page — a value someone put there.
+  const planted = sha256Source('color:red');
+  const bad = await check('bundle-secrets', built(SITE, { 'index.html': pinned(planted), 'assets/index.js': 'console.log("hi");\n' }));
+  assert.equal(bad.status, 'fail', bad.line);
+  assert.ok((bad.fix ?? []).some((f) => /^dist\/index\.html:\d+ \(entropy\)$/.test(f)), (bad.fix ?? []).join(' | '));
+});
+
 /* ---- Content-Security-Policy ---------------------------------------------- */
 
 test('cspProblems: a strict policy has none; each weakness is named', () => {
@@ -152,18 +171,56 @@ test('cspProblems: a strict policy has none; each weakness is named', () => {
   assert.deepEqual(cspProblems("default-src 'none'; script-src 'self' 'unsafe-inline' 'sha256-abc='; base-uri 'none'"), []);
   // The first directive of a name wins.
   assert.deepEqual(cspProblems("default-src 'self'; object-src 'none'; object-src *; base-uri 'self'"), []);
+  // The weaker tier: any inline style, scripts still pinned — named for what it is.
+  assert.deepEqual(cspProblems("default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'"), [
+    "'unsafe-inline' in style-src — injected markup can restyle the page",
+  ]);
+  // Hashed style attributes ('unsafe-hashes') are pinned, not open.
+  assert.deepEqual(cspProblems("default-src 'self'; style-src 'self' 'unsafe-hashes' 'sha256-abc='; object-src 'none'; base-uri 'self'"), []);
+});
+
+test('page CSP: the policy az\'s build gives each page grades strict — a plain page, a 3D model page, an auth page', async () => {
+  const source = 'az 1\nsite aurora\n  auth\n    adapter hosted\npage /\n  hero split 3d\n    title "Hi"\n    describe "A shoe"\n    model ./shoe.glb\n' +
+    'page /plain\n  hero center\n    title "Plain"\npage /login\n  auth login\n';
+  const b = built(source, {}, { 'shoe.glb': '' });
+  // What the generated build.mjs does after the pre-render: each page's template, filled, given its policy.
+  const build = readFileSync(join(b.out, 'az-vite/build.mjs'), 'utf8');
+  const needs = JSON.parse(/\nconst NEEDS = ([\s\S]*?\n});\n/.exec(build)?.[1] ?? '{}') as Record<string, PageNeeds>;
+  assert.deepEqual(Object.keys(needs).sort(), ['index.html', 'login/index.html', 'plain/index.html']);
+  const env = { AZ_PUBLIC_AUTH_URL: 'https://auth.example.org' };
+  const policies: string[] = [];
+  for (const [file, need] of Object.entries(needs)) {
+    const filled = readFileSync(join(b.out, file), 'utf8').replace('<div id="root"></div>', '<div id="root"><p style="color:red">hi</p></div>');
+    const policy = pagePolicy(need, filled, env);
+    policies.push(policy);
+    mkdirSync(join(b.out, 'dist', file, '..'), { recursive: true });
+    writeFileSync(join(b.out, 'dist', file), withPolicy(filled, policy));
+  }
+  assert.ok(policies.every((p) => cspProblems(p).length === 0), policies.join('\n'));
+  const [model, login, plain] = policies;
+  assert.match(model, /script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-hashes' 'sha256-[^']+'; .*worker-src 'self' blob:/);
+  assert.match(login, /connect-src 'self' https:\/\/auth\.example\.org; /);
+  assert.doesNotMatch(plain, /wasm|worker-src/, 'CONTROL: the decoder only where the model is');
+  const r = await check('page-csp', b);
+  assert.deepEqual([r.status, r.line], ['pass', 'page CSP: 3 pages, each with a strict policy']);
 });
 
 test('page CSP: no policy warns as a finding; a weak one is named per page; a strict one passes', async () => {
   const bare = await check('page-csp', built(SITE));
   assert.equal(bare.status, 'warn');
   assert.equal(bare.line, 'page CSP: none of 1 page sets a Content-Security-Policy — an injected script would run');
+  assert.match(bare.fix?.[0] ?? '', /^az build gives every page one/, 'the fix says how to get az\'s policy');
 
   const weak = `<meta http-equiv="content-security-policy" content="default-src 'self' 'unsafe-inline'; base-uri 'self'" />`;
   const mixed = await check('page-csp', built(SITE, { 'index.html': PAGE(STRICT), 'work/index.html': PAGE(weak), 'legal/index.html': PAGE() }));
   assert.equal(mixed.status, 'warn');
   assert.equal(mixed.line, 'page CSP: 1 page without a policy, 1 page with a weak one');
-  assert.deepEqual(mixed.fix?.slice(0, 2), ['/legal: no policy', "/work: 'unsafe-inline' in script-src — an injected script runs; object-src is not 'none' — plugin content may load"]);
+  assert.deepEqual(mixed.fix?.slice(0, 2), ['/legal: no policy',
+    "/work: 'unsafe-inline' in script-src — an injected script runs; object-src is not 'none' — plugin content may load; 'unsafe-inline' in style-src — injected markup can restyle the page"]);
+
+  const inlineStyle = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'" />`;
+  const styled = await check('page-csp', built(SITE, { 'index.html': PAGE(STRICT), 'work/index.html': PAGE(inlineStyle) }));
+  assert.deepEqual([styled.status, styled.line], ['warn', 'page CSP: 1 page allowing any inline style (scripts pinned)']);
 
   const strict = await check('page-csp', built(SITE, { 'index.html': PAGE(STRICT), 'work/index.html': PAGE(STRICT) }));
   assert.deepEqual([strict.status, strict.line], ['pass', 'page CSP: 2 pages, each with a strict policy']);

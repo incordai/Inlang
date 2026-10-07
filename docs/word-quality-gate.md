@@ -70,7 +70,7 @@ almost nothing in this stack legitimately needs them.
 | **Secret leaked into the client bundle** | **critical** | see §4 |
 | XSS via markdown content pipeline | high | sanitize; strip raw HTML by default, opt-in per file |
 | Reverse tabnabbing | medium | `rel="noopener noreferrer"` — already in the button spec |
-| No CSP | medium | emit a sane default CSP header/meta |
+| No CSP | medium | emit a sane default CSP header/meta — **fixed 2026-10-07**: a hashed per-page meta (§5.5) |
 | Known-vulnerable shipped dep | medium | `npm audit` in CI; block on high/critical |
 
 ---
@@ -245,7 +245,7 @@ not build is one failing `output` line, never an empty pass. Severity follows
 |---|---|---|
 | bundle secrets | a key-shaped string in any file `dist/` ships (fail) — §4 rule 2's scanner, `scanText`, the build guard's own, now also over the pre-rendered pages; `AZ_PUBLIC_` values (the output folder's `.env*`, then the environment) allowed, as by the guard. A file that is byte-for-byte one an installed package published (the 3D decoder, found by name in the output's `node_modules`) is judged by the key-shape rules only — compiled decoders are dense, and the entropy rule is for inlined values. **Location and shape only** (`dist/assets/a.js:1234 (secret-prefix)`); a file name or link shaped like a key is printed by its length. `dist/` missing fails; a file over 16MB is a warning, not read | remove it, rebuild, rotate it if deployed |
 | dependencies | **only with `--online`** — the one network call: the package manager's read-only advisory query (`npm audit --json`) per lockfile, the site's and the server's, at once. High or critical fails; moderate or low warns; no lockfile warns; offline or a 15s silence warns `could not reach the advisory service` | `npm audit` for the detail |
-| page CSP | no page sets a `Content-Security-Policy` meta (warn — §2 B, medium); a weak one: no script or default source, `'unsafe-inline'` without a hash or nonce, `'unsafe-eval'`, a wildcard or scheme source, `object-src` not `'none'`, no `base-uri` (the bundle is referenced relatively) | the gap, per page; a header the host sends is not visible here |
+| page CSP | no page sets a `Content-Security-Policy` meta (warn — §2 B, medium); a weak one: no script or default source, `'unsafe-inline'` without a hash or nonce, `'unsafe-eval'`, a wildcard or scheme source, `object-src` not `'none'`, no `base-uri` (the bundle is referenced relatively); the weaker tier, named apart: `style-src 'unsafe-inline'` with scripts still pinned (`'unsafe-hashes'` with hashes is pinned, not open) | the gap, per page; a header the host sends is not visible here |
 | backend CSP | the built server's header-setting files (`http.ts`, `app.ts`, `main.ts`) differ from az's (warn: not vouched for); else az's own headers lack `default-src 'none'`, `frame-ancestors`, `nosniff` or a referrer policy (fail). No project code is loaded | rebuild — the server's files are generated |
 | new-tab links | a `target="_blank"` link without `rel="noopener"` or `noreferrer` (warn — §2 B reverse tabnabbing) | add `rel="noopener noreferrer"` |
 
@@ -271,10 +271,53 @@ request it cannot parse carried no security headers; `http.ts`
 status line and the full set, no body and nothing the client sent, then
 destroys the socket — no write on a reset, an unwritable socket, or one
 whose response has begun.
-*Open:* generated pages ship **no CSP** today, which §2 B
-asks for (`emit a sane default CSP header/meta`). `az audit` reports it as a
-warning on every build; emitting one is target-web work — the pages carry
-inline `style` attributes, so a policy must allow them or they must move.
+
+*Fixed 2026-10-07: generated pages ship a CSP* (§2 B, the last open finding). A static host has
+no per-request nonce, so the policy is hashed, per page, at build: after the
+pre-render, `az-vite/build.mjs` (with `csp.ts`, copied from
+`target-web/src/csp.ts`) puts a `<meta http-equiv="Content-Security-Policy">`
+straight after the charset. As shipped:
+
+- a plain page — `default-src 'self'; script-src 'self'; style-src 'self';
+  img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri
+  'self'; form-action 'self'` (`data:` only while the site has no icon file:
+  the empty `<link rel="icon" href="data:,">` is an image);
+- inline scripts: a `sha256` of each executed one, byte for byte as the page
+  carries it — a pre-rendered page has none (no theme or no-flash script
+  exists: the schemes are CSS; hydration needs no inline data; a FAQ's
+  JSON-LD is a data block CSP does not govern);
+- styles: words emit none inline (every style is a generated class), but an
+  author's `raw`/`slot` component may render a `style` attribute, which the
+  pre-render writes into the markup. Such a page gets `'unsafe-hashes'` and
+  the hash of each exact value — an injected attribute is still refused. No
+  page needs `style-src 'unsafe-inline'`; audit names that tier if it
+  appears. Runtime styling goes through the CSSOM (`el.style.x = …`, React's
+  hydration), which CSP does not govern;
+- auth: every page of a site with `adapter hosted` or `azbackend` adds that
+  adapter's origin to `connect-src` (the session check runs on each), read
+  from the build's public settings (`AZ_PUBLIC_AUTH_URL`,
+  `AZ_PUBLIC_BACKEND_URL`) — the origin only, never the path. Uploaded images
+  add the backend's origin to `img-src` on the admin pages, the pages with
+  a `from` block and the pages with an author component (it may call the
+  data client). Forms post to the page itself (`form-action 'self'`);
+- 3D: a page showing a model adds `'wasm-unsafe-eval'` to `script-src` and
+  `worker-src 'self' blob:` — the Draco decoder compiles WebAssembly in a
+  worker made from a `blob:` URL, and each is refused without it (measured in
+  all three engines) — plus `blob:` in `img-src` and `connect-src` for a
+  model's embedded textures. Nothing needs `'unsafe-eval'`; a procedural
+  scene needs none of this.
+
+`frame-ancestors` (and `report-uri`, `sandbox`) is ignored in a meta, and
+logged: **the host must send `frame-ancestors` as a header**. The built-in
+backend serves no pages; its API responses already send `frame-ancestors
+'none'`. `az dev` serves Vite's template, which carries no policy — its client
+injects styles and scripts as it goes — so development runs without one; `vite
+preview` serves the built pages with theirs. `az audit` grades every page az
+builds strict, and allows in a page only the digests of what that page
+carries inline. A `custom` auth adapter is the author's code: its pages
+allow only same-origin calls. `pnpm test:visual` (gate item 3, `csp`) loads
+every page of every site in three engines and fails on any violation; its
+self-test proves the watch fails a page with an unhashed inline script.
 
 Not built, and why: **the axe pass** (§5) — it needs a browser and the
 accessibility engine, which are this repository's dev tools, not az's
