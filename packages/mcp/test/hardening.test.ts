@@ -64,7 +64,7 @@ const INIT = { jsonrpc: '2.0', id: 0, method: 'initialize',
 const call = (id: number, name: string, args: object = {}) =>
   ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } });
 
-for (const [name, args] of [['az_check', { file: 'site.az' }], ['az_spec', { file: 'site.az' }], ['az_words', {}]] as const) {
+for (const [name, args] of [['az_check', { file: 'site.az' }], ['az_spec', { file: 'site.az' }], ['az_words', {}], ['az_doctor', { file: 'site.az' }]] as const) {
   test(`${name} (read-only) does not run the project's code`, async () => {
     const p = projectWithCode();
     const replies = await session(p.dir, [INIT, call(1, name, args)]);

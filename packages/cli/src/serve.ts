@@ -2,7 +2,7 @@
  * @az module serve
  * Purpose: az dev's serving half: install once, Vite dev server, optional local backend.
  * Spec: docs/PRD.md §6.7 · docs/backend-spec.md §2a
- * Exports: serve, ensureInstalled, freePort, openerFor
+ * Exports: serve, ensureInstalled, freePort, openerFor, findNpmCli
  * Edit guide: everything started is stopped on failure and on Ctrl-C.
  * Tests: packages/cli/test/dev-serve.test.ts
  */
@@ -36,12 +36,16 @@ const STOP_GRACE_MS = 3_000;
 /** Poll interval while waiting for the dev server to answer. */
 const POLL_MS = 150;
 
-/** npm's JS entry beside this node — the same lookup verify-build uses; no shell. */
-function npmCli(): string {
+/** npm's JS entry beside this node, or null — the same lookup verify-build uses; no shell. az doctor checks it. */
+export function findNpmCli(): string | null {
   const dir = dirname(process.execPath);
-  const found = [join(dir, 'node_modules/npm/bin/npm-cli.js'), join(dir, '../lib/node_modules/npm/bin/npm-cli.js')]
-    .find((p) => existsSync(p));
-  if (!found) throw new Error(`npm was not found beside node at ${dir}`);
+  return [join(dir, 'node_modules/npm/bin/npm-cli.js'), join(dir, '../lib/node_modules/npm/bin/npm-cli.js')]
+    .find((p) => existsSync(p)) ?? null;
+}
+
+function npmCli(): string {
+  const found = findNpmCli();
+  if (!found) throw new Error(`npm was not found beside node at ${dirname(process.execPath)}`);
   return found;
 }
 

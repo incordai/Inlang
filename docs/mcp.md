@@ -35,6 +35,7 @@ and key vary by client; the shape is:
 | `az_check {file}` | no | diagnostics with code, severity, line, column |
 | `az_spec {file}` | no | the resolved Spec, or null with diagnostics |
 | `az_lint {wordsDir?}` | no | theme-token lint over word packs |
+| `az_doctor {file?, out?}` | no | `az doctor`: each check's status, line and fix; `.env` key names only, never values; loads no module from the project |
 | `az_build {file, out?}` | **yes, and runs project code** | compile to a runnable project (default `.az-build`); the project's own words run, as in any build |
 | `az_migrate {file}` | **yes, rewrites the file** | upgrade the file's grammar version when a step changes it |
 | `az_eject {word}` | **yes, one-way** | copy a word into the project's `words/`; refuses if already there |

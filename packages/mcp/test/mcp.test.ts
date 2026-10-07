@@ -72,7 +72,7 @@ test('CONTROL: an unknown protocol version is answered with the newest supported
 test('tools/list offers every tool with a schema, and marks the ones that write', async () => {
   const [, r] = await session(project(), [INIT, { jsonrpc: '2.0', id: 1, method: 'tools/list' }]);
   const tools = r.result.tools as { name: string; inputSchema: { type: string }; annotations: { readOnlyHint: boolean } }[];
-  assert.deepEqual(tools.map((t) => t.name).sort(), ['az_backend_init', 'az_build', 'az_check', 'az_eject',
+  assert.deepEqual(tools.map((t) => t.name).sort(), ['az_backend_init', 'az_build', 'az_check', 'az_doctor', 'az_eject',
     'az_explain', 'az_grammar', 'az_lint', 'az_migrate', 'az_spec', 'az_word_docs', 'az_words']);
   for (const t of tools) assert.equal(t.inputSchema.type, 'object');
   const writers = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
@@ -178,6 +178,28 @@ test('az_backend_init writes an owner-only .env and never returns the secret', a
   assert.ok(!JSON.stringify(r).includes(secret), 'the secret must not appear in the tool result');
   assert.equal(statSync(join(root, 'server/.env')).mode & 0o777, 0o600);
   assert.equal((await tool(root, 'az_backend_init', { serverDir: 'server' })).isError, true, 'never overwritten');
+});
+
+test('az_doctor reports every check with its fix, writes nothing, and never returns an .env value', async () => {
+  const root = project();
+  mkdirSync(join(root, '.az-build/server'), { recursive: true });
+  writeFileSync(join(root, '.az-build/server/az.config.json'), JSON.stringify({ database: 'sqlite', email: 'smtp', images: true }));
+  writeFileSync(join(root, '.az-build/server/.env'), 'AZ_SESSION_SECRET=planted-mcp-secret-0123456789abcdef0123\n', { mode: 0o600 });
+  const r = await tool(root, 'az_doctor', { file: 'broken.az' });
+  assert.equal(r.isError, false, r.content[0].text);
+  const checks = r.structuredContent.checks as { id: string; status: string; line: string; fix?: string[] }[];
+  const by = (id: string) => checks.find((c) => c.id === id)!;
+  assert.equal(r.structuredContent.ok, false);
+  assert.equal(by('compile').status, 'fail');
+  assert.equal(by('compile').fix?.[1], 'run: az check broken.az for every one');
+  assert.equal(by('node').status, 'pass');
+  assert.equal(by('backend-image-library').status, 'skip', 'an agent call never loads the project\'s modules');
+  assert.equal(by('backend-env').status, 'fail');
+  assert.match(by('backend-env').line, /^backend .env: the server would refuse 6 keys — AZ_BACKEND_PUBLIC_URL, /);
+  assert.ok(!JSON.stringify(r).includes('planted-mcp-secret'), 'no .env value in the result');
+  // CONTROL: without a file only the machine is checked.
+  const bare = await tool(root, 'az_doctor');
+  assert.equal(bare.structuredContent.checks.find((c: { id: string }) => c.id === 'compile').status, 'skip');
 });
 
 /* ---- the sandbox -------------------------------------------------------- */

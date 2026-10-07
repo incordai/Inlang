@@ -51,11 +51,14 @@ class RpcError extends Error {
   }
 }
 
-/** Answer one parsed message; null for a notification. */
-export function handle(
+/**
+ * Answer one parsed message; null for a notification. A tool may answer
+ * later (az_doctor waits on bounded child processes), so this resolves.
+ */
+export async function handle(
   msg: unknown, root: string, toolbox: Toolbox, version: string,
   log: (line: string) => void = () => {},
-): unknown {
+): Promise<unknown> {
   if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
     // Batches were removed from the protocol (2025-06-18); refuse them too.
     return { jsonrpc: '2.0', id: null, error: { code: ERR.request, message: 'expected one JSON-RPC request object' } };
@@ -67,7 +70,7 @@ export function handle(
       : { jsonrpc: '2.0', id: req.id ?? null, error: { code: ERR.request, message: 'not a JSON-RPC 2.0 request' } };
   }
   try {
-    const result = dispatch(req, root, toolbox, version);
+    const result = await dispatch(req, root, toolbox, version);
     return isNotification ? null : { jsonrpc: '2.0', id: req.id, result };
   } catch (e) {
     if (!(e instanceof RpcError)) log(`az mcp: ${(e as Error).stack ?? String(e)}`);
@@ -78,7 +81,7 @@ export function handle(
   }
 }
 
-function dispatch(req: Request, root: string, toolbox: Toolbox, version: string): unknown {
+async function dispatch(req: Request, root: string, toolbox: Toolbox, version: string): Promise<unknown> {
   const params = req.params ?? {};
   switch (req.method) {
     case 'initialize': {
@@ -113,7 +116,7 @@ function dispatch(req: Request, root: string, toolbox: Toolbox, version: string)
         // The sandbox is built per call: a root deleted mid-session is then a
         // tool error the client reads, not an exception that left the
         // request unanswered.
-        const data = tool.run(validate(tool, params.arguments), toolbox, sandbox(root));
+        const data = await tool.run(validate(tool, params.arguments), toolbox, sandbox(root));
         return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }], structuredContent: data, isError: false };
       } catch (e) {
         // A failure the client can act on is a tool RESULT with isError, so
@@ -155,6 +158,8 @@ export function serve(options: ServerOptions): Promise<void> {
     : (text: string) => { stdoutWrite(text); };
   if (!options.output) process.stdout.write = process.stderr.write.bind(process.stderr);
   const lines = createInterface({ input, crlfDelay: Infinity });
+  /** Replies not yet sent: the server ends once stdin is closed AND these are answered. */
+  const pending = new Set<Promise<void>>();
   lines.on('line', (line) => {
     if (line.trim() === '') return;
     let msg: unknown;
@@ -164,18 +169,19 @@ export function serve(options: ServerOptions): Promise<void> {
       send(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: ERR.parse, message: 'parse error' } }) + '\n');
       return;
     }
-    let reply: unknown;
-    try {
-      reply = handle(msg, options.root, options.toolbox, options.version, log);
-    } catch (e) {
-      log(`az mcp: ${(e as Error).stack ?? String(e)}`);
-      return;
-    }
-    if (reply !== null) send(JSON.stringify(reply) + '\n');
+    // Never rejects: a reply that cannot be sent is logged, so the close
+    // below always ends the server.
+    const answered = handle(msg, options.root, options.toolbox, options.version, log)
+      .then((reply) => { if (reply !== null) send(JSON.stringify(reply) + '\n'); })
+      .catch((e: unknown) => { log(`az mcp: ${(e as Error).stack ?? String(e)}`); })
+      .finally(() => { pending.delete(answered); });
+    pending.add(answered);
   });
   return new Promise((done) => lines.once('close', () => {
-    if (!options.output) process.stdout.write = stdoutWrite;
-    done();
+    void Promise.all([...pending]).then(() => {
+      if (!options.output) process.stdout.write = stdoutWrite;
+      done();
+    });
   }));
 }
 

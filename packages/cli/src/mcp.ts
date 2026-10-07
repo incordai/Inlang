@@ -16,7 +16,7 @@
  * — a tool call and the matching command cannot drift apart.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile, explain, serialiseSpec, STRUCTURE_DESCRIPTIONS, type Diagnostic } from '../../core/src/index.ts';
@@ -28,6 +28,9 @@ import { lockOption } from './data-schema.ts';
 import { lintWords } from './lint.ts';
 import { GRAMMAR_VERSION, migrate } from './migrate.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
+import { doctor } from './doctor-checks.ts';
+import { systemProbe } from './doctor.ts';
+import { findNpmCli } from './serve.ts';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
 const VERSION = (JSON.parse(readFileSync(join(REPO, 'packages/cli/package.json'), 'utf8')) as { version: string }).version;
@@ -139,6 +142,13 @@ export function toolbox(root: string): Toolbox {
         settings: { ...(k.settings ?? {}) },
         values: Object.fromEntries(Object.entries(k.values ?? {}).map(([s, v]) => [s, { ...v }])),
       })),
+
+    // Manifests only, and no module from the project's folders is loaded:
+    // the built server's image library is left to `az doctor` in a terminal.
+    // Paths print relative to the root as the sandbox resolved it (symlinks followed).
+    doctor: (file, outDir) => doctor({
+      source: file, outDir, cwd: realpathSync(root), wordsDir: wordsDir(), probe: systemProbe(findNpmCli), projectModules: false,
+    }),
 
     // Manifests only (no project code runs), like every read-only tool.
     explain: (terms) => explain(terms, loadWords(wordsDir(), projectWords, { code: false }).manifests),

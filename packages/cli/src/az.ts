@@ -1,8 +1,8 @@
 /**
  * @az module az
- * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain.
+ * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, doctor.
  * Spec: docs/PRD.md §6.7 · docs/ARCHITECTURE.md §1a
- * Exports: main, build, specOf, wordsFor, EXIT
+ * Exports: main, build, specOf, wordsFor, parseDotenv, DOTENV_FILES, EXIT
  * Edit guide: filesystem work lives here, never in core; a new command needs USAGE, COMMANDS and a test.
  * Tests: packages/cli/test/cli.test.ts, packages/cli/test/hardening.test.ts
  */
@@ -40,7 +40,7 @@ import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
 // dev.ts imports `build` from here; the cycle is safe because neither module
 // touches the other's exports until a command runs.
 import { dev, devLine } from './dev.ts';
-import { serve, DEFAULT_SITE_PORT, type Served } from './serve.ts';
+import { findNpmCli, serve, DEFAULT_SITE_PORT, type Served } from './serve.ts';
 import { lintWords } from './lint.ts';
 import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
@@ -51,6 +51,9 @@ import { createResizer, imageCacheDir } from './images.ts';
 // mcp.ts imports build/wordsFor from here; the cycle is safe for the same
 // reason as dev.ts's — nothing is touched until a command runs.
 import { runMcp } from './mcp.ts';
+// doctor-checks.ts imports compileReader, wordsFor and the .env reader from here; the same.
+import { doctor } from './doctor-checks.ts';
+import { formatReport, systemProbe } from './doctor.ts';
 import { formatFindings } from '../../theme/src/lint.ts';
 
 const MB = 1024 * 1024;
@@ -356,16 +359,23 @@ function copied(from: string, to: string, keep: (file: string) => boolean = () =
  */
 function dotenv(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const name of ['.env', '.env.local', '.env.production', '.env.production.local']) {
+  for (const name of DOTENV_FILES) {
     const file = join(dir, name);
-    if (!existsSync(file)) continue;
-    for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
-      const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
-      if (!m) continue;
-      out[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
-    }
+    if (existsSync(file)) parseDotenv(readFileSync(file, 'utf8'), out);
   }
   return out;
+}
+
+/** The files dotenv() reads, in the order a later one wins (az doctor reads the same). */
+export const DOTENV_FILES = ['.env', '.env.local', '.env.production', '.env.production.local'] as const;
+
+/** One `.env` file's lines into `out`, as dotenv() reads them. */
+export function parseDotenv(text: string, out: Record<string, string>): void {
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!m) continue;
+    out[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
+  }
 }
 
 /**
@@ -399,9 +409,11 @@ const USAGE = `az — words to a website
                                    record that step in <file>.data.json
   az mcp   [--root dir]            serve these tools to an AI agent (MCP, stdio)
   az explain <term...>             one line per term: az explain hero center
+  az doctor [file.az] [--out dir] [--json]
+                                   check this machine and project; changes nothing
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'doctor']);
 
 /**
  * `az backend init <server-dir>` — write `.env` beside a generated server's
@@ -451,6 +463,53 @@ function runExplain(terms: string[]): number {
   const result = explain(terms, words.manifests);
   process.stdout.write(formatExplained(result) + '\n');
   return result.unknown.length > 0 ? EXIT.missing : EXIT.ok;
+}
+
+/**
+ * `az doctor [file.az] [--out dir] [--json]` — word-quality-gate §5: detect
+ * everything, install nothing. Without a file, the one .az file in this
+ * folder is checked; with none or several, only the machine is. Exit 0 when
+ * nothing failed (warnings never fail), 1 when something did, 2 for a usage
+ * error. The report is written when every check has answered or hit its
+ * deadline, so the exit code is set then.
+ */
+function runDoctor(args: string[]): number {
+  let json = false;
+  let out = '.az-build';
+  let file: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--json') json = true;
+    else if (a === '--out' && args[i + 1] && !args[i + 1].startsWith('--')) out = args[++i];
+    else if (!a.startsWith('--') && a.endsWith('.az') && file === null) file = a;
+    else {
+      process.stderr.write(`az: doctor: unexpected '${a}' — try: az doctor site.az [--out dir] [--json]\n`);
+      return EXIT.config;
+    }
+  }
+  if (file !== null && !(existsSync(file) && statSync(file).isFile())) {
+    process.stderr.write(`az: doctor: ${file} does not exist — try: az doctor site.az\n`);
+    return EXIT.config;
+  }
+  if (file === null) {
+    const here = readdirSync(process.cwd(), { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith('.az'));
+    if (here.length === 1) file = here[0].name;
+  }
+  void doctor({
+    source: file === null ? null : resolve(file),
+    outDir: resolve(out),
+    cwd: process.cwd(),
+    wordsDir: process.env.AZ_WORDS ?? BUNDLED_WORDS,
+    probe: systemProbe(findNpmCli),
+    projectModules: true,
+  }).then((r) => {
+    process.stdout.write(json ? `${JSON.stringify(r, null, 2)}\n` : formatReport(r));
+    process.exitCode = r.exit;
+  }, (e: unknown) => {
+    process.stderr.write(`az: doctor: ${(e as Error).message}\n`);
+    process.exitCode = EXIT.config;
+  });
+  return EXIT.ok;
 }
 
 function runLint(wordsDir: string): number {
@@ -589,6 +648,7 @@ export function main(argv: string[]): number {
   }
   if (cmd === 'lint') return runLint(file ?? process.env.AZ_WORDS ?? 'words');
   if (cmd === 'explain') return runExplain(argv.slice(1));
+  if (cmd === 'doctor') return runDoctor(argv.slice(1));
   if (cmd === 'mcp') {
     // stdin keeps the process alive; the server ends when the client closes it.
     const rootFlag = argv.indexOf('--root');

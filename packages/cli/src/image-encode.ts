@@ -32,13 +32,19 @@
  * a half-written variant; the entry goes last, so an entry means complete.
  * Exit 0 when every job was handled (a failure is an entry, not an exit);
  * exit 2, with a line `az-image: <why>` on stderr, when nothing could be.
+ *
+ * A probe (`{ probe: true, from? }`, az doctor) stops after step 1: the
+ * library loads (and, the CLI's own, is the pinned one), a line
+ * `az-image-ok: <version>` on stdout, nothing written.
  */
 
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { IMAGE_DECODERS } from '../../backend/src/server/data-images.ts';
-import { ENCODING, entryName, imageId, variantName, type CacheEntry, type EncodeJob } from './images.ts';
+import { ENCODING, entryName, imageId, variantName, type CacheEntry, type EncodeJob, type ProbeJob } from './images.ts';
 
 /** The exit code for "nothing could be encoded" — read by images.ts with the stderr line. */
 const EXIT_UNAVAILABLE = 2;
@@ -97,23 +103,37 @@ async function encodeOne(sharp: Library, cacheDir: string, job: EncodeJob, bytes
   return { widths: [...job.widths], sha256: sums };
 }
 
+/** The library: the CLI's own, or the copy installed under `from` (a probe of a built server/). */
+async function load(from: string | undefined): Promise<Library> {
+  if (from === undefined) return (await import('sharp')).default;
+  const path = createRequire(join(from, 'package.json')).resolve('sharp');
+  return ((await import(pathToFileURL(path).href)) as { default: Library }).default;
+}
+
 async function main(): Promise<void> {
-  let input: { cacheDir: string; jobs: EncodeJob[] };
+  let input: { cacheDir: string; jobs: EncodeJob[]; probe?: undefined } | ProbeJob;
   try {
     input = JSON.parse(readFileSync(0, 'utf8')) as typeof input;
   } catch {
     unavailable('the job on stdin is not JSON');
   }
+  // A server's copy is pinned by the server's package.json, not ENCODING:
+  // its probe reports the version and the caller compares.
+  const from = input.probe === true && typeof input.from === 'string' ? input.from : undefined;
   let sharp: Library;
   try {
-    sharp = (await import('sharp')).default;
+    sharp = await load(from);
   } catch (e) {
     unavailable(`the image library is not installed for this platform (${(e as Error).message.split('\n')[0]})`);
   }
   const v = sharp.versions;
   const want = ENCODING.versions;
-  if (v.sharp !== want.library || v.vips !== want.core || v.webp !== want.webp) {
+  if (from === undefined && (v.sharp !== want.library || v.vips !== want.core || v.webp !== want.webp)) {
     unavailable(`the image library is ${v.sharp} (core ${v.vips}, webp ${v.webp}); the build pins ${want.library} (core ${want.core}, webp ${want.webp})`);
+  }
+  if (input.probe === true) {
+    process.stdout.write(`az-image-ok: ${v.sharp}\n`);
+    return;
   }
   sharp.cache(false);
   sharp.concurrency(1);

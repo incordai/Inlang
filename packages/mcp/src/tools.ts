@@ -74,6 +74,17 @@ export interface Toolbox {
   readonly backendInit: (serverDir: string) =>
     { ok: true; path: string } | { ok: false; message: string };
   readonly grammar: () => string;
+  /**
+   * az doctor (word-quality-gate §5): this machine and the project, one line
+   * and a fix per check. Reads only, installs nothing, never loads code from
+   * the project, never reports an environment value.
+   */
+  readonly doctor: (file: string | null, outDir: string) => Promise<{
+    ok: boolean;
+    exit: number;
+    counts: Record<string, number>;
+    checks: readonly { id: string; status: string; line: string; fix?: readonly string[] }[];
+  }>;
   /** One line per term (`hero center` → hero, center); unknown terms get a suggestion. */
   readonly explain: (terms: string[]) => {
     lines: { term: string; kind: string; of: string; text: string }[];
@@ -94,6 +105,7 @@ export interface ToolDef {
   readonly inputSchema: Schema;
   /** MCP tool annotations: whether the tool can change files. */
   readonly annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
+  /** May answer later (az_doctor waits on bounded child processes); the server awaits it. */
   readonly run: (args: Record<string, string>, box: Toolbox, sb: Sandbox) => unknown;
 }
 
@@ -178,6 +190,13 @@ export const TOOLS: ToolDef[] = [
       if (list.length === 0) throw new ToolFailure('terms is empty — e.g. "hero center"');
       return box.explain(list);
     },
+  },
+  {
+    name: 'az_doctor',
+    description: 'Check this machine and the project: Node and npm versions, known-bad combinations, the image library, that the file compiles, the data lock, tables without allow rules, unoptimised 3D models, files over budget, the backend .env (present, owner-only, required keys — names only, never values) and service keys a build would refuse. Each check: pass, warn, fail or skip, one line and the exact fix. Installs nothing, writes nothing.',
+    inputSchema: obj({ file: 'Optional .az file, relative to the project root; without it only the machine is checked.', out: 'Output folder of a build, relative to the project root. Default: .az-build' }, []),
+    annotations: READ,
+    run: ({ file, out }, box, sb) => box.doctor(file ? existing(sb, file) : null, sb.resolve(out ?? '.az-build')),
   },
   {
     name: 'az_word_docs',

@@ -195,6 +195,41 @@ Worth stating so the offline claim stays honest:
   build tool; `doctor` can warn, `core.autocrlf` guidance helps.
 - **Disk space, ARM vs x86 native binaries.**
 
+### 5.4 What `az doctor` checks — built 2026-10-07
+
+`az doctor [file.az] [--out dir] [--json]` (also the `az_doctor` MCP tool).
+Read-only: nothing is installed, written or fixed — every line names its fix
+instead. Without a file it checks the one `.az` file in the folder, or only
+the machine. Each check is `pass`, `warn`, `fail` or `skip`, one fixed line
+and the exact command; exit `0` when nothing failed (warnings never fail),
+`1` when something did, `2` for a usage error (§5.2). Checks run at once,
+each under a 20s deadline; every child process is killed at 15s. A check
+that does not answer reports `no answer after 20s` and the run goes on.
+
+| Check | Fails / warns when | Fix it prints |
+|---|---|---|
+| Node | older than the server's `engines` (`>=22.18`) | install link — Tier 3, never installed |
+| npm | missing beside Node, or no answer | reinstall Node — npm ships with it |
+| platform (known-bad) | an x64 Node translated on an arm64 machine; `AZ_WORDS` not a folder | the arm64 Node; unset `AZ_WORDS` |
+| image library | the resizer's own child (`image-encode.ts`, probe mode) can't load it — a warning: images ship unresized | reinstall az's packages |
+| backend image library | a built server with image fields can't load its copy, or the version differs from the pin | `npm install` in `server/`; skipped from MCP, which never loads project modules |
+| test browsers | only if the project's `package.json` uses the browser-test package: its Chromium revision is absent | the install command — Tier 2, never run from here |
+| compile | `az check` errors (fail) or warnings (warn), first error quoted | `az check site.az` |
+| data lock | AZ1700–AZ1749 (AZ1701: the file and the lock differ) | `az backend plan`, then `az backend schema` |
+| table rules | a table with no `allow` lines (AZ1246); `adapter hosted` always — its row rules can't be read from here (auth-block-spec §4.1) | add `allow` lines; turn on row-level security per table |
+| models | a `.glb` with meshes and no Draco geometry compression (stack-evaluation §9) | the exact optimiser command, pinned, paths shell-quoted |
+| assets | a named file missing (fail) or over its manifest `maxBytes` (warn) | add the file; export it under the budget |
+| backend .env | missing (warn); not a regular file or not owner-only (fail); a key the server's own start-up validation refuses (fail) — **names only, never a value** | `az backend init`; `chmod 600`; set the named keys |
+| build secrets | a variable the build inlines looks like a service key (§4 rule 1) — names only | move it to the server's `.env` |
+
+Not built, and why: **Docker** — no spec asks doctor for it; only this
+repository's own `test:backend-db` needs it. **A missing npm lockfile** —
+the generated `package.json` pins exact versions and there is no `az add`
+yet. **Windows path length, line endings, proxies, disk space** (§5.3) —
+not yet. **Tier 2 installs** (`--yes`) — doctor prints the command instead;
+nothing in it installs. **Texture weight in a GLB** — no texture budget is
+specified yet (ASSUMPTIONS A8, stack-evaluation §15 Q4).
+
 ---
 
 ## 6. Sequencing — don't front-load this
@@ -204,7 +239,7 @@ Worth stating so the offline claim stays honest:
 | Now (M1) | path sandboxing, escape-on-emit, exact pins, `--ignore-scripts` |
 | M2 | the 12-point gate in CI |
 | M4 (auth) | secret-leak detection, adapter key docs |
-| M5 | `az doctor`, `az audit` |
+| M5 | `az doctor` (built early, §5.4), `az audit` |
 | **Before the registry opens** | trust tiers, pack source lint |
 
 The last row is the hard gate. **Everything else can be added incrementally;

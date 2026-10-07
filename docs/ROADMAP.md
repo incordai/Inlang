@@ -202,7 +202,9 @@ one-shot.
 ## Phase 1.5 — after M5 · ~4 weeks
 
 Tier A blocks (11, buttons-and-sections §2), informed by what M5 actually
-needed. Add the missing words M5 revealed. `az deploy`. `az doctor`.
+needed. Add the missing words M5 revealed. `az deploy`. `az doctor` —
+**built early, 2026-10-07** (word-quality-gate §5.4: the checks, what was
+left out and why; `packages/cli/test/doctor.test.ts`, `az_doctor` in `az mcp`).
 
 ## Phase 2 — ~6 weeks
 

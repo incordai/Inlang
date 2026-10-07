@@ -80,7 +80,8 @@ const CHILD_PER_IMAGE_MS = 20_000;
 /** The child's report is a line or two; more is a fault, cut off. */
 const CHILD_OUTPUT_BYTES = 64 * 1024;
 
-const ENCODER = fileURLToPath(new URL('./image-encode.ts', import.meta.url));
+/** The child process that loads the image library — the resizer's, and az doctor's probe of it. */
+export const ENCODER = fileURLToPath(new URL('./image-encode.ts', import.meta.url));
 
 /** The cache key of an image file: its bytes and ENCODING. */
 export function imageId(bytes: Uint8Array): string {
@@ -101,6 +102,16 @@ export const entryName = (id: string): string => `${id}.json`;
 export type CacheEntry =
   | { readonly widths: number[]; readonly sha256: Record<string, string> }
   | { readonly failed: 'undecodable' | 'too-large'; readonly width?: number; readonly height?: number };
+
+/**
+ * az doctor's job for the child: load the library — resolved from `from`'s
+ * node_modules (a built server/), else the CLI's own — check its pinned
+ * versions, and write nothing.
+ */
+export interface ProbeJob {
+  readonly probe: true;
+  readonly from?: string;
+}
 
 /** One image for the child to encode. */
 export interface EncodeJob {

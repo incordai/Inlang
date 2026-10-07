@@ -471,6 +471,7 @@ az eject hero   # take ownership of one block's source
 az migrate      # upgrade .az files across grammar versions
 az mcp          # the same operations as tools for an AI agent (MCP, stdio)
 az explain      # one ≤60-char line per term: az explain hero center
+az doctor       # check this machine and project; changes nothing
 ```
 
 `az dev` with sub-second recompile is the single best demo we have — it is the
