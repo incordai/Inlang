@@ -122,6 +122,39 @@ export function neighbours(index: number, count: number): number[] {
   return [index - 1, index + 1].filter((i) => i >= 0 && i < count);
 }
 
+/** The parts of a thumbnail <img> the lightbox reads — a structural slice of HTMLImageElement. */
+export interface ImageSource {
+  readonly src: string;
+  readonly alt: string;
+  getAttribute(name: string): string | null;
+}
+
+/** What the enlarged image takes from a thumbnail; null removes the attribute. */
+export interface ShownImage {
+  readonly src: string;
+  readonly alt: string;
+  readonly srcset: string | null;
+  readonly width: string | null;
+  readonly height: string | null;
+}
+
+/**
+ * gallery-spec §8 with §7 rule 3: the enlarged image is the thumbnail's
+ * full-size file — its `src`, never its `currentSrc`, which with a srcset is
+ * the small copy the grid chose. Its srcset comes too (the dialog keeps its
+ * own `sizes`, so the browser picks for the enlarged box), and its width and
+ * height, so the box takes that image's shape before the file arrives.
+ */
+export function lightboxImage(source: ImageSource): ShownImage {
+  return {
+    src: source.src,
+    alt: source.alt,
+    srcset: source.getAttribute('srcset'),
+    width: source.getAttribute('width'),
+    height: source.getAttribute('height'),
+  };
+}
+
 /**
  * How far a swipe must travel to count (§8: left/right is prev/next, down
  * closes) — well past a tap's wobble, well short of a deliberate drag.

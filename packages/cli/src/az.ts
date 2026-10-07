@@ -27,7 +27,9 @@ import { fileURLToPath } from 'node:url';
 import {
   compile, envMessage, explain, formatDiagnostics, formatExplained, scanEnv, serialiseSpec,
 } from '../../core/src/index.ts';
-import { emitProject, PathEscapeError, RUNTIME_DIR, USER_DIR } from '../../target-web/src/emit.ts';
+import { emitProject, PathEscapeError, RUNTIME_DIR, safeAssetPath, USER_DIR } from '../../target-web/src/emit.ts';
+import { isFromMark } from '../../core/src/emit-contract.ts';
+import type { Spec } from '../../core/src/spec.ts';
 import { ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
 import { MarkdownError } from '../../target-web/src/markdown.ts';
@@ -44,6 +46,7 @@ import { migrate, GRAMMAR_VERSION } from './migrate.ts';
 import { initBackendEnv } from './backend-init.ts';
 import { lockOption, readLockSteps, runDataPlan, runDataSchema } from './data-schema.ts';
 import { writeOutput } from './output.ts';
+import { createResizer, imageCacheDir } from './images.ts';
 // mcp.ts imports build/wordsFor from here; the cycle is safe for the same
 // reason as dev.ts's — nothing is touched until a command runs.
 import { runMcp } from './mcp.ts';
@@ -52,6 +55,9 @@ import { formatFindings } from '../../theme/src/lint.ts';
 const MB = 1024 * 1024;
 /** A8 and the hero/scene manifests' `maxBytes`: a 3D model's budget. */
 const MODEL_BUDGET_BYTES = 5 * MB;
+const KB = 1024;
+/** gallery-spec §11 and the gallery manifest's image `maxBytes`: one gallery image's budget. */
+const GALLERY_IMAGE_BUDGET_BYTES = 500 * KB;
 
 /** Exit codes are meaningful — word-quality-gate §5.2. */
 export const EXIT = { ok: 0, missing: 1, config: 2 } as const;
@@ -67,6 +73,12 @@ export interface BuildOptions {
    */
   readonly projectWordsDir?: string | null;
   readonly write?: boolean;
+  /**
+   * Where resized images are cached (gallery-spec §7 rule 3) — outside the
+   * output. Defaults to imageCacheDir(); null builds without resizing, as a
+   * build that writes nothing (`az check`) does.
+   */
+  readonly imageCache?: string | null;
 }
 
 export interface BuildOutcome {
@@ -150,6 +162,40 @@ function readProjectHead(projectDir: string, path: string): Uint8Array | null {
   throw new PathEscapeError(found.problems[0]);
 }
 
+/** The real file of a project path through the asset sandbox, or null — for the resizer. */
+function locateImage(projectDir: string, path: string): string | null {
+  const found = locateAssets(projectDir, [path]);
+  return found.sources.length === 1 ? found.sources[0] : null;
+}
+
+const sizeText = (bytes: number) => (bytes >= MB ? `${(bytes / MB).toFixed(1)}MB` : `${Math.round(bytes / KB)}KB`);
+
+/**
+ * gallery-spec §11: a gallery image over 500KB is a warning — every visitor
+ * may download the original (it is the srcset's fallback and, up to 1800px,
+ * its widest candidate). Only the CLI has the file's size, so it lives here.
+ */
+function galleryOverBudget(spec: Spec, projectDir: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const block of [...spec.site.inherited, ...spec.pages.flatMap((p) => p.blocks)]) {
+    if (block.word !== 'gallery') continue;
+    for (const image of block.children) {
+      const raw = image.word === 'image' ? image.args[0]?.value : undefined;
+      if (!raw || isFromMark(raw)) continue;
+      const path = safeAssetPath(raw);
+      if (seen.has(path)) continue;
+      seen.add(path);
+      const file = locateImage(projectDir, path);
+      const bytes = file === null ? 0 : statSync(file).size;
+      if (bytes > GALLERY_IMAGE_BUDGET_BYTES) {
+        out.push(`gallery: '${basename(path)}' is ${sizeText(bytes)} — export it under ${GALLERY_IMAGE_BUDGET_BYTES / KB}KB or the gallery blocks the page`);
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * The words one build compiles with: the set, plus the project's own. With
  * `code: false` the project's emitters are not loaded — manifests only, for a
@@ -174,13 +220,26 @@ export function build(options: BuildOptions): BuildOutcome {
   }
 
   let project;
+  const spec = result.spec;
+  const projectDir = dirname(resolve(options.source));
+  // gallery-spec §7 rule 3: images resized at build, unless nothing is written.
+  const resizer = options.write === false || options.imageCache === null
+    ? undefined
+    : createResizer(options.imageCache ?? imageCacheDir(), (path) => locateImage(projectDir, path));
+  const emitted = () => emitProject(spec, {
+    emitters: words.emitters,
+    readText: (path) => readProjectText(projectDir, path),
+    readBytes: (path) => readProjectHead(projectDir, path),
+    resize: resizer?.resize,
+  });
   try {
-    const projectDir = dirname(resolve(options.source));
-    project = emitProject(result.spec, {
-      emitters: words.emitters,
-      readText: (path) => readProjectText(projectDir, path),
-      readBytes: (path) => readProjectHead(projectDir, path),
-    });
+    project = emitted();
+    // A miss is encoded now; an image that came out with nothing is emitted
+    // again without its srcset.
+    if (resizer?.encode()) {
+      resizer.restart();
+      project = emitted();
+    }
   } catch (e) {
     if (e instanceof PathEscapeError || e instanceof SvgError || e instanceof MarkdownError) {
       return { ok: false, files: [], assets: [], report: `${report}\n${e.message}`.trim(), exit: EXIT.missing };
@@ -213,7 +272,6 @@ export function build(options: BuildOptions): BuildOutcome {
 
   // The author's components go through the same sandbox as assets: they must
   // exist and really be inside the project, symlinks followed.
-  const projectDir = dirname(resolve(options.source));
   const located = locateAssets(projectDir, assets);
   const components = locateAssets(projectDir, modules, 'component');
   // auth-spec §4 rule 1, before anything is written: the environment this
@@ -248,6 +306,8 @@ export function build(options: BuildOptions): BuildOutcome {
       ...assets.map((a, i) => ({ path: `public/${a}`, copyFrom: located.sources[i] })),
       // The generated App imports each one from here (target-web USER_DIR).
       ...modules.map((m, i) => ({ path: `${USER_DIR}/${m}`, copyFrom: components.sources[i] })),
+      // The resized copies the pages' srcsets name, from the cache.
+      ...(resizer?.files() ?? []).map((f) => ({ path: `public/${f.path}`, copyFrom: f.copyFrom })),
     ]);
     if (!written.ok) {
       return { ok: false, files: [], assets: [], report: [report, ...written.problems].filter(Boolean).join('\n'), exit: EXIT.config };
@@ -260,7 +320,8 @@ export function build(options: BuildOptions): BuildOutcome {
   const heavy = located.sources
     .filter((source) => source.toLowerCase().endsWith('.glb') && statSync(source).size > MODEL_BUDGET_BYTES)
     .map((source) => `warning: model '${basename(source)}' is ${(statSync(source).size / MB).toFixed(1)}MB — Draco-compress it or the page will stall on mobile (budget ${MODEL_BUDGET_BYTES / MB}MB)`);
-  const read = project.warnings.map((w) => `warning: ${w}`);
+  const read = [...project.warnings, ...(resizer?.warnings ?? []), ...galleryOverBudget(spec, projectDir)]
+    .map((w) => `warning: ${w}`);
   return { ok: true, files, assets, report: [report, ...read, ...heavy].filter(Boolean).join('\n'), exit: EXIT.ok };
 }
 

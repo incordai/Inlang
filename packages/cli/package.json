@@ -3,5 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "az": "./bin/az.js" }
+  "bin": { "az": "./bin/az.js" },
+  "dependencies": {
+    "sharp": "0.35.5"
+  }
 }

@@ -79,6 +79,36 @@ const SM_COLUMNS = 2;
 /** §7 rule 2: the first row loads eagerly; `columns` is that row's length. */
 const DEFAULT_COLUMNS = 3;
 
+/** A CSS width that is 1/n of the viewport, rounded up so the browser never picks too small a file. */
+const viewportShare = (n: number): string => `${Math.ceil(100 / n)}vw`;
+
+/**
+ * §7 rule 3: how wide one image is drawn at each viewport — the `sizes` the
+ * target writes beside the srcset it builds. It follows the tracks below:
+ * two columns under sm, at most three under md, then `columns`; a masonry
+ * column is narrower than two minimum columns and a gap, or one more would
+ * fit; a carousel slide is one minimum column, all but the peek under sm.
+ * Each value is an upper bound — gaps and gutters only make the box smaller.
+ * `orbit` gets none: its ring textures are the originals, and a resized copy
+ * for the hidden list would be a second download of every image.
+ */
+function slotSizes(variant: string, columns: number, ctx: EmitContext): string | undefined {
+  const t = ctx.theme;
+  const sm = `(width < ${px(t.breakpoint.sm)})`;
+  const mdColumns = Math.min(columns, MD_MAX_COLUMNS);
+  const md = `(width < ${px(t.breakpoint.md)}) ${viewportShare(mdColumns)}`;
+  if (variant === 'grid') {
+    // Up to three columns, md draws them as wide as the desktop does: no condition of its own.
+    return [`${sm} ${viewportShare(SM_COLUMNS)}`, ...(mdColumns === columns ? [] : [md]), viewportShare(columns)].join(', ');
+  }
+  if (variant === 'masonry') return `${sm} ${viewportShare(SM_COLUMNS)}, ${md}, ${px(2 * t.size['column-min'] + t.space[16])}`;
+  if (variant === 'carousel') return `${sm} ${viewportShare(1)}, ${px(t.size['column-min'])}`;
+  return undefined;
+}
+
+/** The block's `columns`: the grid's track count, and the length of its first row. */
+const columnsOf = (block: SpecBlock): number => Number(block.props.columns ?? DEFAULT_COLUMNS);
+
 /** Chevron paths for the previous/next controls (§10: real buttons, real names). */
 const CHEVRON = { '-1': 'M15 6l-6 6 6 6', '1': 'M9 6l6 6-6 6' } as const;
 
@@ -211,7 +241,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // data-spec §10: images load from a table after the page (grid and
     // masonry; core refuses the rest with from). The template is one image
     // rendered by galleryImage() itself, so a row is an image of the set.
-    const template = galleryImage(fromFill(block.from), 0, false, Object.hasOwn(block.from.map, 'caption'), aspect, variant, false, ctx);
+    const template = galleryImage(fromFill(block.from), 0, false, Object.hasOwn(block.from.map, 'caption'), aspect, variant, columnsOf(block), false, ctx);
     children.push(fromShell(block.from, galleryList(block, variant, false, [template], ctx), skeletonImage(aspect, ctx), ctx));
   }
 
@@ -219,11 +249,11 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const shown = variant === 'orbit' ? sources.slice(0, ORBIT_MAX) : sources;
   // §10: <figure> + <figcaption> when captions exist; a plain list when not.
   const captioned = shown.some((c) => c.props.caption);
-  const firstRow = Number(block.props.columns ?? DEFAULT_COLUMNS);
+  const firstRow = columnsOf(block);
   // §8: `lightbox` turns each image into a button that opens it enlarged.
   // `orbit` opens its own viewer, which the validator warns about (§11).
   const lightbox = block.modifiers.includes('lightbox') && variant !== 'orbit';
-  const images = shown.map((c, i) => galleryImage(c, i, i < firstRow, captioned, aspect, variant, lightbox, ctx));
+  const images = shown.map((c, i) => galleryImage(c, i, i < firstRow, captioned, aspect, variant, firstRow, lightbox, ctx));
   // §6/§10: a carousel — and orbit's phone fallback — steps with real buttons.
   const steps = variant === 'carousel' || variant === 'orbit';
   if (images.length > 0) {
@@ -360,14 +390,16 @@ function skeletonImage(aspect: string | undefined, ctx: EmitContext): EmittedNod
  */
 function galleryImage(
   image: SpecBlock, index: number, eager: boolean, captioned: boolean, aspect: string | undefined,
-  variant: string, lightbox: boolean, ctx: EmitContext,
+  variant: string, columns: number, lightbox: boolean, ctx: EmitContext,
 ): EmittedNode {
   const t = ctx.theme;
+  // From a table, the row's image URL fills it after the page (data-spec §10).
+  const fromRow = isFromMark(image.args[0]?.value ?? '');
+  const sizes = slotSizes(variant, columns, ctx);
   const img: EmittedNode = {
     tag: 'img',
     attrs: {
-      // From a table, the row's image URL fills it after the page (data-spec §10).
-      src: isFromMark(image.args[0]?.value ?? '') ? image.args[0].value : ctx.asset(image.args[0]?.value ?? ''),
+      src: fromRow ? image.args[0].value : ctx.asset(image.args[0]?.value ?? ''),
       alt: image.props.alt ?? '',
       class: 'az-gallery-img',
       // The textures of `orbit`'s ring are the list's own images (§9).
@@ -375,6 +407,8 @@ function galleryImage(
       // §7 rule 2: eager first row, lazy after, and never fetchpriority.
       loading: eager ? 'eager' : 'lazy',
       decoding: 'async',
+      // §7 rule 3: the layout's widths, for the srcset the build writes.
+      ...(sizes !== undefined && !fromRow ? { sizes } : {}),
     },
     style: {
       display: 'block',
@@ -526,6 +560,9 @@ function lightboxDialog(images: SpecBlock[], title: string, ctx: EmitContext): E
               // Closed, the dialog is not rendered, so a lazy image waits —
               // opening the lightbox must not have cost a download (§7).
               loading: 'lazy', decoding: 'async',
+              // §7 rule 3: drawn at the dialog's width; the runtime carries
+              // each shown image's srcset and size over from its thumbnail.
+              sizes: String(preset.style.width),
             },
             style: { display: 'block', width: '100%', height: 'auto', maxHeight: LIGHTBOX_MAX_HEIGHT, objectFit: 'contain' },
           },

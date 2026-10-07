@@ -39,7 +39,7 @@
  */
 
 import {
-  billingAnnouncement, billingFrom, carouselEnds, copyText, counterText, lightboxIndex, moveIndex, neighbours,
+  billingAnnouncement, billingFrom, carouselEnds, copyText, counterText, lightboxImage, lightboxIndex, moveIndex, neighbours,
   offScreen, outsideBox, retractedAfter, revealDelay, revealsLater, rollingYear, safeDecode, samePageFragment, sheetDismissed,
   shrunkAfter, solidAfter, swipeOf, transitionMs, trapIndex, type Billing,
 } from './logic.ts';
@@ -411,7 +411,16 @@ function wireLightboxes(ctx: Ctx, root: ParentNode): void {
     const show = (i: number) => {
       index = i;
       const source = imageOf(i);
-      if (img && source) { img.src = source.currentSrc || source.src; img.alt = source.alt; }
+      if (img && source) {
+        const shown = lightboxImage(source);
+        for (const name of ['srcset', 'width', 'height'] as const) {
+          const value = shown[name];
+          if (value === null) img.removeAttribute(name);
+          else img.setAttribute(name, value);
+        }
+        img.src = shown.src;
+        img.alt = shown.alt;
+      }
       if (caption) caption.textContent = thumbs[i].getAttribute('data-az-caption') ?? '';
       if (counter) counter.textContent = counterText(i, thumbs.length);
       // No wrap (§8): the end buttons say so — aria-disabled keeps a focused
@@ -421,9 +430,16 @@ function wireLightboxes(ctx: Ctx, root: ParentNode): void {
       for (const n of neighbours(i, thumbs.length)) {
         const src = imageOf(n);
         if (!src) continue;
+        // The file the lightbox will show: with a srcset, the one the
+        // dialog's own `sizes` picks.
+        const shown = lightboxImage(src);
         const pre = new Image();
         pre.fetchPriority = 'low';
-        pre.src = src.currentSrc || src.src;
+        if (shown.srcset !== null && img) {
+          pre.sizes = img.sizes;
+          pre.srcset = shown.srcset;
+        }
+        pre.src = shown.src;
       }
     };
     const step = (to: number | null) => { if (to !== null && to !== index) show(to); };

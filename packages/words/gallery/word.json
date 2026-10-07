@@ -191,7 +191,8 @@
     "size.tap",
     "size.ring",
     "size.ring-offset",
-    "breakpoint.sm"
+    "breakpoint.sm",
+    "breakpoint.md"
   ],
   "deps": {
     "three": "0.186.0"

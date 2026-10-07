@@ -45,6 +45,7 @@ import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminVa
 import { ROWS_FILE, fromTables, rowsTsx } from './data-rows.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
 import { imageSizes, sizeImages } from './image-dims.ts';
+import { srcsetImages, type Resize } from './image-srcset.ts';
 
 /**
  * Where the author's `raw` / `slot` modules go in the generated project.
@@ -515,6 +516,13 @@ export interface EmitOptions {
    * attributes are left off. Null means the file does not exist.
    */
   readonly readBytes?: (projectPath: string) => Uint8Array | null;
+  /**
+   * Resizes a project image to fixed widths — the CLI's, with its vetted
+   * image library. Given it (and readBytes), an <img> whose word gave a
+   * `sizes` gets a srcset (gallery-spec §7 rule 3); without it that `sizes`
+   * is removed and the output is exactly as before.
+   */
+  readonly resize?: Resize;
 }
 
 /**
@@ -885,10 +893,11 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   // content, so two blocks of a kind on one page collided (ids.ts).
   // gallery-spec §7 rule 1: each image's size from its header, so the page
   // reserves the box before the file arrives. One read per file.
+  // Rule 3: a srcset where a word asked for one and the build resized the file.
   const sizeOf = imageSizes(options.readBytes, srcs, warnings);
   const unique = seeded.pages.map((p) => ({
     ...p,
-    nodes: uniqueIds(sizeOf ? p.nodes.map((n) => sizeImages(n, sizeOf)) : p.nodes),
+    nodes: uniqueIds(p.nodes.map((n) => srcsetImages(sizeOf ? sizeImages(n, sizeOf) : n, srcs, sizeOf, options.resize))),
   }));
   const styled = compileStyles(
     unique,

@@ -912,3 +912,45 @@ written into a generated server's `package.json` only when a table has an
 `devDependencies` pin the same version for the tests
 (`packages/backend/test/emit.test.ts` ties the two).
 
+---
+
+## 16. Image library for build-time resizing — **ADOPT the same `sharp` 0.35.5, CLI-only**
+
+Decided 2026-10-06 for gallery-spec §7 rule 3 (the owner chose option A:
+resize at build). No new library: the one vetted in §14, at the same pin.
+
+**Where it lives.** `packages/cli/package.json` `dependencies` — the CLI only.
+`core` and `target-web` never import it (they must run in a browser; the
+target receives a `resize` function and stays pure), and a generated site
+never ships it: it runs at build, on the author's machine or CI.
+`packages/cli/test/images.test.ts` ties the CLI pin to `BACKEND_PINS.sharp`
+and to the versions the encoder checks at run time.
+
+**How it is run** (`packages/cli/src/images.ts`, `image-encode.ts`):
+
+1. only in a child process (at most 8 images per child, each child killed at
+   10s + 20s per image — 10× the slowest measured), so the compiler stays
+   synchronous, a decoder fault ends the child and not the build, and no
+   wait is unbounded;
+2. §14's defences unchanged: the decoder allow-list (JPEG, PNG, WebP, HEIF
+   for AVIF — now one constant, `IMAGE_DECODERS`, shared with the server),
+   the header-only check (≤ 8000px a side, ≤ 40 MP), `limitInputPixels`,
+   `failOn: 'error'`, `autoOrient()`, and no metadata written;
+3. pinned output: WebP at quality 80, effort 4, alpha quality 100, no
+   smart subsampling or deblocking, lanczos3, never enlarged — every option,
+   and the library, core and WebP codec versions, hashed into each file's
+   name; the child refuses to encode under any other library version;
+4. a cache outside the build output (`AZ_IMAGE_CACHE`, default
+   `$XDG_CACHE_HOME/az/images` or `~/.cache/az/images`), keyed by that hash;
+   an entry is used only when every file matches its recorded SHA-256.
+
+**Measured (macOS arm64, 2026-10-06).** Library load in a fresh process
+~0.1s; a 6000×4000 noise JPEG (the worst case for the encoder) to all four
+widths, 1.16s; two cold caches give byte-identical variants
+(`pnpm verify:build`, `images.test.ts`), and a warm rebuild encodes nothing.
+
+**Cost.** ~20 MB of prebuilt binaries per platform in the CLI's install,
+already in the repository for the backend's tests. By design (not exercised on
+such a platform) a missing binary or another library version builds without
+srcset, with one warning, and never fails the build.
+

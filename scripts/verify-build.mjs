@@ -22,11 +22,12 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import sharp from 'sharp';
 import { watchdog, human } from './lib/bounded.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -143,6 +144,17 @@ const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 
 /** node <script> … */
 const node = (script, args, cwd) => run(process.execPath, [script, ...args], cwd);
+/** `az build` with its report: the warnings are on stderr, which `run` drops on success. */
+function azBuild(source, out, cwd, env = {}) {
+  const r = spawnSync(process.execPath, [CLI, 'build', source, '--out', out], {
+    cwd, encoding: 'utf8',
+    env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH, ...env },
+    timeout: COMMAND_MS, killSignal: 'SIGKILL',
+  });
+  if (r.error || r.signal) throw new Error(`az build was stopped: ${r.error?.message ?? r.signal}`);
+  if (r.status !== 0) throw new Error(`az build failed:\n${r.stderr}`);
+  return r.stderr;
+}
 /** npm … , via npm's own JS rather than the .cmd wrapper */
 const npm = (args, cwd) => node(NPM_CLI, args, cwd);
 /** vite … , from the project's own install */
@@ -619,12 +631,94 @@ try {
   check('CONTROL: a site without pattern ships no pattern declaration',
     !readFileSync(join(evilProj, 'src/theme.css'), 'utf8').includes('--az-pattern-image'));
 
+  /* ---- gallery-spec §7 rule 3: responsive images, resized at build ------ */
+  // The GRAMMAR §8 fixture's images are placeholders too small to resize, so
+  // a gallery of real photographs — made here, in a cache of its own —
+  // goes through the real build, and the checks read the pages it ships.
+  const gallerySite = join(work, 'gallery.az');
+  mkdirSync(join(work, 'photos'));
+  const photo = (w, h) => sharp({ create: { width: w, height: h, channels: 3, background: { r: 120, g: 60, b: 30 } } })
+    .composite([{ input: Buffer.from(`<svg width="${w}" height="${h}"><circle cx="${w / 2}" cy="${h / 2}" r="${Math.min(w, h) / 3}" fill="#fff"/></svg>`) }]);
+  await photo(2400, 1600).jpeg({ quality: 85 }).toFile(join(work, 'photos/big.jpg'));
+  await photo(1000, 667).png().toFile(join(work, 'photos/mid.png'));
+  await photo(400, 300).webp().toFile(join(work, 'photos/small.webp'));
+  // A header that parses over data that does not decode.
+  writeFileSync(join(work, 'photos/broken.jpg'), (await photo(900, 600).jpeg().toBuffer()).subarray(0, 700));
+  writeFileSync(gallerySite,
+    'az 1\nsite photos\n\npage /\n  hero center\n    title "Photos"\n  gallery grid lightbox\n    columns 3\n' +
+    ['big.jpg', 'mid.png', 'small.webp', 'broken.jpg'].map((f) => `    image ./photos/${f}\n      alt "${f}"\n`).join(''));
+  const galleryProj = join(work, 'gallery');
+  const galleryReport = azBuild(gallerySite, galleryProj, work, { AZ_IMAGE_CACHE: join(work, 'image-cache-a') });
+  cpSync(join(proj, 'node_modules'), join(galleryProj, 'node_modules'), { recursive: true });
+  shippedBuild(galleryProj);
+  {
+    const page = shippedRoot(galleryProj, '/');
+    // HTML attribute names are case-blind, and React writes `srcSet`.
+    const attr = (tag, name) => new RegExp(`\\s${name}="([^"]*)"`, 'i').exec(tag)?.[1]
+      ?.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const tags = [...page.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+    const of = (file) => tags.filter((t) => attr(t, 'src') === `/photos/${file}`);
+    const set = (t) => (attr(t, 'srcset') ?? '').split(', ').filter(Boolean).map((c) => {
+      const [url, w] = c.split(' ');
+      return { url, width: Number(w?.slice(0, -1)) };
+    });
+    const [big, bigBox] = of('big.jpg');
+    const [mid] = of('mid.png');
+    check('§7 rule 3: a large photograph ships a srcset of the four widths, with the layout\'s sizes',
+      set(big).map((c) => c.width).join() === '480,768,1200,1800' && attr(big, 'sizes') === '(width < 768px) 50vw, 34vw',
+      `${attr(big, 'srcset')} | ${attr(big, 'sizes')}`);
+    check('§7 rule 3: the original stays the src, with its own width and height',
+      attr(big, 'width') === '2400' && attr(big, 'height') === '1600');
+    check('§7 rule 3: never upscaled — a 1000px original gets 480 and 768, then itself',
+      set(mid).map((c) => `${c.url} ${c.width}`).join() ===
+        `${set(mid)[0]?.url} 480,${set(mid)[1]?.url} 768,/photos/mid.png 1000`, attr(mid, 'srcset'));
+    check('§7 rule 3: the lightbox\'s image has the srcset at the dialog\'s width',
+      !!bigBox && set(bigBox).length === 4 && attr(bigBox, 'srcset') === attr(big, 'srcset') &&
+        /^min\(90vw, \d+px\)$/.test(attr(bigBox, 'sizes') ?? ''),
+      bigBox ?? 'no second img');
+    const none = [...of('small.webp'), ...of('broken.jpg')];
+    check('§7 rule 3: a small original and an undecodable file ship no srcset and no sizes',
+      none.length === 2 && none.every((t) => attr(t, 'srcset') === undefined && attr(t, 'sizes') === undefined));
+    check('§7 rule 3: an undecodable file is a warning, and ships its original only',
+      galleryReport.includes("warning: image: can't resize './photos/broken.jpg' — it does not decode") &&
+        existsSync(join(galleryProj, 'dist/photos/broken.jpg')), galleryReport.trim());
+    // Every candidate a shipped page names is a file in dist/, exactly as
+    // wide as it says and narrower than its original.
+    const named = tags.flatMap((t) => set(t).map((c) => ({ ...c, original: Number(attr(t, 'width')), src: attr(t, 'src') })));
+    const wrong = [];
+    for (const c of named) {
+      const file = join(galleryProj, 'dist', c.url);
+      if (!existsSync(file)) { wrong.push(`${c.url} missing`); continue; }
+      const { width } = await sharp(file).metadata();
+      if (width !== c.width) wrong.push(`${c.url} is ${width}px, says ${c.width}w`);
+      if (c.url !== c.src && !(c.width < c.original)) wrong.push(`${c.url} is not narrower than its ${c.original}px original`);
+    }
+    check('§7 rule 3: every srcset candidate ships, at its stated width, none upscaled',
+      named.length === 4 + 4 + 3 && wrong.length === 0, wrong.join('; ') || `${named.length} candidates`);
+  }
+
   /* ---- determinism ------------------------------------------------------ */
   const a = join(work, 'a'), b = join(work, 'b');
   node(CLI, ['build', site, '--out', a], work);
   node(CLI, ['build', site, '--out', b], work);
   const read = (d) => readFileSync(join(d, 'src/App.tsx'), 'utf8');
   check('DETERMINISM: two builds of one source are identical', read(a) === read(b));
+  // CONVENTIONS §6 with §7 rule 3: resized images from a second, cold cache
+  // are the same names and the same bytes.
+  {
+    const ga = join(work, 'gallery-a');
+    azBuild(gallerySite, ga, work, { AZ_IMAGE_CACHE: join(work, 'image-cache-b') });
+    const variants = (d) => {
+      const dir = join(d, 'public/az-img');
+      return existsSync(dir) ? readdirSync(dir).sort().map((f) => [f, readFileSync(join(dir, f))]) : [];
+    };
+    const first = variants(galleryProj);
+    const second = variants(ga);
+    check('DETERMINISM: resized images from a cold cache are byte-identical, and the pages name them alike',
+      first.length === 6 && second.length === first.length && read(galleryProj) === read(ga) &&
+        first.every(([f, bytes], i) => second[i][0] === f && second[i][1].equals(bytes)),
+      `${first.length} variants`);
+  }
 
   const changed = join(work, 'changed.az');
   writeFileSync(changed, readFileSync(site, 'utf8').replace('site aurora', 'site borealis'));

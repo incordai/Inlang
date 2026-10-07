@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  HIDE_TRAVEL, SOLID_AT, SWIPE_PX, TRANSPARENT_AT, carouselEnds, copyText, counterText, lightboxIndex, moveIndex,
+  HIDE_TRAVEL, SOLID_AT, SWIPE_PX, TRANSPARENT_AT, carouselEnds, copyText, counterText, lightboxImage, lightboxIndex, moveIndex,
   neighbours, retractedAfter, shrunkAfter, solidAfter, swipeOf, transitionMs,
 } from '../src/runtime/logic.ts';
 
@@ -86,6 +86,21 @@ test('gallery §8: the counter is "N of M"; only the neighbours preload', () => 
   assert.deepEqual(neighbours(0, 5), [1]);
   assert.deepEqual(neighbours(2, 5), [1, 3]);
   assert.deepEqual(neighbours(4, 5), [3]);
+});
+
+test('gallery §8 + §7 rule 3: the enlarged image is the full-size file, with its srcset and its own size', () => {
+  const thumb = (attrs: Record<string, string>) => ({
+    // A thumbnail drawn from its 480w copy: currentSrc is the small file.
+    src: 'https://site.test/assets/one.jpg', alt: 'One', currentSrc: 'https://site.test/az-img/a-480.webp',
+    getAttribute: (name: string) => attrs[name] ?? null,
+  });
+  const shown = lightboxImage(thumb({ srcset: '/az-img/a-480.webp 480w, /az-img/a-768.webp 768w', width: '2400', height: '1600' }));
+  assert.deepEqual(shown, {
+    src: 'https://site.test/assets/one.jpg', alt: 'One',
+    srcset: '/az-img/a-480.webp 480w, /az-img/a-768.webp 768w', width: '2400', height: '1600',
+  }, 'never the thumbnail\'s currentSrc: that is the small copy the grid chose');
+  assert.deepEqual(lightboxImage(thumb({})), { src: 'https://site.test/assets/one.jpg', alt: 'One', srcset: null, width: null, height: null },
+    'an image without them removes the previous image\'s');
 });
 
 test('gallery §8 touch: sideways swipes step, a downward one closes, small moves do nothing', () => {

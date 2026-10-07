@@ -2,7 +2,7 @@
  * @az server data-images
  * Purpose: image fields' bytes: magic-byte sniff, the vetted decode/re-encode pipeline, a bounded queue, disk storage, orphan sweep.
  * Spec: docs/data-spec.md §8 · docs/stack-evaluation.md (image library vetting)
- * Exports: createImages, sniffImage, ImageError, IMAGE_LIMITS, Images, StoredImage
+ * Exports: createImages, sniffImage, ImageError, IMAGE_LIMITS, IMAGE_DECODERS, Images, StoredImage
  * Edit guide: the order is the defence — sniff, then a header-only size check, then decode with the loader allow-list,
  *   then re-encode without metadata. Never keepMetadata/withMetadata/withExif; never decode SVG; names are always generated.
  * Tests: packages/backend/test/data-images.test.ts, packages/backend/test/data-api.test.ts
@@ -46,6 +46,17 @@ export const IMAGE_LIMITS = {
   queueMax: 8,
   /** A temporary or unreferenced file younger than this is never swept: its row may still be being written. */
   sweepGraceMs: 60 * 60 * 1000,
+} as const;
+
+/**
+ * The decoder allow-list: every loader is blocked, then only these are
+ * unblocked — without it the library would also decode SVG (script), TIFF,
+ * GIF and more. HEIF covers AVIF; HEIC itself fails (no HEVC). The build's
+ * resizer (gallery-spec §7 rule 3) applies the same list.
+ */
+export const IMAGE_DECODERS = {
+  blocked: ['VipsForeignLoad'],
+  allowed: ['VipsForeignLoadJpeg', 'VipsForeignLoadPng', 'VipsForeignLoadWebp', 'VipsForeignLoadHeif'],
 } as const;
 
 /** The stored format: always WebP, re-encoded, whatever was uploaded. */
@@ -165,10 +176,8 @@ export async function createImages(opts: { readonly dir: string }): Promise<Imag
   const { default: sharp } = await loadDriver('sharp') as { default: ImageLibrary };
   sharp.cache(false);
   sharp.concurrency(1);
-  // The decoder allow-list: without it the library would also decode SVG
-  // (script), TIFF, GIF and more. HEIF covers AVIF; HEIC itself fails (no HEVC).
-  sharp.block({ operation: ['VipsForeignLoad'] });
-  sharp.unblock({ operation: ['VipsForeignLoadJpeg', 'VipsForeignLoadPng', 'VipsForeignLoadWebp', 'VipsForeignLoadHeif'] });
+  sharp.block({ operation: [...IMAGE_DECODERS.blocked] });
+  sharp.unblock({ operation: [...IMAGE_DECODERS.allowed] });
 
   const dir = opts.dir;
   const tmp = join(dir, TMP_DIR);

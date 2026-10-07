@@ -137,7 +137,7 @@ compiler knows and hand-written galleries always get wrong. 200 images × 4
 widths = 800 encodes, so output is content-hashed and cached, or CONVENTIONS §6's
 byte-identical rebuild stops being cheap.
 
-> **Status (rule 1 built, rule 3 awaiting a decision).** Rule 1 ships: the
+> **Status (rules 1 and 3 built, 2026-10-06).** Rule 1 ships: the
 > CLI reads the first 1MB of each image the build copies, through the asset
 > sandbox, and `target-web/src/image-size.ts` reads its size from the
 > header — PNG, GIF, JPEG (EXIF orientation applied), WebP (VP8, VP8L,
@@ -149,23 +149,63 @@ byte-identical rebuild stops being cheap.
 > (never wrong ones) and a warning:
 > `image: can't read the size of './x.bmp' — the page will shift as it loads; export it as WebP, AVIF, JPEG, PNG or GIF`.
 >
-> Rule 3 needs pixels, not a header: four widths means decoding and
-> re-encoding every image, which the compiler cannot do today without a new
-> dependency — and a new compiler dependency is the owner's call. The
-> options:
+> Rule 3 ships as **option A** (the owner's decision, 2026-10-06): images
+> are resized at build by the CLI, with the image library the generated
+> server already uses — same pin, same limits (stack-evaluation §16). The
+> compiler core stays pure: the target decides the widths and writes the
+> attributes (`target-web/src/image-srcset.ts`); the CLI makes the files
+> (`cli/src/images.ts`, encoding in a bounded child process,
+> `cli/src/image-encode.ts`). As built:
 >
-> | Option | Cost | Gain |
-> |---|---|---|
-> | **A. Resize at build** with a vetted image library in the CLI | a native dependency in the compiler (prebuilt binaries per platform, ~10–30MB installed); encode output must be pinned (library + codec versions) or CONVENTIONS §6's byte-identical rebuild breaks; 800 encodes for a 200-image gallery, so a content-hashed cache is required | the full rule: a phone downloads a 480w file instead of the original |
-> | **B. Skip `srcset`, ship one file** (today) | every visitor downloads the original; the author must export at a sensible size — §11's 500KB image-budget warning is the guard, and it is specified but not built yet | no dependency, deterministic, offline, zero build cost |
-> | **C. Resize on the generated server** (its image library is already vetted there) | only sites with a backend; output stops being static files; first request per width pays the encode | no compiler dependency |
->
-> **Recommendation: A**, gated behind the dependency review — the same
-> library the generated server already ships is the natural candidate, with
-> its version pinned and output hashed into a cache under the build folder.
-> Until then the build ships **B**: one size, `width`/`height` exact; the
-> 500KB budget warning (§11) should land with it, as B's only guard. `sizes` without `srcset` means nothing,
-> so neither attribute is written yet.
+> - **Which images.** An `<img>` whose word gives a `sizes` — the gallery's
+>   `grid`, `masonry` and `carousel` images and its lightbox image — of a
+>   JPEG, PNG, WebP or AVIF file (by its first bytes). SVG and GIF are never
+>   resized. `orbit` gives no `sizes`: its ring's textures are the original
+>   files, so a resized copy for the hidden list would be a second download
+>   of every image. Other words' images (hero, feature, cta, logos) give
+>   none yet, so they keep one file.
+> - **Widths.** 480, 768, 1200 and 1800 — only those narrower than the
+>   original: **never upscaled**. The original is the widest candidate while
+>   it is at most 1800px; past that the 1800 variant tops the set. An
+>   original of 480px or less gets no srcset. The original always stays the
+>   `src` (the fallback), and `width`/`height` stay rule 1's.
+> - **`sizes` from the layout** (an upper bound — gaps and gutters only
+>   shrink the box): `grid` is `(width < 768px) 50vw`, then
+>   `(width < 1024px)` at up to three columns' share, then `columns`' share
+>   (`100/columns`, rounded up); `masonry` the same below md, then two
+>   minimum columns and a gap; `carousel` `(width < 768px) 100vw`, then one
+>   minimum column; the lightbox `min(90vw, size.container)`, the dialog's
+>   own width. The site frame (`--az-frame`) is not in `sizes` — it is a CSS
+>   variable `sizes` cannot read — so on a viewport wider than the frame the
+>   browser may pick one width larger than it needs.
+> - **Output.** WebP, quality 80, every encoder option pinned; EXIF
+>   orientation applied to the pixels; no metadata written. Each file is
+>   `/az-img/<hash>-<width>.webp`, the hash over the input bytes and every
+>   option (with the library and codec versions), so the same file always
+>   gives the same names and bytes (CONVENTIONS §6).
+> - **Cache.** Outside the build output — `AZ_IMAGE_CACHE`, default
+>   `$XDG_CACHE_HOME/az/images` (else `~/.cache/az/images`) — keyed by that
+>   hash; an entry is trusted only when every file matches its recorded
+>   SHA-256, so a rebuild (each `az dev` save) encodes nothing.
+> - **Limits.** The upload pipeline's (data-spec §8): the decoder
+>   allow-list, ≤ 8000px a side and ≤ 40 MP checked from the header before
+>   any decode, a bounded decode that fails on any error. A file that does
+>   not decode, or is over the limits, is a warning and ships its original
+>   only: `image: can't resize './x.jpg' — it does not decode; it ships at
+>   its own size only, with no srcset` /
+>   `image: './x.png' is 9000×6000 — over the resize limit (8000px a side,
+>   40 megapixels); it ships at its own size only, with no srcset`. A child
+>   that misses its deadline (10s + 20s per image, 8 images per child) or a
+>   platform without the library's binary is one warning, and those images
+>   ship without a srcset; the build never fails for it.
+> - **Without a resizer** — the playground, unit tests, `az check` — the
+>   `sizes` is removed and the output is exactly what it was before rule 3.
+> - **Lightbox.** The enlarged image takes each thumbnail's `src` (the
+>   original, never its `currentSrc`, which with a srcset is the small copy
+>   the grid chose), its srcset and its `width`/`height`; the neighbour
+>   preload (§8) asks for the same file the dialog's `sizes` picks.
+> - **Not yet.** srcset for `from` rows (their URLs arrive after the page)
+>   and for other words' images.
 
 **4 — `content-visibility: auto` with `contain-intrinsic-size` per row.**
 Offscreen rows skip layout and paint entirely, and the intrinsic size comes free
@@ -266,7 +306,7 @@ What is specific to `orbit`:
 | `orbit` >16 images | `gallery: 'orbit' caps at 16 images, got 30 — use 'grid', or cut the set` |
 | `orbit` <4 images | `gallery: 'orbit' needs at least 4 images to read as a ring — use 'grid'` |
 | image size unreadable (§7 rule 1) | `image: can't read the size of './x.bmp' — the page will shift as it loads; export it as WebP, AVIF, JPEG, PNG or GIF` (an SVG: `give its <svg> a viewBox, or width and height in px`) |
-| image over budget | `gallery: 'bench.webp' is 4.2MB — export it under 500KB or the gallery blocks the page` |
+| image over budget | `gallery: 'bench.webp' is 4.2MB — export it under 500KB or the gallery blocks the page` (built: a warning from the CLI, which has the file's size; over 500KB = 512 000 bytes, the manifest's `maxBytes`; shown in MB from 1MB, else KB) |
 | missing `alt` | `gallery: 'lasts.webp' has no alt text — add: alt "lasts on a shelf", or alt "" if the caption says it` |
 | `alt` equals `caption` | `gallery: alt and caption are identical on 'welt.webp' — set alt "" so it isn't read twice` |
 | partial captions | `gallery: 3 of 9 images have captions — caption all of them or none` |
@@ -312,7 +352,7 @@ boilerplate generator gives anyone.
                  "color.on-scrim","color.overlay","space.*","type.*","radius.md",
                  "motion.emphasis","motion.backdrop","motion.fast","motion.reduced",
                  "motion.ease.emphasis","layer.modal","layer.backdrop","size.measure-display",
-                 "size.measure-body","size.tap","size.ring","size.ring-offset","breakpoint.sm"],
+                 "size.measure-body","size.tap","size.ring","size.ring-offset","breakpoint.sm","breakpoint.md"],
   "deps": { "three": "0.170.0", "@react-three/fiber": "8.17.10" },
   "targets": ["web"],
   "tested": { "with": ["nav", "hero", "footer"],
@@ -343,7 +383,9 @@ the build is megabytes.
 4. **Image processing at build.** §7 rule 3 assumes the compiler resizes and
    re-encodes — a native codec, the first dependency here that cannot be pure
    TypeScript. *(Recommend: decide in M2 — making authors pre-size moves the work
-   to the person least equipped to do it.)*
+   to the person least equipped to do it.)* **Resolved 2026-10-06:** option A,
+   resize at build in the CLI with the server's vetted image library — §7
+   status, stack-evaluation §16.
 5. **Deep-linking a lightbox image.** Out of scope per §8, but "share this
    photo" is real. *(Recommend: revisit with `content`, which has routing.)*
 6. **`breakpoint.md` does not exist.** theme-spec §1 ships `xs` 480, `sm` 768,

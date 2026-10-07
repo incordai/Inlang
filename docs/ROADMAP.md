@@ -333,6 +333,17 @@ lightbox, copy, play, overlay-motion, nav-motion), with a self-test
 proving each fails without what it tests. Still not built: `popup:#id`
 declared popups (Phase 1.5 grammar, warned AZ1222) and the
 `sheet`/`tooltip`/`toast` presets.
+Images (gallery-spec §7, 2026-10-06): every `<img>` of a project file ships
+its header's `width`/`height` (rule 1), and gallery images ship a `srcset`
+resized at build (rule 3, owner option A): up to four WebP widths (480, 768,
+1200, 1800), never upscaled, with a `sizes` from the layout; the original
+stays the `src`. The CLI encodes in a bounded child process with the
+backend's vetted image library and limits (stack-evaluation §16), names each
+file by a hash of its bytes and the pinned options, and caches it outside the
+output; the lightbox carries each image's srcset and size. §11's 500KB
+gallery-image budget warns. Measured in `pnpm test` and `pnpm verify:build`
+(shipped srcsets, file widths, cold-cache determinism). Not yet: srcset on
+other words' images (they give no `sizes`), `orbit`, and `from` rows.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape
