@@ -390,6 +390,13 @@ try {
     const bundled = failing(process.execPath, [join(leak, 'node_modules/vite/bin/vite.js'), 'build'], leak);
     check('M4 exit: the bundle scan FAILS a build with a key pattern in its output',
       bundled !== null && /a service-key pattern was found in the built bundle/.test(bundled));
+    // The guard reads dist/ once it is written; a refused build removes it.
+    const leftWith = (dir, text) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }) : [])
+      .filter((e) => e.isFile() && readFileSync(join(e.parentPath, e.name), 'utf8').includes(text))
+      .map((e) => relative(dir, join(e.parentPath, e.name)));
+    check('§5.5 fixed: the refused build leaves no output folder behind',
+      !existsSync(join(leak, 'dist')),
+      existsSync(join(leak, 'dist')) ? `dist/ remains: ${leftWith(join(leak, 'dist'), 'BEGIN PRIVATE KEY').join(', ') || 'no file with the key'}` : '');
     // CONTROL: the untouched project built above, with its public key shipped.
     check('CONTROL: the clean build (public key present) passed the same guard', existsSync(join(proj, 'dist/index.html')));
 
@@ -412,6 +419,20 @@ try {
       inPublic && pubOut !== null && /found in the built bundle — remove it from source and rebuild \(assets\/logo\.svg@\d+, secret-prefix/.test(pubOut)
         && !pubOut.includes(pubKey),
       pubOut === null ? 'the build succeeded' : pubOut.split('\n').find((l) => l.includes('logo.svg')) ?? pubOut.split('\n')[0]);
+    check('§5.5 fixed: the refused build removed its output — no file left holding the planted key',
+      !existsSync(join(pubProj, 'dist')) && leftWith(join(pubProj, 'dist'), pubKey).length === 0,
+      existsSync(join(pubProj, 'dist')) ? `dist/ remains: ${leftWith(join(pubProj, 'dist'), pubKey).join(', ') || 'no file with the key'}` : '');
+    // The project's own build (npm run build): the refused client build stops
+    // it — the server build and the pre-render never run, nothing is written.
+    const full = spawnSync(process.execPath, [join(pubProj, 'az-vite/build.mjs')], {
+      cwd: pubProj, encoding: 'utf8', env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH, AZ_BUILD_LOG: 'error' },
+      timeout: COMMAND_MS, killSignal: 'SIGKILL',
+    });
+    if (full.error || full.signal) throw new Error(`the project build was stopped: ${full.error?.message ?? full.signal}`);
+    check('§5.5 fixed: npm run build FAILS on the key and writes nothing after — no dist/, no server build, no pre-render',
+      full.status !== 0 && /found in the built bundle/.test(full.stderr) && !full.stderr.includes(pubKey)
+        && !existsSync(join(pubProj, 'dist')) && !existsSync(join(pubProj, '.az-ssr')) && !/prerender/.test(full.stderr),
+      `exit ${full.status}; dist ${existsSync(join(pubProj, 'dist')) ? 'remains' : 'gone'}; .az-ssr ${existsSync(join(pubProj, '.az-ssr')) ? 'present' : 'absent'}`);
 
     // The 3D decoder ships byte-for-byte from three's own files: the clean
     // build above passed with it read (key shape only, as az audit judges it).

@@ -7,11 +7,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { scanText } from '../../core/src/secrets.ts';
-import { shippedSecrets, walkShipped } from '../src/shipped.ts';
+import { removeOutput, shippedSecrets, walkShipped } from '../src/shipped.ts';
 
 /** Shaped like a service key the guard refuses — planted, never real. */
 const PLANTED = `sk_live_${'Q7w'.repeat(12)}`;
@@ -70,4 +70,23 @@ test('a planted key shape in a vendored decoder copy is still caught — byte-id
   // An edited copy is no package's file: every rule applies.
   const edited = project({ 'assets/draco_decoder-AbCd1234.js': decoder }, { 'pkg/libs/draco_decoder.js': `var d="${DENSE}";` });
   assert.deepEqual((await scan(edited)).where.sort(), ['assets/draco_decoder-AbCd1234.js (entropy)', 'assets/draco_decoder-AbCd1234.js (secret-prefix)']);
+});
+
+/* ---- a refused build's output ------------------------------------------- */
+
+test('removeOutput: a refused build\'s output folder inside the project is removed, the project kept', async () => {
+  const dir = project({ 'index.html': '<p>hi</p>', 'assets/notes.txt': `token ${PLANTED}\n` }, { 'pkg/index.js': '' });
+  assert.equal(await removeOutput(dir, join(dir, 'dist')), null);
+  assert.equal(existsSync(join(dir, 'dist')), false, 'the output folder is gone');
+  assert.ok(existsSync(join(dir, 'node_modules/pkg/index.js')), 'CONTROL: the rest of the project is untouched');
+  assert.equal(await removeOutput(dir, join(dir, 'dist')), null, 'an output folder never written is nothing to remove');
+});
+
+test('removeOutput: the project root itself, or a folder outside it, is never removed', async () => {
+  const dir = project({ 'index.html': '<p>hi</p>' });
+  const outside = project({ 'index.html': '<p>other</p>' });
+  assert.match(await removeOutput(dir, dir) ?? '', /was left in place: it is not inside the project/);
+  assert.match(await removeOutput(join(dir, 'dist'), join(dir, 'dist', '..')) ?? '', /was left in place: it is not inside the project/);
+  assert.match(await removeOutput(dir, join(dir, '..', basename(outside), 'dist')) ?? '', /was left in place: it is not inside the project/);
+  assert.ok(existsSync(join(dir, 'dist/index.html')) && existsSync(join(outside, 'dist/index.html')), 'nothing was removed');
 });

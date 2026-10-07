@@ -2,7 +2,7 @@
  * @az module shipped
  * Purpose: the secret scan over a built site's files on disk — what the build guard and az audit both run.
  * Spec: docs/word-quality-gate.md §4 rule 2, §5.5 · docs/auth-block-spec.md §4
- * Exports: walkShipped, shippedSecrets, publishedCopies, readRegular, FILE_MAX_BYTES, MAX_FILES, Shipped, ShippedTree, ShippedHit
+ * Exports: walkShipped, shippedSecrets, publishedCopies, readRegular, removeOutput, FILE_MAX_BYTES, MAX_FILES, Shipped, ShippedTree, ShippedHit
  * Edit guide: imports only node built-ins — the CLI copies this file verbatim into every site's az-vite/, beside secrets.ts; the scanner is passed in, never imported; links are never followed; every walk is capped.
  * Tests: packages/cli/test/shipped.test.ts, packages/cli/test/audit.test.ts, scripts/verify-build.mjs
  */
@@ -21,8 +21,8 @@
  * dense by nature.
  */
 
-import { lstat, readdir, readFile, stat } from 'node:fs/promises';
-import { extname, join, relative, sep } from 'node:path';
+import { lstat, readdir, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { extname, isAbsolute, join, relative, sep } from 'node:path';
 
 /** A shipped file larger than this is not read: it is reported as unscanned instead. */
 export const FILE_MAX_BYTES = 16 * 1024 * 1024;
@@ -157,4 +157,33 @@ export async function shippedSecrets<F extends { readonly rule: string }>(
     .filter((s) => !(s.rule === 'entropy' && published.has(f.path)))
     .map((finding) => ({ path: f.path, finding })));
   return { hits, published };
+}
+
+/**
+ * Removes a refused build's output folder, so nothing a deploy step could
+ * ship is left behind. Only a folder strictly inside `root` is removed: both
+ * are resolved through links first, so a link cannot aim the removal
+ * elsewhere, and the root itself or anything outside it is refused. Returns
+ * null once the folder is gone (or was never written), else why it was left.
+ */
+export async function removeOutput(root: string, outDir: string): Promise<string | null> {
+  let out: string;
+  try {
+    out = await realpath(outDir);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    return `${outDir} could not be resolved, so it was left in place`;
+  }
+  const base = await realpath(root).catch(() => null);
+  if (base === null) return `${outDir} was left in place: the project root ${root} could not be resolved`;
+  const rel = relative(base, out);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return `${outDir} was left in place: it is not inside the project ${root}`;
+  }
+  try {
+    await rm(out, { recursive: true, force: true });
+  } catch (e) {
+    return `${outDir} could not be removed (${(e as NodeJS.ErrnoException).code ?? 'error'})`;
+  }
+  return null;
 }

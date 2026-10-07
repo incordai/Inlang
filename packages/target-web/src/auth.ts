@@ -258,7 +258,8 @@ export function authCss(t: ThemeLike): string {
  * the chunks, the assets Vite reads as bytes, and the files it copies from
  * `public/` — read back from the output folder (az-vite/shipped.ts, the
  * scan `az audit` runs too). Both failures are unsuppressible: no option or
- * flag turns them off.
+ * flag turns them off. A bundle refusal removes the output folder it read,
+ * so a failed build leaves nothing to deploy.
  */
 export function guardTs(required: readonly string[], adapter: string | null = null): string {
   // azbackend: the base URL must be usable, not merely present (§3.4) — the
@@ -267,7 +268,7 @@ export function guardTs(required: readonly string[], adapter: string | null = nu
   return `${generated('build guard: refuses a build that would ship a secret')}import { loadEnv, type Plugin } from "vite";
 import { join, resolve } from "node:path";
 import { PUBLIC_ENV_PREFIX, bundleMessage, envMessage, scanEnv, scanText } from "./secrets.ts";
-import { FILE_MAX_BYTES, MAX_FILES, shippedSecrets, walkShipped } from "./shipped.ts";
+import { FILE_MAX_BYTES, MAX_FILES, removeOutput, shippedSecrets, walkShipped } from "./shipped.ts";
 ${backend ? `import { backendUrlProblem } from "../${AUTH_DIR}/azbackend.ts";\n` : ''}
 /** Variables this site cannot build without (its auth adapter's, §3.2/§3.4). */
 const REQUIRED: readonly string[] = ${JSON.stringify(required)};
@@ -305,7 +306,14 @@ export function secretGuard(): Plugin {
       for (const file of tree.unread) {
         problems.push("auth: " + file + " was not scanned for keys (over " + FILE_MAX_BYTES / 1024 / 1024 + "MB, or past " + MAX_FILES + " files) — the build ships only what the guard has read");
       }
-      if (problems.length > 0) this.error(problems.join("\\n"));
+      if (problems.length > 0) {
+        // The folder is already written: a refused build removes it, so no
+        // deploy step can ship what the guard refused. Only Vite's outDir,
+        // and only inside the project.
+        const left = await removeOutput(root, outDir);
+        if (left !== null) problems.push("auth: " + left + " — delete it before any deploy");
+        this.error(problems.join("\\n"));
+      }
     },
   };
 }
