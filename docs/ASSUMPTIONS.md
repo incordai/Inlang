@@ -8,6 +8,10 @@ comments, docs, or user-facing copy.** If work depends on one, say so.
 
 Status values: `UNVERIFIED` · `TESTING` · `HOLDS` · `FAILED`
 
+`HOLDS (proxy only)` is `HOLDS` on the laptop-plus-synthetic-throttle proxy
+(`motion-tiers-spec.md` §8.3) and nothing else. Per VERIFICATION §2 it is never
+device evidence and is never quoted as such.
+
 ---
 
 ## A1 — Scroll-linked 3D is viable on mid-range mobile browsers
@@ -54,9 +58,10 @@ phones remains unsupported until this says `HOLDS`.
 
 ## A1b — A runtime frame-rate probe can pick the right tier
 
-**Status:** `TESTING` — logic verified, hardware coverage still narrow ·
-**Measured 2026-08-21** (M0 spike) · **Blocks:** the A1 mitigation, and
-therefore the 3D positioning
+**Status:** `HOLDS (proxy only)` — on this laptop and the synthetic-throttle
+proxy; no genuinely slow device has run it · **Verdict 2026-10-07** (M0 spike;
+first measured 2026-08-21) · **Blocks:** the A1 mitigation, and therefore the
+3D positioning
 
 New assumption, created when A1 was downgraded. It is the load-bearing one now:
 that a short in-page probe can distinguish a device that will sustain the frame
@@ -81,6 +86,53 @@ downgraded.
 `deviceMemory`, `prefers-reduced-motion`) and set the default tier
 conservatively to `lite`. That is a worse product but a safe one — and it puts
 A1 back in the critical path, so re-read this file before re-planning.
+
+### Verdict — 2026-10-07: `HOLDS (proxy only)`
+
+The devices available are this laptop (the 2020 machine of the 2026-09-22
+record below, headless `chromium` channel on its hardware GPU — the renderer
+string `test:m0` prints first names the GPU, not a software rasteriser) and
+the synthetic-throttle proxy of `motion-tiers-spec.md` §8.3,
+which §8.4 names as A1b's evidence alongside §8.1 check 6 and §8.2. On both,
+the probe picked the right tier, never oscillated, and did not downgrade the
+capable case. Every figure below was re-run on 2026-10-07 (load average 5–16
+from parallel work during the runs).
+
+| Device / input | Command | Right tier | Result |
+|---|---|---|---|
+| — (pure function) | `pnpm test:decision` | §8.2 rows | **ALL PASS**, 15 assertions; row 4 "200 windows judged, none" with its control "0→1" |
+| — (pure function) | `pnpm test:probe` | §2 gate, §6.1, ladder | **ALL PASS**, 31 assertions; closed loop "path 1→2→3→4" rests at rung 4 |
+| laptop, probe on, 4× CPU throttle [proxy] | `pnpm test:m0` | `full` (frames still meet 20 ms) | rung 0 held 60 s, "applied path 0; decisions none", frame p95 18.4 ms |
+| laptop, probe on, 6× CPU throttle [proxy] | `pnpm test:m0` | `full` | rung 0 held 60 s, "applied path 0; decisions none", frame p95 18.5 ms |
+| laptop, `?az-load=22` [proxy] | `pnpm test:m0` | below `full` | "applied path 0→1→2→3→4→5" in 60 s, one way; decide→apply lag "1:293ms 2:90ms 3:2143ms 4:2135ms 5:2235ms" |
+| laptop, `?az-load=22`, 100 s [proxy] | scratch run, below | `lite` (≈22.5 ms frames: over the 20 ms `full` floor, under 33.3 ms) | `"appliedPath":"0→1→2→3→4→5→6","oneWay":true`, rests at rung 6 `lite` from 63.7 s to 100 s, last window p95 23.3 ms |
+| laptop, `?az-load=10`, 40 s [proxy] — control | scratch run, below | `full` | `"appliedPath":"0","finalTier":"full"`, 19 windows judged, no transitions |
+| every rung forced | `pnpm test:m0` #6 | as forced | 8/8 PASS, effects read back (dpr 2/1.5/1.5/1.5/1/1/1/—, verts 5488→3430 at rung 5, camera subs 1→0 at rung 6) |
+
+`pnpm test:m0` ended `ALL PASS` (exit 0, 5 m 10 s). The two scratch rows come
+from a throwaway browser-automation script (not committed) that loads the built spike
+on `vite preview` with the same GPU channel, DPR 2 and 1440×900 viewport as
+`m0.test.ts`, drives the same 4 s triangle-wave scroll, polls
+`window.__AZ_TIER__.rung` every 250 ms, and prints the engine's own transition
+list — `5→6@63.7s[3 windows p95 over 20ms (last p50 22.5 p95 23.3)]` was the
+last.
+
+**How the threshold reads.** "Correct tier within the settle window" cannot
+mean every step lands inside §3.2's 1.5 s settle: the settle period discards
+samples by design, and §7 item 5 puts the worst case to rung 1 at ~7.5 s.
+What the runs show is that the **entry** tier was right at once on the
+capable laptop and never changed, and that under load the ladder reached the
+right tier at the designed rate (one rung per ~10.8 s, `lite` at 63.7 s)
+and stayed there.
+
+**Why `proxy only`.** CPU throttling cannot starve this scene on this GPU
+(4× and 6× leave frames at 18.4–18.5 ms), so the step-downs come from an
+injected per-frame load, not from a slow device. Nothing here reproduces a
+mobile GPU, thermal throttling or memory pressure (§8.3). §8.4's last A1b
+item — **recording rung transitions on video and judging whether they are
+visible without the debug overlay — was not done**. The verdict becomes plain
+`HOLDS` only when a genuinely slow device has run the probe; A1 stays
+`UNVERIFIED` because no mid-range device was measured.
 
 ### What has been verified — 2026-09-22 (supersedes the 2026-08-21 record)
 
@@ -173,15 +225,17 @@ rasteriser; a GPU driver is not claimed to be byte-stable.
 No genuinely slow device has run the probe; every threshold is validated only
 on one fast machine and synthetic traces. The ladder's post-fx and shadow rungs
 have no real cost to remove in this scene, and rung 6's ease-to-rest (§5.1
-step 2) and the poster cross-fade are not built. Status stays `TESTING` until
-the probe has run on at least one genuinely slow device.
+step 2) and the poster cross-fade are not built. Rung transitions have not
+been recorded on video. The status is qualified `proxy only` until the probe
+has run on at least one genuinely slow device.
 
 ---
 
 ## A2 — R3F keeps word emitters short
 
-**Status:** `HOLDS` for structure · `FAILED` for a distinctive word ·
-**Measured 2026-08-21** (M0 spike, `spike-m0/`)
+**Status:** `HOLDS` for structure (256 code lines, at the edge of ~250) ·
+`FAILED` for a distinctive word (506) — remedy already taken ·
+**Recounted 2026-10-07** (M0 spike, `spike-m0/`; first measured 2026-08-21)
 
 Declarative R3F should map near 1:1 from the DSL, keeping `emit.web.ts` files
 readable.
@@ -202,6 +256,35 @@ the generator and the shaders. The runtime is DOM-driven rather than R3F —
 one shared renderer drawing every view by scissor (scene-spec §5) needs no
 React binding — so generated sites depend on `three` alone. The measurements
 below stay the spike's record.
+
+### Verdict — 2026-10-07, recounted on the spike as it stands
+
+Code lines = lines with anything left after comments are removed (blank,
+`//`, `/* */` and JSX `{/* */}` lines dropped; strings respected). Counted with
+a throwaway scanner (not committed). On the 2026-09-22 commit `5b21a19` it
+gives `Hero.tsx` 320 / `material.ts` 84 where the table further down says
+314 / 78, and matches `geometry.ts` 78 and `tiers.ts` 336 exactly. The older
+counting rule is not recorded (one candidate: this scanner keeps `//` lines
+inside GLSL template strings as code), so the figures below differ from the
+older tables by up to 6 lines per file for method alone.
+
+| What was counted (`spike-m0/src/`) | Code lines | vs ~250 |
+|---|---|---|
+| `Hero.tsx` as it stands | 351 | — |
+| minus spike-only instrumentation: debug readout `<section className="readout">` (35), `__AZ_TIER__` publishing and its `declare global` (16), measurement read-back — `Measured`, the publish in `RendererWatch`, the probe-cost timer, the `measured` ref (32), and the `?az-load` hook (12) | **256** | **holds, at the edge** — 2.4% over the round number |
+| of those 256: the opt-in model path (`ModelBoundary`/`Model` wiring, its state and the lazy import, 23) and the page frame/pattern hookup (`layout.ts`/`patterns.ts` calls, 23) — both added after 2026-09-22 | 46 | 210 without them |
+| + the distinctive look: `geometry.ts` 78, `material.ts` 84, `seed.ts` 43, `framing.ts` 45 | **506** | **fails** |
+| counted separately, not in either row: probe `tiers.ts` 341; model loader `model.tsx` 107 + `model-url.tsx` 37; frame `layout.ts` 78, `patterns.ts` 122; theme `shades.ts` 68 (not imported by the hero) | — | — |
+
+- **Structural half — `HOLDS`.** 256 against "~250" is inside the stated
+  approximation, not under the round number; read as a hard ≤ 250 it would
+  miss by 6. The hero's structure did not run away as features landed: the
+  growth since 2026-09-22 is the opt-in model and the frame, each a few
+  declarative lines.
+- **With-look half — `FAILED`.** 506, double the budget; the generator and the
+  surface code are what break it, as on every earlier count. The `If FAILED`
+  path is the one already taken on 2026-09-23 (above): the look lives in
+  `packages/scene-runtime` and words emit data. Nothing further to do.
 
 ### Measured result
 
@@ -393,9 +476,28 @@ the emitter at all). Do not fall back to code review — it will not hold.
 
 ## A8 — Draco-compressed hero models fit under 5MB
 
-**Status:** `HOLDS` for geometry · texture weight unmeasured ·
-**Measured 2026-09-23** (M0 spike, `spike-m0/scripts/model.test.ts`) ·
-**Scope: narrowed 2026-08-21 — no longer on the critical path**
+**Status:** `HOLDS` on the opt-in model path, for geometry · texture weight
+unmeasured · **Reproduced 2026-10-07** (M0 spike, `spike-m0/scripts/model.test.ts`;
+first measured 2026-09-23) · **Scope: narrowed 2026-08-21 — no longer on the
+critical path**
+
+### Verdict — 2026-10-07: `HOLDS` (opt-in path, geometry only)
+
+Re-run on this laptop after `pnpm build`, against `vite preview --port 4173`:
+
+- `pnpm test:model` — **ALL PASS**, exit 0, 15 checks: "A8: the Draco sample
+  model is under 5 MB — 0.38 MB for 218880 triangles"; "the model decodes to
+  the triangles that were encoded — 218880 triangles"; "the default
+  (procedural) page fetches no model code, decoder or file"; "every request is
+  same-origin — the decoder is self-hosted, no CDN"; build succeeds with the
+  network poisoned; heap growth over 5 model mount/unmount cycles 1.01 MB (JS
+  heap only). Load to drawable 628 ms local, 1592 ms on the throttled
+  ~10 Mbps / 60 ms link (**proxy**).
+- `pnpm model --sweep` — the size table below reproduced to the digit, from
+  0.12 MB (54,720 triangles) to 1.13 MB (875,520).
+
+The scope note under the table stands: textures are not measured, and the
+sample is a generated product-shaped assembly, not a scanned product.
 
 ### Measured result
 
@@ -458,10 +560,40 @@ alongside the model prop. What replaces it as critical-path work is **A8b**.
 
 ## A8b — A seeded generator is reproducible across engines
 
-**Status:** `HOLDS` for the vertex buffer across three engines · visual
-snapshot stability (10 consecutive runs) still unmeasured ·
-**Measured 2026-08-21, engine axis 2026-09-22** (M0 spike) · **Blocks:** the
-procedural default, and therefore the determinism claim on any page using it
+**Status:** `HOLDS` — vertex buffer across builds, runs and three engines;
+visual snapshot stable over 10 consecutive runs on the CPU rasteriser ·
+**Verdict 2026-10-07** (M0 spike; measured 2026-08-21, engine axis
+2026-09-22) · **Blocks:** the procedural default, and therefore the
+determinism claim on any page using it
+
+### Verdict — 2026-10-07: `HOLDS`
+
+Every half of the threshold, re-run on this laptop:
+
+- **Builds and runs.** `pnpm test:determinism`, run twice as separate
+  processes — **ALL PASS** both times: "3 builds → identical vertex hash —
+  cc723c2a1b107de4", "vertex count stable — 4802 vertices", "CONTROL: a
+  different seed changes the hash — cc723c2a1b107de4 vs 6b1465d6a818ef5c",
+  "CONTROL: fewer strands changes the hash".
+- **The page build.** Two `pnpm build`s give the same `dist/` (sha256 of the
+  sorted per-file sha256 list, paths under `dist/`: `75db68a0…` both times);
+  **control** — a third build with `--base /control/` into the scratchpad
+  gives a different list hash (`256fc958…` against `60c49680…` for the same
+  `dist/`, both listed with `./`-relative paths).
+- **Engines.** `pnpm test:engines` — **ALL PASS**: each of the three engines
+  it runs gives `cc723c2a1b107de4`, 4802 vertices, and `6b1465d6a818ef5c` for
+  the control seed.
+- **Visual snapshots, 10 consecutive runs.** `pnpm test:snapshot` run 10
+  times back to back, each exit 0 and **ALL PASS**: every run rendered the
+  procedural scene at `lite` (rung 6) as `cf1eec2f038c0a5d` in both fresh
+  contexts, after a browser restart and via `?az-tier=lite`, and the rung-4
+  **control** as `64109f447f5ba166` — 40 rung-6 screenshots and 10 controls,
+  no differing byte. Headless CPU rasteriser; a GPU driver is not
+  claimed byte-stable, and a moving (scroll-linked) frame is not snapshotted.
+
+**Not covered:** a shipping desktop browser or a mobile engine (the test
+harness's bundled engine builds only), and the second OS was not re-run today
+(the hash first recorded there is the same `cc723c2a1b107de4`).
 
 ### What has been verified
 
@@ -497,9 +629,9 @@ frame.
 
 ### What is still open
 
-Visual snapshot stability across 10 consecutive runs (the second half of the
-threshold) has not been measured. Engine versions are Playwright's bundled
-builds; a real Safari or mobile engine has not been run.
+Visual snapshot stability across 10 consecutive runs was measured on
+2026-10-07 (verdict above). Engine versions are the test harness's bundled
+builds; a shipping desktop browser or a mobile engine has not been run.
 
 Created when A8 was narrowed. Making procedural geometry the default moves
 determinism from a purely *build-time* property to a *runtime* one: the same

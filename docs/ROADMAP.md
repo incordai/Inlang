@@ -37,7 +37,7 @@ the full protocol in VERIFICATION §2 and record it; if not, M0 still completes.
 - [x] zero tier oscillation across a 60s scroll; downgrade ratchets one way — 60s at 4×/6× throttle held rung 0; a synthetic 22ms load stepped 0→5 one way (`m0.test.ts`, proxy)
 - [ ] `full` ≥ 50fps (p5) on a 2021+ laptop
 - [x] no memory growth across 5 mount/unmount cycles — +1.0 MB JS heap (`m0.test.ts`)
-- [x] hand-written hero ≤ ~250 lines, **counted twice and recorded separately** — 237 structural / 481 with the look (ASSUMPTIONS A2)
+- [x] hand-written hero ≤ ~250 lines, **counted twice and recorded separately** — 256 structural / 506 with the look, recounted 2026-10-07 (ASSUMPTIONS A2)
       (tests A2): once for scene structure alone, once including the shader and
       buffer code that carries the distinctive look. A2 splits into two claims
       and only the structural one is currently supported
@@ -50,8 +50,13 @@ the full protocol in VERIFICATION §2 and record it; if not, M0 still completes.
       byte-identical PNGs across fresh contexts and a browser restart, spike
       (`pnpm test:snapshot`) and generated site (`pnpm test:3d`), each with a
       differing control (ASSUMPTIONS A1b, motion-tiers-spec §6.1) (2026-10-06)
-- [ ] `ASSUMPTIONS.md` A1b, A2, A8, A8b updated to `HOLDS` or `FAILED`; A1 updated
-      only if a real device was actually measured
+- [x] `ASSUMPTIONS.md` A1b, A2, A8, A8b updated to `HOLDS` or `FAILED`; A1 updated
+      only if a real device was actually measured — 2026-10-07, every verdict
+      re-run: A1b `HOLDS (proxy only)` (laptop + synthetic load; no slow
+      device, transitions not on video); A2 `HOLDS` structural (256 code lines)
+      / `FAILED` with the look (506), remedy already taken; A8 `HOLDS` on the
+      opt-in path, geometry only (0.38 MB); A8b `HOLDS`, incl. 10 consecutive
+      byte-identical snapshot runs. A1 unchanged — no real device measured
 
 ⚠ **This is no longer a stop gate**, because a slow device now degrades itself
 rather than shipping a broken scene (`ASSUMPTIONS.md` A1). **A1b replaces it as
@@ -228,11 +233,14 @@ M2 exists. The gates above still stand: nothing below waives them.
 the runtime probe.
 - Procedural determinism (A8b) is verified across builds, runs, macOS arm64
   and Windows x64, and three engines — Chromium, Firefox, WebKit
-  (`pnpm test:engines`). Visual-snapshot stability over 10 runs is unmeasured.
-- Probe logic tests pass (`pnpm test:probe`); A1b stays `TESTING` until a
-  deliberately throttled device is measured.
-- Still open: the throttled-device probe run, the 60s no-oscillation scroll,
-  the fps and memory measurements, and the two line counts. The opt-in
+  (`pnpm test:engines`). Visual-snapshot stability over 10 runs: measured
+  2026-10-07, byte-identical every run (`pnpm test:snapshot` ×10).
+- Probe logic tests pass (`pnpm test:probe`); A1b is `HOLDS (proxy only)`
+  since 2026-10-07 — a genuinely slow device has still not run it.
+- Still open (2026-10-07): the probe on a genuinely slow device, rung
+  transitions on video, and `full` fps on a 2021+ laptop (only a 2020
+  laptop was measured). The 60s throttle scroll, memory and the two line counts are
+  recorded in ASSUMPTIONS A1b / A2. The opt-in
   `.glb`/Draco path is built and measured (2026-09-23, `pnpm test:model`):
   A8 holds for geometry, textures unmeasured.
 - §5's deferral deadline (rungs 3–7 never past 2s) was a spike scheduler
