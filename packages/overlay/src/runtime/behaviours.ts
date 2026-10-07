@@ -186,7 +186,9 @@ function lockScroll(doc: Document): Cleanup {
   body.style.overflow = 'hidden';
   return () => {
     if (previous === null) body.removeAttribute('style');
-    else body.setAttribute('style', previous);
+    // Through the CSSOM, never setAttribute: the page's policy refuses a
+    // style attribute written as markup (word-quality-gate §2 B).
+    else body.style.cssText = previous;
     // Instant: the site smooth-scrolls, and a smooth restore would start at
     // the top the lock clamped the page to and glide down — or be cut short
     // by the next scroll and end somewhere else.
