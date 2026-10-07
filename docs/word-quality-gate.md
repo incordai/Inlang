@@ -260,6 +260,17 @@ pre-rendered pages are written after the guard runs, so `az audit` remains
 the check that reads them. *Fixed (8f2c955):* the backend's last-line 500
 (`writeHead(500)` in `main.ts`) sent no security headers; it is now
 `http.ts` `requestListener`, through `send()` like every other response.
+*Fixed (follow-up):* a build the guard refused still exited with `dist/` on
+disk, the planted key in it, for a careless deploy step to ship; the guard
+now removes Vite's resolved `outDir` before failing — only when it resolves,
+links followed, to a folder strictly inside the project root, else the
+failure says it was left — and `npm run build` stops there, before the
+server build and the pre-render. Node's own 400/408/413/431 answers to a
+request it cannot parse carried no security headers; `http.ts`
+`createBackendServer` answers them from a `clientError` listener with a raw
+status line and the full set, no body and nothing the client sent, then
+destroys the socket — no write on a reset, an unwritable socket, or one
+whose response has begun.
 *Open:* generated pages ship **no CSP** today, which §2 B
 asks for (`emit a sane default CSP header/meta`). `az audit` reports it as a
 warning on every build; emitting one is target-web work — the pages carry
