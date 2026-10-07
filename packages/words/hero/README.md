@@ -93,7 +93,8 @@ Known gaps:
 - Layout (§2): `center` and `full` centre the title, sub and actions on one axis, checked within 1px at 1440 and 375px by `test:visual` (`centred`)
 - Layout (§2): `stack` and `minimal` set their column at the start edge, not centred (unit-tested in `responsive-pilot.test.ts`)
 - Images (§8, gallery-spec §7 rule 3): the poster ships a `srcset` resized at build, never upscaled, with a `sizes` from its box — `full` 100vw (full-bleed, no frame cap), `split` 100vw below 768px then half the frame, `center`/`stack`/`minimal` the frame's width; loading unchanged (eager, no priority hint); the page's preload of it carries the same srcset and sizes, checked by `verify:build`
-- Not sized: a `full` poster cropped tall on a phone (`object-fit: cover`) is drawn wider than 100vw, by its own aspect, which the word cannot see — the browser may pick a file narrower than the crop draws
+- Cover crop (§8): the poster is `object-fit: cover`, so the word marks its box — `split` 4:3, `center`/`stack`/`minimal` 16:9, `full` the header's height bound (`height`'s svh, written as vh) — and the target widens `sizes` when the file is wider than the box: a 3:2 `full` poster at `peek` is `max(100vw, min(128vh, 1800px))`, never past the largest file; checked by `image-srcset.test.ts`, `verify:build`, and in Chromium at 375×812 (the file picked covers the crop)
+- Not sized: a `full` header taller than its min-height (copy longer than the phone's `height` share) draws the poster wider than the bound states
 - Not measured: the live scrim over a scene's lightest possible frame — `test:3d` reads the procedural scene as it draws, and the white-pixel case rests on the poster fixtures and the unit test
 
 ## Tested

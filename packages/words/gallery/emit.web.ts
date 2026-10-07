@@ -407,8 +407,10 @@ function galleryImage(
       // §7 rule 2: eager first row, lazy after, and never fetchpriority.
       loading: eager ? 'eager' : 'lazy',
       decoding: 'async',
-      // §7 rule 3: the layout's widths, for the srcset the build writes.
-      ...(sizes !== undefined && !fromRow ? { sizes } : {}),
+      // §7 rule 3: the layout's widths, for the srcset the build writes. A
+      // `ratio` crop is `cover` in a box of exactly that ratio, which the
+      // target widens `sizes` by when the file is wider than the box.
+      ...(sizes !== undefined && !fromRow ? { sizes, ...(aspect ? { 'data-az-cover': aspect } : {}) } : {}),
     },
     style: {
       display: 'block',

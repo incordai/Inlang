@@ -28,7 +28,9 @@ import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
-import { watchdog, human } from './lib/bounded.mjs';
+import { chromium } from 'playwright';
+import { watchdog, human, within, closeWithin } from './lib/bounded.mjs';
+import { startServer } from './visual/serve.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 /** PRD §9: "Bundle, non-3D pages < 150KB gz". */
@@ -75,6 +77,8 @@ const PUBLIC_AUTH = { AZ_PUBLIC_AUTH_URL: 'https://auth.invalid', AZ_PUBLIC_AUTH
  */
 const COMMAND_MS = 10 * 60_000;
 const RUN_MS = 15 * 60_000;
+/** One browser step (a navigation, an image settling, a close): seconds, measured, with margin. */
+const BROWSER_MS = 30_000;
 const progress = { last: 'starting' };
 const deadline = watchdog(RUN_MS, 'verify:build', progress);
 console.log(`deadlines: command ${human(COMMAND_MS)} · run ${human(RUN_MS)}`);
@@ -637,12 +641,14 @@ try {
   // goes through the real build, and the checks read the pages it ships.
   // A feature's `rows` media and a cta's `split` media use the same files,
   // and so do the hero posters: `full` on / and `split` on /reserve.
+  // /tiles crops them into square and 4:3 tiles (cover crops widen sizes).
   const gallerySite = join(work, 'gallery.az');
   mkdirSync(join(work, 'photos'));
   const photo = (w, h) => sharp({ create: { width: w, height: h, channels: 3, background: { r: 120, g: 60, b: 30 } } })
     .composite([{ input: Buffer.from(`<svg width="${w}" height="${h}"><circle cx="${w / 2}" cy="${h / 2}" r="${Math.min(w, h) / 3}" fill="#fff"/></svg>`) }]);
   await photo(2400, 1600).jpeg({ quality: 85 }).toFile(join(work, 'photos/big.jpg'));
   await photo(1000, 667).png().toFile(join(work, 'photos/mid.png'));
+  await photo(1200, 1200).jpeg({ quality: 85 }).toFile(join(work, 'photos/square.jpg'));
   await photo(400, 300).webp().toFile(join(work, 'photos/small.webp'));
   // A header that parses over data that does not decode.
   writeFileSync(join(work, 'photos/broken.jpg'), (await photo(900, 600).jpeg().toBuffer()).subarray(0, 700));
@@ -653,7 +659,9 @@ try {
     '  feature rows\n' +
     ['big.jpg', 'mid.png'].map((f) => `    item "${f}"\n      text "A photograph."\n      media ./photos/${f}\n`).join('') +
     '  cta split\n    title "Reserve"\n    media ./photos/big.jpg\n    cta "Reserve a pair" /reserve\n\npage /reserve\n' +
-    '  hero split 3d\n    title "Reserve"\n    poster ./photos/mid.png\n    describe "A circle of light"\n');
+    '  hero split 3d\n    title "Reserve"\n    poster ./photos/mid.png\n    describe "A circle of light"\n\npage /tiles\n' +
+    ['square', '4:3'].map((ratio) => `  gallery grid\n    ratio ${ratio}\n    columns 3\n` +
+      ['big.jpg', 'square.jpg'].map((f) => `    image ./photos/${f}\n      alt "${f} in ${ratio}"\n`).join('')).join(''));
   const galleryProj = join(work, 'gallery');
   const galleryReport = azBuild(gallerySite, galleryProj, work, { AZ_IMAGE_CACHE: join(work, 'image-cache-a') });
   cpSync(join(proj, 'node_modules'), join(galleryProj, 'node_modules'), { recursive: true });
@@ -673,7 +681,8 @@ try {
     });
     const [big, bigBox] = of('big.jpg');
     const [mid] = of('mid.png');
-    check('§7 rule 3: a large photograph ships a srcset of the four widths, with the layout\'s sizes',
+    // big.jpg is 3:2 in the default 3:2 tile: a cover crop that matches its box, so sizes is the layout's own.
+    check('§7 rule 3: a large photograph ships a srcset of the four widths, with the layout\'s sizes (CONTROL: a 3:2 file in a 3:2 tile)',
       set(big).map((c) => c.width).join() === '480,768,1200,1800' && attr(big, 'sizes') === '(width < 768px) 50vw, min(34vw, 480px)',
       `${attr(big, 'srcset')} | ${attr(big, 'sizes')}`);
     check('§7 rule 3: the original stays the src, with its own width and height',
@@ -694,7 +703,8 @@ try {
     // Every candidate a shipped page names is a file in dist/, exactly as
     // wide as it says and narrower than its original.
     const reserve = imgTags(shippedRoot(galleryProj, '/reserve'));
-    const named = [...tags, ...reserve].flatMap((t) => set(t).map((c) => ({ ...c, original: Number(attr(t, 'width')), src: attr(t, 'src') })));
+    const tiles = imgTags(shippedRoot(galleryProj, '/tiles'));
+    const named = [...tags, ...reserve, ...tiles].flatMap((t) => set(t).map((c) => ({ ...c, original: Number(attr(t, 'width')), src: attr(t, 'src') })));
     const wrong = [];
     for (const c of named) {
       const file = join(galleryProj, 'dist', c.url);
@@ -723,18 +733,21 @@ try {
     // hero-spec §8: the poster, with the sizes of its own box — `full` is
     // full-bleed, so never capped by the frame; `split` is its column.
     const heroFull = media('az-hero-poster', 'big.jpg');
-    check('hero §8: a full poster ships the four widths, edge to edge (100vw), loading as before',
+    // The 3:2 file is cropped into the header — 100vw wide, 85svh tall at
+    // least, bounded by 85vh — so it is drawn up to 85vh × 1.5 = 128vh wide.
+    check('hero §8: a full poster ships the four widths, the box or its crop (max(100vw, 128vh)), loading as before',
       !!heroFull && set(heroFull).map((c) => c.width).join() === '480,768,1200,1800' &&
-        attr(heroFull, 'srcset') === attr(big, 'srcset') && attr(heroFull, 'sizes') === '100vw' &&
+        attr(heroFull, 'srcset') === attr(big, 'srcset') && attr(heroFull, 'sizes') === 'max(100vw, min(128vh, 1800px))' &&
         attr(heroFull, 'width') === '2400' && attr(heroFull, 'loading') === undefined &&
         attr(heroFull, 'fetchpriority') === undefined,
       heroFull ? `${attr(heroFull, 'srcset')} | ${attr(heroFull, 'sizes')}` : 'no hero poster');
     const heroSplit = reserve.find((t) => attr(t, 'src') === '/photos/mid.png' &&
       (attr(t, 'class') ?? '').split(' ').includes('az-hero-poster'));
-    check('hero §8: a split poster is never upscaled — 480 and 768, then its 1000px self — at its column\'s sizes',
+    // A 1000×667 file in the 4:3 column is drawn 1.1244× the column.
+    check('hero §8: a split poster is never upscaled — 480 and 768, then its 1000px self — at its column\'s sizes, widened for its crop',
       !!heroSplit && set(heroSplit).map((c) => c.width).join() === '480,768,1000' &&
         set(heroSplit)[2]?.url === '/photos/mid.png' && attr(heroSplit, 'srcset') === attr(mid, 'srcset') &&
-        attr(heroSplit, 'sizes') === '(width < 768px) 100vw, min(50vw, 720px)',
+        attr(heroSplit, 'sizes') === '(width < 768px) 113vw, min(57vw, 810px)',
       heroSplit ? `${attr(heroSplit, 'srcset')} | ${attr(heroSplit, 'sizes')}` : 'no hero poster');
     // The renderer preloads every eager image from the page's head, the
     // poster included: that preload must carry the poster's own srcset and
@@ -753,10 +766,65 @@ try {
       check(`hero §8: ${route}'s poster preload carries the poster's srcset and sizes, and none names the original alone`,
         matching.length === 1 && byHref.length === 0, links.join(' ') || 'no image preload');
     }
-    // gallery 4 + lightbox 4 + 3, feature 4 + 3, cta 4, hero full 4 (/), hero split 3 (/reserve):
-    // every one checked against the file it names.
+    // Cover crops (gallery-spec §7 rule 3): a file wider than its tile is
+    // drawn wider than the tile, so its sizes is widened by fileAspect /
+    // tileAspect; a file the tile's shape or narrower is left as it was.
+    const tile = (file, ratio) => tiles.find((t) => attr(t, 'alt') === `${file} in ${ratio}`);
+    const LAYOUT = '(width < 768px) 50vw, min(34vw, 480px)';
+    for (const [file, ratio, sizes, why] of [
+      ['big.jpg', 'square', '(width < 768px) 75vw, min(51vw, 720px)', 'a 3:2 file in a square tile is drawn 1.5× the tile'],
+      ['big.jpg', '4:3', '(width < 768px) 57vw, min(39vw, 540px)', 'a 3:2 file in a 4:3 tile is drawn 1.125× the tile'],
+      ['square.jpg', 'square', LAYOUT, 'CONTROL: a square file in a square tile matches it'],
+      ['square.jpg', '4:3', LAYOUT, 'a square file in a 4:3 tile is drawn at the tile\'s width'],
+    ]) {
+      const t = tile(file, ratio);
+      check(`§7 rule 3 cover: ${why} — ${sizes}`,
+        !!t && attr(t, 'sizes') === sizes && attr(t, 'data-az-cover') === undefined && set(t).length === (file === 'big.jpg' ? 4 : 3),
+        t ? `${attr(t, 'sizes')} | ${attr(t, 'srcset')}` : `no ${file} tile in ${ratio}`);
+    }
+    // gallery 4 + lightbox 4 + 3, feature 4 + 3, cta 4, hero full 4 (/), hero split 3 (/reserve),
+    // tiles 4 + 3 + 4 + 3 (/tiles): every one checked against the file it names.
     check('§7 rule 3: every srcset candidate ships, at its stated width, none upscaled',
-      named.length === 4 + 4 + 3 + 4 + 3 + 4 + 4 + 3 && wrong.length === 0, wrong.join('; ') || `${named.length} candidates`);
+      named.length === 4 + 4 + 3 + 4 + 3 + 4 + 4 + 3 + 14 && wrong.length === 0, wrong.join('; ') || `${named.length} candidates`);
+
+    // In a browser: on a 375×812 phone the full poster's box is the header,
+    // ~690px tall, so the crop draws the 3:2 file ~1035px wide. The file the
+    // browser picks must be at least that wide at the device's density, or
+    // the largest there is. `100vw` alone (the old sizes) picks 480px at 1x.
+    const server = await startServer();
+    server.serve(join(galleryProj, 'dist'));
+    const browser = await within(BROWSER_MS, 'chromium.launch', () => chromium.launch());
+    try {
+      for (const dpr of [1, 2]) {
+        const context = await browser.newContext({ viewport: { width: 375, height: 812 }, deviceScaleFactor: dpr });
+        try {
+          const tab = await context.newPage();
+          tab.setDefaultTimeout(BROWSER_MS);
+          await tab.goto(server.url, { waitUntil: 'load', timeout: BROWSER_MS });
+          await tab.waitForFunction(() => {
+            const img = document.querySelector('img.az-hero-poster');
+            return !!img && img.complete && img.currentSrc !== '';
+          }, null, { timeout: BROWSER_MS });
+          const seen = await within(BROWSER_MS, `poster currentSrc @ ${dpr}x`, () => tab.evaluate(() => {
+            const img = document.querySelector('img.az-hero-poster');
+            const box = document.querySelector('header.az-hero').getBoundingClientRect();
+            return { current: new URL(img.currentSrc).pathname, srcset: img.srcset, height: box.height, width: box.width };
+          }));
+          const widths = new Map(seen.srcset.split(', ').map((c) => c.split(' ')).map(([u, w]) => [u, Number(w.slice(0, -1))]));
+          const chosen = widths.get(seen.current);
+          const largest = Math.max(...widths.values());
+          const needed = Math.ceil(Math.max(seen.width, seen.height * 1.5) * dpr);
+          check(`hero §8 browser: at 375×812 ${dpr}x the full poster's file covers its crop (≥ ${needed}px, or the largest)`,
+            chosen !== undefined && (chosen >= needed || chosen === largest),
+            `chose ${seen.current} (${chosen}px) for a ${seen.width}×${Math.round(seen.height)} box`);
+        } finally {
+          await closeWithin(context, BROWSER_MS, `context.close @ ${dpr}x`);
+        }
+      }
+    } finally {
+      await closeWithin(browser, BROWSER_MS, 'chromium.close');
+      await closeWithin(server, BROWSER_MS, 'server.close');
+    }
   }
 
   /* ---- determinism ------------------------------------------------------ */
@@ -777,7 +845,7 @@ try {
     const first = variants(galleryProj);
     const second = variants(ga);
     check('DETERMINISM: resized images from a cold cache are byte-identical, and the pages name them alike',
-      first.length === 6 && second.length === first.length && read(galleryProj) === read(ga) &&
+      first.length === 8 && second.length === first.length && read(galleryProj) === read(ga) &&
         first.every(([f, bytes], i) => second[i][0] === f && second[i][1].equals(bytes)),
       `${first.length} variants`);
   }

@@ -267,11 +267,39 @@ head; the poster's preload carries the same `imagesrcset` and
 original. `focus` and the scrim are untouched. Checked by
 `packages/target-web/test/image-srcset.test.ts` (every variant and site
 width) and `verify:build` (shipped widths and files, no upscaling, the
-matching preload on a `full` and a `split` page). Not measured by `sizes`:
-`object-fit: cover` draws a poster wider than its box when the file is
-wider than the box's aspect — a `full` poster on a portrait phone most of
-all — and the word cannot see the file's aspect (gallery-spec §7), so the
-browser may pick a narrower file than the crop draws.
+matching preload on a `full` and a `split` page).
+
+**The poster's cover crop widens its `sizes` (implemented).** The poster
+is `object-fit: cover` in its visual's box, so a file wider than the box is
+drawn wider than the box. The word marks the box (gallery-spec §7, "cover
+crops"), and the target widens `sizes` by the file's own aspect, read from
+its header, never past the largest file in the srcset:
+
+- `split` — the media column's 4:3, and `center`, `stack`, `minimal` — the
+  16:9 rectangle: exact ratios, so each clause is multiplied by
+  max(1, fileAspect / boxAspect). A 1000×667 poster in `split` ships
+  `(width < 768px) 113vw, min(57vw, 810px)`; a 3:2 poster in a 16:9 box is
+  narrower than its box and keeps its `sizes`.
+- `full` — the box is the header: the viewport's width (≤ 100vw), and a
+  height of `max(<height>svh, the copy's height)`, where `height` is §6's
+  70/85/92/100. Its aspect moves with the viewport, so the hint is a
+  **height bound, not a ratio**: `<height>vh`. The bound is sound for the
+  CSS: `vh` is the large viewport, never shorter than `svh`, so `85vh` ≥
+  `85svh` at every width and in every breakpoint (the min-height does not
+  change below `sm` — only the gutters do). The poster is then drawn at
+  most `<height>vh × fileAspect` wide where the header is taller than wide,
+  and 100vw where it is wider, so `sizes` is `max(100vw, min(<height ×
+  fileAspect>vh, <largest>px))` — a 3:2 poster at `peek`:
+  `max(100vw, min(128vh, 1800px))`. On a 375×812 phone that is ~1035px
+  where `100vw` said 375: at 1x the browser picks the 1200px file, not 480.
+  Checked by `image-srcset.test.ts` (each `height`, a portrait file),
+  verify:build (shipped markup and preload), and in Chromium at 375×812,
+  1x and 2x: the file `currentSrc` names is at least the header's height ×
+  the file's aspect × the density wide, or the largest there is.
+
+Not bounded: copy taller than the min-height grows the header past
+`<height>svh` — a long title on a short phone — and the CSS states no upper
+limit for it, so there the crop can still draw wider than `sizes` says.
 
 **`dispose()` on unmount.** Geometries, materials, textures. Without it, a
 route change leaks memory until the tab dies. This is exactly the failure a

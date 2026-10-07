@@ -201,12 +201,34 @@ byte-identical rebuild stops being cheap.
 >   image from the page's head, and its preload carries the image's own
 >   `srcset` and `sizes` as `imagesrcset`/`imagesizes`, so it asks for the
 >   file the `<img>` picks (verify:build checks the poster's on both pages).
->   Not measured by `sizes`: an `object-fit: cover` crop draws the image
->   wider than its box when the file's aspect is wider than the box's — a
->   `full` poster on a portrait phone most of all — and the word cannot
->   see the file's aspect (as for logos, below), so the browser may pick a
->   narrower file than the crop draws. The gallery's cropped `ratio` tiles
->   share this.
+> - **Cover crops widen `sizes`** (built 2026-10-06). An `object-fit:
+>   cover` image is drawn wider than its box when the file is wider than
+>   the box, and `sizes` states the box. The word knows the box, the target
+>   knows the file's aspect (rule 1's header), so a word marks such an
+>   image with `data-az-cover`, its box in every clause, and the target
+>   (`coverSizes`, `target-web/src/image-srcset.ts`) rewrites `sizes` and
+>   removes the hint:
+>   - a ratio, `w / h` — the box's exact aspect. Each clause's length is
+>     multiplied by max(1, fileAspect / boxAspect), every term rounded up
+>     (`min(34vw, 480px)` × 1.5 = `min(51vw, 720px)`); a box at least as
+>     wide as the file leaves `sizes` exactly as it was. The gallery's
+>     `ratio` tiles (grid, masonry and carousel, any ratio but `auto`) give
+>     their ratio; the hero's `split` (4:3) and `center`/`stack`/`minimal`
+>     (16:9) posters theirs.
+>   - a height, `<n>vh` — an upper bound of the box's height, for a box
+>     whose aspect moves with the viewport (hero `full`, hero-spec §8).
+>     The image is drawn at least the box's width and at most height ×
+>     fileAspect wide, so each clause becomes `max(<length>, <n ×
+>     fileAspect>vh)`.
+>   A widened length is capped at the largest file in the srcset, px —
+>   the browser picks that file at any width past it, so the cap changes
+>   no choice and keeps the value readable — and the cap is written only
+>   where a term could pass it (a vw share under `(width < 768px)` is at
+>   most 768px). The lightbox is `contain`, never widened. Checked by
+>   `image-srcset.test.ts` and verify:build (/tiles: a 3:2 file in a
+>   `square` tile ships `(width < 768px) 75vw, min(51vw, 720px)` and in a
+>   `4:3` tile `… 57vw, min(39vw, 540px)`; a square file in either keeps
+>   the layout's `sizes`, and so does a 3:2 file in the default 3:2 tile).
 > - **The site frame caps `sizes`.** `sizes` cannot read `--az-frame` (a
 >   CSS variable), but the frame is a compile-time value: the target writes
 >   it from `site width` and theme tokens (`default` = `size.container`,

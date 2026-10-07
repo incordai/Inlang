@@ -16,7 +16,8 @@
  * Props: eyebrow → p.az-hero-eyebrow · title → h1.az-hero-title · sub → p.az-hero-sub ·
  *   height → min-height in svh (HEIGHT table) + data-height · poster → img.az-hero-poster via ctx.asset ·
  *   describe → poster alt and the visual's aria-label · model → data-az-model via ctx.asset ·
- *   focus → the poster's object-position (the crop's focal point); the poster's `sizes` → posterSizes().
+ *   focus → the poster's object-position (the crop's focal point); the poster's `sizes` → posterSizes(),
+ *   its cover box (data-az-cover) → posterBox().
  * Styling: theme tokens only; below.sm mobile gutter (+ split one column); actions below.xs stack;
  *   states.live hides the poster (full: the header clears, the scrim layer stays);
  *   states.overBackdrop gives the veil;
@@ -88,6 +89,24 @@ function posterSizes(variant: string, ctx: EmitContext): string {
   }
   return contentShare(1, frame);
 }
+
+/** §8: the visual's box in the flow — `split`'s media column, and the 16:9 rectangle of center, stack and minimal. */
+const VISUAL_RATIO = { split: '4 / 3', flow: '16 / 9' } as const;
+
+/**
+ * gallery-spec §7 rule 3: the poster is `cover` in its visual's box, so the
+ * target widens `sizes` when the file is wider than the box. Every layout
+ * but `full` has a box of one exact ratio (VISUAL_RATIO). `full`'s box is
+ * the header: the viewport's width, and `height`'s min-height in svh
+ * (HEIGHT). Its tallness has no ratio — it changes with the viewport — so
+ * the hint is that height, written in vh: `vh` is the large viewport, never
+ * shorter than `svh`, so `<n>vh` bounds the min-height above at every width.
+ * The bound holds while the copy fits in the min-height; taller copy grows
+ * the header past it, which no CSS states (hero-spec §8).
+ */
+const posterBox = (variant: string, heightWord: string): string =>
+  variant === 'full' ? `${HEIGHT[heightWord] ?? HEIGHT.peek}vh`
+    : variant === 'split' ? VISUAL_RATIO.split : VISUAL_RATIO.flow;
 
 /** §4 — display type is fluid; `full` and `minimal` get the larger step. */
 const bigDisplay = (variant: string | null) =>
@@ -209,6 +228,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
             // The layout's widths, for the srcset the build writes. Loading
             // stays as above: eager, no priority hint.
             sizes: posterSizes(variant, ctx),
+            'data-az-cover': posterBox(variant, heightWord),
           },
           // §10: the poster is cropped to its box — wide on a desktop, tall
           // on a phone under `full` — so `focus` names the part it keeps,
@@ -239,7 +259,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       // layout gives it its own rectangle in the flow (§8's table, row 1).
       style: behind
         ? { position: 'absolute', inset: '0', zIndex: t.layer.behind }
-        : { position: 'relative', width: '100%', aspectRatio: variant === 'split' ? '4 / 3' : '16 / 9', marginTop: variant === 'split' ? undefined : px(t.space[48]) },
+        : { position: 'relative', width: '100%', aspectRatio: variant === 'split' ? VISUAL_RATIO.split : VISUAL_RATIO.flow, marginTop: variant === 'split' ? undefined : px(t.space[48]) },
       children: poster,
     });
     // §8/§9: the type over the visual sits on a gradient scrim. The header's

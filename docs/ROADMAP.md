@@ -361,8 +361,13 @@ the backend's one stored size — the upload pipeline makes no width variants
 variant, with its box's `sizes` (`full` 100vw, uncapped; `split` its column;
 `center`/`stack`/`minimal` the frame), its loading unchanged, and the
 page's preload of it carrying the same srcset and sizes (hero-spec §8,
-verify:build). Not yet: `orbit`, variants at upload for
-`from` rows, and `sizes` that account for a `cover` crop wider than its box.
+verify:build). A `cover` crop wider than its box widens its `sizes`: the
+word marks the box (a gallery `ratio` tile, the hero's 4:3 and 16:9
+visuals; `full` a height bound, `<height>vh`) and the target multiplies
+each clause by fileAspect / boxAspect, capped at the largest file
+(gallery-spec §7, hero-spec §8; unit, verify:build, and a Chromium check
+at 375×812). Not yet: `orbit`, variants at upload for `from` rows, and a
+`full` header whose copy is taller than its min-height.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape
