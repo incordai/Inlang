@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compile, serialiseSpec, type Manifest } from '../src/index.ts';
-import { iconFormat } from '../src/icon.ts';
+import { iconFormat, pngSize, TOUCH_ICON_SIZE } from '../src/icon.ts';
 
 const manifests = new Map<string, Manifest>();
 const ascii = (s: string) => new TextEncoder().encode(s);
@@ -153,6 +153,53 @@ test('an icon under a page is AZ1503 — one icon per site', () => {
 test('icon twice is AZ1504; no value is AZ1205', () => {
   assert.ok(codes(site('  icon ./a.svg\n  icon ./b.svg\n')).includes('AZ1504'));
   assert.ok(codes(site('  icon\n')).includes('AZ1205'));
+});
+
+/* ---- the home-screen icon: AZ1422 ------------------------------------- */
+
+/** PNG's head with the IHDR's width and height set, big-endian. */
+const pngOf = (width: number, height: number) => {
+  const b = PNG.slice();
+  new DataView(b.buffer).setUint32(16, width);
+  new DataView(b.buffer).setUint32(20, height);
+  return b;
+};
+
+test('AZ1422 warns, at the icon line, when no home-screen icon can be made — the build still stands', () => {
+  const cases: [string, Uint8Array, RegExp][] = [
+    ['./icon.svg', SVG, /^site: icon '\.\/icon\.svg' is an SVG, and a home-screen icon must be a PNG — the site has none; use a square PNG of 180×180 or more for one$/],
+    ['./icon.png', pngOf(64, 64), /^site: icon '\.\/icon\.png' is 64×64, and a home-screen icon needs a square PNG of 180×180 or more — the site has none; it is never upscaled$/],
+    ['./icon.png', pngOf(179, 400), /is 179×400/],
+    ['./icon.png', pngOf(512, 256), /is 512×256/],
+  ];
+  for (const [path, bytes, message] of cases) {
+    const r = run(site(`  icon ${path}\n`), () => bytes);
+    assert.equal(r.ok, true, path);
+    const d = only(site(`  icon ${path}\n`), 'AZ1422', () => bytes);
+    assert.equal(d.severity, 'warning');
+    assert.equal(d.pos.line, 3);
+    assert.match(d.message, message);
+  }
+});
+
+test('CONTROL: a square PNG of 180 or more warns nothing; without a reader nothing is read', () => {
+  for (const side of [180, 181, 512]) assert.deepEqual(codes(site('  icon ./icon.png\n'), () => pngOf(side, side)), [], String(side));
+  assert.deepEqual(codes(site('  icon ./icon.svg\n')), []);
+});
+
+test('CONTROL: an icon that is already an error (AZ1421) does not also warn AZ1422', () => {
+  assert.deepEqual(codes(site('  icon ./icon.png\n'), () => SVG), ['AZ1421']);
+  assert.deepEqual(codes(site('  icon ./icon.png\n'), () => null), ['AZ1421']);
+});
+
+test('pngSize reads the IHDR, big-endian; anything not a whole PNG head is null', () => {
+  assert.equal(TOUCH_ICON_SIZE, 180);
+  assert.deepEqual(pngSize(PNG), { width: 180, height: 180 });
+  assert.deepEqual(pngSize(pngOf(0x01020304, 70000)), { width: 0x01020304, height: 70000 });
+  assert.deepEqual(pngSize(pngOf(0xffffffff, 1)), { width: 0xffffffff, height: 1 }, 'unsigned, never negative');
+  assert.equal(pngSize(PNG.subarray(0, 20)), null, 'a cut IHDR');
+  assert.equal(pngSize(SVG), null);
+  assert.equal(pngSize(GIF), null);
 });
 
 /* ---- the sniff on its own --------------------------------------------- */

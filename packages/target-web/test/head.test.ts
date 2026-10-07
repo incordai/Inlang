@@ -126,10 +126,10 @@ page /
 const ICONED = 'az 1\nsite aurora\n  icon ./brand/icon.svg\npage /\npage /about\n';
 const PNG_HEAD = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 64, 0, 0, 0, 64]);
 const SVG_HEAD = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>');
-const project = (src: string, readBytes?: (p: string) => Uint8Array | null) => {
+const project = (src: string, readBytes?: (p: string) => Uint8Array | null, touchIcon?: (p: string) => string | null) => {
   const r = compile(src, { manifests });
   assert.ok(r.spec, JSON.stringify(r.diagnostics));
-  return emitProject(r.spec, { emitters: WEB_EMITTERS, readBytes });
+  return emitProject(r.spec, { emitters: WEB_EMITTERS, readBytes, touchIcon });
 };
 const page = (p: ReturnType<typeof project>, path = 'index.html') => p.files.find((f) => f.path === path)!.content;
 
@@ -157,6 +157,35 @@ test('the second gate: bytes that are not the format the name says are refused, 
   assert.throws(() => project(ICONED, () => PNG_HEAD), IconError);
   assert.throws(() => project(ICONED, () => null), IconError);
   assert.throws(() => project(ICONED, () => new TextEncoder().encode('GIF89a')), IconError);
+});
+
+/* ---- the home-screen icon (GRAMMAR §4.4) ------------------------------ */
+
+const PNGED = 'az 1\nsite aurora\n  icon ./brand/icon.png\npage /\npage /about\n';
+const touchOf = (html: string) => /<link rel="apple-touch-icon" href="([^"]*)" \/>/.exec(html)?.[1] ?? null;
+
+test("a PNG icon's touch icon, as the build's resizer names it, is declared on every page after the icon", () => {
+  const asked: string[] = [];
+  const p = project(PNGED, () => PNG_HEAD, (path) => { asked.push(path); return '/az-img/0123456789abcdef-180.png'; });
+  for (const path of ['index.html', 'about/index.html']) {
+    assert.match(page(p, path),
+      /<link rel="icon" type="image\/png" href="\/brand\/icon\.png" \/>\n {4}<link rel="apple-touch-icon" href="\/az-img\/0123456789abcdef-180\.png" \/>\n {4}<title>/, path);
+  }
+  assert.deepEqual(asked, ['brand/icon.png'], 'asked once, with the sandboxed project path');
+});
+
+test('the touch href is escaped like every attribute', () => {
+  assert.equal(touchOf(page(project(PNGED, () => PNG_HEAD, () => '/a"b<c>.png'))), '/a&quot;b&lt;c&gt;.png');
+});
+
+test('CONTROL: no touch icon when the resizer makes none, for an SVG icon, without a reader, or without a resizer', () => {
+  const never = () => { throw new Error('an SVG or an untyped icon is never offered to the resizer'); };
+  assert.equal(touchOf(page(project(PNGED, () => PNG_HEAD, () => null))), null, 'the resizer made none');
+  assert.equal(touchOf(page(project(ICONED, () => SVG_HEAD, never))), null, 'an SVG');
+  assert.equal(touchOf(page(project(PNGED, undefined, never))), null, 'no reader: the type is unknown');
+  const before = page(project(PNGED, () => PNG_HEAD));
+  assert.equal(touchOf(before), null, 'no resizer');
+  assert.match(before, /<link rel="icon" type="image\/png" href="\/brand\/icon\.png" \/>\n {4}<title>/, 'the head as before');
 });
 
 /* ---- pageDescription on its own --------------------------------------- */

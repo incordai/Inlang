@@ -188,7 +188,10 @@ Adapters only. **We never implement auth** (PRD §6.5).
       pre-M5 Lighthouse audit (ASSUMPTIONS A6): `description "…"` at site and
       page level and `icon <path>` at site level (GRAMMAR §4.4, AZ1420,
       AZ1421; core `head-settings.test.ts`, target `head.test.ts`, cli
-      `site-icon.test.ts`, verify-build) (2026-10-07)
+      `site-icon.test.ts`, verify-build) (2026-10-07). Then the home-screen
+      touch icon: a 180×180 PNG from a square PNG icon of 180px or more,
+      made by the build's resizer; an SVG or a smaller PNG gives none and
+      warns, AZ1422 (cli `touch-icon.test.ts`, verify-build) (2026-10-07)
 - [ ] proof demo recorded (distribution-and-hosting §6)
 
 ⛔ **If escape-hatch ratio < 50%, stop.** The abstraction is wrong. Reconsider

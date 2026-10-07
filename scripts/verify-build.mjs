@@ -694,6 +694,8 @@ try {
   // so a small site does: a site description with characters HTML must
   // escape, a page's own description over its hero's lead copy, a real PNG
   // icon — and two builds that must fail: a GIF named .png, and a path out.
+  // The icon is 192px square, so the build also resizes it to the 180×180
+  // PNG home-screen icon, in a cache of the run's own.
   const headDir = join(work, 'head-site');
   mkdirSync(join(headDir, 'brand'), { recursive: true });
   await sharp({ create: { width: 192, height: 192, channels: 4, background: { r: 20, g: 120, b: 90, alpha: 1 } } })
@@ -704,7 +706,7 @@ try {
     'page /\n  description "Reserve a pair from the autumn run."\n  hero center\n    title "Head"\n    sub "Lead copy the written description replaces."\n\n' +
     'page /about\n');
   const headProj = join(headDir, 'proj');
-  node(CLI, ['build', headSite, '--out', headProj], headDir);
+  const headReport = azBuild(headSite, headProj, headDir, { AZ_IMAGE_CACHE: join(work, 'touch-cache-a') });
   cpSync(join(proj, 'node_modules'), join(headProj, 'node_modules'), { recursive: true });
   shippedBuild(headProj);
   {
@@ -730,6 +732,47 @@ try {
     check('§4.4: the icon file ships byte for byte at the URL it is declared at',
       existsSync(join(headProj, 'dist/brand/icon.png')) &&
         readFileSync(join(headProj, 'dist/brand/icon.png')).equals(readFileSync(join(headDir, 'brand/icon.png'))));
+    // The home-screen icon: a 180×180 PNG, declared on every page with a
+    // href relative to the page like the icon's, content-hash named, the
+    // same name and bytes from a second cold cache.
+    const touchOf = (r) => /<link rel="apple-touch-icon" href="([^"]+)" \/>/.exec(shippedHead(r))?.[1] ?? null;
+    const touchUrls = ['/', '/about'].map((r) => (touchOf(r) === null ? null : new URL(touchOf(r), fileUrl(r)).pathname));
+    check('§4.4 touch icon: every page declares one, resolving to one content-hash-named PNG under the variant folder',
+      touchUrls.every((u) => u !== null && u === touchUrls[0]) && /^\/az-img\/[0-9a-f]{16}-180\.png$/.test(touchUrls[0] ?? '') &&
+        !/^\//.test(touchOf('/about') ?? '/'),
+      `${touchOf('/')} | ${touchOf('/about')}`);
+    const touchFile = touchUrls[0] === null ? null : join(headProj, 'dist', touchUrls[0]);
+    const touchMeta = touchFile !== null && existsSync(touchFile) ? await sharp(touchFile).metadata() : null;
+    check('§4.4 touch icon: the file ships at that URL and is a 180×180 PNG',
+      touchMeta?.format === 'png' && touchMeta.width === 180 && touchMeta.height === 180,
+      `${touchFile} ${touchMeta?.format} ${touchMeta?.width}×${touchMeta?.height}`);
+    check('§4.4 touch icon: a usable icon warns nothing', !/AZ1422|home-screen/.test(headReport), headReport.trim());
+    const headAgain = join(headDir, 'proj-again');
+    azBuild(headSite, headAgain, headDir, { AZ_IMAGE_CACHE: join(work, 'touch-cache-b') });
+    check('§4.4 touch icon: deterministic — a second cold cache gives the same pages, name and bytes',
+      ['index.html', 'about/index.html'].every((f) => readFileSync(join(headProj, f), 'utf8') === readFileSync(join(headAgain, f), 'utf8')) &&
+        touchUrls[0] !== null && readFileSync(join(headAgain, 'public', touchUrls[0])).equals(readFileSync(join(headProj, 'public', touchUrls[0]))));
+    // CONTROLS: an SVG icon and a PNG under 180px ship the icon and no touch
+    // icon — never an SVG rasterised, never a small one upscaled — and warn.
+    writeFileSync(join(headDir, 'brand/icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12"/></svg>\n');
+    await sharp({ create: { width: 64, height: 64, channels: 4, background: { r: 20, g: 120, b: 90, alpha: 1 } } })
+      .png().toFile(join(headDir, 'brand/small.png'));
+    for (const [name, icon, type, warning] of [
+      ['svg', 'icon.svg', 'image/svg+xml', /svg\.az:3:8 warning AZ1422 {2}site: icon '\.\/brand\/icon\.svg' is an SVG, and a home-screen icon must be a PNG/],
+      ['small', 'small.png', 'image/png', /small\.az:3:8 warning AZ1422 {2}site: icon '\.\/brand\/small\.png' is 64×64, and a home-screen icon needs a square PNG of 180×180 or more/],
+    ]) {
+      writeFileSync(join(headDir, `${name}.az`), `az 1\nsite head\n  icon ./brand/${icon}\n\npage /\n`);
+      const out = join(headDir, `${name}-proj`);
+      const cache = join(work, `touch-cache-${name}`);
+      const report = azBuild(join(headDir, `${name}.az`), out, headDir, { AZ_IMAGE_CACHE: cache });
+      cpSync(join(proj, 'node_modules'), join(out, 'node_modules'), { recursive: true });
+      shippedBuild(out);
+      const shipped = readFileSync(join(out, 'dist/index.html'), 'utf8');
+      check(`CONTROL §4.4: a${name === 'svg' ? 'n SVG icon' : ' PNG icon under 180px'} ships with no touch icon, nothing resized, and warns AZ1422`,
+        !shipped.includes('apple-touch-icon') && shipped.includes(`rel="icon" type="${type}"`) &&
+          !existsSync(join(out, 'dist/az-img')) && !existsSync(cache) && warning.test(report),
+        report.trim().split('\n')[0]);
+    }
     writeFileSync(join(headDir, 'gif.az'), 'az 1\nsite head\n  icon ./brand/fake.png\n\npage /\n');
     writeFileSync(join(headDir, 'brand/fake.png'), 'GIF89a\x01\x00\x01\x00');
     const gifOut = failing(process.execPath, [CLI, 'build', join(headDir, 'gif.az'), '--out', join(headDir, 'gif')], headDir) ?? '';

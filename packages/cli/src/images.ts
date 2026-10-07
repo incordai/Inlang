@@ -1,10 +1,10 @@
 /**
  * @az module images
- * Purpose: the build's image resizer: content-hashed WebP variants from a cache outside the build output, encoded by a bounded child process.
- * Spec: docs/gallery-block-spec.md §7 rule 3 · docs/stack-evaluation.md §16
- * Exports: createResizer, Resizer, ENCODING, VARIANT_DIR, imageCacheDir, imageId, variantName, entryName, CacheEntry, EncodeJob
+ * Purpose: the build's image resizer: content-hashed WebP variants, and the PNG home-screen icon, from a cache outside the build output, encoded by a bounded child process.
+ * Spec: docs/gallery-block-spec.md §7 rule 3 · docs/GRAMMAR.md §4.4 (touch icon) · docs/stack-evaluation.md §16
+ * Exports: createResizer, Resizer, ENCODING, TOUCH_ENCODING, VARIANT_DIR, imageCacheDir, imageId, touchIconId, variantName, VariantFormat, entryName, CacheEntry, EncodeJob
  * Edit guide: a cache entry is used only when every file is there with its recorded hash; the image library runs only in the child (image-encode.ts).
- * Tests: packages/cli/test/images.test.ts
+ * Tests: packages/cli/test/images.test.ts, packages/cli/test/touch-icon.test.ts
  */
 
 /**
@@ -28,6 +28,13 @@
  * is a warning, and that image ships as its original only — as before this
  * rule existed. Only raster formats are resized (JPEG, PNG, WebP, AVIF, by
  * their first bytes); SVG and GIF never are.
+ *
+ * The home-screen ("touch") icon (GRAMMAR §4.4) goes the same way: a square
+ * PNG `site icon` larger than TOUCH_ICON_SIZE is resized down to it, as a
+ * PNG — the format a phone takes — named by its own hash (TOUCH_ENCODING),
+ * cached and encoded with the variants. One exactly that size is the touch
+ * icon as it is; a smaller, non-square or SVG icon gives none (compile()
+ * warns, AZ1422), and nothing is ever upscaled.
  */
 
 import { createHash } from 'node:crypto';
@@ -37,6 +44,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IMAGE_LIMITS, sniffImage } from '../../backend/src/server/data-images.ts';
+import { TOUCH_ICON_SIZE, pngSize } from '../../core/src/index.ts';
+import type { TouchIcon } from '../../target-web/src/head.ts';
 import type { Resize, Variant } from '../../target-web/src/image-srcset.ts';
 
 /**
@@ -55,6 +64,22 @@ export const ENCODING = {
     quality: IMAGE_LIMITS.quality, alphaQuality: 100, effort: 4, lossless: false, nearLossless: false,
     smartSubsample: false, smartDeblock: false, preset: 'default', exact: false,
   },
+} as const;
+
+/**
+ * Everything that decides the touch icon's bytes, pinned and hashed into its
+ * name like ENCODING — a separate key, so adding it renamed no WebP variant.
+ * The PNG writer's options leave nothing to chance: a fixed zlib level, no
+ * adaptive filtering, no palette quantisation (which would search colours),
+ * no interlace; and, as for every variant, no metadata is kept.
+ */
+export const TOUCH_ENCODING = {
+  scheme: 1,
+  versions: { ...ENCODING.versions, png: '1.6.58', zlib: '2.3.3' },
+  decode: ENCODING.decode,
+  size: TOUCH_ICON_SIZE,
+  resize: ENCODING.resize,
+  png: { compressionLevel: 9, adaptiveFiltering: false, palette: false, progressive: false },
 } as const;
 
 /** Where variants are served from: `public/az-img/…` in the generated project, `/az-img/…` on the page. */
@@ -92,8 +117,20 @@ export function imageId(bytes: Uint8Array): string {
     .slice(0, ID_CHARS);
 }
 
+/** The cache key of a touch icon's source file: its bytes and TOUCH_ENCODING. */
+export function touchIconId(bytes: Uint8Array): string {
+  return createHash('sha256')
+    .update(`az-touch-icon\0${JSON.stringify(TOUCH_ENCODING)}\0`)
+    .update(bytes)
+    .digest('hex')
+    .slice(0, ID_CHARS);
+}
+
+/** What a variant is written as: WebP for a srcset, PNG for the touch icon. */
+export type VariantFormat = 'webp' | 'png';
+
 /** A variant's file name, in the cache and under VARIANT_DIR alike. */
-export const variantName = (id: string, width: number): string => `${id}-${width}.webp`;
+export const variantName = (id: string, width: number, format: VariantFormat = 'webp'): string => `${id}-${width}.${format}`;
 
 /** The cache entry's file name for an image id. */
 export const entryName = (id: string): string => `${id}.json`;
@@ -119,6 +156,8 @@ export interface EncodeJob {
   /** The real path, already through the asset sandbox. */
   readonly file: string;
   readonly widths: number[];
+  /** Absent for a srcset's WebP variants; 'png' for the touch icon (one square width). */
+  readonly format?: VariantFormat;
 }
 
 /**
@@ -133,7 +172,7 @@ export function imageCacheDir(env: NodeJS.ProcessEnv = process.env): string {
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 /** The cache's entry for `id`, or null when there is none it can trust for these widths. */
-function cached(cacheDir: string, id: string, widths: readonly number[]): CacheEntry | null {
+function cached(cacheDir: string, id: string, widths: readonly number[], format: VariantFormat = 'webp'): CacheEntry | null {
   let entry: CacheEntry;
   try {
     entry = JSON.parse(readFileSync(join(cacheDir, entryName(id)), 'utf8')) as CacheEntry;
@@ -143,7 +182,7 @@ function cached(cacheDir: string, id: string, widths: readonly number[]): CacheE
   if ('failed' in entry) return entry.failed === 'undecodable' || entry.failed === 'too-large' ? entry : null;
   if (!Array.isArray(entry.widths) || entry.widths.join() !== widths.join()) return null;
   for (const w of widths) {
-    const file = join(cacheDir, variantName(id, w));
+    const file = join(cacheDir, variantName(id, w, format));
     if (!existsSync(file) || sha256(readFileSync(file)) !== entry.sha256?.[String(w)]) return null;
   }
   return entry;
@@ -153,6 +192,8 @@ function cached(cacheDir: string, id: string, widths: readonly number[]): CacheE
 export interface Resizer {
   /** For EmitOptions.resize. A cache miss is planned (its names are known) and encoded by `encode`. */
   readonly resize: Resize;
+  /** For EmitOptions.touchIcon. A cache miss is planned and encoded by `encode`, like a variant. */
+  readonly touchIcon: TouchIcon;
   /**
    * Encode every planned miss in bounded child processes. True when some
    * image got no variants after all — the page must be emitted again, and
@@ -182,6 +223,8 @@ export function createResizer(cacheDir: string, locate: (projectPath: string) =>
   /** Per project path: its real file and id, or null when it is not a format that is resized. */
   const known = new Map<string, { file: string; id: string } | null>();
   const pending = new Map<string, EncodeJob & { path: string }>();
+  /** Per project path: the touch icon's source, its id, and whether it is already the size; null when it gives none. */
+  const touchKnown = new Map<string, { file: string; id: string; exact: boolean } | null>();
   /** Ids encoded this build that came out with nothing: their pages ship originals only. */
   const without = new Set<string>();
   const used = new Map<string, string>();
@@ -199,8 +242,14 @@ export function createResizer(cacheDir: string, locate: (projectPath: string) =>
     return found;
   };
 
-  const report = (path: string, entry: CacheEntry) => {
+  const report = (path: string, entry: CacheEntry, format: VariantFormat = 'webp') => {
     if (!('failed' in entry)) return;
+    if (format === 'png') {
+      warn(`touch:${path}`, entry.failed === 'too-large'
+        ? `icon: './${path}' is ${entry.width}×${entry.height} — over the resize limit (${IMAGE_LIMITS.maxSide}px a side); the site has no home-screen icon`
+        : `icon: can't resize './${path}' — it does not decode; the site has no home-screen icon`);
+      return;
+    }
     warn(path, entry.failed === 'too-large'
       ? `image: './${path}' is ${entry.width}×${entry.height} — over the resize limit (${IMAGE_LIMITS.maxSide}px a side, ${IMAGE_LIMITS.maxPixels / 1_000_000} megapixels); it ships at its own size only, with no srcset`
       : `image: can't resize './${path}' — it does not decode; it ships at its own size only, with no srcset`);
@@ -223,6 +272,39 @@ export function createResizer(cacheDir: string, locate: (projectPath: string) =>
     return variants;
   };
 
+  /** A square PNG at least TOUCH_ICON_SIZE a side, by its own header; anything else gives none (compile() warned). */
+  const touchSource = (path: string) => {
+    if (touchKnown.has(path)) return touchKnown.get(path)!;
+    const file = locate(path);
+    let found: { file: string; id: string; exact: boolean } | null = null;
+    if (file !== null) {
+      const bytes = readFileSync(file);
+      const size = pngSize(bytes);
+      if (size !== null && size.width === size.height && size.width >= TOUCH_ICON_SIZE) {
+        found = { file, id: touchIconId(bytes), exact: size.width === TOUCH_ICON_SIZE };
+      }
+    }
+    touchKnown.set(path, found);
+    return found;
+  };
+
+  const touchIcon: TouchIcon = (path) => {
+    const source = touchSource(path);
+    if (!source || without.has(source.id)) return null;
+    // Already the size: the icon file the page ships is the touch icon too.
+    if (source.exact) return `/${path}`;
+    const widths = [TOUCH_ICON_SIZE];
+    const entry = cached(cacheDir, source.id, widths, 'png');
+    if (entry && 'failed' in entry) {
+      report(path, entry, 'png');
+      return null;
+    }
+    if (!entry) pending.set(source.id, { id: source.id, file: source.file, widths, format: 'png', path });
+    const name = variantName(source.id, TOUCH_ICON_SIZE, 'png');
+    used.set(`${VARIANT_DIR}/${name}`, join(cacheDir, name));
+    return `/${VARIANT_DIR}/${name}`;
+  };
+
   const encode = (): boolean => {
     const jobs = [...pending.values()];
     pending.clear();
@@ -232,7 +314,7 @@ export function createResizer(cacheDir: string, locate: (projectPath: string) =>
       const chunk = jobs.slice(at, at + CHUNK);
       const deadline = CHILD_BASE_MS + CHILD_PER_IMAGE_MS * chunk.length;
       const r = spawnSync(process.execPath, ['--experimental-strip-types', ENCODER], {
-        input: JSON.stringify({ cacheDir, jobs: chunk.map(({ id, file, widths }) => ({ id, file, widths })) }),
+        input: JSON.stringify({ cacheDir, jobs: chunk.map(({ id, file, widths, format }) => ({ id, file, widths, format })) }),
         encoding: 'utf8', timeout: deadline, killSignal: 'SIGKILL', maxBuffer: CHILD_OUTPUT_BYTES,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -246,22 +328,28 @@ export function createResizer(cacheDir: string, locate: (projectPath: string) =>
       }
     }
     let incomplete = 0;
+    let touchless = false;
     for (const job of jobs) {
-      const entry = cached(cacheDir, job.id, job.widths);
+      const entry = cached(cacheDir, job.id, job.widths, job.format);
       if (entry && !('failed' in entry)) continue;
       without.add(job.id);
-      if (entry) report(job.path, entry);
+      if (entry) report(job.path, entry, job.format);
+      else if (job.format === 'png') touchless = true;
       else incomplete++;
     }
     if (incomplete > 0) {
       const count = incomplete === 1 ? '1 image ships' : `${incomplete} images ship`;
       warn('resizer', `image: ${stopped ?? 'the resizer wrote no variants'} — ${count} as the original only, with no srcset; build again to retry`);
     }
+    if (touchless) {
+      warn('resizer-touch', `icon: ${stopped ?? 'the resizer wrote no home-screen icon'} — the site has none this build; build again to retry`);
+    }
     return jobs.some((job) => without.has(job.id));
   };
 
   return {
     resize,
+    touchIcon,
     encode,
     restart: () => used.clear(),
     files: () => [...used].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([path, copyFrom]) => ({ path, copyFrom })),

@@ -211,8 +211,19 @@ the project; a URL is AZ1402 — the icon ships with the site), its name ends
 `.svg` or `.png` (AZ1410), and its first bytes must be that format (AZ1421):
 the format is read, never taken from the name. Every page declares it as
 `<link rel="icon" type="…">`; without `icon` every page declares an empty
-one, so no `/favicon.ico` is requested. Not built: a home-screen touch
-icon — the build's resizer makes WebP only, and that icon must be PNG.
+one, so no `/favicon.ico` is requested.
+
+*Built (2026-10-07): the home-screen touch icon.* A square PNG icon of
+180×180 or more also gives every page a `<link rel="apple-touch-icon">`:
+exactly 180 is the icon itself; larger is resized to a 180×180 PNG by the
+build's resizer (its child process, the same pinned image library, a PNG
+output with pinned deterministic options and no metadata, content-hash
+named and cached beside the WebP variants). An SVG is never rasterised at
+build — that would put an XML parser with entities and external
+references on author bytes, outside the upload pipeline's raster-only
+decoder allow-list — so an SVG icon, a PNG under 180px or a non-square
+one gives no touch icon and warns (AZ1422); nothing is upscaled. Without
+a resizer the pages are as before (GRAMMAR §4.4).
 
 **`theme accent`** — selects the hue whose ramp the theme draws from. Steps are
 addressed as tokens (`color.accent-700`), and every step states its contrast

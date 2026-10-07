@@ -33,9 +33,9 @@ import { emitPages, type EmitterMap } from './tree.ts';
 import { sanitizeSvg, SvgError } from './svg.ts';
 import { markdownToNodes, MarkdownError } from './markdown.ts';
 import { compileStyles } from './stylesheet.ts';
-import { iconType, pageDescription } from './head.ts';
+import { iconType, pageDescription, type TouchIcon } from './head.ts';
 import { uniqueIds } from './ids.ts';
-import { COMPONENT_EXT } from '../../core/src/index.ts';
+import { COMPONENT_EXT, ICON_FORMATS } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 import { PUBLIC_ENV_PREFIX } from '../../core/src/index.ts';
 import {
@@ -524,6 +524,11 @@ export interface EmitOptions {
    * is removed and the output is exactly as before.
    */
   readonly resize?: Resize;
+  /**
+   * The home-screen icon for a PNG `site icon` (GRAMMAR §4.4) — the CLI's,
+   * through the same resizer. Without it no page declares one.
+   */
+  readonly touchIcon?: TouchIcon;
 }
 
 /**
@@ -706,12 +711,13 @@ function htmlEntries(spec: Spec): Record<string, string> {
   return out;
 }
 
-/** A page's icon declaration: `site icon`'s URL and media type, or null for none. */
-interface IconRef { readonly href: string; readonly type: string | null }
+/** A page's icon declaration: `site icon`'s URL and media type, and its home-screen icon's URL; null for none. */
+interface IconRef { readonly href: string; readonly type: string | null; readonly touch: string | null }
 
 function iconTag(icon: IconRef | null): string {
   if (icon === null) return '<link rel="icon" href="data:," />';
-  return `<link rel="icon"${icon.type ? ` type="${escapeHtml(icon.type)}"` : ''} href="${escapeHtml(icon.href)}" />`;
+  const touch = icon.touch === null ? '' : `\n    <link rel="apple-touch-icon" href="${escapeHtml(icon.touch)}" />`;
+  return `<link rel="icon"${icon.type ? ` type="${escapeHtml(icon.type)}"` : ''} href="${escapeHtml(icon.href)}" />${touch}`;
 }
 
 // `lang` is "en": the grammar has no site locale to take it from — `site`
@@ -936,12 +942,15 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
     return [htmlFileFor(p.route), authored.get(p.route) ?? pageDescription(nodes.slice(lead, nodes.length - tail))] as const;
   }));
   // The site icon through the asset sandbox — copied like any asset — its
-  // type from its bytes, read through the same sandbox.
+  // type from its bytes, read through the same sandbox. A PNG one may also
+  // give the home-screen icon, which only the build's resizer makes.
   const iconPath = spec.site.icon;
   let icon: IconRef | null = null;
   if (iconPath !== undefined) {
     const href = asset(iconPath);
-    icon = { href, type: iconType(iconPath, options.readBytes?.(href.slice(1))) };
+    const type = iconType(iconPath, options.readBytes?.(href.slice(1)));
+    const touch = type === ICON_FORMATS.png.type ? options.touchIcon?.(href.slice(1)) ?? null : null;
+    icon = { href, type, touch };
   }
   // The tables `from` blocks read (data-spec §10.3); none, and no rows runtime is wired.
   const rowTables = spec.site.data ? fromTables(spec) : [];

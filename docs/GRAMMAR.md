@@ -742,6 +742,28 @@ page /work
   say. Without `icon` each page declares an empty one, so the browser asks
   for no `/favicon.ico`.
 
+  **The home-screen icon.** A phone saving the site to its home screen asks
+  for a PNG `<link rel="apple-touch-icon">`, 180×180. `az build` makes it
+  from a **square PNG icon of 180×180 or more**: exactly 180 is that file as
+  it is; larger is resized down to 180×180 by the build's image resizer — a
+  PNG with pinned options (fixed compression level, no palette, no
+  interlace, no metadata), named by a hash of the file and those options,
+  cached with the responsive-image variants and shipped under `/az-img/`.
+  Every page declares it after the icon, with a href relative to the page
+  like the icon's. It is never upscaled and never rasterised from SVG: an
+  SVG icon, a PNG under 180px a side, or one that is not square gives no
+  touch icon and the warning
+  `site: icon './icon.svg' is an SVG, and a home-screen icon must be a PNG — the site has none; use a square PNG of 180×180 or more for one`
+  or `site: icon './icon.png' is 64×64, and a home-screen icon needs a square PNG of 180×180 or more — the site has none; it is never upscaled`
+  (AZ1422, a warning: the site builds, with its icon). *Decision: an SVG is
+  not rasterised at build. That would run a second, larger parser — XML
+  with entities and references to other files — over author bytes, for one
+  icon; the resizer allows only the raster decoders the upload pipeline
+  allows (JPEG, PNG, WebP, AVIF), and keeping it so is the safer choice.
+  An author who wants the touch icon supplies a PNG.* With no resizer (the
+  Playground, unit tests, `az check`) or one that cannot run, no page
+  declares a touch icon and the pages are otherwise unchanged.
+
 Each is set once: a second `description` in the same site or page, or a
 second `icon`, is AZ1504. No value is AZ1205, a second value AZ1406, an
 indented body AZ1219.

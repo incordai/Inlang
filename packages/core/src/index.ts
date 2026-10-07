@@ -31,14 +31,14 @@ import { link, type Manifest } from './link.ts';
 import { buildSpec, serialiseSpec, type Spec } from './spec.ts';
 import { secretLiterals } from './literals.ts';
 import { checkLock } from './data-lock.ts';
-import { ICON_FORMATS, iconFormat } from './icon.ts';
+import { ICON_FORMATS, TOUCH_ICON_SIZE, iconFormat, pngSize } from './icon.ts';
 import { quotable } from './secrets.ts';
 
 export type { Diagnostic, Pos, Token } from './lex.ts';
 export type { Arg, Statement, AzFile } from './parse.ts';
 export type { Manifest, LinkedWord, PropSpec } from './link.ts';
 export { COMPONENT_EXT, INJECTION_POINTS, META_DESCRIPTION_MAX } from './link.ts';
-export { ICON_FORMATS, ICON_HEAD_BYTES, iconFormat, type IconFormat } from './icon.ts';
+export { ICON_FORMATS, ICON_HEAD_BYTES, TOUCH_ICON_SIZE, iconFormat, pngSize, type IconFormat } from './icon.ts';
 export type { Spec, SpecBlock, SpecPage, SpecSite } from './spec.ts';
 export type { SpecFrom } from './spec-block.ts';
 export { FROM_EMPTY, FROM_SETTINGS, type FromField, type FromManifest } from './from.ts';
@@ -94,7 +94,8 @@ export interface CompileOptions {
    * Reads the start of a project file — at least ICON_HEAD_BYTES of it —
    * through the caller's sandbox; null when it cannot be read (missing, not
    * a file, or outside the project). Given it, the `site icon` file's
-   * content must be the format its extension names (AZ1421). Absent (the
+   * content must be the format its extension names (AZ1421), and an icon no
+   * home-screen icon can be made from warns (AZ1422). Absent (the
    * Playground has no files), the content is not checked here; the target
    * still reads it before declaring a type.
    */
@@ -137,8 +138,11 @@ export function compile(source: string, options: CompileOptions): CompileResult 
   if (icon !== undefined && options.readBytes && !all.some((d) => d.severity === 'error')) {
     const site = parsed.file.body.find((s) => s.word === 'site');
     const at = site?.children.find((s) => s.word === 'icon')?.args[0]?.pos ?? site?.pos ?? { line: 1, col: 1 };
-    const problem = iconProblem(icon, options.readBytes(icon));
+    const bytes = options.readBytes(icon);
+    const problem = iconProblem(icon, bytes);
     if (problem) all.push({ code: 'AZ1421', message: problem, pos: at, severity: 'error' });
+    const touch = problem || bytes === null ? null : touchIconProblem(icon, bytes);
+    if (touch) all.push({ code: 'AZ1422', message: touch, pos: at, severity: 'warning' });
   }
   const ok = !all.some((d) => d.severity === 'error');
 
@@ -159,6 +163,23 @@ function iconProblem(raw: string, bytes: Uint8Array | null): string | null {
   if (format === null) return `site: icon '${path}' is not a PNG or an SVG file — export it as one`;
   if (format !== named) return `site: icon '${path}' is ${format === 'svg' ? 'an SVG' : 'a PNG'} file — name it ${ICON_FORMATS[format].ext}`;
   return null;
+}
+
+/**
+ * Why no home-screen icon can be made from a sound icon file, or null. It
+ * must be PNG — an SVG is not rasterised at build, a new parser on author
+ * bytes for one icon — square, and at least TOUCH_ICON_SIZE a side, since it
+ * is never upscaled. The build still ships the icon; only the touch icon is
+ * left out.
+ */
+function touchIconProblem(raw: string, bytes: Uint8Array): string | null {
+  const path = quotable(raw);
+  const want = `a square PNG of ${TOUCH_ICON_SIZE}×${TOUCH_ICON_SIZE} or more`;
+  if (iconFormat(bytes) === 'svg') return `site: icon '${path}' is an SVG, and a home-screen icon must be a PNG — the site has none; use ${want} for one`;
+  const size = pngSize(bytes);
+  if (size === null) return null;
+  if (size.width === size.height && size.width >= TOUCH_ICON_SIZE) return null;
+  return `site: icon '${path}' is ${size.width}×${size.height}, and a home-screen icon needs ${want} — the site has none; it is never upscaled`;
 }
 
 /** GRAMMAR §7.2 rule 6: report at most this many problems. */

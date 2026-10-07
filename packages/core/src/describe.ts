@@ -42,7 +42,7 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
       theme: 'Theme name, e.g. midnight, paper or signal',
       font: 'Font roles for display, body and mono text',
       description: 'Search-result text for every page; quoted, ≤160 chars',
-      icon: 'Site icon file, ./icon.svg or ./icon.png',
+      icon: 'Site icon, .svg or .png; square PNG ≥180×180 adds touch icon',
     },
     values: { width: SITE_WIDTHS, theme: THEME_NAMES },
   },

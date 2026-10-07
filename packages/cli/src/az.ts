@@ -249,6 +249,7 @@ export function build(options: BuildOptions): BuildOutcome {
     readText: (path) => readProjectText(projectDir, path),
     readBytes: (path) => readProjectHead(projectDir, path),
     resize: resizer?.resize,
+    touchIcon: resizer?.touchIcon,
   });
   try {
     project = emitted();

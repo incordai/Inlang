@@ -1,10 +1,10 @@
 /**
  * @az module image-encode
- * Purpose: the resizer's child process: decodes each image under the upload pipeline's limits and writes its WebP variants and cache entry.
+ * Purpose: the resizer's child process: decodes each image under the upload pipeline's limits and writes its WebP variants (or PNG touch icon) and cache entry.
  * Spec: docs/gallery-block-spec.md §7 rule 3 · docs/stack-evaluation.md §16
  * Exports: (none — a child process images.ts runs, one JSON job on stdin)
  * Edit guide: the order is the defence — decoder allow-list, header-only size check, bounded decode; never keep metadata; the entry is written last.
- * Tests: packages/cli/test/images.test.ts
+ * Tests: packages/cli/test/images.test.ts, packages/cli/test/touch-icon.test.ts
  */
 
 /**
@@ -23,7 +23,9 @@
  *      autoOrient turns the pixels upright, so a variant is drawn the way
  *      the browser draws the original;
  *   5. each width is fitted without enlarging and encoded to WebP with the
- *      pinned options; no metadata is kept — EXIF, GPS, XMP and comments
+ *      pinned options — or, for a touch icon (`format: 'png'`), a square
+ *      source is fitted to its one size and encoded to PNG with
+ *      TOUCH_ENCODING's; no metadata is kept — EXIF, GPS, XMP and comments
  *      never reach a variant;
  *   6. a file whose bytes no longer hash to its id is skipped: it changed
  *      after the build read it, and an entry would lie.
@@ -44,7 +46,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IMAGE_DECODERS } from '../../backend/src/server/data-images.ts';
-import { ENCODING, entryName, imageId, variantName, type CacheEntry, type EncodeJob, type ProbeJob } from './images.ts';
+import { ENCODING, TOUCH_ENCODING, entryName, imageId, touchIconId, variantName, type CacheEntry, type EncodeJob, type ProbeJob } from './images.ts';
 
 /** The exit code for "nothing could be encoded" — read by images.ts with the stderr line. */
 const EXIT_UNAVAILABLE = 2;
@@ -82,16 +84,18 @@ async function encodeOne(sharp: Library, cacheDir: string, job: EncodeJob, bytes
   // Never upscale: every width asked for is narrower than the pixels. The
   // target asked from the header; pixels that disagree are not this image.
   if (job.widths.some((w) => !Number.isInteger(w) || w < 1 || w >= width)) return { failed: 'undecodable' };
+  // A touch icon is one square at its one size, from a square source.
+  const png = job.format === 'png';
+  if (png && (width !== height || job.widths.length !== 1 || job.widths[0] !== TOUCH_ENCODING.size)) return { failed: 'undecodable' };
   const written: string[] = [];
   const sums: Record<string, string> = {};
   try {
     for (const w of job.widths) {
-      const out = await sharp(bytes, ENCODING.decode)
+      const fitted = sharp(bytes, ENCODING.decode)
         .autoOrient()
-        .resize({ width: w, ...ENCODING.resize })
-        .webp(ENCODING.webp)
-        .toBuffer();
-      const file = join(cacheDir, variantName(job.id, w));
+        .resize(png ? { width: w, height: w, ...TOUCH_ENCODING.resize } : { width: w, ...ENCODING.resize });
+      const out = await (png ? fitted.png(TOUCH_ENCODING.png) : fitted.webp(ENCODING.webp)).toBuffer();
+      const file = join(cacheDir, variantName(job.id, w, job.format));
       writeWhole(file, out);
       written.push(file);
       sums[String(w)] = createHash('sha256').update(out).digest('hex');
@@ -127,9 +131,11 @@ async function main(): Promise<void> {
     unavailable(`the image library is not installed for this platform (${(e as Error).message.split('\n')[0]})`);
   }
   const v = sharp.versions;
-  const want = ENCODING.versions;
-  if (from === undefined && (v.sharp !== want.library || v.vips !== want.core || v.webp !== want.webp)) {
-    unavailable(`the image library is ${v.sharp} (core ${v.vips}, webp ${v.webp}); the build pins ${want.library} (core ${want.core}, webp ${want.webp})`);
+  const want = TOUCH_ENCODING.versions;
+  if (from === undefined && (v.sharp !== want.library || v.vips !== want.core || v.webp !== want.webp ||
+      v.png !== want.png || v['zlib-ng'] !== want.zlib)) {
+    unavailable(`the image library is ${v.sharp} (core ${v.vips}, webp ${v.webp}, png ${v.png}, zlib ${v['zlib-ng']}); ` +
+      `the build pins ${want.library} (core ${want.core}, webp ${want.webp}, png ${want.png}, zlib ${want.zlib})`);
   }
   if (input.probe === true) {
     process.stdout.write(`az-image-ok: ${v.sharp}\n`);
@@ -151,7 +157,7 @@ async function main(): Promise<void> {
     } catch {
       continue;
     }
-    if (imageId(bytes) !== job.id) continue;
+    if ((job.format === 'png' ? touchIconId(bytes) : imageId(bytes)) !== job.id) continue;
     const entry = await encodeOne(sharp, input.cacheDir, job, bytes);
     writeWhole(join(input.cacheDir, entryName(job.id)), JSON.stringify(entry));
   }

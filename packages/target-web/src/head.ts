@@ -1,8 +1,8 @@
 /**
  * @az module head
- * Purpose: what a page's <head> says about it beyond the title — its description (written, else its lead copy) and its icon.
+ * Purpose: what a page's <head> says about it beyond the title — its description (written, else its lead copy), its icon and its home-screen icon.
  * Spec: docs/GRAMMAR.md §4.4 · docs/ASSUMPTIONS.md A6 (SEO) · docs/ROADMAP.md M5
- * Exports: pageDescription, iconType, IconError, DESCRIPTION_MAX
+ * Exports: pageDescription, iconType, IconError, DESCRIPTION_MAX, TouchIcon
  * Edit guide: derived from the emitted tree, never from a word's name, so every word's copy counts alike; no copy, no tag.
  *   An icon's type comes from its bytes, never its name.
  * Tests: packages/target-web/test/head.test.ts
@@ -102,3 +102,13 @@ export function iconType(raw: string, bytes: Uint8Array | null | undefined): str
   }
   return ICON_FORMATS[format].type;
 }
+
+/**
+ * The build's home-screen ("touch") icon for a PNG `site icon` at
+ * `projectPath`: its root-relative URL — the icon itself when it is exactly
+ * TOUCH_ICON_SIZE square, else a PNG resized to it — or null when the build
+ * makes none (the icon is smaller, not square, or could not be resized).
+ * The CLI's, with its vetted image library; without it (unit tests, a
+ * playground) no page declares a touch icon and the output is as before.
+ */
+export type TouchIcon = (projectPath: string) => string | null;
