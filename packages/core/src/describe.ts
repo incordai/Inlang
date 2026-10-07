@@ -41,6 +41,8 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
       width: 'Width of the frame every section aligns to',
       theme: 'Theme name, e.g. midnight, paper or signal',
       font: 'Font roles for display, body and mono text',
+      description: 'Search-result text for every page; quoted, ≤160 chars',
+      icon: 'Site icon file, ./icon.svg or ./icon.png',
     },
     values: { width: SITE_WIDTHS, theme: THEME_NAMES },
   },
@@ -62,7 +64,10 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
     },
     values: { display: FONT_FAMILIES, body: FONT_FAMILIES, mono: FONT_FAMILIES },
   },
-  page: { description: 'One page of the site; its value is the route' },
+  page: {
+    description: 'One page of the site; its value is the route',
+    settings: { description: "This page's search-result text; overrides site's" },
+  },
   raw: { description: 'Mount your own component file in page or block' },
   slot: { description: 'Put your component in a block slot or before/after' },
   data: {

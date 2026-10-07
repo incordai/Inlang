@@ -652,6 +652,60 @@ try {
   check('CONTROL: a site without pattern ships no pattern declaration',
     !readFileSync(join(evilProj, 'src/theme.css'), 'utf8').includes('--az-pattern-image'));
 
+  /* ---- GRAMMAR §4.4: `description` and `icon`, as the pages ship them ---- */
+  // The fixture writes neither (it must stay byte-identical to GRAMMAR §8),
+  // so a small site does: a site description with characters HTML must
+  // escape, a page's own description over its hero's lead copy, a real PNG
+  // icon — and two builds that must fail: a GIF named .png, and a path out.
+  const headDir = join(work, 'head-site');
+  mkdirSync(join(headDir, 'brand'), { recursive: true });
+  await sharp({ create: { width: 192, height: 192, channels: 4, background: { r: 20, g: 120, b: 90, alpha: 1 } } })
+    .png().toFile(join(headDir, 'brand/icon.png'));
+  const headSite = join(headDir, 'site.az');
+  writeFileSync(headSite,
+    'az 1\nsite head\n  description "Shoes & boots — \\"made\\" <by hand>"\n  icon ./brand/icon.png\n\n' +
+    'page /\n  description "Reserve a pair from the autumn run."\n  hero center\n    title "Head"\n    sub "Lead copy the written description replaces."\n\n' +
+    'page /about\n');
+  const headProj = join(headDir, 'proj');
+  node(CLI, ['build', headSite, '--out', headProj], headDir);
+  cpSync(join(proj, 'node_modules'), join(headProj, 'node_modules'), { recursive: true });
+  shippedBuild(headProj);
+  {
+    const shippedHead = (r) => {
+      const file = readFileSync(join(headProj, 'dist', r === '/' ? '' : r.slice(1), 'index.html'), 'utf8');
+      return file.slice(0, file.indexOf('</head>'));
+    };
+    const described = (r) => /<meta name="description" content="([^"]*)"/.exec(shippedHead(r))?.[1] ?? null;
+    check("§4.4: a page's own description ships over its lead copy",
+      described('/') === 'Reserve a pair from the autumn run.', described('/'));
+    check("§4.4: the site's description ships on a page without its own — HTML-escaped",
+      described('/about') === 'Shoes &amp; boots — &quot;made&quot; &lt;by hand&gt;' && !shippedHead('/about').includes('<by hand>'),
+      described('/about'));
+    // The project build makes the href relative to each page, as it does the
+    // bundle's (vite.config `base: "./"`): it must resolve, from the page's
+    // own file, to the icon's root URL.
+    const iconOf = (r) => /<link rel="icon" type="image\/png" href="([^"]+)" \/>/.exec(shippedHead(r))?.[1] ?? null;
+    const fileUrl = (r) => `http://site.invalid${r === '/' ? '' : r}/index.html`;
+    check('§4.4: every page declares the icon with the type its bytes say, resolving to its URL, and no empty one',
+      ['/', '/about'].every((r) => iconOf(r) !== null && new URL(iconOf(r), fileUrl(r)).pathname === '/brand/icon.png' &&
+        !shippedHead(r).includes('data:,')),
+      `${iconOf('/')} | ${iconOf('/about')}`);
+    check('§4.4: the icon file ships byte for byte at the URL it is declared at',
+      existsSync(join(headProj, 'dist/brand/icon.png')) &&
+        readFileSync(join(headProj, 'dist/brand/icon.png')).equals(readFileSync(join(headDir, 'brand/icon.png'))));
+    writeFileSync(join(headDir, 'gif.az'), 'az 1\nsite head\n  icon ./brand/fake.png\n\npage /\n');
+    writeFileSync(join(headDir, 'brand/fake.png'), 'GIF89a\x01\x00\x01\x00');
+    const gifOut = failing(process.execPath, [CLI, 'build', join(headDir, 'gif.az'), '--out', join(headDir, 'gif')], headDir) ?? '';
+    check('§4.4: a GIF named .png fails the build with AZ1421 at its line, and writes nothing',
+      /gif\.az:3:8 error AZ1421 {2}site: icon '\.\/brand\/fake\.png' is not a PNG or an SVG file/.test(gifOut) &&
+        !existsSync(join(headDir, 'gif/index.html')), gifOut.trim().split('\n')[0]);
+    writeFileSync(join(headDir, 'out.az'), 'az 1\nsite head\n  icon ../../etc/icon.png\n\npage /\n');
+    const outOut = failing(process.execPath, [CLI, 'build', join(headDir, 'out.az'), '--out', join(headDir, 'out')], headDir) ?? '';
+    check('SECURITY §4.4: an icon path out of the project fails at link stage (AZ1210) and writes nothing',
+      /AZ1210 {2}site: '\.\.\/\.\.\/etc\/icon\.png' points outside the project/.test(outOut) &&
+        !/AZ1421/.test(outOut) && !existsSync(join(headDir, 'out/index.html')), outOut.trim().split('\n')[0]);
+  }
+
   /* ---- gallery-spec §7 rule 3: responsive images, resized at build ------ */
   // The GRAMMAR §8 fixture's images are placeholders too small to resize, so
   // a gallery of real photographs — made here, in a cache of its own —

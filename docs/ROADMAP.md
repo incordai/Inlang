@@ -184,7 +184,11 @@ Adapters only. **We never implement auth** (PRD §6.5).
 - [ ] escape-hatch ratio ≥ 80% (tests A4)
 - [ ] Lighthouse: perf ≥ 85 mobile, SEO ≥ 95 (tests A6), a11y 100
 - [ ] `ASSUMPTIONS.md` A3, A4, A6 updated
-- [ ] **grammar frozen** — tagged `grammar-v1`
+- [ ] **grammar frozen** — tagged `grammar-v1`. Decided before it, from the
+      pre-M5 Lighthouse audit (ASSUMPTIONS A6): `description "…"` at site and
+      page level and `icon <path>` at site level (GRAMMAR §4.4, AZ1420,
+      AZ1421; core `head-settings.test.ts`, target `head.test.ts`, cli
+      `site-icon.test.ts`, verify-build) (2026-10-07)
 - [ ] proof demo recorded (distribution-and-hosting §6)
 
 ⛔ **If escape-hatch ratio < 50%, stop.** The abstraction is wrong. Reconsider

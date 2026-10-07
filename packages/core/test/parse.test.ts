@@ -150,3 +150,12 @@ test('lexer diagnostics are carried through, not dropped', () => {
   const cs = codes('az 1\nsite Aurora\n');
   assert.ok(cs.includes('AZ1008'), 'a lex error must reach the parse result');
 });
+
+test('GRAMMAR §4.4: description and icon parse as settings of site, and description of page', () => {
+  const r = run('az 1\nsite aurora\n  description "Handmade shoes."\n  icon ./icon.png\npage /\n  description "Reserve a pair."\n');
+  assert.deepEqual(r.diagnostics, []);
+  const [site, page] = r.file.body;
+  assert.deepEqual(site.children.map((c) => [c.word, c.args.map((a) => `${a.kind}:${a.value}`)]),
+    [['description', ['string:Handmade shoes.']], ['icon', ['path:./icon.png']]]);
+  assert.deepEqual(page.children.map((c) => [c.word, c.args[0].kind, c.args[0].value]), [['description', 'string', 'Reserve a pair.']]);
+});

@@ -4,7 +4,7 @@
  * Spec: docs/GRAMMAR.md §4–§5 · docs/ARCHITECTURE.md §4.1
  * Exports: link, Manifest, PropSpec, STRUCTURE, STRUCTURE_PROPS
  * Edit guide: never name a specific word here — per-word rules are manifest data (checks.ts); lookups use Object.hasOwn.
- * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts
+ * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts, packages/core/test/head-settings.test.ts
  */
 
 /**
@@ -29,6 +29,7 @@ import type { Diagnostic, Pos } from './lex.ts';
 import type { Arg, Statement, AzFile } from './parse.ts';
 import { routePath, runBlockChecks, type Check, type CheckChild } from './checks.ts';
 import { fromWords, type FromManifest } from './from.ts';
+import { ICON_FORMATS } from './icon.ts';
 
 export interface PropSpec {
   readonly type: string;
@@ -230,9 +231,18 @@ export const PATTERN_ORIGIN_NAMES: Readonly<Record<string, string>> = {
   center: 'Light from the centre',
 };
 
+/**
+ * `description` — the meta description a search result shows under the
+ * page's title, written by the author at site level (every page's default)
+ * or per page. Results cut longer copy, so past this length it is advice
+ * (AZ1409), like every text limit, never a block (CONVENTIONS §5).
+ */
+export const META_DESCRIPTION_MAX = 160;
+
 /** Properties those keywords accept — PRD §6.1a. */
 export const STRUCTURE_PROPS: Record<string, ReadonlySet<string>> = {
-  site: new Set(['width', 'theme', 'font']),
+  site: new Set(['width', 'theme', 'font', 'description', 'icon']),
+  page: new Set(['description']),
   theme: new Set(['accent', 'pattern']),
   font: new Set(['display', 'body', 'mono']),
 };
@@ -694,6 +704,56 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     return out;
   }
 
+  /**
+   * `description "<text>"` (site or page) and `icon ./<file>` (site): one
+   * value on one line. A description is copy, so it is quoted and not empty;
+   * an icon is a project file, sandboxed and typed like any path — its
+   * content is checked by compile(), which is given the project's reader
+   * (AZ1421). Reported problems leave the line out of the Spec.
+   */
+  function headSetting(s: Statement, parentWord: string): boolean {
+    const value = s.args[0];
+    const example = s.word === 'icon' ? 'icon ./icon.svg' : 'description "What this page is about"';
+    if (!value) {
+      err('AZ1205', `${parentWord}: '${s.word}' has no value — write: ${example}`, s.pos);
+      return false;
+    }
+    if (s.args.length > 1) {
+      err('AZ1406', `${parentWord}: '${s.word}' takes one value — remove '${shown(s.args[1].value)}'`, s.args[1].pos);
+      return false;
+    }
+    if (s.children.length > 0) {
+      err('AZ1219', `${parentWord}: '${s.word}' takes no indented lines — write it on one line: ${example}`, s.children[0].pos);
+      return false;
+    }
+    if (s.word === 'description') {
+      if (value.kind !== 'string') {
+        err('AZ1205', `${parentWord}: 'description' is a sentence — write it in quotes: description "${shown(value.value)}"`, value.pos);
+        return false;
+      }
+      const text = value.value.replace(/\s+/g, ' ').trim();
+      if (text === '') {
+        err('AZ1420', `${parentWord}: description is empty — write what the ${parentWord} is about, or remove the line`, value.pos);
+        return false;
+      }
+      const n = [...text].length;
+      if (n > META_DESCRIPTION_MAX) {
+        warn('AZ1409', `${parentWord}: description is ${n} characters, ${META_DESCRIPTION_MAX} is the limit — search results cut the rest; shorten it`, value.pos);
+      }
+      return true;
+    }
+    // `icon`: a file shipped with the site — never a URL, never outside the project.
+    if (value.kind !== 'path') {
+      err('AZ1402', `${parentWord}: icon '${shown(value.value)}' is not a project file — write: icon ./icon.svg`, value.pos);
+      return false;
+    }
+    const before = diagnostics.length;
+    checkValues(parentWord, { icon: value }, {
+      icon: { type: 'path', ext: Object.values(ICON_FORMATS).map((f) => f.ext) },
+    });
+    return diagnostics.length === before;
+  }
+
   function resolve(s: Statement, parent: Manifest | undefined, parentWord: string | null): LinkedWord | null {
     if (s.word === 'backend') return backendDecl(s, parentWord);
     if (s.word === 'data') return dataDecl(s, parentWord);
@@ -706,6 +766,11 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
 
     // A structure keyword's property, e.g. `width` under `site`.
     if (parentWord && STRUCTURE_PROPS[parentWord]?.has(s.word)) {
+      if ((parentWord === 'site' || parentWord === 'page') && (s.word === 'description' || s.word === 'icon')) {
+        return headSetting(s, parentWord)
+          ? { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as, children: [], pos: s.pos }
+          : null;
+      }
       // `site width` is a closed choice (PRD §6.1a); an unknown frame would
       // otherwise compile and silently render as the default.
       if (parentWord === 'site' && s.word === 'width') {
@@ -772,6 +837,12 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
     }
 
     if (s.word === 'raw' || s.word === 'slot') return escapeHatch(s, parent, parentWord);
+
+    // GRAMMAR §5.4: the icon is the site's, one per site — not a page's word.
+    if (s.word === 'icon' && parentWord === 'page') {
+      err('AZ1503', 'icon: declared under a page — move it to site level, one icon per site', s.pos);
+      return null;
+    }
 
     // `from` reached here: the enclosing word's manifest takes none (a word
     // that does keeps it in the block's own child loop below).

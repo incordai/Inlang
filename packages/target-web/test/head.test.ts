@@ -1,7 +1,8 @@
 /**
  * What a page's <head> says beyond its title (head.ts, emit.ts indexHtml):
- * a meta description from the page's own lead copy, and an icon declared
- * so the browser does not request a /favicon.ico that is not there.
+ * a meta description — the page's, else the site's (GRAMMAR §4.4), else
+ * its own lead copy — and an icon: `site icon` with its type read from the
+ * file, else an empty one so the browser requests no /favicon.ico.
  *
  * Found by `pnpm test:lighthouse` (ASSUMPTIONS A6, pre-M5): every generated
  * page lacked a meta description (SEO) and logged a 404 for /favicon.ico
@@ -12,8 +13,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
-import { emit } from '../src/emit.ts';
-import { pageDescription, DESCRIPTION_MAX } from '../src/head.ts';
+import { emit, emitProject } from '../src/emit.ts';
+import { pageDescription, DESCRIPTION_MAX, IconError } from '../src/head.ts';
 import { WEB_EMITTERS } from '../../words/registry.ts';
 
 const wordsDir = new URL('../../words/', import.meta.url);
@@ -80,6 +81,82 @@ test('every page declares its icon, so no /favicon.ico is requested', () => {
   for (const path of ['index.html', 'work/index.html', 'about/index.html']) {
     assert.match(html(HERO, path), /<link rel="icon" href="data:," \/>/, path);
   }
+});
+
+/* ---- `description` and `icon` written by the author (GRAMMAR §4.4) ---- */
+
+const WRITTEN = `az 1
+site aurora
+  description "Handmade shoes from a two-person workshop."
+page /
+  description "Reserve a pair from the autumn run."
+  hero center
+    title "Built in the dark"
+    sub   "Handmade. Forty pairs a month."
+page /about
+page /work
+  text
+    title "Work"
+    body  "Every pair we made this year, with the people who wear them."
+`;
+
+test("a page's own description wins over its lead copy and over the site's", () => {
+  assert.equal(description(html(WRITTEN)), 'Reserve a pair from the autumn run.');
+});
+
+test("the site's description is every other page's — lead copy or none", () => {
+  assert.equal(description(html(WRITTEN, 'about/index.html')), 'Handmade shoes from a two-person workshop.');
+  assert.equal(description(html(WRITTEN, 'work/index.html')), 'Handmade shoes from a two-person workshop.');
+});
+
+test('CONTROL: with nothing written the lead copy is still the fallback', () => {
+  assert.equal(description(html(HERO)), 'Handmade. Forty pairs a month.');
+});
+
+test('SECURITY: a written description is HTML-escaped and cannot leave the attribute', () => {
+  const page = html(`az 1
+site aurora
+  description "\\"/><script>alert(1)</script> & 'more'"
+page /
+`);
+  assert.doesNotMatch(page, /<script>alert/);
+  assert.equal(description(page), '&quot;/&gt;&lt;script&gt;alert(1)&lt;/script&gt; &amp; &#39;more&#39;');
+});
+
+const ICONED = 'az 1\nsite aurora\n  icon ./brand/icon.svg\npage /\npage /about\n';
+const PNG_HEAD = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 64, 0, 0, 0, 64]);
+const SVG_HEAD = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>');
+const project = (src: string, readBytes?: (p: string) => Uint8Array | null) => {
+  const r = compile(src, { manifests });
+  assert.ok(r.spec, JSON.stringify(r.diagnostics));
+  return emitProject(r.spec, { emitters: WEB_EMITTERS, readBytes });
+};
+const page = (p: ReturnType<typeof project>, path = 'index.html') => p.files.find((f) => f.path === path)!.content;
+
+test("every page declares the site icon, its type read from the file's bytes", () => {
+  const asked: string[] = [];
+  const p = project(ICONED, (path) => { asked.push(path); return SVG_HEAD; });
+  for (const path of ['index.html', 'about/index.html']) {
+    assert.match(page(p, path), /<link rel="icon" type="image\/svg\+xml" href="\/brand\/icon\.svg" \/>/, path);
+    assert.doesNotMatch(page(p, path), /data:,/, path);
+  }
+  assert.deepEqual(asked, ['brand/icon.svg'], 'read once, through the sandboxed project path');
+  assert.ok(p.assets.includes('brand/icon.svg'), 'the icon is copied with the other assets');
+});
+
+test('a PNG icon is declared image/png', () => {
+  const p = project('az 1\nsite aurora\n  icon ./icon.png\npage /\n', () => PNG_HEAD);
+  assert.match(page(p), /<link rel="icon" type="image\/png" href="\/icon\.png" \/>/);
+});
+
+test('without a reader (tests, a playground) the icon is declared with no type — never one guessed from its name', () => {
+  assert.match(page(project(ICONED)), /<link rel="icon" href="\/brand\/icon\.svg" \/>/);
+});
+
+test('the second gate: bytes that are not the format the name says are refused, not declared', () => {
+  assert.throws(() => project(ICONED, () => PNG_HEAD), IconError);
+  assert.throws(() => project(ICONED, () => null), IconError);
+  assert.throws(() => project(ICONED, () => new TextEncoder().encode('GIF89a')), IconError);
 });
 
 /* ---- pageDescription on its own --------------------------------------- */

@@ -33,7 +33,7 @@ import { emitPages, type EmitterMap } from './tree.ts';
 import { sanitizeSvg, SvgError } from './svg.ts';
 import { markdownToNodes, MarkdownError } from './markdown.ts';
 import { compileStyles } from './stylesheet.ts';
-import { pageDescription } from './head.ts';
+import { iconType, pageDescription } from './head.ts';
 import { uniqueIds } from './ids.ts';
 import { COMPONENT_EXT } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
@@ -706,22 +706,31 @@ function htmlEntries(spec: Spec): Record<string, string> {
   return out;
 }
 
+/** A page's icon declaration: `site icon`'s URL and media type, or null for none. */
+interface IconRef { readonly href: string; readonly type: string | null }
+
+function iconTag(icon: IconRef | null): string {
+  if (icon === null) return '<link rel="icon" href="data:," />';
+  return `<link rel="icon"${icon.type ? ` type="${escapeHtml(icon.type)}"` : ''} href="${escapeHtml(icon.href)}" />`;
+}
+
 // `lang` is "en": the grammar has no site locale to take it from — `site`
 // declares none, and pricing's `locale` formats money, not the page. When
 // the site gains one, this is where it lands.
 // An admin page (data-spec §11) is kept out of search results and says so in its title.
-// `description` is the page's own lead copy (head.ts); a page without one has no tag.
-// The icon: the grammar has no site icon yet, so the page says it has none
-// (an empty data: URL) rather than leave the browser to request
-// /favicon.ico — a 404 and a console error on every page view.
-function indexHtml(spec: Spec, admin = false, description: string | null = null): string {
+// `description` is the page's own, else the site's, else its lead copy
+// (GRAMMAR §4.4, head.ts); a page with none of them has no tag.
+// The icon: `site icon`, its type read from the file (head.ts). Without one
+// the page says it has none (an empty data: URL) rather than leave the
+// browser to request /favicon.ico — a 404 and a console error on every view.
+function indexHtml(spec: Spec, admin = false, description: string | null = null, icon: IconRef | null = null): string {
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-${admin ? '    <meta name="robots" content="noindex, nofollow" />\n' : ''}${description ? `    <meta name="description" content="${escapeHtml(description)}" />\n` : ''}    <link rel="icon" href="data:," />
+${admin ? '    <meta name="robots" content="noindex, nofollow" />\n' : ''}${description ? `    <meta name="description" content="${escapeHtml(description)}" />\n` : ''}    ${iconTag(icon)}
     <title>${admin ? 'Admin · ' : ''}${escapeHtml(spec.site.name)}</title>
   </head>
   <body>
@@ -919,11 +928,21 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   // The admin pages (data-spec §11), only with tables: none of this otherwise.
   const admin = adminOf(spec);
   const adminFiles = new Set(admin.map(htmlFileFor));
-  // Each page's description from its content — between the nav and the footer.
+  // Each page's description: written for the page, else for the site, else
+  // derived from its content — between the nav and the footer.
+  const authored = new Map(spec.pages.map((p) => [p.route, p.description ?? spec.site.description ?? null] as const));
   const descriptions = new Map(pages.map((p) => {
     const { lead, tail, nodes } = layOut(p);
-    return [htmlFileFor(p.route), pageDescription(nodes.slice(lead, nodes.length - tail))] as const;
+    return [htmlFileFor(p.route), authored.get(p.route) ?? pageDescription(nodes.slice(lead, nodes.length - tail))] as const;
   }));
+  // The site icon through the asset sandbox — copied like any asset — its
+  // type from its bytes, read through the same sandbox.
+  const iconPath = spec.site.icon;
+  let icon: IconRef | null = null;
+  if (iconPath !== undefined) {
+    const href = asset(iconPath);
+    icon = { href, type: iconType(iconPath, options.readBytes?.(href.slice(1))) };
+  }
   // The tables `from` blocks read (data-spec §10.3); none, and no rows runtime is wired.
   const rowTables = spec.site.data ? fromTables(spec) : [];
   const files: EmittedFile[] = [
@@ -1086,7 +1105,7 @@ export default defineConfig({
         include: ['src'],
       }, null, 2) + '\n',
     },
-    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec, adminFiles.has(path), descriptions.get(path) ?? null) })),
+    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec, adminFiles.has(path), descriptions.get(path) ?? null, icon) })),
     {
       path: 'AZ.md',
       content: azMd({

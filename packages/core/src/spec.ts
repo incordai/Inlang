@@ -45,6 +45,11 @@ export type { SpecBlock } from './spec-block.ts';
 export interface SpecPage {
   readonly route: string;
   readonly blocks: SpecBlock[];
+  /**
+   * The page's own `description` (GRAMMAR §4.4), whitespace collapsed —
+   * absent unless written, so a page without one serialises as before.
+   */
+  readonly description?: string;
 }
 
 export interface SpecSite {
@@ -58,6 +63,16 @@ export interface SpecSite {
   readonly pattern: string;
   readonly patternOrigin: string;
   readonly fonts: Record<string, string>;
+  /**
+   * `description` (GRAMMAR §4.4): every page's meta description unless the
+   * page writes its own. Absent unless written.
+   */
+  readonly description?: string;
+  /**
+   * `icon` (GRAMMAR §4.4): the site icon, a project path as written. Absent
+   * unless written; its format is read from the file, never this name.
+   */
+  readonly icon?: string;
   /** Blocks declared at site level and inherited by every page. */
   readonly inherited: SpecBlock[];
   /**
@@ -321,6 +336,19 @@ export function buildSpec(
 
   // ---- the frame and theme, resolved once (PRD principle 3) -------------
   const kids = siteWord?.children ?? [];
+
+  // ---- `description` and `icon` (GRAMMAR §4.4): one each, never last-wins
+  // (§5.4). link.ts kept only the lines that passed its checks.
+  const single = (owner: string, words: readonly LinkedWord[], key: string): string | undefined => {
+    const found = words.filter((w) => w.word === key);
+    for (const extra of found.slice(1)) {
+      diagnostics.push({ code: 'AZ1504', message: `${owner}: '${key}' set twice — keep one`, pos: extra.pos, severity: 'error' });
+    }
+    const value = found[0]?.args[0]?.value;
+    return value === undefined ? undefined : key === 'description' ? value.replace(/\s+/g, ' ').trim() : value;
+  };
+  const siteDescription = single('site', kids, 'description');
+  const siteIcon = single('site', kids, 'icon');
   const themeWord = kids.find((w) => w.word === 'theme');
   const fontWord = kids.find((w) => w.word === 'font');
 
@@ -389,7 +417,12 @@ export function buildSpec(
   const data: FromContext = { tables, protect, login, report: (d) => diagnostics.push(d) };
   const pages: SpecPage[] = pageWords.map((p) => {
     const route = p.args[0]?.value ?? '/';
-    return { route, blocks: p.children.map((c) => toBlock(c, manifests, site, { route, data })) };
+    const description = single('page', p.children, 'description');
+    return {
+      route,
+      blocks: p.children.filter((c) => c.word !== 'description').map((c) => toBlock(c, manifests, site, { route, data })),
+      ...(description !== undefined ? { description } : {}),
+    };
   });
 
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');
@@ -405,6 +438,8 @@ export function buildSpec(
       pattern: valueOf(patternWord, SITE_DEFAULTS.pattern),
       patternOrigin: patternWord?.args[1]?.value ?? SITE_DEFAULTS.patternOrigin,
       fonts,
+      ...(siteDescription !== undefined ? { description: siteDescription } : {}),
+      ...(siteIcon !== undefined ? { icon: siteIcon } : {}),
       inherited,
       scoped: Object.fromEntries([...site.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
       ...(backend ? { backend } : {}),

@@ -31,11 +31,14 @@ import { link, type Manifest } from './link.ts';
 import { buildSpec, serialiseSpec, type Spec } from './spec.ts';
 import { secretLiterals } from './literals.ts';
 import { checkLock } from './data-lock.ts';
+import { ICON_FORMATS, iconFormat } from './icon.ts';
+import { quotable } from './secrets.ts';
 
 export type { Diagnostic, Pos, Token } from './lex.ts';
 export type { Arg, Statement, AzFile } from './parse.ts';
 export type { Manifest, LinkedWord, PropSpec } from './link.ts';
-export { COMPONENT_EXT, INJECTION_POINTS } from './link.ts';
+export { COMPONENT_EXT, INJECTION_POINTS, META_DESCRIPTION_MAX } from './link.ts';
+export { ICON_FORMATS, ICON_HEAD_BYTES, iconFormat, type IconFormat } from './icon.ts';
 export type { Spec, SpecBlock, SpecPage, SpecSite } from './spec.ts';
 export type { SpecFrom } from './spec-block.ts';
 export { FROM_EMPTY, FROM_SETTINGS, type FromField, type FromManifest } from './from.ts';
@@ -87,6 +90,15 @@ export interface CompileOptions {
     /** The digest the lock was written with (sha256 hex in the CLI). */
     readonly digest: (text: string) => string;
   };
+  /**
+   * Reads the start of a project file — at least ICON_HEAD_BYTES of it —
+   * through the caller's sandbox; null when it cannot be read (missing, not
+   * a file, or outside the project). Given it, the `site icon` file's
+   * content must be the format its extension names (AZ1421). Absent (the
+   * Playground has no files), the content is not checked here; the target
+   * still reads it before declaring a type.
+   */
+  readonly readBytes?: (projectPath: string) => Uint8Array | null;
 }
 
 /**
@@ -119,9 +131,34 @@ export function compile(source: string, options: CompileOptions): CompileResult 
     const at = site?.children.find((s) => s.word === 'data')?.pos ?? site?.pos ?? { line: 1, col: 1 };
     all.push(...checkLock(built.spec.site.data ?? [], lock.text, { source: lock.source, lock: lock.name }, lock.digest, at));
   }
+  // The icon's bytes are read only for a sound file: the link stage has
+  // then refused a path that leaves the project before anything is read.
+  const icon = built.spec.site.icon;
+  if (icon !== undefined && options.readBytes && !all.some((d) => d.severity === 'error')) {
+    const site = parsed.file.body.find((s) => s.word === 'site');
+    const at = site?.children.find((s) => s.word === 'icon')?.args[0]?.pos ?? site?.pos ?? { line: 1, col: 1 };
+    const problem = iconProblem(icon, options.readBytes(icon));
+    if (problem) all.push({ code: 'AZ1421', message: problem, pos: at, severity: 'error' });
+  }
   const ok = !all.some((d) => d.severity === 'error');
 
   return { spec: built.spec, diagnostics: capped(all), ok };
+}
+
+/**
+ * Why the icon file cannot be the site icon, or null. Its first bytes say
+ * what it is; its extension must say the same, because a host serves the
+ * file by its name — a PNG named `.svg` would be sent as an SVG and shown
+ * as nothing.
+ */
+function iconProblem(raw: string, bytes: Uint8Array | null): string | null {
+  const path = quotable(raw);
+  if (bytes === null) return `site: icon '${path}' can't be read — add the file inside the project, or fix the path`;
+  const format = iconFormat(bytes);
+  const named = Object.entries(ICON_FORMATS).find(([, f]) => raw.toLowerCase().endsWith(f.ext))?.[0];
+  if (format === null) return `site: icon '${path}' is not a PNG or an SVG file — export it as one`;
+  if (format !== named) return `site: icon '${path}' is ${format === 'svg' ? 'an SVG' : 'a PNG'} file — name it ${ICON_FORMATS[format].ext}`;
+  return null;
 }
 
 /** GRAMMAR §7.2 rule 6: report at most this many problems. */

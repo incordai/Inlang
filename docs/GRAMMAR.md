@@ -415,8 +415,13 @@ file-member     = site-decl | page-decl
 site-decl       = "site" , name , NEWLINE ,
                   [ INDENT , { site-member } , DEDENT ] ;
 
-site-member     = theme-decl | font-decl | inheritable-block
+site-member     = theme-decl | font-decl | description-decl | icon-decl
+                | inheritable-block
                 | popup-decl | content-decl | interrupt-decl ;
+
+description-decl = "description" , STRING , NEWLINE ;   (* site or page, §4.4 *)
+
+icon-decl       = "icon" , path , NEWLINE ;               (* site only, §4.4 *)
 
 theme-decl      = "theme" , name , NEWLINE ;
 
@@ -426,7 +431,7 @@ font-role       = ( "display" | "body" | "mono" ) , WORD , NEWLINE ;
 page-decl       = "page" , route , NEWLINE ,
                   [ INDENT , { page-member } , DEDENT ] ;
 
-page-member     = block | inheritable-block | raw-decl ;
+page-member     = block | inheritable-block | raw-decl | description-decl ;
 
 raw-decl        = "raw" , path , NEWLINE ;
 
@@ -492,6 +497,8 @@ value           = STRING | PAIR | BARE ;
 | `pattern <shape> [origin]` | `theme` | 1 | PRD §6.1a — background |
 | `font` + indented roles | file, `site` | 1 | PRD §6.1 |
 | `display` / `body` / `mono` `<family>` | `font` | 1 | PRD §6.1 |
+| `description "<text>"` | `site`, `page` | 1 | §4.4 — the meta description; the page's wins |
+| `icon <path>` | `site` | 1 | §4.4 — the site icon, PNG or SVG |
 | `page <route>` | file | 1 | PRD §6.1 |
 | `raw <path>` | `page`, any block | 1 (M3) | PRD §6.6 |
 | `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
@@ -697,6 +704,48 @@ is AZ1419. Without `pattern` there is none. A setting with no value is AZ1205,
 an extra value AZ1406, and a repeated setting warns (AZ1203) and the first is
 kept. `az explain theme accent` lists the hues.
 
+**Site and page settings: `description` and `icon`.** Both are one value on
+one line, like `width`.
+
+```
+site aurora
+  description "Handmade shoes from a two-person workshop."
+  icon        ./brand/icon.svg
+
+page /work
+  description "Every pair we made this year, and who wears them."
+```
+
+- `description "<text>"` — what a search result shows under the page's
+  title (its `<meta name="description">`). At site level it is every page's;
+  a page's own replaces it for that page. Neither written, the page's lead
+  copy stands in — the first paragraph after its first heading — and a page
+  with none has no description. It is copy, so it is quoted (a bare value is
+  AZ1205), its whitespace is collapsed to one line, and it is escaped at
+  emit. An empty one is
+  `site: description is empty — write what the site is about, or remove the line`
+  (AZ1420). Past 160 characters it warns —
+  `site: description is 182 characters, 160 is the limit — search results cut the rest; shorten it`
+  (AZ1409, the text-limit warning) — and ships as written.
+- `icon <path>` — the site icon, site level only (under a page it is
+  `icon: declared under a page — move it to site level, one icon per site`,
+  AZ1503). A project file, sandboxed like every `path` (§4.2: outside the
+  project is AZ1210); a URL, a route or a quoted value is
+  `site: icon 'https://…' is not a project file — write: icon ./icon.svg`
+  (AZ1402), so the icon always ships with the site. The name ends `.svg` or
+  `.png` (AZ1410), and the file's **first bytes** must be that format, since a
+  host serves a file by its name: a file that cannot be read, is neither PNG
+  nor SVG, or is the other one is
+  `site: icon './icon.png' is an SVG file — name it .svg` (AZ1421, checked
+  when the compiler is given the project's files — `az build`, `az check`,
+  `az spec`, the MCP tools). Every page declares it with the type its bytes
+  say. Without `icon` each page declares an empty one, so the browser asks
+  for no `/favicon.ico`.
+
+Each is set once: a second `description` in the same site or page, or a
+second `icon`, is AZ1504. No value is AZ1205, a second value AZ1406, an
+indented body AZ1219.
+
 ### 4.5 Repeated values
 
 A prop declared `"repeat": true` accepts more than one value on one line, all
@@ -790,6 +839,8 @@ structural fact, not an authoring choice.*
 |---|---|
 | `theme` twice at site level | `theme: declared twice — keep one` (AZ1502) |
 | `theme` under a `page` | `theme: declared under a page — move it to site level, one theme per site` (AZ1503) |
+| `icon` under a `page` | `icon: declared under a page — move it to site level, one icon per site` (AZ1503) |
+| `description` twice in one site or page, `icon` twice | `site: 'description' set twice — keep one` (AZ1504) |
 | Two `hero` blocks on one page | `hero: only one per page (it owns the <h1>)` — hero-spec §11 |
 | Same prop twice in one block, no `max` | `hero: 'title' set twice — keep one` (AZ1504) |
 | `site` twice | `site: declared twice — keep one` (AZ1508) |

@@ -114,3 +114,16 @@ test('diagnostics are COLLECTED, not thrown on the first', () => {
   const src = 'site Aurora\n\ttheme midnight\n';
   assert.ok(lex(src).diagnostics.length >= 2, 'must report more than the first problem');
 });
+
+test('GRAMMAR §4.4: a description is one STRING — # and non-ASCII kept, escapes decoded; an icon is one path', () => {
+  const ts = lex('az 1\nsite aurora\n  description "Shoes #4 \\"hand\\" — café"\n  icon ./brand/icon.svg\n').tokens;
+  assert.deepEqual(val(ts, 'string'), ['Shoes #4 "hand" — café']);
+  assert.deepEqual(val(ts, 'path'), ['./brand/icon.svg']);
+  assert.deepEqual(lex('az 1\nsite a\n  description "x"\n').diagnostics, []);
+});
+
+test('CONTROL: an icon written as a URL lexes as a pair, a traversal as a path — the link stage refuses both', () => {
+  const ts = lex('az 1\nsite a\n  icon https://cdn.example/i.png\n  icon ../../x.png\n').tokens;
+  assert.deepEqual(val(ts, 'pair'), ['https://cdn.example/i.png']);
+  assert.deepEqual(val(ts, 'path'), ['../../x.png']);
+});

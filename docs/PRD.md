@@ -194,6 +194,26 @@ mobile gutter applies. (The compiler previously defaulted to `center`, which
 is not one of these values and rendered nothing; the code now follows this
 section.)
 
+**`site description` / `page description`, `site icon`** — what a page tells
+a search engine and a browser tab beyond its title (GRAMMAR §4.4).
+`description "…"` is copy: at site level every page's, on a page that page's
+own; neither written, a page describes itself with its lead copy.
+`icon ./icon.svg` is a file the author supplies, PNG or SVG.
+
+*Built (2026-10-07), before the M5 grammar freeze, from the pre-M5
+Lighthouse audit (ASSUMPTIONS A6): pages with no lead copy had no
+description to give, and no site could name its icon.* The page's
+description wins, then the site's, then the derived one; it is escaped into
+`<meta name="description">` (no Open Graph tags exist, so none are added).
+An empty description is AZ1420; past 160 characters it warns (AZ1409) and
+ships as written. The icon goes through the asset sandbox (AZ1210 outside
+the project; a URL is AZ1402 — the icon ships with the site), its name ends
+`.svg` or `.png` (AZ1410), and its first bytes must be that format (AZ1421):
+the format is read, never taken from the name. Every page declares it as
+`<link rel="icon" type="…">`; without `icon` every page declares an empty
+one, so no `/favicon.ico` is requested. Not built: a home-screen touch
+icon — the build's resizer makes WebP only, and that icon must be PNG.
+
 **`theme accent`** — selects the hue whose ramp the theme draws from. Steps are
 addressed as tokens (`color.accent-700`), and every step states its contrast
 against both schemes (theme-spec §6). A step that fails the floor is not

@@ -45,6 +45,14 @@ test('explain: word, variant, prop, value, slot and slot prop in context', () =>
   assert.deepEqual(r.unknown, []);
 });
 
+test('explain: site description and icon, and page description, are settings (GRAMMAR §4.4)', () => {
+  const r = explain(['site', 'description', 'icon', 'page', 'description'], manifests);
+  assert.deepEqual(r.lines.map((l) => `${l.of}|${l.term}|${l.kind}`), [
+    '|site|keyword', 'site|description|setting', 'site|icon|setting', '|page|keyword', 'page|description|setting',
+  ]);
+  assert.deepEqual(r.unknown, []);
+});
+
 test('explain: a word name starts a new context', () => {
   const r = explain(['hero', 'split', 'nav', 'sticky'], manifests);
   assert.deepEqual(r.lines.map((l) => l.kind), ['word', 'variant', 'word', 'modifier']);

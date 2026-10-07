@@ -32,6 +32,7 @@ import { isFromMark } from '../../core/src/emit-contract.ts';
 import type { Spec } from '../../core/src/spec.ts';
 import { ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
+import { IconError } from '../../target-web/src/head.ts';
 import { MarkdownError } from '../../target-web/src/markdown.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
@@ -162,6 +163,20 @@ function readProjectHead(projectDir: string, path: string): Uint8Array | null {
   throw new PathEscapeError(found.problems[0]);
 }
 
+/**
+ * compile()'s reader (the `site icon` check, AZ1421): readProjectHead, with
+ * a file that is missing or resolves outside the project read as null —
+ * a diagnostic at the icon's line, not a thrown error.
+ */
+export const compileReader = (source: string) => (path: string): Uint8Array | null => {
+  try {
+    return readProjectHead(dirname(resolve(source)), path);
+  } catch (e) {
+    if (e instanceof PathEscapeError) return null;
+    throw e;
+  }
+};
+
 /** The real file of a project path through the asset sandbox, or null — for the resizer. */
 function locateImage(projectDir: string, path: string): string | null {
   const found = locateAssets(projectDir, [path]);
@@ -208,7 +223,7 @@ export const wordsFor = (options: Omit<BuildOptions, 'outDir'>, code = true) => 
 export function build(options: BuildOptions): BuildOutcome {
   const src = readFileSync(options.source, 'utf8');
   const words = wordsFor(options);
-  const result = compile(src, { manifests: words.manifests, lock: lockOption(options.source) });
+  const result = compile(src, { manifests: words.manifests, lock: lockOption(options.source), readBytes: compileReader(options.source) });
 
   const report = result.diagnostics.length
     ? formatDiagnostics(result.diagnostics, options.source)
@@ -241,7 +256,7 @@ export function build(options: BuildOptions): BuildOutcome {
       project = emitted();
     }
   } catch (e) {
-    if (e instanceof PathEscapeError || e instanceof SvgError || e instanceof MarkdownError) {
+    if (e instanceof PathEscapeError || e instanceof SvgError || e instanceof MarkdownError || e instanceof IconError) {
       return { ok: false, files: [], assets: [], report: `${report}\n${e.message}`.trim(), exit: EXIT.missing };
     }
     throw e;
@@ -360,7 +375,7 @@ function dotenv(dir: string): Record<string, string> {
  */
 export function specOf(options: Omit<BuildOptions, 'outDir'>): { json: string | null; report: string } {
   const src = readFileSync(options.source, 'utf8');
-  const r = compile(src, { manifests: wordsFor(options).manifests, lock: lockOption(options.source) });
+  const r = compile(src, { manifests: wordsFor(options).manifests, lock: lockOption(options.source), readBytes: compileReader(options.source) });
   const report = r.diagnostics.length ? formatDiagnostics(r.diagnostics, options.source) : '';
   return { json: r.ok && r.spec ? serialiseSpec(r.spec) : null, report };
 }
