@@ -8,7 +8,8 @@
  *    1  typecheck                     tsc --noEmit (once, for the repository)
  *    2  theme lint                    az lint <word>
  *    3  renders 390/768/1440          test:visual — overflow in three engines,
- *                                     plus the responsive-table rows
+ *                                     plus the responsive-table rows and
+ *                                     centred columns (hero-spec §2)
  *    4  axe, zero violations          test:visual — and text over media at
  *                                     4.5:1 (over-media, hero-spec §10)
  *    5  keyboard and visible focus    test:visual — keyboard walk, skip link
@@ -43,7 +44,7 @@ const EXACT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const RAN = /^(chromium|firefox|webkit)-\d+(\.\d+)?$/;
 /** Items 3–7: which test:visual checks each gate item is made of. */
 const VISUAL = {
-  3: ['compile', 'deadline', 'overflow', 'no-js', 'hydration', 'image-shift', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'firefox', 'webkit'],
+  3: ['compile', 'deadline', 'overflow', 'no-js', 'hydration', 'image-shift', 'restack', 'column', 'centred', 'frame', 'font', 'theme-settings', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'firefox', 'webkit'],
   4: ['axe', 'over-media', 'copy'],
   5: ['keyboard', 'skip-link', 'drawer', 'sheet-drag', 'dropdown', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'play', 'billing'],
   6: ['reduced-motion', 'overlay-motion', 'nav-motion', 'reveal', 'reveal-reduced'],

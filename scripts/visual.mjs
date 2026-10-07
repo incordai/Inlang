@@ -12,7 +12,9 @@
  *   7  light and dark actually differ (+ screenshots for human review)
  * and, from the gallery spec (§7 rule 1), that images held back and then
  * released move nothing on the page (`image-shift`, CLS 0); from the hero
- * spec (§10), that text over a poster keeps 4.5:1 at 375px (`over-media`).
+ * spec (§10), that text over a poster keeps 4.5:1 at 375, 768 and 1440px
+ * (`over-media`), and (§2) that a centred column centres on one axis
+ * (`centred`).
  * Chromium runs everything; Firefox and WebKit run a smaller pass (overflow
  * and page errors at one width each), so browser claims rest on real runs.
  *
@@ -38,7 +40,7 @@ import { tmpdir } from 'node:os';
 import { crc32, deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer, textOverPoster, PHONE_WIDTH } from './visual/checks.mjs';
+import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer, textOverPoster, centredUnder, PHONE_WIDTH } from './visual/checks.mjs';
 import { FONT_STACKS, THEMES as THEME_TOKENS } from '../packages/theme/src/index.ts';
 import { startServer } from './visual/serve.mjs';
 import {
@@ -115,7 +117,7 @@ async function pool(items, limit, fn) {
 /* ---- results ------------------------------------------------------------ */
 
 const CHECKS = ['compile', 'deadline', 'overflow', 'axe', 'keyboard', 'reduced-motion', 'schemes', 'restack', 'column', 'frame', 'font', 'theme-settings', 'disclosure', 'skip-link',
-  'no-js', 'hydration', 'image-shift', 'over-media',
+  'no-js', 'hydration', 'image-shift', 'over-media', 'centred',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
   'firefox', 'webkit'];
@@ -148,10 +150,12 @@ const COLUMN = {
   hero: { split: ['.az-hero-title', '.az-hero-sub', '.az-hero-actions'] },   // hero-spec §2
 };
 /**
- * Text over media, per word and variant (hero-spec §9/§10): on a phone at the
- * static tier — reduced motion, so the poster is what shows — every line of
- * text keeps 4.5:1 over the darkest and the lightest poster fixture (files in
- * the word's preview-assets/assets). A variant listed here needs a
+ * Text over media, per word and variant (hero-spec §9/§10): on a phone, a
+ * tablet and a desktop (OVER_MEDIA_WIDTHS), each on a tall and a short
+ * screen (OVER_MEDIA_HEIGHTS), at the static tier — reduced
+ * motion, so the poster is what shows — every line of text keeps 4.5:1 over
+ * the darkest and the lightest poster fixture (files in the word's
+ * preview-assets/assets). A variant listed here needs a
  * `preview.<variant>.az` with a poster, which the check swaps for each.
  */
 const OVER_MEDIA = {
@@ -163,6 +167,30 @@ const OVER_MEDIA = {
     },
   },
 };
+/** The widths over-media measures: the narrowest phone, then the tablet and desktop gate widths. */
+const OVER_MEDIA_WIDTHS = [PHONE_WIDTH, WIDTHS[1], WIDTHS[2]];
+/**
+ * The heights it measures each width at. The header's height is a minimum
+ * and its copy is centred in it, so WHERE the text sits over the scrim
+ * depends on the screen: on a tall one the copy sits mid-gradient; on a
+ * short one — a landscape phone, a short browser window — the copy fills the
+ * header and the eyebrow sits at the scrim's lightest end, its top edge.
+ */
+const OVER_MEDIA_HEIGHTS = [900, 390];
+
+/**
+ * Centred layouts, per word and variant (hero-spec §2: a single centred
+ * column of type): the sub's and the actions' horizontal centres sit within
+ * 1px of the title's, on a desktop and on a phone (CENTRED_WIDTHS). A word's
+ * preview.az is keyed `default`.
+ */
+const CENTRED = {
+  hero: {
+    default: { title: '.az-hero-title', under: ['.az-hero-sub', '.az-hero-actions'] },
+    full: { title: '.az-hero-title', under: ['.az-hero-sub', '.az-hero-actions'] },
+  },
+};
+const CENTRED_WIDTHS = [WIDTHS[2], PHONE_WIDTH];
 
 /**
  * Disclosure forms that replace a layout on phones, per word and variant:
@@ -509,16 +537,30 @@ async function checkSite(s, browsers, server) {
     });
   }
 
-  // hero-spec §10: text over the poster on a phone, in both schemes.
+  // hero-spec §10: text over the poster on a phone, a tablet and a desktop, in both schemes.
   const overMedia = OVER_MEDIA[s.word]?.[s.variant];
   if (overMedia) {
     const fixtures = overMedia.fixtures.map((name) => ({
       name, type: 'image/webp', bytes: readFileSync(join(WORDS, s.word, 'preview-assets/assets', name)),
     }));
     for (const scheme of SCHEMES) {
-      const where = tag(scheme, PHONE_WIDTH);
-      if (await load('over-media', where, { media: { colorScheme: scheme, reducedMotion: 'reduce' }, viewport: { width: PHONE_WIDTH, height: 900 } })) {
-        await checked('over-media', where, (page) => textOverPoster(page, overMedia, fixtures));
+      for (const width of OVER_MEDIA_WIDTHS) {
+        for (const height of OVER_MEDIA_HEIGHTS) {
+          const where = `${tag(scheme, width)}x${height}`;
+          if (await load('over-media', where, { media: { colorScheme: scheme, reducedMotion: 'reduce' }, viewport: { width, height } })) {
+            await checked('over-media', where, (page) => textOverPoster(page, overMedia, fixtures));
+          }
+        }
+      }
+    }
+  }
+  // hero-spec §2: a centred column centres every part of it on one axis.
+  const centred = CENTRED[s.word]?.[s.variant ?? 'default'];
+  if (centred) {
+    for (const width of CENTRED_WIDTHS) {
+      const where = tag('light', width);
+      if (await load('centred', where, { media: { colorScheme: 'light', reducedMotion: 'no-preference' }, viewport: { width, height: 900 } })) {
+        await checked('centred', where, (page) => centredUnder(page, centred));
       }
     }
   }
@@ -712,6 +754,18 @@ const OVER = (scrimmed) => `<!doctype html><html lang="en"><head><title>over med
   <img class="p" src="/poster.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1">
   ${scrimmed ? '<div style="position:absolute;inset:0;z-index:-1;background:rgb(0 0 0 / 0.8)"></div>' : ''}
   <h1>Over media</h1><p>Light text on the poster.</p></header></main></body></html>`;
+
+/**
+ * hero-spec §2: a centred column — flex, text centred — whose title, sub and
+ * actions either centre on one axis or, as `full` once did, sit in boxes at
+ * the start edge with only their text centred inside them.
+ */
+const CENTRE = (centred) => `<!doctype html><html lang="en"><head><title>centred</title></head><body><main>
+  <header style="display:flex;flex-direction:column;text-align:center;padding-inline:64px${centred ? ';align-items:center' : ''}">
+  <h1 class="t" style="max-width:20ch;margin:0">Built in the dark</h1>
+  <p class="s" style="max-width:40ch">Handmade.</p>
+  <ul class="a" style="display:flex;gap:16px;list-style:none;padding:0"><li><a href="/x">Reserve</a></li><li><a href="/y">See</a></li></ul>
+  </header></main></body></html>`;
 
 /** A real PNG of one grey (`value`, 0–255), made here so no binary is checked in. */
 function solidPng(width, height, value = 0x80) {
@@ -914,6 +968,20 @@ async function selfTest() {
     expect(`hero §10 text over media holds 4.5:1 (${scrimmed ? 'scrimmed' : 'bare'} page)`,
       await within(CHECK_MS, 'over-media self-test', () => textOverPoster(page, { poster: '.p', text: ['h1', 'p'] }, posters)), scrimmed);
     await closeWithin(ctx, CLOSE_MS, 'context.close');
+  }
+  // hero-spec §2: the start-edge boxes and the centred column, at both widths the real run uses.
+  for (const [name, centred] of [['centre-start', false], ['centre-axis', true]]) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'), CENTRE(centred));
+    server.serve(join(dir, name));
+    for (const width of CENTRED_WIDTHS) {
+      const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+      const page = await ctx.newPage();
+      await page.goto(server.url);
+      expect(`hero §2 the column centres on one axis (${centred ? 'centred' : 'start-edge'} page, ${width}px)`,
+        await within(CHECK_MS, 'centred self-test', () => centredUnder(page, { title: '.t', under: ['.s', '.a'] })), centred);
+      await closeWithin(ctx, CLOSE_MS, 'context.close');
+    }
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');
   await behaviourSelfTest(browser, server, dir, expect);

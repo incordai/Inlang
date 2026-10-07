@@ -46,7 +46,20 @@ test('hero-spec §10: center, stack and minimal keep their layout below sm — o
 test('hero-spec §5: under xs the actions stack full-width', () => {
   const actions = byClass(hero(block('hero', 'center'), context()), 'az-hero-actions');
   assert.equal(actions?.style?.flexDirection, undefined, 'CONTROL: a row on wider screens');
-  assert.deepEqual(actions?.below?.xs, { flexDirection: 'column', alignItems: 'stretch' });
+  // alignSelf: a centred column shrinks the row to its buttons; it stretches back.
+  assert.deepEqual(actions?.below?.xs, { flexDirection: 'column', alignItems: 'stretch', alignSelf: 'stretch' });
+});
+
+test('hero-spec §2: center and full centre their boxes on one axis, not only the text in them', () => {
+  for (const v of ['center', 'full']) {
+    const out = hero(block('hero', v), context());
+    assert.equal(out.style?.flexDirection, 'column', v);
+    assert.equal(out.style?.alignItems, 'center', v);
+    assert.equal(out.style?.textAlign, 'center', v);
+  }
+  for (const v of ['stack', 'minimal']) {
+    assert.equal(hero(block('hero', v), context()).style?.alignItems, undefined, `CONTROL: ${v} keeps the start edge`);
+  }
 });
 
 test('nav-spec §7: the skip link is off-screen until focused, and shown when focused', () => {

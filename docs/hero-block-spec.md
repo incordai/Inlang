@@ -46,6 +46,15 @@ The variant is decided by **what the visual is doing**, not by taste:
 **Default to `center`.** `full` looks the most impressive in a portfolio shot
 and causes the most real-world problems (contrast, LCP, mobile crop).
 
+**A centred column centres its boxes (implemented).** `center` and `full`
+centre the title, the sub and the actions on one axis — the boxes, not only
+the text inside them. The title and the sub each carry their own measure (§3)
+and the actions are a flex row, so a column that only centred its text left
+them at the start edge, off the title's axis; below 480px the actions row
+stretches back to the full width (§5). Checked in a browser by `test:visual`'s
+`centred` check: at 1440 and 375px the sub's and the actions' centres are
+within 1px of the title's.
+
 ---
 
 ## 3. Width and measure
@@ -266,7 +275,7 @@ Not optional, and cheap to bake in once:
 |---|---|
 | `center` | unchanged; display clamp floor kicks in |
 | `split` | **restacks to `stack`** — text above, media below |
-| `full` | keep, but crop from a defined focal point; strengthen scrim (88% → 65%, below) |
+| `full` | keep, but crop from a defined focal point; the scrim already holds over any pixel (88% → 65% at every width) |
 | `stack` | unchanged |
 | `minimal` | unchanged |
 
@@ -280,20 +289,25 @@ under `full` on a phone — so one value holds the subject in both.
 behind the type and the header's flat `scrim` background sits under the
 visual, so the scrim the type reads on is a layer of its own between them
 (`az-hero-scrim`): a gradient of `color.scrim` from **88%** at the bottom
-edge to **55%** at the top, over the poster and, while live, over the scene
-(the header clears so the canvas shows). Below 768px the top stop rises to
-**65%**, so the whole gradient runs 88% → 65%. The number is derived the way
-the veil's is (theme `VEIL_PERCENT`): a poster or a scene can show any
-pixel, and the worst pixel under light ink is pure white; **63% is the
-smallest whole percent at which `on-scrim` holds 4.5:1 over white through
-the scrim in every theme and scheme** (paper light is the edge), and 65 keeps
-the veil's two points for the browser's compositing. At 55% the top fails
-over white (3.54:1 in paper light); the desktop stops are not re-derived by
-this rule and are not yet measured over a light poster. Proven by
-`packages/words/test/hero-scrim.test.ts` (the floor, its edge) and in a
-browser by `test:visual`'s `over-media` check: at 375px, both schemes, every
-theme, every line of text over the darkest and the lightest poster fixture
-(`preview.full.az`) keeps ≥ 4.5:1.
+edge to **65%** at the top, over the poster and, while live, over the scene
+(the header clears so the canvas shows), **the same at every width**. The
+top stop is derived the way the veil's is (theme `VEIL_PERCENT`): a poster or
+a scene can show any pixel, and the worst pixel under light ink is pure
+white; **63% is the smallest whole percent at which `on-scrim` holds 4.5:1
+over white through the scrim in every theme and scheme** (paper light is the
+edge), and 65 keeps the veil's two points for the browser's compositing. The
+gradient never falls below its top stop, so the type holds wherever it sits —
+the header's `height` and the copy's length move it, so no stop is bounded by
+where the text happens to be. The desktop top was once 55%, which fails over
+white (3.54:1 in paper light); a phone needs nothing stronger than this, so
+"strengthen" in the table above is already met at every width. Proven by
+`packages/words/test/hero-scrim.test.ts` (the floor, its edge, one gradient
+at every width) and in a browser by `test:visual`'s `over-media` check: at
+375, 768 and 1440px, both schemes, every theme, every line of text over the
+darkest and the lightest poster fixture (`preview.full.az`) keeps ≥ 4.5:1;
+and live, by `test:3d`: over the drawing scene the scrim stacks above the
+canvas and under the type, its stops are these, and every line keeps
+≥ 4.5:1 in both schemes.
 
 `split` restacking is the reason it can't be the default. Half of `split`
 heroes in the wild look broken on a phone because nobody defined the restack.

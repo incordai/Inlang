@@ -89,8 +89,9 @@ Known gaps:
 - `3d` draws through the page's single renderer (packages/scene-runtime); the poster shows until it draws and at the `static` tier
 - Actions render through the button primitive (`ctx.actions`): hierarchy, intent, six states and a 44px target
 - Responsive (§10): `split` restacks to one column below 768px and the actions stack full-width below 480px, checked in a browser by `test:visual` (preview.split.az)
-- Responsive (§10): `full` crops its poster from `focus`, and its scrim over the visual strengthens below 768px (88% → 65% of `scrim`, the stop that holds 4.5:1 over a white pixel in every theme), checked at 375px over the darkest and lightest poster by `test:visual` (preview.full.az)
-- Not measured: the desktop scrim (88% → 55%) over a light poster
+- Responsive (§10): `full` crops its poster from `focus`, and its scrim over the visual runs 88% → 65% of `scrim` at every width (65% is the stop that holds 4.5:1 over a white pixel in every theme), checked at 375, 768 and 1440px over the darkest and lightest poster by `test:visual` (preview.full.az), and live over the drawing scene by `test:3d` (the scrim above the canvas, every line at 4.5:1)
+- Layout (§2): `center` and `full` centre the title, sub and actions on one axis, checked within 1px at 1440 and 375px by `test:visual` (`centred`)
+- Not measured: the live scrim over a scene's lightest possible frame — `test:3d` reads the procedural scene as it draws, and the white-pixel case rests on the poster fixtures and the unit test
 
 ## Tested
 

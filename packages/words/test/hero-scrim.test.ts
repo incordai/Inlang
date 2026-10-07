@@ -1,14 +1,14 @@
 /**
- * hero `full` — the scrim over its visual, and how it strengthens on a phone
- * (hero-block-spec §8, §9, §10).
+ * hero `full` — the scrim over its visual (hero-block-spec §8, §9, §10).
  *
  * The visual sits behind the type, and the header's own background sits
  * under the visual — so the scrim the type needs is a layer of its own,
  * between the two. It was missing: at the static tier the type sat straight
- * on the poster, 1:1 over a white one. Below 768px its lightest stop rises to
- * SCRIM.phoneTop, the smallest whole percent that holds 4.5:1 over ANY pixel
- * in every theme, plus two points of margin. test:visual (`over-media`)
- * measures the same thing in a browser at 375px.
+ * on the poster, 1:1 over a white one. Its lightest stop, SCRIM.top, is the
+ * smallest whole percent that holds 4.5:1 over ANY pixel in every theme, plus
+ * two points of margin, and it is the same at every width: a desktop top of
+ * 55% read 3.54:1 over white in paper light. test:visual (`over-media`)
+ * measures the same thing in a browser at 375, 768 and 1440px.
  */
 
 import { test } from 'node:test';
@@ -27,20 +27,29 @@ const every = Object.values(THEMES).flatMap((theme) => SCHEMES.map((scheme) => (
 const overWhite = (c: { scrim: string; 'on-scrim': string }, percent: number) =>
   contrastRatio(rgbOf(c['on-scrim']), composite(rgbOf(c.scrim), WHITE, percent / 100));
 
-test('§10: the phone scrim holds 4.5:1 over a white pixel in every theme and scheme', () => {
+/** The desktop top stop before §10 derived it: what a lighter top reads over white. */
+const OLD_DESKTOP_TOP = 55;
+
+test('§10: both stops hold 4.5:1 over a white pixel in every theme and scheme', () => {
   for (const { label, c } of every) {
-    assert.ok(overWhite(c, SCRIM.phoneTop) >= CONTRAST_BODY, `${label}: ${overWhite(c, SCRIM.phoneTop)}:1 at ${SCRIM.phoneTop}%`);
+    assert.ok(overWhite(c, SCRIM.top) >= CONTRAST_BODY, `${label}: ${overWhite(c, SCRIM.top)}:1 at ${SCRIM.top}%`);
     assert.ok(overWhite(c, SCRIM.bottom) >= CONTRAST_BODY, `${label}: bottom stop`);
   }
 });
 
-test('EDGE: three points lighter fails somewhere — phoneTop is the floor plus the margin, not a guess', () => {
-  const failing = every.filter(({ c }) => overWhite(c, SCRIM.phoneTop - 3) < CONTRAST_BODY);
-  assert.ok(failing.length > 0, `every theme holds at ${SCRIM.phoneTop - 3}% — the floor is lower than stated`);
+test('§10: the gradient never falls below its top stop — text holds wherever it sits', () => {
+  assert.ok(SCRIM.bottom >= SCRIM.top, `bottom ${SCRIM.bottom}% is lighter than top ${SCRIM.top}%`);
 });
 
-test('CONTROL: the desktop top stop does not hold over white — why the phone needs its own', () => {
-  assert.ok(every.some(({ c }) => overWhite(c, SCRIM.top) < CONTRAST_BODY));
+test('EDGE: three points lighter fails somewhere — top is the floor plus the margin, not a guess', () => {
+  const failing = every.filter(({ c }) => overWhite(c, SCRIM.top - 3) < CONTRAST_BODY);
+  assert.ok(failing.length > 0, `every theme holds at ${SCRIM.top - 3}% — the floor is lower than stated`);
+});
+
+test('CONTROL: the old desktop top (55%) does not hold over white — why it was re-derived', () => {
+  const paper = every.find(({ label }) => label === 'paper light');
+  assert.ok(paper, 'no paper light theme');
+  assert.ok(overWhite(paper.c, OLD_DESKTOP_TOP) < CONTRAST_BODY, `${overWhite(paper.c, OLD_DESKTOP_TOP)}:1`);
 });
 
 const T = resolve(THEMES.midnight, 'light');
@@ -73,9 +82,10 @@ test('§8/§9: full 3d lays a gradient scrim over its visual, after it, under th
   assert.match(String(scrim.style?.background), new RegExp(`${SCRIM.bottom}%.*${SCRIM.top}%`));
 });
 
-test('§10: below 768px the scrim strengthens to the phone stop', () => {
+test('§10: the scrim is the same at every width — no breakpoint weakens it', () => {
   const { scrim } = scrimOf('full', ['3d']);
-  assert.match(String(scrim?.below?.sm?.background), new RegExp(`${SCRIM.bottom}%.*${SCRIM.phoneTop}%`));
+  assert.ok(scrim, 'no az-hero-scrim');
+  assert.equal(scrim.below, undefined);
 });
 
 test('§8: live, the header clears so the canvas shows through — the scrim layer covers it', () => {

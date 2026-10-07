@@ -10,7 +10,8 @@
  * browser can: a WebGL context really exists, ONE canvas serves every view,
  * `static` and reduced motion never fetch the 3D chunk, the model loads
  * self-hosted with one decoder and nothing cross-origin, orbit answers the
- * keyboard, and a lost context falls back to the posters. Every check that
+ * keyboard, a lost context falls back to the posters, and a live `full`
+ * hero keeps its scrim between the scene and its type. Every check that
  * could pass vacuously has a control beside it.
  *
  * Headless Chromium renders WebGL with SwiftShader, so no frame time here is
@@ -26,6 +27,8 @@ import { join } from 'node:path';
 import { ROOT, buildSites } from './visual/pipeline.mjs';
 import { startServer } from './visual/serve.mjs';
 import { Overdue, within, closeWithin, watchdog, human } from './lib/bounded.mjs';
+import { textContrast } from './visual/checks.mjs';
+import { SCRIM } from '../packages/words/hero/emit.web.ts';
 
 /** Bound on every wait for the runtime to reach a state. */
 const WAIT_MS = 15_000;
@@ -58,6 +61,26 @@ page /
   scene full 3d scroll
     poster ./assets/poster.webp
     alt    "The strands, growing as you scroll"
+`;
+
+/** hero-spec §8/§10: a `full` hero drawing live behind its type. */
+const FULL = `az 1
+
+site aurora
+
+page /
+  hero full 3d
+    eyebrow  "Limited run"
+    title    "Built in the dark"
+    sub      "Handmade. Forty pairs a month."
+    describe "Strands curling upward"
+    poster   ./assets/poster.webp
+    cta      "Reserve a pair" /reserve
+    alt      "See the process" /process
+
+page /reserve
+
+page /process
 `;
 
 /** The same page under another site name: another seed (scene-spec §11.1), another scene. */
@@ -224,9 +247,10 @@ const below = { dir: join(work, 'below'), source: BELOW };
 const heroBehind = { dir: join(work, 'hero-behind'), source: HERO_BEHIND };
 const ringSite = { dir: join(work, 'ring'), source: RING };
 const protectedSite = { dir: join(work, 'protected'), source: PROTECTED };
+const fullHero = { dir: join(work, 'full'), source: FULL };
 mkdirSync(fixture.dir, { recursive: true });
 cpSync(fixtureAssets, fixture.dir, { recursive: true });
-const sites = [procedural, reseeded, many, pair, backdrop, below, heroBehind, ringSite, protectedSite];
+const sites = [procedural, reseeded, many, pair, backdrop, below, heroBehind, ringSite, protectedSite, fullHero];
 for (const s of sites) {
   mkdirSync(join(s.dir, 'assets'), { recursive: true });
   cpSync(join(fixtureAssets, 'assets/orbit.webp'), join(s.dir, 'assets/poster.webp'));
@@ -701,6 +725,70 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
     `${await canvases(page)} canvas`);
   check('no page errors on the protected page', errors.length === 0, errors[0] ?? '');
   await context.close();
+}
+
+/* ---- hero-spec §8/§10: `full` live — the scrim over the scene, the type at 4.5:1 -- */
+// The scrim layer and the canvas take no pointer, so a hit test does not see
+// them: for the one read they are made hittable, and the stack at the
+// title's centre is read top first. The contrast is read from pixels with
+// the lite rung's static camera, so the scene holds still for the capture.
+{
+  const TEXT = ['.az-hero-eyebrow', '.az-hero-title', '.az-hero-sub', '.az-hero .az-action--secondary'];
+  for (const scheme of ['light', 'dark']) {
+    const { page, context, errors } = await open(fullHero, '/?az-tier=lite&az-probe=off');
+    try {
+      await page.emulateMedia({ colorScheme: scheme });
+      const live = await waitFor(page, () => document.querySelector('.az-hero[data-live="true"]')
+        && getComputedStyle(document.querySelector('.az-hero-poster')).visibility === 'hidden');
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      await page.waitForTimeout(SETTLE_MS);
+      const stack = await page.evaluate(() => {
+        const probe = document.createElement('style');
+        probe.textContent = '.az-3d-canvas, .az-hero-scrim { pointer-events: auto !important; }';
+        document.head.append(probe);
+        try {
+          const r = document.querySelector('.az-hero-title').getBoundingClientRect();
+          const hits = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          const at = (q) => hits.findIndex((el) => el.matches(q));
+          const scrim = document.querySelector('.az-hero-scrim');
+          const cs = scrim ? getComputedStyle(scrim) : null;
+          return {
+            title: at('.az-hero-title'), scrim: at('.az-hero-scrim'), visual: at('.az-hero-visual'), canvas: at('canvas.az-3d-canvas'),
+            opacity: cs?.opacity ?? null, visibility: cs?.visibility ?? null, image: cs?.backgroundImage ?? '',
+          };
+        } finally {
+          probe.remove();
+        }
+      });
+      const order = `title ${stack.title}, scrim ${stack.scrim}, visual ${stack.visual}, canvas ${stack.canvas} (0 is on top)`;
+      check(`hero §8 full live (${scheme}): the scrim paints over the scene and under the type`,
+        live && stack.title >= 0 && stack.scrim > stack.title && stack.visual > stack.scrim && stack.canvas > stack.scrim, order);
+      // The gradient's stops, as computed: every alpha in it is one of SCRIM's.
+      const alphas = [...stack.image.matchAll(/\/\s*([\d.]+)\s*\)|rgba\([^)]*,\s*([\d.]+)\s*\)/g)].map((m) => Number(m[1] ?? m[2]));
+      const want = [SCRIM.bottom / 100, SCRIM.top / 100];
+      check(`hero §10 full live (${scheme}): the scrim is opaque as a layer and its stops are ${SCRIM.bottom}% → ${SCRIM.top}%`,
+        stack.opacity === '1' && stack.visibility === 'visible' && alphas.length === want.length
+          && alphas.every((a, i) => Math.abs(a - want[i]) < 0.005),
+        `opacity ${stack.opacity}, visibility ${stack.visibility}, ${stack.image}`);
+      const held = await textContrast(page, TEXT);
+      check(`hero §9 full live (${scheme}): every line over the scene holds 4.5:1`, live && held.problems.length === 0,
+        held.problems.length ? held.problems.join('; ') : `worst ${held.worst}:1`);
+      // CONTROL: the same read with the scrim taken away is worse, so it is
+      // the scrim, over real canvas pixels, that the read above measured.
+      await page.evaluate(() => {
+        const off = document.createElement('style');
+        off.id = 'az-no-scrim';
+        off.textContent = '.az-hero-scrim { display: none !important; }';
+        document.head.append(off);
+      });
+      const bare = await textContrast(page, TEXT);
+      check(`CONTROL: full live (${scheme}) without its scrim reads lower`, bare.worst < held.worst,
+        `bare ${bare.worst}:1 vs scrimmed ${held.worst}:1`);
+      check(`no page errors on the live full hero (${scheme})`, errors.length === 0, errors[0] ?? '');
+    } finally {
+      await closeWithin(context, CLOSE_MS, `full hero ${scheme} context.close`);
+    }
+  }
 }
 
 let closed = await closeWithin(browser, CLOSE_MS, 'chromium.close');

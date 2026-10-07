@@ -6,7 +6,7 @@
  *   p.az-hero-eyebrow? · h1.az-hero-title? · p.az-hero-sub? ·
  *   ul.az-hero-actions? > li > a|button (ctx.actions: cta primary, alt secondary) ·
  *   div.az-hero-visual[data-az-3d=hero]? > img.az-hero-poster?   (only with 3d) ·
- *   div.az-hero-scrim?   (full + 3d: the gradient over the visual, stronger below sm)
+ *   div.az-hero-scrim?   (full + 3d: the gradient over the visual, the same at every width)
  *   split wraps them as div.az-hero-text + div.az-hero-media (visual goes in media).
  * Variants: center — centred column, centred text · split — two-column grid text|media, one column below sm ·
  *   full — scrim background, on-scrim type, visual absolutely behind · stack — column from the top, visual below ·
@@ -52,13 +52,16 @@ const HEIGHT: Record<string, number> = {
 
 /**
  * §8/§10 — `full`'s scrim over its visual: alpha stops of `color.scrim`, from
- * the bottom edge to the top. `phoneTop` is derived, not chosen (§10): 63% is
- * the smallest whole percent at which `on-scrim` holds 4.5:1 over a pure-white
- * pixel — the worst a poster or scene can show — in every theme and scheme
- * (paper light is the edge); 65 keeps the veil's two points for the browser's
- * compositing (theme VEIL_PERCENT). test/hero-scrim.test.ts proves both.
+ * the bottom edge to the top, the same at every width. `top` is derived, not
+ * chosen (§10): 63% is the smallest whole percent at which `on-scrim` holds
+ * 4.5:1 over a pure-white pixel — the worst a poster or scene can show — in
+ * every theme and scheme (paper light is the edge); 65 keeps the veil's two
+ * points for the browser's compositing (theme VEIL_PERCENT). The gradient
+ * never falls below its top stop, so the type holds wherever it sits — the
+ * header's height and the copy's length move it. test/hero-scrim.test.ts
+ * proves both stops.
  */
-export const SCRIM = { bottom: 88, top: 55, phoneTop: 65 } as const;
+export const SCRIM = { bottom: 88, top: 65 } as const;
 
 /** §4 — display type is fluid; `full` and `minimal` get the larger step. */
 const bigDisplay = (variant: string | null) =>
@@ -149,8 +152,9 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
         marginBottom: 0, listStyle: 'none', padding: 0,
       },
       // §5: under 480px the primary goes full-width; the secondary stays a
-      // text link, which a full-width row does not change.
-      below: { xs: { flexDirection: 'column', alignItems: 'stretch' } },
+      // text link, which a full-width row does not change. A centred column
+      // shrinks the row to its buttons, so it stretches back to the width.
+      below: { xs: { flexDirection: 'column', alignItems: 'stretch', alignSelf: 'stretch' } },
       children: actions,
     });
   }
@@ -164,6 +168,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   // viewport — and no fetchpriority: the TEXT is the LCP element (§8).
   const threeD = block.modifiers.includes('3d');
   const behind = variant === 'full';
+  /** §2 — the layouts whose type is one centred column. */
+  const centred = variant === 'center' || variant === 'full';
   if (threeD) {
     const poster: EmittedNode[] = block.props.poster
       ? [{
@@ -209,16 +215,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     });
     // §8/§9: the type over the visual sits on a gradient scrim. The header's
     // own background is under the visual, so the scrim is a layer of its own
-    // over it — the poster now, the canvas when live. Below 768px its light
-    // end rises to the stop that holds over any pixel (§10, SCRIM).
+    // over it — the poster now, the canvas when live. Its light end is the
+    // stop that holds over any pixel, at every width (§10, SCRIM).
     if (behind) {
-      const gradient = (top: number) =>
-        `linear-gradient(to top, color-mix(in srgb, ${t.color.scrim} ${SCRIM.bottom}%, transparent), color-mix(in srgb, ${t.color.scrim} ${top}%, transparent))`;
       children.push({
         tag: 'div',
         attrs: { class: 'az-hero-scrim', 'aria-hidden': 'true' },
-        style: { position: 'absolute', inset: '0', zIndex: t.layer.behind, pointerEvents: 'none', background: gradient(SCRIM.top) },
-        below: { sm: { background: gradient(SCRIM.phoneTop) } },
+        style: {
+          position: 'absolute', inset: '0', zIndex: t.layer.behind, pointerEvents: 'none',
+          background: `linear-gradient(to top, color-mix(in srgb, ${t.color.scrim} ${SCRIM.bottom}%, transparent), color-mix(in srgb, ${t.color.scrim} ${SCRIM.top}%, transparent))`,
+        },
       });
     }
   }
@@ -265,12 +271,16 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       //   center/full/minimal  a single centred column of type.
       display: variant === 'split' ? 'grid' : 'flex',
       gridTemplateColumns: variant === 'split' ? 'minmax(0, 1fr) minmax(0, 1fr)' : undefined,
-      alignItems: variant === 'split' ? 'center' : undefined,
       columnGap: variant === 'split' ? px(t.space[48]) : undefined,
       flexDirection: variant === 'split' ? undefined : 'column',
+      // A centred column centres its BOXES, not only the text in them: the
+      // title and sub carry their own measure (§3) and the actions are a flex
+      // row, so stretched to the width they would sit at the start edge with
+      // their text centred inside — off the title's axis.
+      alignItems: variant === 'split' || centred ? 'center' : undefined,
       justifyContent: variant === 'stack' ? 'flex-start' : 'center',
       paddingBlock: variant === 'stack' ? px(t.space[96]) : undefined,
-      textAlign: variant === 'center' || variant === 'full' ? 'center' : undefined,
+      textAlign: centred ? 'center' : undefined,
       paddingInline: framed(t),
       // §8 — text sits over media only with a SCRIM, and a scrim is a gradient
       // over a colour, never a flat opacity layer that dims the whole image.
@@ -305,8 +315,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
       : undefined,
     // §10: under 768px `split` restacks to `stack` — text above, media
     // below, which is already the source order. center, stack and minimal
-    // are unchanged; full keeps its focal point (`focus`) and its scrim
-    // layer strengthens (SCRIM.phoneTop, on az-hero-scrim).
+    // are unchanged; full keeps its focal point (`focus`), and its scrim
+    // already holds over any pixel at every width (SCRIM).
     // Every variant takes the mobile gutter below sm (§3, theme-spec §1).
     below: {
       sm: {
