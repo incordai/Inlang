@@ -495,8 +495,17 @@ Two defects were in every site, both in `target-web`, fixed there:
 "No lead copy": the preview's page is a title-only hero plus the word, with
 no paragraph after a heading, so it honestly has no description. A real
 page in that shape would score the same; the author's remedy today is a
-`sub`. An author-written description (a `site` / `page` key) is a grammar
-decision for M5, before the freeze.
+`sub`, or now a written `description`.
+
+**Decided before the freeze (2026-10-07):** `description "…"` at site level
+(every page's) and page level (that page's), and `icon <path>` at site level
+(GRAMMAR §4.4). The written description wins over the derived one, which
+stays the fallback. The same eight previews, each given a site-level
+`description` for the run only, all score SEO 100 (`pnpm test:lighthouse
+footer footer.columns footer.mega gallery.orbit nav nav.full nav.mega
+nav.sheet`; perf 100 on every median, a11y 100, best practices 100). The
+committed previews are left without one: a preview shows its word, and its
+lead-copy-less page is the honest case the derived fallback is measured on.
 
 What this does and does not show:
 
