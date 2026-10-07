@@ -35,7 +35,7 @@
 
 import type { SpecBlock } from '../../core/src/spec.ts';
 import {
-  framed, fromFill, fromShell, isFromMark, px, revealed, visuallyHidden, type EmitContext, type EmittedNode,
+  contentShare, framed, fromFill, fromShell, isFromMark, px, revealed, visuallyHidden, type EmitContext, type EmittedNode,
 } from '../../core/src/emit-contract.ts';
 import { closeButton, popup } from '../../overlay/src/index.ts';
 
@@ -79,30 +79,30 @@ const SM_COLUMNS = 2;
 /** §7 rule 2: the first row loads eagerly; `columns` is that row's length. */
 const DEFAULT_COLUMNS = 3;
 
-/** A CSS width that is 1/n of the viewport, rounded up so the browser never picks too small a file. */
-const viewportShare = (n: number): string => `${Math.ceil(100 / n)}vw`;
-
 /**
  * §7 rule 3: how wide one image is drawn at each viewport — the `sizes` the
  * target writes beside the srcset it builds. It follows the tracks below:
  * two columns under sm, at most three under md, then `columns`; a masonry
  * column is narrower than two minimum columns and a gap, or one more would
  * fit; a carousel slide is one minimum column, all but the peek under sm.
- * Each value is an upper bound — gaps and gutters only make the box smaller.
- * `orbit` gets none: its ring textures are the originals, and a resized copy
+ * Each value is an upper bound — gaps and gutters only make the box smaller
+ * — and a share of the viewport is capped by the same share of the site
+ * frame, which the content never exceeds. `orbit` gets none: its ring textures are the originals, and a resized copy
  * for the hidden list would be a second download of every image.
  */
 function slotSizes(variant: string, columns: number, ctx: EmitContext): string | undefined {
   const t = ctx.theme;
+  const frame = ctx.site.frame;
   const sm = `(width < ${px(t.breakpoint.sm)})`;
+  const smShare = (n: number) => `${sm} ${contentShare(n, frame, t.breakpoint.sm)}`;
   const mdColumns = Math.min(columns, MD_MAX_COLUMNS);
-  const md = `(width < ${px(t.breakpoint.md)}) ${viewportShare(mdColumns)}`;
+  const md = `(width < ${px(t.breakpoint.md)}) ${contentShare(mdColumns, frame, t.breakpoint.md)}`;
   if (variant === 'grid') {
     // Up to three columns, md draws them as wide as the desktop does: no condition of its own.
-    return [`${sm} ${viewportShare(SM_COLUMNS)}`, ...(mdColumns === columns ? [] : [md]), viewportShare(columns)].join(', ');
+    return [smShare(SM_COLUMNS), ...(mdColumns === columns ? [] : [md]), contentShare(columns, frame)].join(', ');
   }
-  if (variant === 'masonry') return `${sm} ${viewportShare(SM_COLUMNS)}, ${md}, ${px(2 * t.size['column-min'] + t.space[16])}`;
-  if (variant === 'carousel') return `${sm} ${viewportShare(1)}, ${px(t.size['column-min'])}`;
+  if (variant === 'masonry') return `${smShare(SM_COLUMNS)}, ${md}, ${px(2 * t.size['column-min'] + t.space[16])}`;
+  if (variant === 'carousel') return `${smShare(1)}, ${px(t.size['column-min'])}`;
   return undefined;
 }
 

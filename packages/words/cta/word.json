@@ -44,7 +44,7 @@
         ".avif"
       ],
       "maxBytes": 512000,
-      "description": "Image for the split variant"
+      "description": "Image for split; resized at build to its column"
     },
     "describe": {
       "type": "string",
@@ -78,7 +78,8 @@
     "space.*",
     "radius.lg",
     "type.display",
-    "type.body"
+    "type.body",
+    "breakpoint.sm"
   ],
   "deps": {},
   "targets": [

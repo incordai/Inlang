@@ -81,7 +81,7 @@
             ".png",
             ".avif"
           ],
-          "description": "Screenshot or photo for the item"
+          "description": "Screenshot or photo; resized at build to its tile"
         },
         "lead": {
           "type": "flag",
@@ -148,7 +148,8 @@
     "size.measure-body",
     "size.ring",
     "size.ring-offset",
-    "breakpoint.sm"
+    "breakpoint.sm",
+    "breakpoint.md"
   ],
   "deps": {},
   "targets": [

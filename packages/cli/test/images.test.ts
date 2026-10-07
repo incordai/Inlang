@@ -105,7 +105,7 @@ test('build: srcset on the gallery, variants of the right widths in public/, nev
   const byName = (name: string) => all.find((a) => a.src === `/assets/${name}`)!;
 
   const big = byName('big.jpg');
-  assert.equal(big.sizes, '(width < 768px) 50vw, 34vw');
+  assert.equal(big.sizes, '(width < 768px) 50vw, min(34vw, 480px)', 'three columns, capped by a third of the frame');
   assert.deepEqual(candidates(big.srcset).map((c) => c.width), [480, 768, 1200, 1800]);
   assert.equal(big.width, '2400', 'the original keeps its width and height');
   const mid = byName('mid.png');

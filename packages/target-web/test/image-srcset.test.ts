@@ -12,10 +12,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
+import { SITE_WIDTHS } from '../../core/src/link.ts';
 import { emitProject } from '../src/emit.ts';
 import { SRCSET_WIDTHS, srcsetImages, srcsetWidths, type Resize } from '../src/image-srcset.ts';
 import { WEB_EMITTERS } from '../../words/registry.ts';
-import type { EmittedNode } from '../../core/src/emit-contract.ts';
+import { contentShare, framePx, type EmittedNode, type ThemeLike } from '../../core/src/emit-contract.ts';
 
 /** A PNG header for w×h: signature, IHDR length and type, then the size. */
 function png(width: number, height: number): Uint8Array {
@@ -116,9 +117,9 @@ for (const n of readdirSync(wordsDir)) {
   manifests.set(m.name, m);
 }
 
-const gallery = (head: string) => `az 1
+const gallery = (head: string, width?: string) => `az 1
 site "Bench"
-
+${width === undefined ? '' : `  width ${width}\n`}
 page /
   nav bar
     logo ./assets/logo.png
@@ -138,8 +139,12 @@ const FILES: Record<string, Uint8Array> = {
   'assets/three.png': png(400, 300), 'assets/four.png': png(1800, 1200),
 };
 
-function build(head: string, resize?: Resize) {
-  const r = compile(gallery(head), { manifests });
+function build(head: string, resize?: Resize, width?: string) {
+  return buildSource(gallery(head, width), resize);
+}
+
+function buildSource(source: string, resize?: Resize) {
+  const r = compile(source, { manifests });
   assert.ok(r.spec, r.diagnostics.map((d) => `${d.code} ${d.message}`).join('\n'));
   const p = emitProject(r.spec, { emitters: WEB_EMITTERS, readBytes: (path) => FILES[path] ?? null, resize });
   return p.files.find((f) => f.path === 'src/App.tsx')!.content;
@@ -159,7 +164,8 @@ test('build: the gallery\'s images get a srcset and the layout\'s sizes; the log
   assert.equal(logo.sizes, undefined);
   const one = all.filter((a) => a.src === '/assets/one.png');
   assert.equal(one.length, 2, 'the thumbnail and the lightbox\'s first image');
-  assert.equal(one[0].sizes, '(width < 768px) 50vw, (width < 1024px) 34vw, 25vw', 'four columns: 2 / 3 / 4 per row');
+  assert.equal(one[0].sizes, '(width < 768px) 50vw, (width < 1024px) 34vw, min(25vw, 360px)',
+    'four columns: 2 / 3 / 4 per row, the last capped by a quarter of the 1440px frame');
   assert.equal(one[1].sizes, 'min(90vw, 1440px)', 'the lightbox is drawn at the dialog\'s width');
   for (const a of one) assert.match(a.srcset, /-480\.webp 480w, .*-1800\.webp 1800w$/);
   assert.equal(one[0].width, '2400', 'width and height stay the original\'s');
@@ -176,8 +182,9 @@ test('build: the gallery\'s images get a srcset and the layout\'s sizes; the log
 
 test('build: each layout gives its own sizes', () => {
   const sizesOf = (head: string) => imgs(build(head, fakeResize())).find((a) => a.src === '/assets/one.png')!.sizes;
-  assert.equal(sizesOf('gallery grid\n    columns 3'), '(width < 768px) 50vw, 34vw', 'three columns: md draws them as the desktop does');
-  assert.equal(sizesOf('gallery grid\n    columns 2'), '(width < 768px) 50vw, 50vw');
+  assert.equal(sizesOf('gallery grid\n    columns 3'), '(width < 768px) 50vw, min(34vw, 480px)',
+    'three columns: md draws them as the desktop does');
+  assert.equal(sizesOf('gallery grid\n    columns 2'), '(width < 768px) 50vw, min(50vw, 720px)');
   assert.equal(sizesOf('gallery masonry\n    ratio auto'), '(width < 768px) 50vw, (width < 1024px) 34vw, 496px');
   assert.equal(sizesOf('gallery carousel'), '(width < 768px) 100vw, 240px');
   assert.equal(sizesOf('gallery orbit\n    poster ./assets/one.png'), undefined, 'orbit: the ring uses the originals');
@@ -188,4 +195,102 @@ test('build: with no resizer the page has no srcset and no sizes at all — as b
   assert.doesNotMatch(app, /"srcset"|"sizes"/);
   const sized = imgs(app).find((a) => a.src === '/assets/one.png')!;
   assert.deepEqual(Object.keys(sized).sort(), ['alt', 'class', 'decoding', 'height', 'loading', 'src', 'width']);
+});
+
+/* ---- the site frame caps `sizes` ------------------------------------------- */
+
+test('the frame in px is the --az-frame the target writes, for every site width', () => {
+  const theme = emitProject(compile(gallery('gallery grid'), { manifests }).spec!, { emitters: WEB_EMITTERS })
+    .files.find((f) => f.path === 'src/theme.css')!.content;
+  const T = { size: { container: 1440, 'gutter-lg': 64 }, breakpoint: { md: 1024 } } as unknown as ThemeLike;
+  const css = (width: string) => new RegExp(
+    width === 'default' ? String.raw`\.az-site \{ --az-frame: ([^;]+);` : String.raw`\.az-site\[data-width="${width}"\] \{ --az-frame: ([^;]+);`,
+  ).exec(theme)?.[1];
+  for (const width of Object.keys(SITE_WIDTHS)) {
+    const frame = framePx(width, T);
+    assert.equal(frame === undefined ? undefined : `${frame}px`, /px$/.test(css(width) ?? '') ? css(width) : undefined, width);
+  }
+  assert.equal(framePx('full', T), undefined, 'full has no frame');
+  assert.equal(framePx('reading', T), undefined, 'reading is a measure in ch, not px');
+});
+
+test('contentShare: a share of the viewport, capped by the frame only where the frame can bite', () => {
+  assert.equal(contentShare(3, undefined), '34vw', 'no frame: the viewport alone');
+  assert.equal(contentShare(3, 1440), 'min(34vw, 480px)');
+  assert.equal(contentShare(2, 1568), 'min(50vw, 784px)');
+  assert.equal(contentShare(3, 1000), 'min(34vw, 334px)', 'rounded up: never too small a file');
+  assert.equal(contentShare(1, 1440, 768), '100vw', 'under 768px a 1440px frame never caps');
+  assert.equal(contentShare(2, 1024, 1024), '50vw', 'a frame as wide as the clause\'s bound never caps');
+  assert.equal(contentShare(2, 900, 1024), 'min(50vw, 450px)');
+});
+
+test('build: each site width caps the gallery\'s sizes by its own frame', () => {
+  const sizesAt = (width: string) => imgs(build('gallery grid\n    columns 3', fakeResize(), width))
+    .find((a) => a.src === '/assets/one.png')!.sizes;
+  assert.equal(sizesAt('default'), '(width < 768px) 50vw, min(34vw, 480px)', 'the 1440px container');
+  assert.equal(sizesAt('wide'), '(width < 768px) 50vw, min(34vw, 523px)', 'the container and both 64px gutters');
+  assert.equal(sizesAt('narrow'), '(width < 768px) 50vw, min(34vw, 342px)', 'breakpoint md');
+  assert.equal(sizesAt('full'), '(width < 768px) 50vw, 34vw', 'no frame');
+  assert.equal(sizesAt('reading'), '(width < 768px) 50vw, 34vw', 'a measure in ch: no px to cap with');
+});
+
+/* ---- feature and cta -------------------------------------------------------- */
+
+const page = (block: string, width?: string) => `az 1
+site "Bench"
+${width === undefined ? '' : `  width ${width}\n`}
+page /
+  ${block}
+`;
+
+const featureSource = (variant: string, extra = '') => page(`feature ${variant}${extra}
+    item "One"
+      media ./assets/one.png
+    item "Two"
+      media ./assets/two.png
+    item "Three"
+      media ./assets/three.png
+    item "Four"
+      media ./assets/four.png`);
+
+const ctaSplit = (width?: string) => page(`cta split
+    title "Reserve"
+    media ./assets/one.png
+    cta "Reserve a pair" /reserve`, width) + '\npage /reserve\n';
+
+test('build: feature rows media is the whole content below sm, then half the row, capped by the frame', () => {
+  const all = imgs(buildSource(featureSource('rows'), fakeResize()));
+  const one = all.find((a) => a.src === '/assets/one.png')!;
+  assert.equal(one.sizes, '(width < 768px) 100vw, min(50vw, 720px)');
+  assert.match(one.srcset, /-480\.webp 480w, .*-1800\.webp 1800w$/);
+  assert.equal(one.width, '2400', 'width and height stay the original\'s');
+  assert.match(all.find((a) => a.src === '/assets/two.png')!.srcset, /768w, \/assets\/two\.png 1000w$/, 'never upscaled');
+  const three = all.find((a) => a.src === '/assets/three.png')!;
+  assert.equal(three.srcset, undefined, 'a 400px original is not resized');
+  assert.equal(three.sizes, undefined);
+});
+
+test('build: feature bento media follows its tracks — one, then two under md, then columns', () => {
+  const sizesOf = (extra: string) => imgs(buildSource(featureSource('bento', extra), fakeResize()))
+    .find((a) => a.src === '/assets/one.png')!.sizes;
+  assert.equal(sizesOf(''), '(width < 768px) 100vw, (width < 1024px) 50vw, min(34vw, 480px)', 'three columns by default');
+  assert.equal(sizesOf('\n    columns 2'), '(width < 768px) 100vw, min(50vw, 720px)', 'two columns: md is the desktop');
+});
+
+test('build: feature grid shows no media, so it asks for no sizes', () => {
+  assert.doesNotMatch(buildSource(featureSource('grid'), fakeResize()), /"sizes"/);
+});
+
+test('build: cta split media is the whole content below sm, then its column, capped by the frame', () => {
+  const one = imgs(buildSource(ctaSplit(), fakeResize())).find((a) => a.src === '/assets/one.png')!;
+  assert.equal(one.sizes, '(width < 768px) 100vw, min(50vw, 720px)');
+  assert.match(one.srcset, /-480\.webp 480w, .*-1800\.webp 1800w$/);
+  const full = imgs(buildSource(ctaSplit('full'), fakeResize())).find((a) => a.src === '/assets/one.png')!;
+  assert.equal(full.sizes, '(width < 768px) 100vw, 50vw', 'a full site has no frame to cap with');
+});
+
+test('build: feature and cta with no resizer ship no srcset and no sizes — as before the rule', () => {
+  for (const source of [featureSource('rows'), featureSource('bento'), ctaSplit()]) {
+    assert.doesNotMatch(buildSource(source), /"srcset"|"sizes"/);
+  }
 });

@@ -569,6 +569,18 @@ implementation over Node's HMAC, a decision of its own.
 then deletes the old file; a crash between leaves an orphan, swept by a
 periodic job comparing the directory to the keys in use.
 
+**One size per upload.** An upload is stored as one file, fitted inside
+2048 px (§18.4); the pipeline makes **no width variants**. So an image a
+`from <table>` row fills in (§10 — gallery `grid`/`masonry` `src`, feature
+`media`) ships that one file, with no `srcset`: the build's resized widths
+(gallery-spec §7 rule 3) are made from build files, and a row's URL comes
+from the server after the page, which no build can see. On a phone, a row's
+image costs up to the 2048 px file where a build image would cost its 480 px
+copy. Variants would be made at upload — the same pinned widths, each a file
+of the row, removed with it, and listed in the API's image value — a change
+to the queue's work per upload and to the sweep, so it is its own piece of
+work, not done yet (§15).
+
 **Metadata.** Photos from phones carry location (EXIF GPS). Stripping it
 properly means decoding and re-encoding [R22], which needs an image library —
 vetted first (§16, Q6): `sharp` 0.35.5, decided 2026-10-06

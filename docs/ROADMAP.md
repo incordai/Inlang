@@ -342,8 +342,15 @@ backend's vetted image library and limits (stack-evaluation §16), names each
 file by a hash of its bytes and the pinned options, and caches it outside the
 output; the lightbox carries each image's srcset and size. §11's 500KB
 gallery-image budget warns. Measured in `pnpm test` and `pnpm verify:build`
-(shipped srcsets, file widths, cold-cache determinism). Not yet: srcset on
-other words' images (they give no `sizes`), `orbit`, and `from` rows.
+(shipped srcsets, file widths, cold-cache determinism). Feature `rows`/`bento`
+media and cta `split` media ship the same srcset with their own layouts'
+`sizes`, and every word's `sizes` is capped by the site frame in px
+(`min(34vw, 480px)` for three columns on the 1440px container; `full` and
+`reading` stay uncapped). Logos ship one file by decision (fixed height:
+their drawn width is the file's aspect, gallery-spec §7). `from` rows ship
+the backend's one stored size — the upload pipeline makes no width variants
+(data-spec §8). Not yet: srcset on the hero's media, `orbit`, and variants
+at upload for `from` rows.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
 validated at the link stage (placement AZ1217, slot name AZ1218, shape

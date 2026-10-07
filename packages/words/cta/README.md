@@ -78,6 +78,7 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 Known gaps:
 
 - Actions render through the button primitive (`ctx.actions`): hierarchy, intent, six states and a 44px target
+- `split` media carries `width`/`height` from the file header and a `srcset` resized at build (gallery-spec §7 rule 3), with `sizes` from its column capped by the site frame
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested

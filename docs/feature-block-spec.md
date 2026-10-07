@@ -157,6 +157,13 @@ have product shots looks like a build error (warned, not blocked — CONVENTIONS
 Item `media` (an image, for `rows` and `bento`) follows the same intrinsic-size
 rule as `gallery` §7: the compiler reads the file header at build time and
 writes `width`/`height` so the box is reserved before the byte arrives.
+It follows gallery §7 rule 3 too (built 2026-10-06): the item's `<img>`
+carries a `sizes` from this word's layout — `rows` `(width < 768px) 100vw`,
+then half the row; `bento` `(width < 768px) 100vw`, then `(width < 1024px)`
+at up to two tiles' share, then `columns`' share — capped by the site frame
+(`min(50vw, 720px)` on the 1440px container), and the build writes a srcset
+of the widths narrower than the file. Media from a `from <table>` row ships
+the server's one file and no srcset (data-spec §8).
 
 ## 8. The `bento` tiling
 

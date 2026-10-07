@@ -148,6 +148,13 @@ the text something to sit against at desktop width; stacked on a phone it is a
 it is genuinely informative — a product shot, a still that explains the film —
 the author says so with a `describe` line and it is kept below the text.
 
+**Its file is sized to the layout** (gallery-spec §7 rule 3, built
+2026-10-06): the `split` image carries `sizes="(width < 768px) 100vw,
+<half the section>"`, the half capped by the site frame (`min(50vw, 720px)`
+on the 1440px container), and the build writes a srcset of the widths
+narrower than the file — so a phone that keeps an informative image fetches
+its 480 or 768px copy, not the original.
+
 ## 7. The honest part: when `cta` is redundant
 
 A closing CTA is the most-added and least-considered block on a marketing page,

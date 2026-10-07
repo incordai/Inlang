@@ -128,7 +128,7 @@ Every variant renders distinctly. Properties not yet implemented (`pnpm coverage
 Known gaps:
 
 - Icons are inlined and sanitised at build (§7): the CLI reads the file through the asset sandbox, and a strict parser keeps only shape elements and geometry/paint attributes. Script, style, `foreignObject`, event handlers and outside references are dropped. Paint becomes `currentColor`, and the icon is `aria-hidden`. A DOCTYPE, entity, CDATA or malformed file fails the build. Without file access (unit tests) the icon renders as an `<img>`
-- `media` has no `width`/`height` from the file header yet (§7), which needs build-time image reading
+- `media` (`rows`, `bento`) carries `width`/`height` from the file header and a `srcset` resized at build (gallery-spec §7 rule 3), with `sizes` from the layout capped by the site frame; `media` from a `from <table>` row ships the server's one file (data-spec §8)
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
 ## Tested

@@ -158,12 +158,22 @@ byte-identical rebuild stops being cheap.
 > `cli/src/image-encode.ts`). As built:
 >
 > - **Which images.** An `<img>` whose word gives a `sizes` — the gallery's
->   `grid`, `masonry` and `carousel` images and its lightbox image — of a
+>   `grid`, `masonry` and `carousel` images and its lightbox image, a
+>   `feature`'s `rows` and `bento` media and a `cta`'s `split` media — of a
 >   JPEG, PNG, WebP or AVIF file (by its first bytes). SVG and GIF are never
 >   resized. `orbit` gives no `sizes`: its ring's textures are the original
 >   files, so a resized copy for the hidden list would be a second download
->   of every image. Other words' images (hero, feature, cta, logos) give
->   none yet, so they keep one file.
+>   of every image. The hero's media gives none yet, so it keeps one file.
+> - **Logos give no `sizes`, by decision.** The nav logo is drawn
+>   `space.32` tall (`space.24` shrunk) and the footer's `space.24`, with
+>   `width: auto` — so its drawn width is that height times the file's own
+>   aspect, which the word cannot see (only the target reads the file). Any
+>   `sizes` the word could state is a guess, and a safe upper bound (the
+>   bar's width) would make the browser pick a far larger file than the
+>   100–200px a logo is drawn at — the opposite of this rule. A fixed-height
+>   image wants density descriptors (`1x`/`2x` at widths derived from its
+>   height), a different rule from these fixed widths; and most logos are
+>   SVG, which is never resized. So a logo ships its one file.
 > - **Widths.** 480, 768, 1200 and 1800 — only those narrower than the
 >   original: **never upscaled**. The original is the widest candidate while
 >   it is at most 1800px; past that the 1800 variant tops the set. An
@@ -175,9 +185,25 @@ byte-identical rebuild stops being cheap.
 >   (`100/columns`, rounded up); `masonry` the same below md, then two
 >   minimum columns and a gap; `carousel` `(width < 768px) 100vw`, then one
 >   minimum column; the lightbox `min(90vw, size.container)`, the dialog's
->   own width. The site frame (`--az-frame`) is not in `sizes` — it is a CSS
->   variable `sizes` cannot read — so on a viewport wider than the frame the
->   browser may pick one width larger than it needs.
+>   own width. `feature` `rows` media is `(width < 768px) 100vw` (above the
+>   text), then half the row (two equal columns); `bento` media is
+>   `(width < 768px) 100vw`, then `(width < 1024px)` at up to two tiles'
+>   share, then `columns`' share; `cta` `split` media is
+>   `(width < 768px) 100vw`, then half the section (its two columns).
+> - **The site frame caps `sizes`.** `sizes` cannot read `--az-frame` (a
+>   CSS variable), but the frame is a compile-time value: the target writes
+>   it from `site width` and theme tokens (`default` = `size.container`,
+>   `wide` = container + both `size.gutter-lg`, `narrow` =
+>   `breakpoint.md`), and hands the same px to every word as
+>   `ctx.site.frame` (`framePx`, `core/src/emit-contract.ts`). A share of
+>   the viewport is then `min(<n>vw, <frame / n>px)` — for a three-column
+>   grid on the 1440px container, `min(34vw, 480px)` — because the content
+>   is never wider than the frame. A clause that only holds below a width
+>   the frame is at least as wide as (`(width < 768px)`, and `(width <
+>   1024px)` on a frame of 1024px or more) is never capped, so it stays
+>   plain `vw`. `full` has no frame and `reading` is a measure in `ch` (a
+>   length of the page's font, which no px states), so those two sites keep
+>   the uncapped viewport share — still an upper bound.
 > - **Output.** WebP, quality 80, every encoder option pinned; EXIF
 >   orientation applied to the pixels; no metadata written. Each file is
 >   `/az-img/<hash>-<width>.webp`, the hash over the input bytes and every
@@ -204,8 +230,14 @@ byte-identical rebuild stops being cheap.
 >   original, never its `currentSrc`, which with a srcset is the small copy
 >   the grid chose), its srcset and its `width`/`height`; the neighbour
 >   preload (§8) asks for the same file the dialog's `sizes` picks.
-> - **Not yet.** srcset for `from` rows (their URLs arrive after the page)
->   and for other words' images.
+> - **`from <table>` rows ship one size.** A row's image URL arrives from
+>   the backend after the page, not from a build file, and the backend's
+>   upload pipeline stores **one** re-encoded file per upload (WebP, at
+>   most 2048px a side — data-spec §8, `IMAGE_LIMITS.storedMax`); it makes
+>   no width variants. So a row's `<img>` (gallery `grid`/`masonry`,
+>   feature media) gets no `sizes` and no srcset. Variants at upload are a
+>   server change of their own (data-spec §8).
+> - **Not yet.** srcset for the hero's media.
 
 **4 — `content-visibility: auto` with `contain-intrinsic-size` per row.**
 Offscreen rows skip layout and paint entirely, and the intrinsic size comes free

@@ -22,7 +22,7 @@ import { actionsFor } from './actions.ts';
 import { blocksFor, type Spec, type SpecBlock } from '../../core/src/index.ts';
 import type { EmitContext, EmittedNode, ThemeLike, WordEmitter }
   from '../../core/src/emit-contract.ts';
-import { componentNode, px } from '../../core/src/emit-contract.ts';
+import { componentNode, framePx, px } from '../../core/src/emit-contract.ts';
 
 export type EmitterMap = Readonly<Record<string, WordEmitter>>;
 
@@ -223,7 +223,9 @@ export function emitPages(
   spec: Spec, theme: ThemeLike, emitters: EmitterMap, asset: AssetResolver, component: ComponentResolver,
   inline?: InlineSvg, markdown?: MarkdownRender,
 ): { route: string; nodes: EmittedNode[] }[] {
-  const site: SiteInfo = { name: spec.site.name };
+  // The frame is the site's, so every word sizing an image caps it alike.
+  const frame = framePx(spec.site.width, theme);
+  const site: SiteInfo = { name: spec.site.name, ...(frame === undefined ? {} : { frame }) };
   return spec.pages.map((page) => ({
     route: page.route,
     // blocksFor resolves inheritance: overrides, `none` suppression, and the

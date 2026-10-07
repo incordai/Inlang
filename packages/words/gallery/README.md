@@ -95,7 +95,7 @@ Known gaps:
 
 - `orbit` draws a 3D image ring through the page's single renderer; its image list and poster stay in the page and are the static tier
 - `lightbox` (§8) and `carousel` arrows are built and checked in three browser engines on `preview.carousel.az`
-- Not built: image `width`/`height` and `srcset` (needs build-time image reading)
+- Images carry `width`/`height` from the file header (§7 rule 1) and a `srcset` resized at build (§7 rule 3) for `grid`, `masonry`, `carousel` and the lightbox, with `sizes` from the columns capped by the site frame; `orbit` and `from <table>` rows ship one file (rows: data-spec §8)
 - The validation table's missing-alt, alt-equals-caption and partial-caption warnings are implemented (AZ2106–AZ2108)
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 

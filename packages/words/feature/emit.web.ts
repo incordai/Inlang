@@ -19,7 +19,8 @@
  * Styling: theme tokens only; row gap larger than column gap; below.md / below.sm track counts;
  *   icons inlined and sanitised (ctx.inlineSvg) so they take the text colour.
  * Behaviour: none; section buttons by target-web/src/actions.ts; `from` rows by the overlay runtime's rows.ts.
- * Edit guide: one item → featureItem(); grid tracks → featureList(); loading item → skeletonItem().
+ * Edit guide: one item → featureItem(); grid tracks → featureList(); loading item → skeletonItem();
+ *   media `sizes` → mediaSizes(), which must follow featureList()'s tracks.
  *   Keep: items render their own props (never the generic slot renderer); no skipped heading level.
  * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/feature-items.test.ts, packages/words/test/responsive.test.ts, packages/words/test/from-blocks.test.ts
  */
@@ -35,11 +36,38 @@
 
 import type { SpecBlock } from '../../core/src/spec.ts';
 import {
-  framed, fromFill, fromShell, isFromMark, px, revealed, skeletonLine, type EmitContext, type EmittedNode,
+  contentShare, framed, fromFill, fromShell, isFromMark, px, revealed, skeletonLine, type EmitContext, type EmittedNode,
 } from '../../core/src/emit-contract.ts';
 
 /** The manifest's `columns` default. */
 const DEFAULT_COLUMNS = 3;
+
+/** Between sm and md a grid or bento caps at this many tracks (featureList). */
+const MD_MAX_COLUMNS = 2;
+
+/** `rows`: media and text share the row in equal columns, from sm up. */
+const ROWS_COLUMNS = 2;
+
+/**
+ * gallery-spec §7 rule 3: how wide an item's media is drawn at each
+ * viewport — the `sizes` the target writes beside the srcset it builds. It
+ * follows featureList() and featureItem(): `rows` is the whole content
+ * below sm (media above the text), then one of two equal columns; `bento`
+ * is one tile per row below sm, at most two under md, then `columns`. Each
+ * value is an upper bound — gaps and gutters only make the box smaller —
+ * and a share of the viewport is capped by the same share of the site
+ * frame, which the content never exceeds.
+ */
+function mediaSizes(variant: string, columns: number, ctx: EmitContext): string {
+  const t = ctx.theme;
+  const frame = ctx.site.frame;
+  const sm = `(width < ${px(t.breakpoint.sm)}) ${contentShare(1, frame, t.breakpoint.sm)}`;
+  if (variant === 'rows') return `${sm}, ${contentShare(ROWS_COLUMNS, frame)}`;
+  const mdColumns = Math.min(columns, MD_MAX_COLUMNS);
+  const md = `(width < ${px(t.breakpoint.md)}) ${contentShare(mdColumns, frame, t.breakpoint.md)}`;
+  // At two columns or fewer md draws them as wide as the desktop does: no condition of its own.
+  return [sm, ...(mdColumns === columns ? [] : [md]), contentShare(columns, frame)].join(', ');
+}
 
 /** §6: "a label of ≤3 words" — the spec-sheet exception to one column. */
 const SPEC_SHEET_MAX_WORDS = 3;
@@ -58,19 +86,25 @@ const isLead = (item: SpecBlock) =>
  * row puts the media on the right); below sm media sits above the text in
  * every row and the alternation is dropped.
  */
-function featureItem(item: SpecBlock, index: number, variant: string, ctx: EmitContext, heading: 'h2' | 'h3'): EmittedNode {
+function featureItem(
+  item: SpecBlock, index: number, variant: string, columns: number, ctx: EmitContext, heading: 'h2' | 'h3',
+): EmittedNode {
   const t = ctx.theme;
   const rows = variant === 'rows';
+  // From a table, the row's image URL fills it after the page (data-spec §10).
+  const fromRow = isFromMark(item.props.media ?? '');
   const media = item.props.media && (rows || variant === 'bento')
     ? {
         tag: 'img',
         attrs: {
-          // From a table, the row's image URL fills it after the page (data-spec §10).
-          src: isFromMark(item.props.media) ? item.props.media : ctx.asset(item.props.media),
+          src: fromRow ? item.props.media : ctx.asset(item.props.media),
           alt: '',
           class: 'az-feature-media',
           loading: 'lazy',
           decoding: 'async',
+          // gallery-spec §7 rule 3: the layout's widths, for the srcset the
+          // build writes. A row's file is the server's, never resized at build.
+          ...(fromRow ? {} : { sizes: mediaSizes(variant, columns, ctx) }),
         },
         style: {
           display: 'block',
@@ -178,7 +212,7 @@ function featureList(variant: string, columns: number, specSheet: boolean, ctx: 
       listStyle: 'none', padding: 0, margin: 0,
     },
     below: variant === 'rows' ? undefined : {
-      md: { gridTemplateColumns: tracks(Math.min(columns, 2)) },
+      md: { gridTemplateColumns: tracks(Math.min(columns, MD_MAX_COLUMNS)) },
       sm: { gridTemplateColumns: variant === 'grid' && specSheet ? tracks(2) : tracks(1) },
     },
     children: items,
@@ -258,10 +292,10 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   if (block.from) {
     // data-spec §10: items load from a table after the page. The template is
     // one item rendered by featureItem() itself, so a row is an item.
-    const template = featureItem(fromFill(block.from), 0, variant, ctx, heading);
+    const template = featureItem(fromFill(block.from), 0, variant, columns, ctx, heading);
     children.push(fromShell(block.from, featureList(variant, columns, false, ctx, [template]), skeletonItem(variant, ctx), ctx));
   }
-  const items = itemFills.map((c, i) => featureItem(c, i, variant, ctx, heading));
+  const items = itemFills.map((c, i) => featureItem(c, i, variant, columns, ctx, heading));
   if (items.length > 0) children.push(featureList(variant, columns, specSheet, ctx, items));
 
   // Section actions (spec §5/§6): the button primitive — one primary `cta`,

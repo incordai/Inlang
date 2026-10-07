@@ -13,7 +13,7 @@
  * Styling: theme tokens only; band paints accent with accent-contrast ink; below.sm mobile gutter,
  *   band padding drops a step, card inset to the gutter, split one column; band actions stack below sm.
  * Behaviour: none; buttons by target-web/src/actions.ts (tone inverted on band).
- * Edit guide: palette per variant → surface/ink at the top of emit(); media → splitMedia().
+ * Edit guide: palette per variant → surface/ink at the top of emit(); media and its `sizes` → splitMedia().
  *   Keep: the band's buttons invert with it; describe is the alt, alt is the secondary button.
  * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/cta-media.test.ts, packages/words/test/responsive.test.ts
  */
@@ -39,7 +39,12 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { framed, glassSurface, px, revealed, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import {
+  contentShare, framed, glassSurface, px, revealed, type EmitContext, type EmittedNode,
+} from '../../core/src/emit-contract.ts';
+
+/** `split`: text and media share the section in two equal columns, from sm up. */
+const SPLIT_COLUMNS = 2;
 
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
@@ -174,6 +179,12 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
 function splitMedia(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
   if (!block.props.media) return null;
   const describe = block.props.describe;
+  const t = ctx.theme;
+  // gallery-spec §7 rule 3: how wide the image is drawn — the whole content
+  // below sm (restacked under the text), then one of the two equal columns;
+  // an upper bound (the column gap only shrinks it), capped by the frame.
+  const frame = ctx.site.frame;
+  const sizes = `(width < ${px(t.breakpoint.sm)}) ${contentShare(1, frame, t.breakpoint.sm)}, ${contentShare(SPLIT_COLUMNS, frame)}`;
   return {
     tag: 'div',
     attrs: {
@@ -193,6 +204,8 @@ function splitMedia(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
         // A closing cta sits below the fold; it must not compete for LCP.
         loading: 'lazy',
         decoding: 'async',
+        // The layout's widths, for the srcset the build writes.
+        sizes,
       },
       style: {
         display: 'block',

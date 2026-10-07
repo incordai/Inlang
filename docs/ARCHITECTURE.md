@@ -209,6 +209,7 @@ export interface WordEmitter {
 export interface EmitContext {
   theme: ResolvedTheme;   // ONLY source of colour/space/type values
   target: string;
+  site: { name: string; frame?: number };  // frame: the site frame in px, when it has one
   slot(name: string): EmittedNode[];
   asset(path: string): string;  // sandboxed; throws outside project root
   // The action primitive — buttons-and-sections-spec §1:

@@ -144,4 +144,11 @@ test('feature: media fills from an image field (rows), as a marker the runtime r
   const template = part(out, 'data-az-from-template')!;
   const img = walk(template).find((n) => n.tag === 'img')!;
   assert.equal(img.attrs!.src, fromMark('media'));
+  // data-spec §8: a row's image is the server's one stored file, never
+  // resized at build, so its <img> asks for no srcset.
+  assert.equal(img.attrs!.sizes, undefined, 'a row\'s media carries no sizes');
+  const plain = emit(block(['  feature rows', '    item "A"', '      text "a"', '      media ./a.webp',
+    '    item "B"', '      text "b"', '      media ./b.webp'], 'feature'));
+  const own = walk(plain).find((n) => n.tag === 'img')!;
+  assert.equal(typeof own.attrs!.sizes, 'string', 'CONTROL: a build file\'s media carries the layout\'s sizes');
 });

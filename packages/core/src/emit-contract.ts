@@ -2,7 +2,7 @@
  * @az module emit-contract
  * Purpose: the word-emitter contract: EmittedNode, EmitContext, style variants, helpers.
  * Spec: docs/ARCHITECTURE.md §4.3
- * Exports: EmittedNode, EmitContext, ThemeLike, px, visuallyHidden, componentNode, fromShell, fromFill, fromMark, isFromMark, skeletonLine
+ * Exports: EmittedNode, EmitContext, ThemeLike, px, framed, framePx, contentShare, visuallyHidden, componentNode, fromShell, fromFill, fromMark, isFromMark, skeletonLine
  * Edit guide: a contract change touches every emitter and target-web; update ARCHITECTURE §4.3 in the same commit.
  * Tests: packages/target-web/test/stylesheet.test.ts, packages/words/test/words.test.ts
  */
@@ -164,8 +164,10 @@ export interface EmitContext {
    * The site this block belongs to. A word needs its name wherever the page
    * must say what the site is without an image to say it — nav-spec §7: the
    * logo link carries the site name as text, or it is an unlabelled link.
+   * `frame` is the site frame's width in px (`framePx`), absent when the
+   * frame has none — a word that sizes an image caps its `sizes` with it.
    */
-  readonly site: { readonly name: string };
+  readonly site: { readonly name: string; readonly frame?: number };
   /** Children filling a named slot — `hero`'s `cta`, `footer`'s `link`. */
   readonly slot: (name: string) => EmittedNode[];
   /**
@@ -248,6 +250,34 @@ export const px = (n: number): string => `${n}px`;
  */
 export const framed = (theme: ThemeLike): string =>
   `max(${px(theme.size['gutter-lg'])}, calc((100% - var(--az-frame, 100%)) / 2))`;
+
+/**
+ * PRD §6.1a: the site frame's width in px, the `--az-frame` the target
+ * writes for each `site width` — `default` the theme container, `wide` the
+ * container and both gutters, `narrow` breakpoint md. `full` has no frame,
+ * and `reading` is a measure in `ch`, a length of the page's font that no
+ * px value states, so neither has one.
+ */
+export function framePx(width: string, theme: ThemeLike): number | undefined {
+  if (width === 'default') return theme.size.container;
+  if (width === 'wide') return theme.size.container + 2 * theme.size['gutter-lg'];
+  if (width === 'narrow') return theme.breakpoint.md;
+  return undefined;
+}
+
+/**
+ * gallery-spec §7 rule 3: the `sizes` length of an image one `n`th of the
+ * content wide — `100/n` vw, rounded up so the browser never picks too
+ * small a file, and, where the site frame can be narrower than the
+ * viewport, never more than one `n`th of the frame (the content is the
+ * frame at most). `below` is the width under which the clause holds, px: a
+ * frame at least that wide never caps it, and the length stays plain vw.
+ */
+export function contentShare(n: number, frame: number | undefined, below?: number): string {
+  const vw = `${Math.ceil(100 / n)}vw`;
+  if (frame === undefined || (below !== undefined && frame >= below)) return vw;
+  return `min(${vw}, ${px(Math.ceil(frame / n))})`;
+}
 
 /**
  * The tag of a component node: a user component named by `raw` or `slot`

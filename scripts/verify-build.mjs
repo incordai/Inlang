@@ -635,6 +635,7 @@ try {
   // The GRAMMAR §8 fixture's images are placeholders too small to resize, so
   // a gallery of real photographs — made here, in a cache of its own —
   // goes through the real build, and the checks read the pages it ships.
+  // A feature's `rows` media and a cta's `split` media use the same files.
   const gallerySite = join(work, 'gallery.az');
   mkdirSync(join(work, 'photos'));
   const photo = (w, h) => sharp({ create: { width: w, height: h, channels: 3, background: { r: 120, g: 60, b: 30 } } })
@@ -646,7 +647,10 @@ try {
   writeFileSync(join(work, 'photos/broken.jpg'), (await photo(900, 600).jpeg().toBuffer()).subarray(0, 700));
   writeFileSync(gallerySite,
     'az 1\nsite photos\n\npage /\n  hero center\n    title "Photos"\n  gallery grid lightbox\n    columns 3\n' +
-    ['big.jpg', 'mid.png', 'small.webp', 'broken.jpg'].map((f) => `    image ./photos/${f}\n      alt "${f}"\n`).join(''));
+    ['big.jpg', 'mid.png', 'small.webp', 'broken.jpg'].map((f) => `    image ./photos/${f}\n      alt "${f}"\n`).join('') +
+    '  feature rows\n' +
+    ['big.jpg', 'mid.png'].map((f) => `    item "${f}"\n      text "A photograph."\n      media ./photos/${f}\n`).join('') +
+    '  cta split\n    title "Reserve"\n    media ./photos/big.jpg\n    cta "Reserve a pair" /reserve\n\npage /reserve\n');
   const galleryProj = join(work, 'gallery');
   const galleryReport = azBuild(gallerySite, galleryProj, work, { AZ_IMAGE_CACHE: join(work, 'image-cache-a') });
   cpSync(join(proj, 'node_modules'), join(galleryProj, 'node_modules'), { recursive: true });
@@ -657,7 +661,8 @@ try {
     const attr = (tag, name) => new RegExp(`\\s${name}="([^"]*)"`, 'i').exec(tag)?.[1]
       ?.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
     const tags = [...page.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
-    const of = (file) => tags.filter((t) => attr(t, 'src') === `/photos/${file}`);
+    const MEDIA = /\baz-(?:feature-media|cta-media-img)\b/;
+    const of = (file) => tags.filter((t) => attr(t, 'src') === `/photos/${file}` && !MEDIA.test(attr(t, 'class') ?? ''));
     const set = (t) => (attr(t, 'srcset') ?? '').split(', ').filter(Boolean).map((c) => {
       const [url, w] = c.split(' ');
       return { url, width: Number(w?.slice(0, -1)) };
@@ -665,7 +670,7 @@ try {
     const [big, bigBox] = of('big.jpg');
     const [mid] = of('mid.png');
     check('§7 rule 3: a large photograph ships a srcset of the four widths, with the layout\'s sizes',
-      set(big).map((c) => c.width).join() === '480,768,1200,1800' && attr(big, 'sizes') === '(width < 768px) 50vw, 34vw',
+      set(big).map((c) => c.width).join() === '480,768,1200,1800' && attr(big, 'sizes') === '(width < 768px) 50vw, min(34vw, 480px)',
       `${attr(big, 'srcset')} | ${attr(big, 'sizes')}`);
     check('§7 rule 3: the original stays the src, with its own width and height',
       attr(big, 'width') === '2400' && attr(big, 'height') === '1600');
@@ -693,8 +698,26 @@ try {
       if (width !== c.width) wrong.push(`${c.url} is ${width}px, says ${c.width}w`);
       if (c.url !== c.src && !(c.width < c.original)) wrong.push(`${c.url} is not narrower than its ${c.original}px original`);
     }
+    // The same rule for feature and cta media, with the sizes of their own layouts.
+    const media = (cls, file) => tags.find((t) => attr(t, 'src') === `/photos/${file}` && (attr(t, 'class') ?? '').split(' ').includes(cls));
+    const featureBig = media('az-feature-media', 'big.jpg');
+    const featureMid = media('az-feature-media', 'mid.png');
+    const ctaBig = media('az-cta-media-img', 'big.jpg');
+    check('§7 rule 3: feature rows media ships the four widths, with half the row\'s sizes capped by the frame',
+      !!featureBig && set(featureBig).map((c) => c.width).join() === '480,768,1200,1800' &&
+        attr(featureBig, 'sizes') === '(width < 768px) 100vw, min(50vw, 720px)' &&
+        attr(featureBig, 'srcset') === attr(big, 'srcset') && attr(featureBig, 'width') === '2400',
+      featureBig ? `${attr(featureBig, 'srcset')} | ${attr(featureBig, 'sizes')}` : 'no feature media');
+    check('§7 rule 3: feature media is never upscaled — a 1000px original gets 480 and 768, then itself',
+      !!featureMid && set(featureMid).map((c) => c.width).join() === '480,768,1000' &&
+        set(featureMid)[2]?.url === '/photos/mid.png', featureMid ? attr(featureMid, 'srcset') : 'no feature media');
+    check('§7 rule 3: cta split media ships the four widths, with its column\'s sizes capped by the frame',
+      !!ctaBig && set(ctaBig).map((c) => c.width).join() === '480,768,1200,1800' &&
+        attr(ctaBig, 'sizes') === '(width < 768px) 100vw, min(50vw, 720px)' && attr(ctaBig, 'height') === '1600',
+      ctaBig ? `${attr(ctaBig, 'srcset')} | ${attr(ctaBig, 'sizes')}` : 'no cta media');
+    // gallery 4 + lightbox 4 + 3, feature 4 + 3, cta 4: every one checked against the file it names.
     check('§7 rule 3: every srcset candidate ships, at its stated width, none upscaled',
-      named.length === 4 + 4 + 3 && wrong.length === 0, wrong.join('; ') || `${named.length} candidates`);
+      named.length === 4 + 4 + 3 + 4 + 3 + 4 && wrong.length === 0, wrong.join('; ') || `${named.length} candidates`);
   }
 
   /* ---- determinism ------------------------------------------------------ */
