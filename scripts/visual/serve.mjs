@@ -4,11 +4,16 @@
  * One server, re-pointed at each site's dist/ in turn, because the emitted
  * pages link assets from the root (`/assets/...`) and so must be served at
  * `/`. Paths are resolved inside the root; anything escaping it is a 404.
+ *
+ * `{ compress: true }` gzips text responses for a client that accepts it, as
+ * a static host does in production — for a check that measures transfer
+ * (pnpm test:lighthouse). The default serves the bytes as they are.
  */
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css',
@@ -16,7 +21,10 @@ const TYPES = {
   '.jpeg': 'image/jpeg', '.avif': 'image/avif', '.json': 'application/json', '.ico': 'image/x-icon',
 };
 
-export async function startServer() {
+/** The types a static host compresses: text, not already-compressed media. */
+const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.svg', '.json']);
+
+export async function startServer({ compress = false } = {}) {
   let root = null;
   const server = createServer(async (req, res) => {
     const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
@@ -28,7 +36,10 @@ export async function startServer() {
     }
     try {
       const body = await readFile(file);
-      res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' }).end(body);
+      const headers = { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' };
+      const gzip = compress && COMPRESSIBLE.has(extname(file)) && /\bgzip\b/.test(req.headers['accept-encoding'] ?? '');
+      if (gzip) Object.assign(headers, { 'content-encoding': 'gzip', vary: 'accept-encoding' });
+      res.writeHead(200, headers).end(gzip ? gzipSync(body) : body);
     } catch {
       res.writeHead(404).end();
     }

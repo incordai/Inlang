@@ -436,6 +436,88 @@ Measured, on what ships (`dist/`), not on a render in the test process:
 Still open: the Lighthouse SEO score (M5). Status stays `UNVERIFIED` until it
 is measured.
 
+### Pre-M5 evidence (2026-10-07): synthetic sites, local — not the M5 verdict
+
+`pnpm test:lighthouse` (stack-evaluation §17: Lighthouse 13.5.0, headless
+Chrome for Testing 153, default config — mobile emulation, simulated
+throttling) on 29 production builds: every word preview, the GRAMMAR §8
+fixture, and `combined` (nav, hero `full 3d`, feature, gallery, pricing,
+cta on one page). Each is served locally with gzip, its first page audited
+three times on a quiet machine (no gate, visual or test-3d running);
+perf is the median, with all three runs shown. These are this repository's
+own sites on a laptop, not a real client site on a real host, so **the M5
+box stays open** and the status stays `UNVERIFIED`.
+
+Two defects were in every site, both in `target-web`, fixed there:
+
+1. **No meta description** (SEO 90–91). A page now describes itself with
+   its own lead copy — the first paragraph after its first heading
+   (`target-web/src/head.ts`); a page with no such paragraph gets no tag
+   rather than an invented one. Tests: `packages/target-web/test/head.test.ts`,
+   and `verify:build` reads it from the shipped `/` and `/legal`.
+2. **A 404 for `/favicon.ico` on every page view** (best practices 96: a
+   console error). The grammar has no site icon, so each page now declares
+   an empty one (`<link rel="icon" href="data:,">`) and the browser asks for
+   nothing. Same tests.
+
+| site | perf runs (before / after) | perf | a11y | best practices | SEO |
+|---|---|---|---|---|---|
+| auth | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| auth.signup | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| cta | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| cta.split | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| faq | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| faq.columns | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| feature | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| feature.rows | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 91 → 100 |
+| footer | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 (no lead copy) |
+| footer.columns | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 (no lead copy) |
+| footer.mega | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 (no lead copy) |
+| gallery | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 91 → 100 |
+| gallery.carousel | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 91 → 100 |
+| gallery.orbit | 96 100 100 / 97 100 100 | 100 | 100 | 96 → 100 | 91 (no lead copy) |
+| hero | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| hero.full | 97 99 100 / 99 97 97 | 99 / 97 | 100 | 96 → 100 | 90 → 100 |
+| hero.split | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| nav | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 91 (no lead copy) |
+| nav.bar | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 91 → 100 |
+| nav.full | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 91 (no lead copy) |
+| nav.mega | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 (no lead copy) |
+| nav.sheet | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 91 (no lead copy) |
+| pricing | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| pricing.table | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| scene | 97 98 99 / 97 99 98 | 98 | 100 | 96 → 100 | 90 → 100 |
+| text | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| text.columns | 100 100 100 / 100 100 100 | 100 | 100 | 96 → 100 | 90 → 100 |
+| grammar-fixture | 96 97 99 / 95 96 99 | 97 / 96 | 100 | 96 → 100 | 91 → 100 |
+| combined | 97 98 99 / 99 98 99 | 98 / 99 | 100 | 96 → 100 | 91 → 100 |
+
+"No lead copy": the preview's page is a title-only hero plus the word, with
+no paragraph after a heading, so it honestly has no description. A real
+page in that shape would score the same; the author's remedy today is a
+`sub`. An author-written description (a `site` / `page` key) is a grammar
+decision for M5, before the freeze.
+
+What this does and does not show:
+
+- **Accessibility was 100 on every site before any change**; perf ≥ 95
+  everywhere on a quiet machine. The M5 targets (perf ≥ 85, SEO ≥ 95,
+  a11y 100) are met by every site with lead copy.
+- **Perf is load-sensitive.** Earlier single runs of the fixture and
+  `combined`, while other work loaded the machine, scored 63–75 (TBT 1.3–3 s);
+  the same builds on a quiet machine score 96–99. A profile showed no long
+  task of the site's own in a quiet run (the 3D start is ~40 ms, the first
+  draw ~12–18 ms, unthrottled). M5 should measure several runs on a quiet
+  machine, or a lab, not one.
+- Diagnostics left as they are, none moving a score below target: unused
+  JavaScript (React and the runtime, ~35–42 KiB; the 3D chunk ~105 KiB on
+  3D pages only — non-3D pages fetch no 3D code), the one render-blocking
+  stylesheet (~150 ms estimated), and cache lifetimes (the local server
+  sends no cache headers — the host's job).
+- Not shown: a real host's compression, caching, TLS and latency; a real
+  phone's GPU (headless Chromium draws the 3D canvas on this laptop's);
+  pages other than each site's first.
+
 ---
 
 ## A7 — Theme compliance is mechanically enforceable

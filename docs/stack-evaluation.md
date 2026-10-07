@@ -954,3 +954,61 @@ already in the repository for the backend's tests. By design (not exercised on
 such a platform) a missing binary or another library version builds without
 srcset, with one warning, and never fails the build.
 
+
+---
+
+## 17. Lighthouse for the pre-M5 audit — **ADOPT `lighthouse` 13.5.0, root devDependency only**
+
+Decided 2026-10-07 for ROADMAP M5's exit criterion (Lighthouse perf ≥ 85
+on mobile, SEO ≥ 95, a11y 100 — ASSUMPTIONS A6), run early on synthetic
+sites so M5 does not trip on defects the compiler puts into every site.
+
+**What it is.** `lighthouse` 13.5.0 — read from the npm registry on
+2026-10-07: `latest` dist-tag, published 2026-09-18 (newer entries are
+`-dev` nightlies under the `next` tag). Apache-2.0. `engines.node >=22.19`;
+the repository runs Node 22.23.2. No peer dependencies. 19.2 MB unpacked,
+106 packages added to the lockfile (`pnpm audit`: no known
+vulnerabilities on the day).
+
+**How it runs here.** Programmatically (`import lighthouse from
+'lighthouse'`), against Playwright's own Chromium (`chromium
+.executablePath()`, Chrome for Testing 153 at Playwright 1.63.0), started
+by `scripts/lighthouse.mjs` as a child with `--headless=new
+--remote-debugging-port=0` and a fresh profile, then passed to Lighthouse
+as `port` — so no second browser is downloaded and Lighthouse's own
+launcher is not used. The default config is used unchanged: mobile
+emulation, simulated throttling. Its error reporting is off unless the
+`enableErrorReporting` flag is set (`core/lib/sentry.js`); the script
+never sets it, so a run sends nothing anywhere.
+
+**Where it lives.** The repository root's `devDependencies`, for
+`pnpm test:lighthouse` only. No `packages/*` manifest, no `word.json`, and
+no emitted `package.json` names it; a generated site never installs it.
+
+**Alternatives.**
+- *Playwright plus `web-vitals` by hand*: LCP, CLS and INP from the page
+  itself, no new dependency. But M5's criterion is a Lighthouse score —
+  a weighted model over simulated throttling plus the SEO, a11y and
+  best-practice audit sets — and re-implementing it would measure
+  something else under the same name.
+- *axe alone* (already pinned, `@axe-core/playwright`): covers the a11y
+  category's rules (Lighthouse runs axe for it) and nothing of perf, SEO
+  or best practices.
+- *Lighthouse CI* (`@lhci/cli`): adds a server, assertions and history —
+  machinery for a dashboard M5 does not need, around the same engine.
+- *A hosted page-speed service*: sends the site to a third party and
+  cannot reach a local build.
+
+**Drawbacks.** A large tree for a check (106 packages, among them a
+second browser-automation client and an error-reporting SDK that stays
+unloaded). Performance scores are sensitive to the machine's load, so the
+script runs sites one at a time, waits for the other browser checks to
+finish, audits each site three times and reports the median with the
+spread and the load average. Desktop headless Chromium on Apple silicon
+is not a phone: simulated throttling models a mid-range device's CPU and
+network, but GPU work (the 3D canvas) runs on this machine's GPU.
+
+**Decision.** Adopt as a root devDependency for `pnpm test:lighthouse`.
+Revisit when M5 measures a deployed site (a real host's compression,
+caching and latency), or if the engine requirement outruns the
+repository's Node.
