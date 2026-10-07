@@ -2,7 +2,7 @@
  * @az server http
  * Purpose: the HTTP edge: JSON bodies, cookies, CORS, security headers, rate limits, client IP.
  * Spec: docs/backend-spec.md §5
- * Exports: readJson, readRaw, sendFile, cookie, corsHeaders, clientIp, createLimiter, requestListener
+ * Exports: readJson, readRaw, sendFile, cookie, corsHeaders, clientIp, createLimiter, requestListener, createBackendServer
  * Edit guide: trust X-Forwarded-For only by hop count; exact-origin CORS; cap limiter memory.
  * Tests: packages/backend/test/security.test.ts
  */
@@ -16,8 +16,9 @@
 
 import { createWriteStream } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createServer, STATUS_CODES, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
+import type { Duplex } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 /** The largest request body read; auth bodies are a few hundred bytes. */
@@ -174,6 +175,65 @@ export function requestListener(
       if (!res.headersSent) send(res, 500, { error: 'unknown' }); else res.end();
     });
   };
+}
+
+/** The status Node itself answers each parser failure with; any other is a 400. */
+const CLIENT_ERROR_STATUS: Readonly<Record<string, number>> = {
+  HPE_HEADER_OVERFLOW: 431,
+  HPE_CHUNK_EXTENSIONS_OVERFLOW: 413,
+  ERR_HTTP_REQUEST_TIMEOUT: 408,
+};
+
+/** How long a refused connection may take to flush its answer before it is destroyed regardless. */
+const CLIENT_ERROR_FLUSH_MS = 1_000;
+
+/**
+ * The raw answer to a request Node could not parse: a status line and the
+ * security set, no body. Built from the error's code alone — nothing the
+ * client sent is echoed.
+ */
+function clientErrorResponse(code: string | undefined): string {
+  const status = (code === undefined ? undefined : CLIENT_ERROR_STATUS[code]) ?? 400;
+  const headers = { ...SECURITY_HEADERS, 'content-length': '0', connection: 'close' };
+  return `HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\n${Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join('')}\r\n`;
+}
+
+/**
+ * The backend's HTTP server. Requests go to requestListener; a request Node
+ * cannot parse (a malformed request line, oversized headers, a timeout) is
+ * answered by the 'clientError' listener, since Node's own answer to it
+ * carries no security headers. There is no response object there, so the
+ * answer is written raw to the socket (Node's documented pattern) — only
+ * while the socket is writable and no response on it has begun, never on a
+ * reset — and the socket is then destroyed.
+ */
+export function createBackendServer(
+  handle: (req: IncomingMessage, res: ServerResponse) => Promise<void>,
+  log: (line: string) => void,
+): Server {
+  const listener = requestListener(handle, log);
+  // The responses still open on each connection: a raw answer written once
+  // one of them has begun would corrupt the stream the client is reading.
+  const inFlight = new WeakMap<Duplex, Set<ServerResponse>>();
+  const server = createServer((req, res) => {
+    const responses = inFlight.get(req.socket) ?? new Set<ServerResponse>();
+    inFlight.set(req.socket, responses);
+    responses.add(res);
+    res.once('close', () => responses.delete(res));
+    listener(req, res);
+  });
+  server.on('clientError', (err: NodeJS.ErrnoException, socket: Duplex) => {
+    const begun = [...(inFlight.get(socket) ?? [])].some((res) => res.headersSent);
+    if (err.code === 'ECONNRESET' || !socket.writable || begun) {
+      socket.destroy();
+      return;
+    }
+    const timer = setTimeout(() => socket.destroy(), CLIENT_ERROR_FLUSH_MS);
+    timer.unref();
+    socket.once('close', () => clearTimeout(timer));
+    socket.end(clientErrorResponse(err.code), () => socket.destroy());
+  });
+  return server;
 }
 
 /**

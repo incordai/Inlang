@@ -17,7 +17,7 @@ import { migrate, openSqlite } from '../src/server/db.ts';
 import { migrateData } from '../src/server/data-migrate.ts';
 import { ownedRowDeletes } from '../src/server/data-values.ts';
 import { createStore } from '../src/server/store.ts';
-import { clientIp, createLimiter, rateKey, requestListener, SECURITY_HEADERS } from '../src/server/http.ts';
+import { clientIp, createBackendServer, createLimiter, rateKey, requestListener, SECURITY_HEADERS } from '../src/server/http.ts';
 import { isEmail, isSitePath } from '../src/server/app.ts';
 import { loadConfig } from '../src/server/env.ts';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -395,5 +395,87 @@ test('CONTROL fallback: headers already sent are not rewritten — the response 
     const r = await fetch(s.url, { signal: AbortSignal.timeout(5_000) });
     assert.equal(r.status, 200);
     assert.equal(await r.text(), 'partial');
+  } finally { await s.close(); }
+});
+
+/* ---- a request Node cannot parse ---------------------------------------- */
+
+/** How long one raw exchange may take before the probe gives up. */
+const RAW_MS = 5_000;
+
+/** Sends `bytes` over a bare TCP connection; resolves with what came back, and whether the server closed it in time. */
+function rawExchange(url: string, bytes: string): Promise<{ answer: string; closed: boolean }> {
+  const { hostname, port } = new URL(url);
+  return new Promise((done, fail) => {
+    const s = connect(Number(port), hostname, () => s.write(bytes));
+    let answer = '';
+    const timer = setTimeout(() => { s.destroy(); done({ answer, closed: false }); }, RAW_MS);
+    s.on('data', (c) => { answer += c; });
+    s.on('close', () => { clearTimeout(timer); done({ answer, closed: true }); });
+    s.on('error', (e: NodeJS.ErrnoException) => { if (e.code !== 'ECONNRESET') { clearTimeout(timer); fail(e); } });
+  });
+}
+
+/** A real server from createBackendServer, answering every parsed request 204; closed by the caller. */
+async function parsing() {
+  const server = createBackendServer(async (_req, res) => { res.writeHead(204, { ...SECURITY_HEADERS }).end(); }, () => {});
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const close = () => new Promise<void>((ok) => { server.closeAllConnections(); server.close(() => ok()); });
+  return { url, close };
+}
+
+/** The header block of a raw answer, by lower-cased name. */
+const headersOf = (answer: string) => new Map(answer.split('\r\n\r\n')[0]!.split('\r\n').slice(1)
+  .map((l) => [l.slice(0, l.indexOf(':')).toLowerCase(), l.slice(l.indexOf(':') + 1).trim()] as const));
+
+const MARKER = 'probe-marker-7f3a';
+
+test('SECURITY malformed request: a bad request line is answered 400 with the full security set, nothing echoed, the socket closed', async () => {
+  const s = await parsing();
+  try {
+    const { answer, closed } = await rawExchange(s.url, `GET /${MARKER} NOT-HTTP\r\nHost: ${MARKER}\r\n\r\n`);
+    assert.match(answer, /^HTTP\/1\.1 400 Bad Request\r\n/, answer.split('\r\n')[0]);
+    const h = headersOf(answer);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) assert.equal(h.get(k), v, k);
+    assert.equal(h.get('connection'), 'close');
+    assert.equal(answer.split('\r\n\r\n')[1], '', 'no body');
+    assert.ok(!answer.includes(MARKER), 'nothing the client sent comes back');
+    assert.ok(closed, 'the server closed the connection');
+  } finally { await s.close(); }
+});
+
+test('SECURITY oversized header: answered 431 with the full security set, the socket closed', async () => {
+  const s = await parsing();
+  try {
+    // Past Node's default 16 KiB header limit.
+    const { answer, closed } = await rawExchange(s.url, `GET / HTTP/1.1\r\nHost: localhost\r\nX-Big: ${MARKER}${'a'.repeat(20 * 1024)}\r\n\r\n`);
+    assert.match(answer, /^HTTP\/1\.1 431 Request Header Fields Too Large\r\n/, answer.split('\r\n')[0]);
+    const h = headersOf(answer);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) assert.equal(h.get(k), v, k);
+    assert.ok(!answer.includes(MARKER), 'nothing the client sent comes back');
+    assert.ok(closed, 'the server closed the connection');
+  } finally { await s.close(); }
+});
+
+test('CONTROL malformed request: a well-formed request on the same server is answered by the handler', async () => {
+  const s = await parsing();
+  try {
+    const { answer } = await rawExchange(s.url, 'GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
+    assert.match(answer, /^HTTP\/1\.1 204 No Content\r\n/, answer.split('\r\n')[0]);
+  } finally { await s.close(); }
+});
+
+test('CONTROL malformed request: a connection the client reset gets no answer and the server keeps serving', async () => {
+  const s = await parsing();
+  try {
+    const { hostname, port } = new URL(s.url);
+    await new Promise<void>((ok) => {
+      const c = connect(Number(port), hostname, () => { c.write('GET / HTTP/1.1\r\nX-Bad\r\n'); c.resetAndDestroy(); });
+      c.on('close', () => ok());
+      c.on('error', () => {});
+    });
+    const { answer } = await rawExchange(s.url, 'GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
+    assert.match(answer, /^HTTP\/1\.1 204 /, 'still serving');
   } finally { await s.close(); }
 });

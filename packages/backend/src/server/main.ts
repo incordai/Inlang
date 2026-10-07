@@ -20,7 +20,6 @@
  * Copied into a generated server; imports only its siblings and node built-ins.
  */
 
-import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { createApp, type DataRoutes } from './app.ts';
 import { MigrationBusy } from './claim.ts';
@@ -28,7 +27,7 @@ import type { DataStep } from './data-migrate.ts';
 import { migrate, openMysql, openPostgres, openSqlite, type Db } from './db.ts';
 import { createMailer } from './email.ts';
 import { loadConfig, type Setup } from './env.ts';
-import { requestListener } from './http.ts';
+import { createBackendServer } from './http.ts';
 import { createOidc } from './oidc.ts';
 import { createStore } from './store.ts';
 
@@ -146,9 +145,10 @@ if (args.migrate) {
 
 const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }, ownedRows);
 const app = createApp({ config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)), ...(data ? { data } : {}) });
-// The handler answers its own failures; requestListener is the last line,
-// and its 500 carries the security headers like every other response.
-const server = createServer(requestListener(app.handler, (line) => process.stderr.write(`backend: ${line}\n`)));
+// The handler answers its own failures; requestListener is the last line.
+// Its 500, like the answer to a request Node cannot parse, carries the
+// security headers like every other response.
+const server = createBackendServer(app.handler, (line) => process.stderr.write(`backend: ${line}\n`));
 // An image upload of up to AZ_UPLOAD_MAX_MB needs longer than a JSON body.
 server.requestTimeout = config.setup.images === true ? 120_000 : 15_000;
 server.headersTimeout = 10_000;
