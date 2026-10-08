@@ -70,7 +70,7 @@ almost nothing in this stack legitimately needs them.
 | **Secret leaked into the client bundle** | **critical** | see §4 |
 | XSS via markdown content pipeline | high | sanitize; strip raw HTML by default, opt-in per file |
 | Reverse tabnabbing | medium | `rel="noopener noreferrer"` — already in the button spec |
-| No CSP | medium | emit a sane default CSP header/meta — **fixed 2026-10-07**: a hashed per-page meta (§5.5) |
+| No CSP | medium | emit a sane default CSP header/meta — **fixed 2026-10-07**: a hashed per-page meta (§5.5), watched for violations in every browser suite |
 | Known-vulnerable shipped dep | medium | `npm audit` in CI; block on high/critical |
 
 ---
@@ -303,9 +303,19 @@ straight after the charset. As shipped:
 - 3D: a page showing a model adds `'wasm-unsafe-eval'` to `script-src` and
   `worker-src 'self' blob:` — the Draco decoder compiles WebAssembly in a
   worker made from a `blob:` URL, and each is refused without it (measured in
-  all three engines) — plus `blob:` in `img-src` and `connect-src` for a
-  model's embedded textures. Nothing needs `'unsafe-eval'`; a procedural
-  scene needs none of this.
+  all three engines) — plus `blob:` in `connect-src` for a model's embedded
+  textures: the loader makes a `blob:` URL of each image and fetches it,
+  then decodes it with `createImageBitmap`, never an `<img>`. `img-src`
+  carries no `blob:` — *tightened (follow-up)*: it was allowed from the
+  loader's source alone; `pnpm test:3d` now draws a generated textured model
+  (`scripts/gen-textured-glb.mjs`, 5KB, a PNG in a bufferView) in Chromium,
+  Firefox and WebKit, and it decodes and draws with no violation under the
+  policy without it (red texels on screen, one more texture on the GPU),
+  while the same page without `blob:` in `connect-src` is refused in each
+  (a violation, no texture). The loader falls back to an `<img>` only in an
+  engine without `createImageBitmap` or in the older engine versions it
+  excludes by user agent, all below the words' `tested` floor. Nothing
+  needs `'unsafe-eval'`; a procedural scene needs none of this.
 
 `frame-ancestors` (and `report-uri`, `sandbox`) is ignored in a meta, and
 logged: **the host must send `frame-ancestors` as a header**. The built-in
@@ -318,6 +328,14 @@ carries inline. A `custom` auth adapter is the author's code: its pages
 allow only same-origin calls. `pnpm test:visual` (gate item 3, `csp`) loads
 every page of every site in three engines and fails on any violation; its
 self-test proves the watch fails a page with an unhashed inline script.
+The same watch (`scripts/visual/csp.mjs`, one module: the
+`securitypolicyviolation` event and the engines' console errors, in pages
+and workers) is on every page `pnpm test:3d`, `test:auth`, `test:data` and
+`test:cloud-auth` open, in every engine each drives; any violation fails
+that engine's check. Each of those suites first opens a page whose policy
+refuses its own inline script, in a context made exactly as its own pages'
+are, in every engine it uses, and fails unless the watch reports it. Under
+the watch the auth, data and cloud-auth flows report no violation.
 
 Not built, and why: **the axe pass** (§5) — it needs a browser and the
 accessibility engine, which are this repository's dev tools, not az's

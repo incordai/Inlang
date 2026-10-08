@@ -234,7 +234,9 @@ carries (only an author component writes one), `img-src 'self'` (and
 `data:` for the empty icon), `connect-src 'self'` plus the auth adapter's or
 the backend's origin from the build's public settings, `object-src 'none'`,
 `base-uri 'self'`, `form-action 'self'`. A page showing a 3D model adds
-`'wasm-unsafe-eval'` and a `blob:` worker for its decoder. Never
+`'wasm-unsafe-eval'` and a `blob:` worker for its decoder, and `blob:` in
+`connect-src` for its embedded textures — not in `img-src`, which a
+textured model drawn in three engines proved it does not need. Never
 `'unsafe-inline'` or `'unsafe-eval'`. `frame-ancestors` cannot be sent in a
 meta: the host must send it as a header (the built-in backend already sends
 `frame-ancestors 'none'` on every response it serves; it serves no pages).
