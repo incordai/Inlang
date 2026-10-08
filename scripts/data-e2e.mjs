@@ -38,6 +38,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { CLI, COMPILE_MS, ROOT, WORDS, buildSites } from './visual/pipeline.mjs';
 import { metadataFindings, phoneJpeg, plainJpeg, SVG } from '../packages/backend/test/image-fixtures.ts';
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
+import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 
 /*
  * Deadlines (lib/bounded.mjs): page.evaluate and close() have no timeout of
@@ -48,10 +49,19 @@ import { closeWithin, watchdog, human } from './lib/bounded.mjs';
  */
 const RUN_MS = 15 * 60_000;
 const CLOSE_MS = 15_000;
+/** Bound on the policy control's load, its wait for the report, and its close. */
+const CONTROL_MS = 10_000;
 const progress = { last: 'starting' };
 const run = watchdog(RUN_MS, 'test:data', progress);
 console.log(`deadlines: run ${human(RUN_MS)} · close ${human(CLOSE_MS)}`);
 let closed = true;
+
+/**
+ * word-quality-gate §2 B: every page this run opens, in every engine, is
+ * watched for a Content-Security-Policy violation (visual/csp.mjs), one list
+ * per engine; any one fails that engine's check.
+ */
+const csp = {};
 
 let failures = 0;
 const check = (name, pass, detail = '') => {
@@ -512,7 +522,7 @@ async function proveAddress(page, email) {
  * more sign-up would pass the server's limit of 10 an hour per IP.
  */
 async function squatFlow(b, name, planter, email) {
-  const ownerCtx = await b.newContext();
+  const ownerCtx = await watchedContext(b, csp);
   try {
     await planter.goto(`${host.url}/notes`);
     const planted = await use(planter, 'create', { title: `${name} planted under another address` });
@@ -553,13 +563,13 @@ async function axeViolations(page) {
  * verified, see the refusal; the server refuses them too.
  */
 async function adminFlow(b, name, owner) {
-  const ctx = await b.newContext();
+  const ctx = await watchedContext(b, csp);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`${name} admin: ${e.message}`));
   await verifiedAccount(page, 'Boss', adminEmail(name));
 
   const target = await use(owner, 'create', { title: `${name} for review`, contact: SECRET_CONTACT });
-  const stranger = await (await b.newContext()).newPage();
+  const stranger = await (await watchedContext(b, csp)).newPage();
   await stranger.goto(`${host.url}/`);
   const spam = await stranger.evaluate(async (base) => (await fetch(`${base}/data/messages`, {
     method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', 'x-az-request': '1' },
@@ -806,7 +816,7 @@ async function adminFlow(b, name, owner) {
 
   // Refused: a signed-in account that is not an admin, and a listed one never verified.
   for (const [who, email] of [['an unlisted account', undefined], ['a listed but unverified account', `unverified-${name}@notebook.test`]]) {
-    const other = await (await b.newContext()).newPage();
+    const other = await (await watchedContext(b, csp)).newPage();
     other.on('pageerror', (e) => errors.push(`${name} refused: ${e.message}`));
     await signUp(other, 'Eve', email);
     await other.goto(`${host.url}/admin`);
@@ -880,7 +890,7 @@ async function fromSignedOut(b, name) {
       html.includes('data-az-from-skeleton') && !html.includes('aria-busy') && html.includes('Turn on JavaScript to load this list.')
         && !html.includes('First seeded note') && !html.includes('How long does it take?'), String(html.length));
   }
-  const off = await b.newContext({ javaScriptEnabled: false });
+  const off = await watchedContext(b, csp, { javaScriptEnabled: false });
   const still = await off.newPage();
   await still.goto(`${host.url}/board`);
   const noscript = await still.locator('.az-from-noscript').first().isVisible();
@@ -889,7 +899,7 @@ async function fromSignedOut(b, name) {
   check(`${name} from: without JavaScript the skeleton and the noscript line show; no block is busy forever`, noscript && skeletonShown && busyOff === 0, String(busyOff));
   await off.close();
 
-  const ctx = await b.newContext();
+  const ctx = await watchedContext(b, csp);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`${name} from: ${e.message}`));
   // A hydration mismatch is a console error, not a page error: React
@@ -1014,7 +1024,9 @@ try {
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
     const b = await engine.launch();
     try {
-      const out = await b.newContext();
+      const caught = await violationControl(b, `${host.url}/az-policy-control/`, CONTROL_MS);
+      check(`${name} CONTROL §2 B: the watch reports a page that breaks its policy`, !cspResult(caught).pass, caught[0] ?? 'nothing reported');
+      const out = await watchedContext(b, csp);
       const visitor = await out.newPage();
       visitor.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
       await visitor.goto(`${host.url}/notes`);
@@ -1032,7 +1044,7 @@ try {
         continue;
       }
 
-      const ownerCtx = await b.newContext();
+      const ownerCtx = await watchedContext(b, csp);
       const owner = await ownerCtx.newPage();
       owner.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
       await signUp(owner, `Ada${name}`);
@@ -1049,7 +1061,7 @@ try {
       await owner.locator(`[data-notes="list"] li[data-mine="true"]`, { hasText: `${name} note` }).waitFor();
       check(`${name}: after a reload the component shows the new row as mine`, true);
 
-      const otherCtx = await b.newContext();
+      const otherCtx = await watchedContext(b, csp);
       const other = await otherCtx.newPage();
       other.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
       const otherEmail = `bo-${name}-${randomBytes(3).toString('hex')}@notebook.test`;
@@ -1077,6 +1089,10 @@ try {
     }
   }
   check('no page errors in any browser', errors.length === 0, errors.slice(0, 2).join(' | '));
+  for (const engine of ['chromium', 'firefox', 'webkit']) {
+    const { pass, detail } = cspResult(csp[engine] ?? []);
+    check(`§2 B: no Content-Security-Policy violation on any page opened in ${engine}`, pass && engine in csp, detail || (engine in csp ? '' : 'no page was watched'));
+  }
   check('the server logged no private value', !serverLog.includes(SECRET_CONTACT) && !serverLog.includes(PASSWORD), serverLog.slice(0, 200));
   check('no image file outlived its row: the files folder is empty, no temporary left', stored().files === 0 && stored().temp === 0, JSON.stringify(stored()));
 } finally {

@@ -24,6 +24,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
 import { ROOT as ROOT_DIR, buildSites } from './visual/pipeline.mjs';
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
+import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 
 const PUBLIC_KEY = 'pk-probe-public';
 const USER = { id: 'u-ada', email: 'ada@studio.test', password: 'correct-horse-battery' };
@@ -39,10 +40,19 @@ const EXPIRED_TOKEN = 'reset-probe-expired';
  */
 const RUN_MS = 15 * 60_000;
 const CLOSE_MS = 15_000;
+/** Bound on the policy control's load, its wait for the report, and its close. */
+const CONTROL_MS = 10_000;
 const progress = { last: 'starting' };
 const run = watchdog(RUN_MS, 'test:auth', progress);
 console.log(`deadlines: run ${human(RUN_MS)} · close ${human(CLOSE_MS)}`);
 let closed = true;
+
+/**
+ * word-quality-gate §2 B: every page this run opens, in every engine, is
+ * watched for a Content-Security-Policy violation (visual/csp.mjs), one list
+ * per engine; any one fails that engine's check at the end.
+ */
+const csp = {};
 
 let failures = 0;
 const check = (name, pass, detail = '') => {
@@ -397,7 +407,7 @@ const browser = await chromium.launch();
 const errors = [];
 
 try {
-  const page = await browser.newPage();
+  const page = await (await watchedContext(browser, csp)).newPage();
   page.on('pageerror', (e) => errors.push(e.message));
   // The browser logs every non-2xx response; the mock's deliberate 400/401/409
   // replies (wrong password, taken email, expired link) are the cases under
@@ -545,7 +555,9 @@ try {
          another origin, in every engine — cookie session, CORS, CSRF header. */
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
     const b = name === 'chromium' ? browser : await engine.launch();
-    const ctx = await b.newContext();
+    const caught = await violationControl(b, `${backendHost.url}/az-policy-control/`, CONTROL_MS);
+    check(`${name} CONTROL §2 B: the watch reports a page that breaks its policy`, !cspResult(caught).pass, caught[0] ?? 'nothing reported');
+    const ctx = await watchedContext(b, csp);
     const p = await ctx.newPage();
     const errs = [];
     p.on('pageerror', (e) => errs.push(e.message));
@@ -766,7 +778,7 @@ const freePort = () => new Promise((done) => {
   });
   check('backend: the generated server starts from its own folder', up, up ? '' : serverLog.slice(0, 300));
   const b = await chromium.launch();
-  const ctx = await b.newContext();
+  const ctx = await watchedContext(b, csp);
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message));
@@ -870,6 +882,10 @@ const freePort = () => new Promise((done) => {
   }
 }
 
+for (const engine of ['chromium', 'firefox', 'webkit']) {
+  const { pass, detail } = cspResult(csp[engine] ?? []);
+  check(`§2 B: no Content-Security-Policy violation on any page opened in ${engine}`, pass && engine in csp, detail || (engine in csp ? '' : 'no page was watched'));
+}
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED — work dir kept: ${work}`);
 if (failures === 0) rmSync(work, { recursive: true, force: true });
 process.exitCode = failures === 0 ? 0 : 1;

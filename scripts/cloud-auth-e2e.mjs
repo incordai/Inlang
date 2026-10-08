@@ -28,6 +28,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
+import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 
 const readFile = promisify(readFileCb);
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -57,6 +58,8 @@ const DOCKER_MS = 10 * 60_000;
 const BUILD_MS = 10 * 60_000;
 const PROBE_MS = 30_000;
 const CLOSE_MS = 15_000;
+/** Bound on the policy control's load, its wait for the report, and its close. */
+const CONTROL_MS = 10_000;
 const RUN_MS = 30 * 60_000;
 const progress = { last: 'starting' };
 const deadline = watchdog(RUN_MS, 'cloud-auth', progress);
@@ -300,7 +303,11 @@ try {
 
   const browser = await chromium.launch();
   cleanups.unshift(async () => { closed = await closeWithin(browser, CLOSE_MS, 'chromium.close'); });
-  const page = await browser.newPage();
+  // word-quality-gate §2 B: every page below is watched for a policy violation.
+  const csp = {};
+  const caught = await violationControl(browser, `${siteUrl}/az-policy-control/`, CONTROL_MS);
+  check('CONTROL §2 B: the watch reports a page that breaks its policy', !cspResult(caught).pass, caught[0] ?? 'nothing reported');
+  const page = await (await watchedContext(browser, csp)).newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
@@ -365,7 +372,7 @@ try {
   }
 
   // A sign-in link (no account creation), followed from the email.
-  const context = await browser.newContext();
+  const context = await watchedContext(browser, csp);
   const fresh = await context.newPage();
   await fresh.goto(`${siteUrl}/login/?next=%2Faccount`);
   const beforeLink = smtp.messages.length;
@@ -389,6 +396,7 @@ try {
   check('…and no email is sent to it', smtp.messages.length === unknownBefore);
 
   check('no page errors in the browser', errors.length === 0, errors.join(' | '));
+  check('§2 B: no Content-Security-Policy violation on any page opened in chromium', cspResult(csp.chromium).pass, cspResult(csp.chromium).detail);
 } catch (e) {
   failures++;
   console.log(`FAIL  run aborted: ${e.message}`);
