@@ -21,7 +21,7 @@
 
 import { chromium, firefox, webkit } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
-import { mkdtempSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, buildSites } from './visual/pipeline.mjs';
@@ -30,6 +30,8 @@ import { Overdue, within, closeWithin, watchdog, human } from './lib/bounded.mjs
 import { textContrast } from './visual/checks.mjs';
 import { watchCsp } from './visual/csp.mjs';
 import { SCRIM } from '../packages/words/hero/emit.web.ts';
+import { TEXTURED_GLB } from './gen-textured-glb.mjs';
+import sharp from 'sharp';
 
 /** Bound on every wait for the runtime to reach a state. */
 const WAIT_MS = 15_000;
@@ -216,6 +218,24 @@ page /account
       text "Yes, in the studio."
 `;
 
+/**
+ * word-quality-gate §2 B: a model whose texture is embedded in the file
+ * (scripts/gen-textured-glb.mjs). The loader hands the image to the browser
+ * as a blob: URL, so this page proves which blob: sources a model needs.
+ */
+const TEXTURED = `az 1
+
+site aurora
+
+page /
+  hero center
+    title "A textured model"
+  scene inline 3d
+    model  ./assets/textured.glb
+    poster ./assets/poster.webp
+    alt    "A checkered cube"
+`;
+
 /*
  * Deadlines (lib/bounded.mjs): page.evaluate has no timeout of its own. The
  * run takes two to three minutes; past RUN_MS it is stuck, and the watchdog
@@ -249,14 +269,16 @@ const heroBehind = { dir: join(work, 'hero-behind'), source: HERO_BEHIND };
 const ringSite = { dir: join(work, 'ring'), source: RING };
 const protectedSite = { dir: join(work, 'protected'), source: PROTECTED };
 const fullHero = { dir: join(work, 'full'), source: FULL };
+const textured = { dir: join(work, 'textured'), source: TEXTURED };
 mkdirSync(fixture.dir, { recursive: true });
 cpSync(fixtureAssets, fixture.dir, { recursive: true });
-const sites = [procedural, reseeded, many, pair, backdrop, below, heroBehind, ringSite, protectedSite, fullHero];
+const sites = [procedural, reseeded, many, pair, backdrop, below, heroBehind, ringSite, protectedSite, fullHero, textured];
 for (const s of sites) {
   mkdirSync(join(s.dir, 'assets'), { recursive: true });
   cpSync(join(fixtureAssets, 'assets/orbit.webp'), join(s.dir, 'assets/poster.webp'));
 }
 cpSync(join(fixtureAssets, 'assets/shoe.glb'), join(heroBehind.dir, 'assets/shoe.glb'));
+cpSync(TEXTURED_GLB, join(textured.dir, 'assets/textured.glb'));
 for (const i of [1, 2, 3, 4]) cpSync(join(fixtureAssets, `assets/orbit-${i}.webp`), join(ringSite.dir, `assets/orbit-${i}.webp`));
 await buildSites([fixture, ...sites], work);
 for (const s of [fixture, ...sites]) {
@@ -266,6 +288,25 @@ for (const s of [fixture, ...sites]) {
 // photograph of the ring. The build shipped them; the host lost them.
 rmSync(join(heroBehind.dist, 'assets/shoe.glb'));
 rmSync(join(ringSite.dist, 'assets', readdirSync(join(ringSite.dist, 'assets')).find((f) => /^orbit-2\./.test(f))));
+
+/**
+ * CONTROL copies of the textured site: its page with one blob: source taken
+ * out of the policy the build shipped, everything else as built.
+ */
+const SHIPPED_POLICY = /<meta http-equiv="Content-Security-Policy" content="([^"]*)" \/>/;
+const texturedPolicy = SHIPPED_POLICY.exec(readFileSync(join(textured.dist, 'index.html'), 'utf8'))?.[1] ?? '';
+function withoutBlob(directive) {
+  const dist = join(work, `textured-no-${directive}-blob`);
+  cpSync(textured.dist, dist, { recursive: true });
+  const page = join(dist, 'index.html');
+  const html = readFileSync(page, 'utf8');
+  const policy = SHIPPED_POLICY.exec(html)?.[1] ?? '';
+  const changed = policy.split('; ').map((d) => (d.startsWith(`${directive} `) ? d.split(' ').filter((s) => s !== 'blob:').join(' ') : d)).join('; ');
+  if (changed === policy) throw new Error(`3d: the textured page's ${directive} has no blob: to take out (${policy})`);
+  writeFileSync(page, html.replace(policy, changed));
+  return dist;
+}
+const texturedControls = { 'connect-src': withoutBlob('connect-src') };
 
 const server = await startServer();
 const browser = await chromium.launch({ args: GL_ARGS });
@@ -289,6 +330,66 @@ async function open(site, path, { reducedMotion = 'no-preference' } = {}) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(new URL(path, server.url).href, { waitUntil: 'load' });
   return { page, context, requests, errors };
+}
+
+/** A pixel of the texture's red: the material's own colour is white, so only the decoded texture shows it. */
+const isRed = (r, g, b) => r > 100 && r > 2 * g && r > 2 * b;
+/**
+ * The share of the view's pixels that must be red for the texture to count
+ * as drawn: the framed cube covers a small part of the view, half of each
+ * face red (measured 1.5% drawn, 0.0% refused, in all three engines).
+ */
+const RED_SHARE = 0.005;
+/** The texture count in `data-az3d-gpu` ("geometries,textures"). */
+const texturesOf = (gpu) => Number((gpu ?? '0,0').split(',')[1]);
+
+/**
+ * §2 B: the textured model, drawn by `b` from `dist`. Returns whether the
+ * view went live, the policy violations its page reported by then, the
+ * share of its pixels in the texture's red, and the GPU's geometry and
+ * texture counts once the model arrived.
+ */
+async function drawTextured(b, dist) {
+  server.serve(dist);
+  const context = await b.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const sink = await watchCsp(context);
+    const page = await context.newPage();
+    await page.goto(new URL('/?az-probe=off', server.url).href, { waitUntil: 'load' });
+    await page.locator('.az-scene-view').scrollIntoViewIfNeeded();
+    const live = await waitFor(page, () => document.querySelector('.az-scene-view[data-live="true"]'));
+    await page.waitForTimeout(SETTLE_MS);
+    const gpu = await page.evaluate(() => document.documentElement.getAttribute('data-az3d-gpu'));
+    // Read before the screenshot: the page has loaded, decoded and drawn by
+    // now, and a WebKit screenshot injects a stylesheet of its own, which
+    // the page's policy refuses (measured on a page with no style at all).
+    const violations = [...sink];
+    const box = await page.locator('.az-scene-view').boundingBox();
+    const { data, info } = await sharp(await page.screenshot({ clip: box })).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    let red = 0;
+    for (let i = 0; i < data.length; i += 3) if (isRed(data[i], data[i + 1], data[i + 2])) red++;
+    return { live, violations, red: red / (info.width * info.height), gpu };
+  } finally {
+    await closeWithin(context, CLOSE_MS, 'textured context.close');
+  }
+}
+
+/**
+ * Check the textured model in one engine: under the shipped policy it draws
+ * with no violation; under each control policy it does not.
+ */
+async function checkTextured(b, name) {
+  const shipped = await drawTextured(b, textured.dist);
+  const imgSrc = texturedPolicy.split('; ').find((d) => d.startsWith('img-src ')) ?? '';
+  check(`§2 B ${name}: a model's embedded texture decodes and draws under the shipped policy, whose img-src has no blob: — no violation`,
+    shipped.live && shipped.red >= RED_SHARE && shipped.violations.length === 0 && imgSrc !== '' && !imgSrc.includes('blob:'),
+    `live ${shipped.live}, red ${(shipped.red * 100).toFixed(1)}%, gpu ${shipped.gpu}${shipped.violations[0] ? `; ${shipped.violations[0]}` : ''}`);
+  for (const [directive, dist] of Object.entries(texturedControls)) {
+    const control = await drawTextured(b, dist);
+    check(`CONTROL ${name}: without blob: in ${directive} the texture is refused — a violation, no red drawn`,
+      control.violations.length > 0 && control.red < RED_SHARE && texturesOf(control.gpu) < texturesOf(shipped.gpu),
+      `live ${control.live}, red ${(control.red * 100).toFixed(1)}%, gpu ${control.gpu}; ${control.violations[0] ?? 'no violation'}`);
+  }
 }
 
 const rung = (page) => page.evaluate(() => document.documentElement.getAttribute('data-az3d-rung'));
@@ -512,6 +613,8 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
     violations.length === watched && decoded, `${violations.slice(watched)[0] ?? ''} gpu ${gpu}`);
   await context.close();
 }
+console.log(`textured page policy: ${texturedPolicy}`);
+await checkTextured(browser, `chromium ${browser.version()}`);
 
 /* ---- a page without a view never loads 3D, even on a 3D site --------------- */
 {
@@ -812,13 +915,17 @@ check('§7: releasing frees GPU memory — fewer geometries held than with every
 let closed = await closeWithin(browser, CLOSE_MS, 'chromium.close');
 
 /* ---- the other engines: the page never breaks ------------------------------ */
+/** Each other engine's policy violations, on every page it opens (§2 B). */
+const otherViolations = { firefox: [], webkit: [] };
 for (const [name, engine] of [['firefox', firefox], ['webkit', webkit]]) {
   let other;
   try {
     await within(ENGINE_MS, `${name}: the procedural page`, async () => {
       other = await engine.launch();
       server.serve(procedural.dist);
-      const page = await other.newPage({ viewport: { width: 1440, height: 900 } });
+      const context = await other.newContext({ viewport: { width: 1440, height: 900 } });
+      await watchCsp(context, otherViolations[name]);
+      const page = await context.newPage();
       const errors = [];
       page.on('pageerror', (e) => errors.push(e.message));
       await page.goto(new URL('/?az-probe=off', server.url).href, { waitUntil: 'load' });
@@ -832,9 +939,10 @@ for (const [name, engine] of [['firefox', firefox], ['webkit', webkit]]) {
       check(`${name} ${other.version()}: renders live or falls back, with no page errors`,
         errors.length === 0, `rung ${state.rung ?? 'none (poster)'}, ${state.live} live parts${errors[0] ? `; ${errors[0]}` : ''}`);
     });
+    await within(ENGINE_MS, `${name}: the textured model`, () => checkTextured(other, `${name} ${other.version()}`));
   } catch (e) {
     if (!(e instanceof Overdue)) throw e;
-    check(`${name}: renders live or falls back, with no page errors`, false, e.message);
+    check(e.label, false, e.message);
     // The abandoned work may still be launching a browser this loop never sees.
     closed = false;
   }
@@ -842,6 +950,9 @@ for (const [name, engine] of [['firefox', firefox], ['webkit', webkit]]) {
 }
 
 check('§2 B: no Content-Security-Policy violation on any page opened in Chromium', violations.length === 0, violations.slice(0, 3).join(' | '));
+for (const [name, sink] of Object.entries(otherViolations)) {
+  check(`§2 B: no Content-Security-Policy violation on the pages opened in ${name}`, sink.length === 0, sink.slice(0, 3).join(' | '));
+}
 closed = (await closeWithin(server, CLOSE_MS, 'server.close')) && closed;
 run.clear();
 if (failures === 0) rmSync(work, { recursive: true, force: true });

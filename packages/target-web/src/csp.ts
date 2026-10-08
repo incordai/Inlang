@@ -37,7 +37,9 @@ export interface PageNeeds {
   /**
    * The page shows a 3D model, which may be compressed: the decoder compiles
    * WebAssembly ('wasm-unsafe-eval') in a worker made from a blob: URL, and
-   * a model's embedded textures load from blob: URLs.
+   * the loader fetches a model's embedded textures from blob: URLs
+   * (connect-src). It decodes them with createImageBitmap, never an <img>,
+   * in every tested engine, so img-src needs no blob: (test:3d measures both).
    */
   readonly decoder: boolean;
 }
@@ -152,7 +154,7 @@ export function pagePolicy(needs: PageNeeds, html: string, env: Readonly<Record<
     // 'unsafe-hashes' lets a hash match a style attribute, and only an exact
     // value the build hashed: an injected attribute is still refused.
     ['style-src', ["'self'", ...(attrs.length > 0 ? ["'unsafe-hashes'"] : []), ...sorted([...attrs, ...sheets])]],
-    ['img-src', ["'self'", ...(needs.dataIcon ? ['data:'] : []), ...(needs.decoder ? ['blob:'] : []), ...origins(needs.images)]],
+    ['img-src', ["'self'", ...(needs.dataIcon ? ['data:'] : []), ...origins(needs.images)]],
     ['connect-src', ["'self'", ...(needs.decoder ? ['blob:'] : []), ...origins(needs.connect)]],
     ...(needs.decoder ? [['worker-src', ["'self'", 'blob:']] as [string, string[]]] : []),
     ['object-src', ["'none'"]],

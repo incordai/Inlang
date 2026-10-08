@@ -85,7 +85,8 @@ test('a page with a 3D model: wasm-unsafe-eval and a blob: worker for the decode
   const policy = pagePolicy({ ...PLAIN, decoder: true }, page(''), {});
   assert.match(policy, /script-src 'self' 'wasm-unsafe-eval'; /);
   assert.match(policy, /worker-src 'self' blob:; /);
-  assert.match(policy, /img-src 'self' data: blob:; connect-src 'self' blob:; /, 'a model\'s embedded textures load from blob: URLs');
+  assert.match(policy, /img-src 'self' data:; connect-src 'self' blob:; /,
+    'a model\'s embedded textures are fetched from blob: URLs and decoded as bitmaps: connect-src, not img-src');
   assert.doesNotMatch(policy, /'unsafe-eval'/);
   assert.doesNotMatch(pagePolicy(PLAIN, page(''), {}), /wasm|worker-src|blob:/, 'CONTROL: none of it without a model');
 });
