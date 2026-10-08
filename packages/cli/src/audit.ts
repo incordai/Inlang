@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
-import { inlineScripts, inlineStyles, sha256Source, styleAttributes } from '../../target-web/src/csp.ts';
+import { ownDigests } from '../../target-web/src/csp.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
 import { FILE_MAX_BYTES, MAX_FILES, readRegular, shippedSecrets, walkShipped, type Shipped } from './shipped.ts';
 import {
@@ -119,16 +119,6 @@ async function publicValues(ctx: AuditContext): Promise<Set<string>> {
   }
   const merged: Record<string, string | undefined> = { ...env, ...ctx.probe.env };
   return new Set(Object.entries(merged).filter(([k, v]) => k.startsWith(PUBLIC_ENV_PREFIX) && v).map(([, v]) => v as string));
-}
-
-/**
- * The digests a page's own policy pins — `sha256-…` of each inline script,
- * inline style and style attribute the text carries (target-web csp.ts).
- * Derived from the same text, so a digest is allowed only where it is the
- * hash of something that file really holds; any other value is judged.
- */
-function ownDigests(text: string): string[] {
-  return [...inlineScripts(text), ...inlineStyles(text), ...styleAttributes(text)].map((t) => sha256Source(t).slice(1, -1));
 }
 
 const bundleSecrets: Check<AuditContext> = {
@@ -310,6 +300,60 @@ const PINNED = /^'(?:nonce-|sha256-|sha384-|sha512-)/;
 const STYLE_INLINE = "'unsafe-inline' in style-src — injected markup can restyle the page";
 
 /**
+ * The fetch directives graded for open sources besides script-src (graded
+ * on its own above) and object-src (which must be 'none'), each with what an
+ * open source in it lets in. Only a directive the policy sets is graded: one
+ * it leaves out falls back to default-src, graded here in its own right.
+ */
+const FETCH_DIRECTIVES: Readonly<Record<string, string>> = {
+  'default-src': 'whatever no other directive names loads from anywhere',
+  'script-src-elem': 'scripts from anywhere',
+  'script-src-attr': 'scripts from anywhere',
+  'style-src': 'stylesheets from anywhere',
+  'style-src-elem': 'stylesheets from anywhere',
+  'style-src-attr': 'stylesheets from anywhere',
+  'connect-src': 'the page can send what it reads anywhere',
+  'img-src': 'images from anywhere, and the page can send what it reads in their URLs',
+  'font-src': 'fonts from anywhere',
+  'media-src': 'media from anywhere',
+  'frame-src': 'frames from anywhere',
+  'child-src': 'frames and workers from anywhere',
+  'worker-src': 'workers from anywhere',
+  'manifest-src': 'a manifest from anywhere',
+};
+
+/**
+ * The scheme sources a directive may carry and still grade strict — each one
+ * only where az's own page policy (target-web csp.ts) uses it, for a reason
+ * that holds in any policy:
+ *
+ * - img-src data: — a page with no icon file declares `href="data:,"`, and a
+ *   data: image is pixels: it runs nothing and requests nothing.
+ * - img-src blob:, connect-src blob: — a 3D model's embedded textures are
+ *   decoded to blob: URLs, then loaded and read back. A blob: URL is minted
+ *   only by a script already running in the page, so an injected tag cannot
+ *   name one of its own.
+ * - worker-src blob: — the model decoder runs in a worker made from a blob:
+ *   URL, for the same reason: only the page's own pinned script can make it.
+ */
+const ALLOWED_SCHEMES: Readonly<Record<string, ReadonlySet<string>>> = {
+  'img-src': new Set(['data:', 'blob:']),
+  'connect-src': new Set(['blob:']),
+  'worker-src': new Set(['blob:']),
+};
+
+/** A bare scheme source (`https:`, `data:`): any URL of that scheme, on any host. */
+const SCHEME_SOURCE = /^[a-z][a-z0-9+.-]*:$/;
+/** A wildcard host (`*`, `*.cdn.test`, `https://*`): any host, or any under a name. */
+const WILDCARD_HOST = /^(?:[a-z][a-z0-9+.-]*:\/\/)?\*/;
+
+/** The sources in one fetch directive that let its content come from anywhere. */
+function openSources(name: string, sources: readonly string[]): string[] {
+  const allowed = ALLOWED_SCHEMES[name];
+  return sources.filter((s) => WILDCARD_HOST.test(s) || (SCHEME_SOURCE.test(s) && !allowed?.has(s)));
+}
+
+/**
  * What a page's policy leaves open, one phrase each; empty when it is
  * strict. A hash, a nonce or 'strict-dynamic' disables 'unsafe-inline' in
  * any browser that knows them, so then it is not counted.
@@ -333,6 +377,10 @@ export function cspProblems(policy: string): string[] {
   if (!d.has('base-uri')) out.push('no base-uri — an injected <base> moves every relative script');
   const style = d.get('style-src') ?? d.get('default-src');
   if (style?.includes("'unsafe-inline'") && !style.some((s) => PINNED.test(s))) out.push(STYLE_INLINE);
+  for (const [name, what] of Object.entries(FETCH_DIRECTIVES)) {
+    const open = openSources(name, d.get(name) ?? []);
+    if (open.length > 0) out.push(`${name} allows ${open.map(quotable).join(' ')} — ${what}`);
+  }
   return out;
 }
 

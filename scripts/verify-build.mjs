@@ -22,7 +22,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync, existsSync, symlinkSync } from 'node:fs';
 import { join, dirname, basename, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
@@ -464,8 +464,8 @@ try {
     cpSync(join(proj, 'node_modules'), join(pubProj, 'node_modules'), { recursive: true });
     const inPublic = existsSync(join(pubProj, 'public/assets/logo.svg'));
     const pubOut = failing(process.execPath, [join(pubProj, 'node_modules/vite/bin/vite.js'), 'build'], pubProj);
-    check('§5.5 fixed: a key in a project file az build copies into public/ FAILS the build, by file — never by value',
-      inPublic && pubOut !== null && /found in the built bundle — remove it from source and rebuild \(assets\/logo\.svg@\d+, secret-prefix/.test(pubOut)
+    check('§5.5 fixed: a key in a project file az build copies into public/ FAILS the build, named as a public/ copy, by file — never by value',
+      inPublic && pubOut !== null && /found in a file copied from public\/ — remove it from source and rebuild \(assets\/logo\.svg@\d+, secret-prefix/.test(pubOut)
         && !pubOut.includes(pubKey),
       pubOut === null ? 'the build succeeded' : pubOut.split('\n').find((l) => l.includes('logo.svg')) ?? pubOut.split('\n')[0]);
     check('§5.5 fixed: the refused build removed its output — no file left holding the planted key',
@@ -479,7 +479,7 @@ try {
     });
     if (full.error || full.signal) throw new Error(`the project build was stopped: ${full.error?.message ?? full.signal}`);
     check('§5.5 fixed: npm run build FAILS on the key and writes nothing after — no dist/, no server build, no pre-render',
-      full.status !== 0 && /found in the built bundle/.test(full.stderr) && !full.stderr.includes(pubKey)
+      full.status !== 0 && /found in a file copied from public\//.test(full.stderr) && !full.stderr.includes(pubKey)
         && !existsSync(join(pubProj, 'dist')) && !existsSync(join(pubProj, '.az-ssr')) && !/prerender/.test(full.stderr),
       `exit ${full.status}; dist ${existsSync(join(pubProj, 'dist')) ? 'remains' : 'gone'}; .az-ssr ${existsSync(join(pubProj, '.az-ssr')) ? 'present' : 'absent'}`);
 
@@ -508,9 +508,37 @@ try {
       const decoderOut = failing(process.execPath, [join(vendored, 'node_modules/vite/bin/vite.js'), 'build'], vendored);
       const stem = basename(decoder.src).replace(/\.[^.]+$/, '');
       check('§5.5 fixed: a key shape planted in the vendored decoder copy still FAILS the build',
-        decoderOut !== null && new RegExp(`\\(assets/${stem}-[A-Za-z0-9_-]{8}\\.[a-z]+@\\d+, secret-prefix`).test(decoderOut) && !decoderOut.includes(decoderKey),
+        decoderOut !== null && new RegExp(`found in the built bundle — remove it from source and rebuild \\(assets/${stem}-[A-Za-z0-9_-]{8}\\.[a-z]+@\\d+, secret-prefix`).test(decoderOut) && !decoderOut.includes(decoderKey),
         decoderOut === null ? 'the build succeeded' : decoderOut.split('\n').find((l) => l.includes(stem)) ?? decoderOut.split('\n')[0]);
     }
+
+    // word-quality-gate §5.5, fixed: the pre-render fills every page after
+    // the guard has run. A key only a server-only render path writes
+    // (import.meta.env.SSR is false in the client bundle, so no chunk carries
+    // it) reaches the page alone; build.mjs scans every page as written.
+    const ssr = join(work, 'proj-page');
+    cpSync(proj, ssr, { recursive: true, filter: (f) => !f.startsWith(join(proj, 'dist')) && !f.startsWith(join(proj, 'node_modules')) });
+    symlinkSync(join(proj, 'node_modules'), join(ssr, 'node_modules'), 'dir');
+    const pageKey = `sk_live_${'Pg5'.repeat(10)}`;
+    const badge = join(ssr, 'src/user/custom/Badge.tsx');
+    const badgeSource = readFileSync(badge, 'utf8');
+    writeFileSync(badge, badgeSource.replace('Handmade in the studio', `Handmade in the studio{import.meta.env.SSR ? <i hidden>${pageKey}</i> : null}`));
+    const clientOnly = failing(process.execPath, [join(ssr, 'node_modules/vite/bin/vite.js'), 'build'], ssr);
+    check('CONTROL: the server-only key is in no file the client build writes — the guard alone passes it',
+      badgeSource.includes('Handmade in the studio') && clientOnly === null && leftWith(join(ssr, 'dist'), pageKey).length === 0,
+      clientOnly === null ? leftWith(join(ssr, 'dist'), pageKey).join(', ') : clientOnly.split('\n')[0]);
+    const paged = spawnSync(process.execPath, [join(ssr, 'az-vite/build.mjs')], {
+      cwd: ssr, encoding: 'utf8', env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH, AZ_BUILD_LOG: 'error' },
+      timeout: COMMAND_MS, killSignal: 'SIGKILL',
+    });
+    if (paged.error || paged.signal) throw new Error(`the project build was stopped: ${paged.error?.message ?? paged.signal}`);
+    check('§5.5 fixed: a key only the pre-rendered page carries FAILS npm run build, named as a page, by file — never by value',
+      paged.status !== 0 && /found in a pre-rendered page — remove it from source and rebuild \(index\.html@\d+, secret-prefix/.test(paged.stderr)
+        && !paged.stderr.includes(pageKey),
+      `exit ${paged.status}; ${paged.stderr.split('\n').find((l) => l.includes('pre-rendered')) ?? paged.stderr.split('\n')[0]}`);
+    check('§5.5 fixed: the refused pre-render removed its output — no dist/, no server build, no file holding the key',
+      !existsSync(join(ssr, 'dist')) && !existsSync(join(ssr, '.az-ssr')),
+      existsSync(join(ssr, 'dist')) ? `dist/ remains: ${leftWith(join(ssr, 'dist'), pageKey).join(', ') || 'no file with the key'}` : '');
   }
 
   /* ---- M4: `azbackend` — the build refuses a URL the cookie cannot cross -- */

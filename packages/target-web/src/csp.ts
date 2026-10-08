@@ -2,7 +2,7 @@
  * @az module csp
  * Purpose: each built page's Content-Security-Policy, from what the page needs and the markup it ships.
  * Spec: docs/word-quality-gate.md §2 B, §5.5 · docs/ARCHITECTURE.md §4.2
- * Exports: PageNeeds, CSP_META, PolicyError, pagePolicy, withPolicy, inlineScripts, inlineStyles, styleAttributes, sha256Source, originOf
+ * Exports: PageNeeds, CSP_META, PolicyError, pagePolicy, withPolicy, inlineScripts, inlineStyles, styleAttributes, sha256Source, ownDigests, originOf
  * Edit guide: dependency-free besides node:crypto — the CLI copies this file verbatim into az-vite/, where build.mjs imports it.
  *   A source is added only for something a page really does; never 'unsafe-inline' or 'unsafe-eval'.
  * Tests: packages/target-web/test/csp.test.ts
@@ -114,6 +114,17 @@ export function styleAttributes(html: string): string[] {
     if (style !== undefined) out.push(style);
   }
   return out;
+}
+
+/**
+ * The digests a page's own policy pins — `sha256-…` of each inline script,
+ * inline style and style attribute the text carries — as the secret scan
+ * allows them (the generated build.mjs and az audit). Derived from the same
+ * text, so a digest is allowed only where it is the hash of something that
+ * file really holds; any other value is judged.
+ */
+export function ownDigests(html: string): string[] {
+  return [...inlineScripts(html), ...inlineStyles(html), ...styleAttributes(html)].map((t) => sha256Source(t).slice(1, -1));
 }
 
 /** An error in the build's public settings that a policy cannot be made from. */

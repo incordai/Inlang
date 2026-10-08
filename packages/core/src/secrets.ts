@@ -2,7 +2,7 @@
  * @az module secrets
  * Purpose: secret detection for env, bundles and literals — never prints a value.
  * Spec: docs/auth-block-spec.md §4 · docs/word-quality-gate.md §4
- * Exports: scanText, scanEnv, redact, envMessage, bundleMessage
+ * Exports: scanText, scanEnv, redact, envMessage, bundleMessage, ShippedPlace
  * Edit guide: patterns stay vendor-neutral; findings report name/offset and length only.
  * Tests: packages/core/test/secrets.test.ts, packages/cli/test/secrets.test.ts
  */
@@ -196,7 +196,22 @@ export function envMessage(f: SecretFinding): string {
     + `use the public key here and keep the service key on your server (${f.rule}, ${f.excerpt})`;
 }
 
-export function bundleMessage(file: string, f: SecretFinding): string {
-  return `auth: a service-key pattern was found in the built bundle — remove it from source and rebuild `
+/**
+ * Where in a built site the build guard found a key: what Vite bundled, a
+ * file it copied from `public/`, any other file in the output folder, or a
+ * page the pre-render filled. Named in the message, so the author looks in
+ * the right place.
+ */
+export type ShippedPlace = 'bundle' | 'public' | 'output' | 'page';
+
+const PLACES: Readonly<Record<ShippedPlace, string>> = {
+  bundle: 'the built bundle',
+  public: 'a file copied from public/',
+  output: 'a file in the output folder',
+  page: 'a pre-rendered page',
+};
+
+export function bundleMessage(file: string, f: SecretFinding, place: ShippedPlace): string {
+  return `auth: a service-key pattern was found in ${PLACES[place]} — remove it from source and rebuild `
     + `(${file}${f.where}, ${f.rule}, ${f.excerpt})`;
 }

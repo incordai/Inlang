@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { scanText } from '../../core/src/secrets.ts';
@@ -102,4 +102,23 @@ test('removeOutput: the project root itself, or a folder outside it, is never re
   assert.match(await removeOutput(join(dir, 'dist'), join(dir, 'dist', '..')) ?? '', /was left in place: it is not inside the project/);
   assert.match(await removeOutput(dir, join(dir, '..', basename(outside), 'dist')) ?? '', /was left in place: it is not inside the project/);
   assert.ok(existsSync(join(dir, 'dist/index.html')) && existsSync(join(outside, 'dist/index.html')), 'nothing was removed');
+});
+
+test('removeOutput: an output folder that is a link to a folder outside the project is refused, and nothing outside is deleted', async () => {
+  const dir = project({});
+  const outside = mkdtempSync(join(tmpdir(), 'az-shipped-outside-'));
+  try {
+    mkdirSync(join(outside, 'assets'));
+    writeFileSync(join(outside, 'index.html'), '<p>not the build</p>');
+    writeFileSync(join(outside, 'assets/keep.txt'), 'keep');
+    rmSync(join(dir, 'dist'), { recursive: true, force: true });
+    symlinkSync(outside, join(dir, 'dist'), 'dir');
+    assert.ok(lstatSync(join(dir, 'dist')).isSymbolicLink(), 'the output folder is a link');
+    assert.match(await removeOutput(dir, join(dir, 'dist')) ?? '', /dist was left in place: it is not inside the project/);
+    assert.ok(existsSync(join(outside, 'index.html')) && existsSync(join(outside, 'assets/keep.txt')), 'nothing outside the project was deleted');
+    assert.ok(lstatSync(join(dir, 'dist')).isSymbolicLink(), 'the link itself is left too');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });

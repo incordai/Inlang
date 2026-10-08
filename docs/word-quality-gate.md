@@ -245,7 +245,7 @@ not build is one failing `output` line, never an empty pass. Severity follows
 |---|---|---|
 | bundle secrets | a key-shaped string in any file `dist/` ships (fail) — §4 rule 2's scanner, `scanText`, the build guard's own, now also over the pre-rendered pages; `AZ_PUBLIC_` values (the output folder's `.env*`, then the environment) allowed, as by the guard. A file that is byte-for-byte one an installed package published (the 3D decoder, found by name in the output's `node_modules`) is judged by the key-shape rules only — compiled decoders are dense, and the entropy rule is for inlined values. **Location and shape only** (`dist/assets/a.js:1234 (secret-prefix)`); a file name or link shaped like a key is printed by its length. `dist/` missing fails; a file over 16MB is a warning, not read | remove it, rebuild, rotate it if deployed |
 | dependencies | **only with `--online`** — the one network call: the package manager's read-only advisory query (`npm audit --json`) per lockfile, the site's and the server's, at once. High or critical fails; moderate or low warns; no lockfile warns; offline or a 15s silence warns `could not reach the advisory service` | `npm audit` for the detail |
-| page CSP | no page sets a `Content-Security-Policy` meta (warn — §2 B, medium); a weak one: no script or default source, `'unsafe-inline'` without a hash or nonce, `'unsafe-eval'`, a wildcard or scheme source, `object-src` not `'none'`, no `base-uri` (the bundle is referenced relatively); the weaker tier, named apart: `style-src 'unsafe-inline'` with scripts still pinned (`'unsafe-hashes'` with hashes is pinned, not open) | the gap, per page; a header the host sends is not visible here |
+| page CSP | no page sets a `Content-Security-Policy` meta (warn — §2 B, medium); a weak one: no script or default source, `'unsafe-inline'` without a hash or nonce, `'unsafe-eval'`, a wildcard host (`*`, `*.host`, `https://*`) or a bare scheme source (`https:`, `http:`, `data:`, `blob:` …) in any fetch directive the policy sets — `script-src` (and `-elem`/`-attr`), `default-src`, `style-src` (and `-elem`/`-attr`), `connect-src`, `img-src`, `font-src`, `media-src`, `frame-src`, `child-src`, `worker-src`, `manifest-src` — except `data:`/`blob:` in `img-src` and `blob:` in `connect-src`/`worker-src`, where az's own policy uses them (a no-icon page's `data:` image, a model's `blob:` textures and decoder worker: a `blob:` URL is minted only by a script already running in the page), `object-src` not `'none'`, no `base-uri` (the bundle is referenced relatively); the weaker tier, named apart: `style-src 'unsafe-inline'` with scripts still pinned (`'unsafe-hashes'` with hashes is pinned, not open) | the gap, per page; a header the host sends is not visible here |
 | backend CSP | the built server's header-setting files (`http.ts`, `app.ts`, `main.ts`) differ from az's (warn: not vouched for); else az's own headers lack `default-src 'none'`, `frame-ancestors`, `nosniff` or a referrer policy (fail). No project code is loaded | rebuild — the server's files are generated |
 | new-tab links | a `target="_blank"` link without `rel="noopener"` or `noreferrer` (warn — §2 B reverse tabnabbing) | add `rel="noopener noreferrer"` |
 
@@ -256,8 +256,8 @@ folder back once Vite has written it and scans every text file, with
 `az audit`'s own walk and published-copy rule (`cli/src/shipped.ts`, copied
 verbatim into `az-vite/`); a key there fails the build as in the bundle, and
 a file it cannot read (over 16MB, past 20 000 files) fails it too. The
-pre-rendered pages are written after the guard runs, so `az audit` remains
-the check that reads them. *Fixed (8f2c955):* the backend's last-line 500
+pre-rendered pages are written after the guard runs; see the second
+follow-up below for their scan. *Fixed (8f2c955):* the backend's last-line 500
 (`writeHead(500)` in `main.ts`) sent no security headers; it is now
 `http.ts` `requestListener`, through `send()` like every other response.
 *Fixed (follow-up):* a build the guard refused still exited with `dist/` on
@@ -271,6 +271,26 @@ request it cannot parse carried no security headers; `http.ts`
 status line and the full set, no body and nothing the client sent, then
 destroys the socket — no write on a reset, an unwritable socket, or one
 whose response has begun.
+
+*Fixed (second follow-up):* the pre-rendered pages were never scanned by
+the build: the guard runs at Vite's `writeBundle`, and `az-vite/build.mjs`
+fills each page afterwards, so a key only a server-only render path writes
+(an author component's `import.meta.env.SSR` branch, which no client chunk
+carries) shipped on a green `npm run build`. `build.mjs` now scans every
+page as written, before it reports success, with the guard's scanner and
+rules (`AZ_PUBLIC_` values allowed; in a page, the digests its own policy
+pins, as `az audit` allows them — `csp.ts` `ownDigests`, now shared); a hit
+removes `dist/` (`removeOutput`) and fails the build. The guard's message
+named every location "the built bundle"; it now says where the key is: the
+built bundle, a file copied from `public/`, another file in the output
+folder, or a pre-rendered page. `removeOutput`'s link branch is tested: an
+`outDir` that is a link to a folder outside the project is refused and
+nothing outside is deleted. The `clientError` answer is proven end to end:
+`main.ts` started for real, a malformed request line and an oversized
+header over raw TCP each get every security header. `az audit` graded
+wildcard and scheme sources in `script-src` only; it now grades every fetch
+directive the policy sets (the page CSP row above), and az's own policies
+still grade strict.
 
 *Fixed 2026-10-07: generated pages ship a CSP* (§2 B, the last open finding). A static host has
 no per-request nonce, so the policy is hashed, per page, at build: after the

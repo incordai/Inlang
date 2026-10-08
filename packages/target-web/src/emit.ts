@@ -778,13 +778,20 @@ export function render(route: string): string {
  * file; the hashes come from the page as filled. Only the built page gets
  * one — the dev server serves the template, which has none (Vite's dev
  * client injects styles and its own scripts as it goes).
+ *
+ * Last, every page as written goes through the build guard's own scan
+ * (secrets.ts, shipped.ts): the guard ran when the client bundle was
+ * written, before the pages held their markup. A key fails the build and
+ * removes dist/, as the guard does.
  */
 function buildScript(needs: Readonly<Record<string, PageNeeds>>): string {
   return `${generated('the build: client bundle, then every route pre-rendered into dist/ with its policy')}import { build, loadEnv } from "vite";
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { pagePolicy, withPolicy } from "./csp.ts";
+import { ownDigests, pagePolicy, withPolicy } from "./csp.ts";
+import { bundleMessage, scanText } from "./secrets.ts";
+import { removeOutput, shippedSecrets } from "./shipped.ts";
 
 /** What each page loads beyond its own files (csp.ts PageNeeds), by its file in dist/. */
 const NEEDS = ${stableJson(needs)};
@@ -813,6 +820,7 @@ const pages = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
   e.isDirectory() ? (e.name === "assets" ? [] : pages(join(dir, e.name)))
     : e.name === "index.html" ? [join(dir, e.name)] : []);
 const warnings = [];
+const written = [];
 const report = console.error;
 console.error = (...args) => { warnings.push(args.map(String).join(" ")); };
 try {
@@ -825,11 +833,29 @@ try {
     const page = NEEDS[path];
     if (!page) throw new Error("csp: " + path + " is not a page this site emitted");
     const filled = html.replace('<div id="root"></div>', '<div id="root">' + render(route) + "</div>");
-    writeFileSync(file, withPolicy(filled, pagePolicy(page, filled, env)));
+    const text = withPolicy(filled, pagePolicy(page, filled, env));
+    writeFileSync(file, text);
+    written.push({ path, text });
   }
 } finally {
   console.error = report;
   rmSync(server, { recursive: true, force: true });
+}
+
+// 4. The build guard's scan over every page as written: the guard ran when
+//    the client bundle was written, before any page held its markup, and a
+//    server-only render path can put text in a page that no chunk carries.
+//    The same scanner and rules as the guard and az audit: the public values
+//    allowed, and in a page the digests its own policy pins for what it
+//    carries inline; a hit removes dist/ and fails the build.
+const publicValues = [...new Set(Object.values(env).filter(Boolean))];
+const scan = (text) => scanText(text, new Set([...publicValues, ...ownDigests(text)]));
+const { hits } = await shippedSecrets(written, join(root, "node_modules"), scan);
+if (hits.length > 0) {
+  const problems = hits.map((h) => bundleMessage(h.path, h.finding, "page"));
+  const left = await removeOutput(root, dist);
+  if (left !== null) problems.push("auth: " + left + " — delete it before any deploy");
+  throw new Error(problems.join("\\n"));
 }
 if (warnings.length > 0) {
   throw new Error("prerender: React reported while rendering — the page would not match what the browser hydrates:\\n" + warnings.join("\\n"));

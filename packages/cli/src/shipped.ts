@@ -10,8 +10,9 @@
 /**
  * One scan for every file a built site ships — the generated build's guard
  * runs it once Vite has written the output (its chunks, the assets it read
- * as bytes, and the files it copied from `public/`), and `az audit` runs it
- * again after the pre-render. Both judge with the same scanner (core
+ * as bytes, and the files it copied from `public/`), the generated
+ * build.mjs over every page the pre-render then fills, and `az audit` again
+ * over the finished folder. All judge with the same scanner (core
  * secrets.ts, scanText), passed in so this file needs no path to it.
  *
  * The one exception both make: a shipped file that is byte-for-byte a file

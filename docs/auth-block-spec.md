@@ -635,7 +635,7 @@ CONVENTIONS §5.
 | Check | Severity | Message |
 |---|---|---|
 | service key would be inlined | **error, unsuppressible** | `auth: 'VITE_SERVICE_KEY' is a service key and would be readable in the shipped bundle — use the public key here and keep the service key on your server` |
-| key pattern in the built bundle | **error, unsuppressible** | `auth: a service-key pattern was found in the built bundle — remove it from source and rebuild` |
+| key pattern in the built site | **error, unsuppressible** | `auth: a service-key pattern was found in <where> — remove it from source and rebuild`, `<where>` naming the place: `the built bundle`, `a file copied from public/`, `a file in the output folder`, or `a pre-rendered page` |
 | key literal in the `.az` file (AZ1411, any word) | error | `auth: a key literal in 'key' would be committed to source control — move it to an environment variable` |
 | no variant | error | `auth: no form named — pick one of 'login', 'signup', 'reset'` |
 | two variants | error | `auth: 'login' and 'signup' are both forms — pick one` |

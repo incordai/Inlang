@@ -161,10 +161,15 @@ test('build.mjs gives every page its policy after the pre-render, from csp.ts be
   const r = compile('az 1\nsite aurora\npage /\n  hero center\n    title "x"\n', { manifests });
   assert.ok(r.ok && r.spec);
   const build = emitProject(r.spec, { emitters: WEB_EMITTERS }).files.find((f) => f.path === 'az-vite/build.mjs')?.content ?? '';
-  assert.match(build, /import \{ pagePolicy, withPolicy \} from "\.\/csp\.ts";/);
+  assert.match(build, /import \{ ownDigests, pagePolicy, withPolicy \} from "\.\/csp\.ts";/);
   assert.match(build, /const env = loadEnv\("production", root, "AZ_PUBLIC_"\);/, 'origins from the public env only');
   const render = build.indexOf('render(route)');
   assert.ok(render > 0 && build.indexOf('withPolicy(filled, pagePolicy(page, filled, env))') > render, 'the policy is made from the filled page');
+  // word-quality-gate §5.5: every page as written goes through the guard's scan; a hit removes dist/.
+  const wrote = build.indexOf('writeFileSync(file, text)');
+  const scanned = build.indexOf('await shippedSecrets(written, join(root, "node_modules"), scan)');
+  assert.ok(wrote > render && scanned > wrote, 'the pages are scanned once they are written');
+  assert.ok(build.indexOf('bundleMessage(h.path, h.finding, "page")') > scanned && build.indexOf('await removeOutput(root, dist)') > scanned);
   const html = emitProject(r.spec, { emitters: WEB_EMITTERS }).files.find((f) => f.path === 'index.html')?.content ?? '';
   assert.doesNotMatch(html, /Content-Security-Policy/, 'the template the dev server serves carries none');
 });

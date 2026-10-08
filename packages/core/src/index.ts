@@ -211,5 +211,5 @@ export function formatDiagnostics(diagnostics: Diagnostic[], file = 'site.az'): 
     .join('\n');
 }
 
-export { scanText, scanEnv, isSecretLiteral, PUBLIC_ENV_PREFIX, envMessage, bundleMessage, type SecretFinding } from './secrets.ts';
+export { scanText, scanEnv, isSecretLiteral, PUBLIC_ENV_PREFIX, envMessage, bundleMessage, type SecretFinding, type ShippedPlace } from './secrets.ts';
 export { lex, parse, link, buildSpec, serialiseSpec as serialise };

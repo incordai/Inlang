@@ -259,15 +259,17 @@ export function authCss(t: ThemeLike): string {
  * `public/` — read back from the output folder (az-vite/shipped.ts, the
  * scan `az audit` runs too). Both failures are unsuppressible: no option or
  * flag turns them off. A bundle refusal removes the output folder it read,
- * so a failed build leaves nothing to deploy.
+ * so a failed build leaves nothing to deploy. The pages the pre-render fills
+ * after this runs are scanned the same way by az-vite/build.mjs.
  */
 export function guardTs(required: readonly string[], adapter: string | null = null): string {
   // azbackend: the base URL must be usable, not merely present (§3.4) — the
   // adapter's own check, imported so the build and the site agree.
   const backend = adapter === 'azbackend';
   return `${generated('build guard: refuses a build that would ship a secret')}import { loadEnv, type Plugin } from "vite";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { PUBLIC_ENV_PREFIX, bundleMessage, envMessage, scanEnv, scanText } from "./secrets.ts";
+import { PUBLIC_ENV_PREFIX, bundleMessage, envMessage, scanEnv, scanText, type ShippedPlace } from "./secrets.ts";
 import { FILE_MAX_BYTES, MAX_FILES, removeOutput, shippedSecrets, walkShipped } from "./shipped.ts";
 ${backend ? `import { backendUrlProblem } from "../${AUTH_DIR}/azbackend.ts";\n` : ''}
 /** Variables this site cannot build without (its auth adapter's, §3.2/§3.4). */
@@ -277,6 +279,7 @@ export function secretGuard(): Plugin {
   let publicValues = new Set<string>();
   let root = "";
   let outDir = "";
+  let publicDir = "";
   return {
     name: "az-secret-guard",
     configResolved(config) {
@@ -293,16 +296,22 @@ export function secretGuard(): Plugin {
       publicValues = new Set(Object.values(env).filter(Boolean));
       root = config.root;
       outDir = resolve(config.root, config.build.outDir);
+      // Vite's resolved public/ folder, or "" when copying it is turned off.
+      publicDir = config.publicDir;
     },
     // Once everything is written: Vite copies public/ before it writes the
     // bundle, so the folder now holds every file the site ships.
-    async writeBundle(options) {
+    async writeBundle(options, bundle) {
       const dir = options.dir ?? outDir;
       const tree = await walkShipped(dir);
       if (tree === null) throw new Error("auth: the build guard found no output folder at " + dir + " — nothing the site ships could be checked");
       // A file an installed package published is judged by key shape only.
       const { hits } = await shippedSecrets(tree.files, join(root, "node_modules"), (text) => scanText(text, publicValues));
-      const problems = hits.map((h) => bundleMessage(h.path, h.finding));
+      // The message names where the key is: a file Vite wrote from the
+      // bundle, one it copied from public/, or anything else in the folder.
+      const place = (path: string): ShippedPlace => path in bundle ? "bundle"
+        : publicDir !== "" && existsSync(join(publicDir, path)) ? "public" : "output";
+      const problems = hits.map((h) => bundleMessage(h.path, h.finding, place(h.path)));
       for (const file of tree.unread) {
         problems.push("auth: " + file + " was not scanned for keys (over " + FILE_MAX_BYTES / 1024 / 1024 + "MB, or past " + MAX_FILES + " files) — the build ships only what the guard has read");
       }

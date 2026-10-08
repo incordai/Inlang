@@ -166,6 +166,7 @@ test('cspProblems: a strict policy has none; each weakness is named', () => {
     'no script-src or default-src — any script may load',
     "object-src is not 'none' — plugin content may load",
     'no base-uri — an injected <base> moves every relative script',
+    'img-src allows * — images from anywhere, and the page can send what it reads in their URLs',
   ]);
   // A hash pins the inline scripts: 'unsafe-inline' is then ignored by the browser.
   assert.deepEqual(cspProblems("default-src 'none'; script-src 'self' 'unsafe-inline' 'sha256-abc='; base-uri 'none'"), []);
@@ -177,6 +178,61 @@ test('cspProblems: a strict policy has none; each weakness is named', () => {
   ]);
   // Hashed style attributes ('unsafe-hashes') are pinned, not open.
   assert.deepEqual(cspProblems("default-src 'self'; style-src 'self' 'unsafe-hashes' 'sha256-abc='; object-src 'none'; base-uri 'self'"), []);
+});
+
+/** A strict policy with one fetch directive set to `sources` — what that directive alone leaves open. */
+const only = (directive: string, sources: string) =>
+  cspProblems(`default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; ${directive} ${sources}`);
+
+test('cspProblems: every fetch directive is graded — a wildcard and an http:/https: scheme source weaken it', () => {
+  const what: Record<string, string> = {
+    'connect-src': 'the page can send what it reads anywhere',
+    'img-src': 'images from anywhere, and the page can send what it reads in their URLs',
+    'worker-src': 'workers from anywhere',
+    'style-src': 'stylesheets from anywhere',
+    'font-src': 'fonts from anywhere',
+    'frame-src': 'frames from anywhere',
+  };
+  for (const [directive, consequence] of Object.entries(what)) {
+    assert.deepEqual(only(directive, "'self' *"), [`${directive} allows * — ${consequence}`], directive);
+    assert.deepEqual(only(directive, "'self' https:"), [`${directive} allows https: — ${consequence}`], directive);
+    assert.deepEqual(only(directive, "'self' http:"), [`${directive} allows http: — ${consequence}`], directive);
+    assert.deepEqual(only(directive, "'self' https://*.cdn.test"), [`${directive} allows https://*.cdn.test — ${consequence}`], directive);
+    // CONTROL: one named origin is not "anywhere".
+    assert.deepEqual(only(directive, "'self' https://api.example.org"), [], `${directive} with one origin`);
+  }
+  // default-src is graded in its own right: everything it covers falls back to it.
+  assert.deepEqual(cspProblems("default-src 'self' https:; script-src 'self'; object-src 'none'; base-uri 'self'"), [
+    'default-src allows https: — whatever no other directive names loads from anywhere',
+  ]);
+  assert.deepEqual(cspProblems("default-src *; script-src 'self'; object-src 'none'; base-uri 'self'"), [
+    'default-src allows * — whatever no other directive names loads from anywhere',
+  ]);
+});
+
+test('cspProblems: blob: and data: pass only where az\'s own policy uses them, for its reason', () => {
+  // Where the generated policy uses them: the data: icon, a model's blob: textures and its decoder worker.
+  assert.deepEqual(only('img-src', "'self' data: blob:"), []);
+  assert.deepEqual(only('connect-src', "'self' blob:"), []);
+  assert.deepEqual(only('worker-src', "'self' blob:"), []);
+  // Everywhere else they are a source any page can name.
+  assert.deepEqual(only('connect-src', "'self' data:"), ['connect-src allows data: — the page can send what it reads anywhere']);
+  assert.deepEqual(only('worker-src', "'self' data:"), ['worker-src allows data: — workers from anywhere']);
+  assert.deepEqual(only('style-src', "'self' data:"), ['style-src allows data: — stylesheets from anywhere']);
+  assert.deepEqual(only('style-src', "'self' blob:"), ['style-src allows blob: — stylesheets from anywhere']);
+  assert.deepEqual(only('font-src', "'self' blob:"), ['font-src allows blob: — fonts from anywhere']);
+  assert.deepEqual(only('frame-src', "'self' data:"), ['frame-src allows data: — frames from anywhere']);
+  assert.deepEqual(cspProblems("default-src 'self' blob:; script-src 'self'; object-src 'none'; base-uri 'self'"), [
+    'default-src allows blob: — whatever no other directive names loads from anywhere',
+  ]);
+});
+
+test('cspProblems: az\'s page policy with every need at once still grades strict', () => {
+  const need: PageNeeds = { dataIcon: true, decoder: true, connect: ['AZ_PUBLIC_AUTH_URL'], images: ['AZ_PUBLIC_BACKEND_URL'] };
+  const html = '<meta charset="utf-8" /><div id="root"><p style="color:red">hi</p></div><script>1</script><style>p{}</style>';
+  const policy = pagePolicy(need, html, { AZ_PUBLIC_AUTH_URL: 'https://auth.example.org', AZ_PUBLIC_BACKEND_URL: 'http://127.0.0.1:8787' });
+  assert.match(policy, /img-src 'self' data: blob: http:\/\/127\.0\.0\.1:8787; connect-src 'self' blob: https:\/\/auth\.example\.org; worker-src 'self' blob:/);
+  assert.deepEqual(cspProblems(policy), []);
 });
 
 test('page CSP: the policy az\'s build gives each page grades strict — a plain page, a 3D model page, an auth page', async () => {
