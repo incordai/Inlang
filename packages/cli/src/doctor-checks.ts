@@ -2,7 +2,7 @@
  * @az module doctor-checks
  * Purpose: every az doctor check — machine, project, backend — each a line and its fix; and doctor(), which runs them.
  * Spec: docs/word-quality-gate.md §5 · docs/auth-block-spec.md §4.1 · docs/stack-evaluation.md §9
- * Exports: CHECKS, doctor, glbGeometry, DoctorOptions
+ * Exports: CHECKS, doctor, glbGeometry, browserPlatform, BrowserMachine, DoctorOptions
  * Edit guide: detect and instruct only — no check installs, writes or prints an environment value; files are read through fs/promises, bounded.
  * Tests: packages/cli/test/doctor.test.ts
  */
@@ -19,21 +19,21 @@
  * file installs or writes anything.
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
 import { open, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
-import { compile, scanEnv, type Diagnostic, type Manifest, type PropSpec, type SpecBlock } from '../../core/src/index.ts';
+import { scanEnv, type Diagnostic, type Manifest, type PropSpec, type SpecBlock } from '../../core/src/index.ts';
 import { isFromMark } from '../../core/src/emit-contract.ts';
 import { BACKEND_PINS, NODE_ENGINE, SERVER_DIR } from '../../backend/src/emit.ts';
 import { loadConfig, type Setup } from '../../backend/src/server/env.ts';
-import { compileReader, DOTENV_FILES, parseDotenv, wordsFor } from './az.ts';
-import { lockPath, lockOption } from './data-schema.ts';
+import { DOTENV_FILES, parseDotenv } from './az.ts';
+import { lockPath } from './data-schema.ts';
+import type { CompileJob } from './doctor-compile.ts';
 import { ENCODER, type ProbeJob } from './images.ts';
 import {
-  CHILD_MS, report, runChecks, shellQuote,
-  type Check, type CheckResult, type DoctorContext, type DoctorReport, type Probe, type RunResult,
+  CHILD_MS, report, runChecks, runWorker, shellQuote,
+  type Check, type CheckResult, type Compiled, type DoctorContext, type DoctorReport, type Probe, type RunResult,
 } from './doctor.ts';
 
 /**
@@ -284,6 +284,86 @@ function browserCache(probe: Probe, projectDir: string): string {
   return join(probe.env.XDG_CACHE_HOME || join(probe.home, '.cache'), BROWSER_CACHE);
 }
 
+/** What browserPlatform reads from the machine. `distro` is /etc/os-release's ID and VERSION_ID (linux only). */
+export interface BrowserMachine {
+  readonly platform: NodeJS.Platform;
+  readonly arch: string;
+  readonly osRelease: string;
+  readonly cpuModels: readonly string[];
+  readonly distro?: { readonly id: string; readonly version: string };
+  /** The package's own override of the platform name, when set. */
+  readonly override?: string;
+}
+
+/** The newest macOS major the browser-test package knows; a later darwin is named as this one. */
+const LAST_KNOWN_MAC = 26;
+/** The text in a CPU model the package reads as an arm64 darwin machine. */
+const ARM_MAC_CPU = 'Apple';
+
+/**
+ * The platform name the browser-test package keys `revisionOverrides` by —
+ * its own rules, as the version this repository pins (1.63.0) computes them
+ * in its hostPlatform module: `mac14-arm64`, `ubuntu22.04-x64`, `win64`.
+ */
+export function browserPlatform(m: BrowserMachine): string {
+  if (m.override) return m.override;
+  if (m.platform === 'darwin') {
+    const major = Number.parseInt(m.osRelease.split('.')[0], 10);
+    const mac = major < 18 ? '10.13' : major === 18 ? '10.14' : major === 19 ? '10.15' : String(major < 25 ? 11 + (major - 20) : Math.min(major + 1, LAST_KNOWN_MAC));
+    return Number(mac) >= 11 && m.cpuModels.some((c) => c.includes(ARM_MAC_CPU)) ? `mac${mac}-arm64` : `mac${mac}`;
+  }
+  if (m.platform === 'linux') {
+    if (m.arch !== 'x64' && m.arch !== 'arm64') return '<unknown>';
+    const arch = `-${m.arch}`;
+    const { id, version } = m.distro ?? { id: undefined, version: '' };
+    const major = Number.parseInt(version, 10);
+    if (id === 'ubuntu' || id === 'pop' || id === 'neon' || id === 'tuxedo') {
+      if (major < 20) return `ubuntu18.04${arch}`;
+      if (major < 22) return `ubuntu20.04${arch}`;
+      if (major < 24) return `ubuntu22.04${arch}`;
+      if (major < 26) return `ubuntu24.04${arch}`;
+      if (major < 28) return `ubuntu26.04${arch}`;
+      return `ubuntu${version}${arch}`;
+    }
+    if (id === 'linuxmint') return `${major <= 20 ? 'ubuntu20.04' : major === 21 ? 'ubuntu22.04' : 'ubuntu24.04'}${arch}`;
+    if (id === 'debian' || id === 'raspbian') {
+      if (version === '11' || version === '12' || version === '13') return `debian${version}${arch}`;
+      if (version === '') return `debian13${arch}`;
+    }
+    return `ubuntu24.04${arch}`;
+  }
+  return m.platform === 'win32' ? 'win64' : '<unknown>';
+}
+
+/** /etc/os-release's ID and VERSION_ID, read as the package reads them; undefined when it can't be read. */
+async function linuxDistro(): Promise<{ id: string; version: string } | undefined> {
+  const text = await readRegular('/etc/os-release').catch(() => null);
+  if (text === null) return undefined;
+  const fields = new Map<string, string>();
+  for (const line of text.split('\n')) {
+    const [name, ...rest] = line.split('=');
+    let value = rest.join('=').trim();
+    if (value.startsWith('"') && value.endsWith('"')) value = value.substring(1, value.length - 1);
+    if (name) fields.set(name.toLowerCase(), value);
+  }
+  return { id: fields.get('id') ?? '', version: fields.get('version_id') ?? '' };
+}
+
+/** One browser's entry in the package's browsers.json. */
+interface BrowserEntry { readonly name?: string; readonly revision?: string; readonly revisionOverrides?: Readonly<Record<string, string>> }
+
+/**
+ * The revision the package installs on this platform, and the folder it
+ * installs it in: an override for the platform wins, in a folder of its own
+ * (`<name>_<platform>_special-<revision>`, dashes made underscores).
+ */
+function browserInstall(entry: BrowserEntry, host: string): { revision: string | undefined; folder: string } {
+  const override = entry.revisionOverrides?.[host];
+  const revision = override || entry.revision;
+  const prefix = override ? `${TEST_BROWSER}_${host}_special` : TEST_BROWSER;
+  return { revision, folder: `${prefix.replace(/-/g, '_')}-${revision}` };
+}
+
 const browsers: Check = {
   id: 'browsers',
   title: 'test browsers',
@@ -299,20 +379,27 @@ const browsers: Check = {
     if (pkg === null) return { status: 'skip', line: 'test browsers: the project runs no browser tests' };
     const uses = BROWSER_TEST_PACKAGES.some((n) => Object.hasOwn(pkg?.dependencies ?? {}, n) || Object.hasOwn(pkg?.devDependencies ?? {}, n));
     if (!uses) return { status: 'skip', line: 'test browsers: the project runs no browser tests' };
-    let revision: string | undefined;
+    let entry: BrowserEntry | undefined;
     try {
       const text = await readRegular(join(dir, 'node_modules', BROWSER_TEST_CORE, 'browsers.json'));
       if (text === null) throw new Error('absent');
-      const list = JSON.parse(text) as { browsers?: { name?: string; revision?: string }[] };
-      revision = list.browsers?.find((b) => b.name === TEST_BROWSER)?.revision;
+      const list = JSON.parse(text) as { browsers?: BrowserEntry[] };
+      entry = list.browsers?.find((b) => b.name === TEST_BROWSER);
     } catch {
       return { status: 'warn', line: 'test browsers: the browser-test package is not installed', fix: [`run: ${cdTo(ctx, dir)}npm install`] };
     }
+    const { probe } = ctx;
+    const host = browserPlatform({
+      platform: probe.platform, arch: probe.arch, osRelease: probe.osRelease, cpuModels: probe.cpuModels,
+      distro: probe.platform === 'linux' ? await linuxDistro() : undefined,
+      override: probe.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE,
+    });
+    const { revision, folder } = browserInstall(entry ?? {}, host);
     if (!revision || !/^\d+$/.test(revision)) {
       return { status: 'warn', line: 'test browsers: the browser-test package lists no browser revision — reinstall it', fix: [`run: ${cdTo(ctx, dir)}npm install`] };
     }
     const cache = browserCache(ctx.probe, dir);
-    if (await isDir(join(cache, `${TEST_BROWSER}-${revision}`))) {
+    if (await isDir(join(cache, folder))) {
       return { status: 'pass', line: `test browsers: ${TEST_BROWSER} ${revision} is installed` };
     }
     // Tier 2 (word-quality-gate §5.1): offered as a command, never fetched from here.
@@ -334,7 +421,7 @@ const compiles: Check = {
   title: 'compile',
   run: async (ctx) => {
     if (!ctx.source) return noFile;
-    const c = ctx.compiled();
+    const c = await ctx.compiled();
     const name = shown(ctx, ctx.source);
     if ('error' in c) return { status: 'fail', line: `${name}: can't be compiled (${c.error})`, fix: [`run: az check ${fileName(ctx)}`] };
     // The lock and the tables' rules have their own lines below.
@@ -358,7 +445,7 @@ const dataLock: Check = {
   title: 'data lock',
   run: async (ctx) => {
     if (!ctx.source) return noFile;
-    const c = ctx.compiled();
+    const c = await ctx.compiled();
     if ('error' in c) return { status: 'skip', line: 'data lock: the file could not be compiled' };
     const lock = shown(ctx, lockPath(ctx.source));
     const stale = c.result.diagnostics.filter((d) => isLockCode(d.code));
@@ -381,7 +468,7 @@ const tableRules: Check = {
   title: 'table rules',
   run: async (ctx) => {
     if (!ctx.source) return noFile;
-    const c = ctx.compiled();
+    const c = await ctx.compiled();
     if ('error' in c) return { status: 'skip', line: 'table rules: the file could not be compiled' };
     const site = c.result.spec?.site;
     const adapter = site?.scoped.auth?.adapter;
@@ -464,9 +551,9 @@ function namedFiles(blocks: readonly SpecBlock[], manifests: ReadonlyMap<string,
 }
 
 /** The compile result and every file its blocks name, or a skip line. */
-function projectFiles(ctx: DoctorContext): Named[] | CheckResult {
+async function projectFiles(ctx: DoctorContext): Promise<Named[] | CheckResult> {
   if (!ctx.source) return noFile;
-  const c = ctx.compiled();
+  const c = await ctx.compiled();
   if ('error' in c) return { status: 'skip', line: 'assets: the file could not be compiled' };
   const spec = c.result.spec;
   if (!spec) return { status: 'skip', line: 'assets: the file has no site to read' };
@@ -484,7 +571,7 @@ const assets: Check = {
   id: 'assets',
   title: 'assets',
   run: async (ctx) => {
-    const found = projectFiles(ctx);
+    const found = await projectFiles(ctx);
     if (!Array.isArray(found)) return found;
     const dir = dirname(ctx.source!);
     const missing: string[] = [];
@@ -539,7 +626,7 @@ const models: Check = {
   id: 'models',
   title: 'models',
   run: async (ctx) => {
-    const found = projectFiles(ctx);
+    const found = await projectFiles(ctx);
     if (!Array.isArray(found)) return { ...found, line: found.line.replace(/^assets:/, 'models:') };
     const dir = dirname(ctx.source!);
     const glbs = found.filter((f) => extname(f.path).toLowerCase() === '.glb');
@@ -592,7 +679,7 @@ const backendEnv: Check = {
   run: async (ctx) => {
     const server = join(ctx.outDir, SERVER_DIR);
     const setup = await serverSetup(server);
-    const c = ctx.source ? ctx.compiled() : null;
+    const c = ctx.source ? await ctx.compiled() : null;
     const declared = c !== null && 'result' in c && c.result.spec?.site.backend !== undefined;
     if (!setup) {
       return declared
@@ -664,11 +751,20 @@ export interface DoctorOptions {
   readonly projectModules: boolean;
   readonly checks?: readonly Check[];
   readonly deadlineMs?: number;
+  /** The worker module that compiles the file (doctor-compile.ts); a test passes one that never answers. */
+  readonly compiler?: URL;
+  /** The compile worker's timeout: under the deadline, so the compile line says what stopped. */
+  readonly compileMs?: number;
 }
+
+/** The compile worker az doctor runs. */
+const COMPILER = new URL('./doctor-compile.ts', import.meta.url);
 
 /** Run every check against this machine and project. Reads only; writes and installs nothing. */
 export async function doctor(options: DoctorOptions): Promise<DoctorReport> {
-  let compiled: ReturnType<DoctorContext['compiled']> | undefined;
+  let compiled: Promise<Compiled> | undefined;
+  // Ends a compile still running once the report is in, so nothing outlives it.
+  const done = new AbortController();
   const ctx: DoctorContext = {
     source: options.source,
     outDir: options.outDir,
@@ -678,24 +774,19 @@ export async function doctor(options: DoctorOptions): Promise<DoctorReport> {
     projectModules: options.projectModules,
     // Manifests only: doctor never runs the project's own word code.
     compiled: () => {
-      if (compiled) return compiled;
       const source = options.source;
-      if (!source) throw new Error('no .az file');
-      // The file and its lock are read synchronously: a named pipe in their
-      // place would block before any deadline could fire, so it is refused.
-      const irregular = [source, lockPath(source)].find((f) => existsSync(f) && !statSync(f).isFile());
-      if (irregular) {
-        compiled = { error: `${basename(irregular)} is not a regular file` };
-        return compiled;
-      }
-      try {
-        const manifests = wordsFor({ source, wordsDir: options.wordsDir }, false).manifests;
-        compiled = { manifests, result: compile(readFileSync(source, 'utf8'), { manifests, lock: lockOption(source), readBytes: compileReader(source) }) };
-      } catch (e) {
-        compiled = { error: String((e as Error).message ?? e).split('\n')[0] };
-      }
+      if (!source) return Promise.reject(new Error('no .az file'));
+      const job: CompileJob = { source, wordsDir: options.wordsDir };
+      compiled ??= runWorker<Compiled>(options.compiler ?? COMPILER, job, options.compileMs ?? CHILD_MS, done.signal).then((r) => {
+        if (r.kind === 'done') return r.value;
+        return { error: r.kind === 'timeout' ? `no answer after ${r.ms / 1000}s` : r.message.split('\n')[0] };
+      });
       return compiled;
     },
   };
-  return report(await runChecks(options.checks ?? CHECKS, ctx, options.deadlineMs));
+  try {
+    return report(await runChecks(options.checks ?? CHECKS, ctx, options.deadlineMs));
+  } finally {
+    done.abort();
+  }
 }

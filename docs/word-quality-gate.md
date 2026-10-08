@@ -205,6 +205,12 @@ and the exact command; exit `0` when nothing failed (warnings never fail),
 `1` when something did, `2` for a usage error (§5.2). Checks run at once,
 each under a 20s deadline; every child process is killed at 15s. A check
 that does not answer reports `no answer after 20s` and the run goes on.
+The deadline is a timer, so it cannot stop synchronous work: the compile
+runs in a worker thread (`doctor-compile.ts`), terminated at 15s. A file
+that keeps the compiler busy reports `site.az: can't be compiled (no answer
+after 15s)`, the checks that read the compile skip, and every other check
+still answers; a worker still running when the report is in is terminated
+with it.
 
 | Check | Fails / warns when | Fix it prints |
 |---|---|---|
@@ -213,7 +219,7 @@ that does not answer reports `no answer after 20s` and the run goes on.
 | platform (known-bad) | an x64 Node translated on an arm64 machine; `AZ_WORDS` not a folder | the arm64 Node; unset `AZ_WORDS` |
 | image library | the resizer's own child (`image-encode.ts`, probe mode) can't load it — a warning: images ship unresized | reinstall az's packages |
 | backend image library | a built server with image fields can't load its copy, or the version differs from the pin | `npm install` in `server/`; skipped from MCP, which never loads project modules |
-| test browsers | only if the project's `package.json` uses the browser-test package: its Chromium revision is absent | the install command — Tier 2, never run from here |
+| test browsers | only if the project's `package.json` uses the browser-test package: its Chromium revision is absent — read as the package reads it: `revisionOverrides` for this platform (named by the package's own rules, as its pinned 1.63.0 computes them: `mac14-arm64`, `ubuntu22.04-x64`, its platform-override variable honoured) wins, in its own `<name>_<platform>_special-<revision>` folder | the install command — Tier 2, never run from here |
 | compile | `az check` errors (fail) or warnings (warn), first error quoted | `az check site.az` |
 | data lock | AZ1700–AZ1749 (AZ1701: the file and the lock differ) | `az backend plan`, then `az backend schema` |
 | table rules | a table with no `allow` lines (AZ1246); `adapter hosted` always — its row rules can't be read from here (auth-block-spec §4.1) | add `allow` lines; turn on row-level security per table |
@@ -240,6 +246,15 @@ fixed or installed. It runs in doctor's frame — the same `pass`/`warn`/`fail`/
 (`0` nothing failed, `1` something did, `2` a usage error). A folder az did
 not build is one failing `output` line, never an empty pass. Severity follows
 §2: what §2 calls critical or high fails; medium warns.
+
+The built site is read once, in a worker thread (`audit-site.ts`) terminated
+at 15s: the secret scan and the tag scans are synchronous, over files of up
+to 16MB, and a timer on the main thread could not stop them. Measured on the
+old code: a 900KB page of 300 000 unclosed `<a ` tags — the tag scans are
+quadratic on it — held the run for minutes, the 20s deadline never firing.
+Now it is `bundle secrets: no answer after 15s reading .az-build/dist —
+nothing it ships was checked` (fail), page CSP and new-tab links skip
+pointing to it, and dependencies and backend CSP answer as usual.
 
 | Check | Fails / warns when | Fix it prints |
 |---|---|---|

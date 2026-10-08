@@ -416,6 +416,35 @@ test('DEADLINE: a hung audit check reports no answer and says to run az audit ag
   assert.match(r.fix?.[0] ?? '', /run az audit again/);
 });
 
+/** A page of unclosed tags: every tag scan over it is quadratic — minutes of synchronous work for one 900KB file. */
+const SLOW_PAGE = PAGE('', '<a '.repeat(300_000));
+
+test('DEADLINE: a built page the scans are slow on is ended at the read\'s timeout — the line says so, every other check finishes', async () => {
+  const b = built(BACKEND, { 'index.html': SLOW_PAGE });
+  const started = Date.now();
+  const r = await audit(options(b, { siteMs: 1_000, deadlineMs: 10_000 }));
+  const took = Date.now() - started;
+  assert.ok(took < 8_000, `ended at the read's timeout, not the scan's end (${took}ms)`);
+  assert.deepEqual(r.checks.map((c) => [c.id, c.status, c.line]), [
+    ['bundle-secrets', 'fail', 'bundle secrets: no answer after 1s reading .az-build/dist — nothing it ships was checked'],
+    ['dependencies', 'skip', 'dependencies: not checked — the advisory service is a network call; run: az audit --online'],
+    ['page-csp', 'skip', 'page CSP: the built site was not read — see the bundle secrets line'],
+    ['backend-csp', 'pass', r.checks[3].line],
+    ['new-tab-links', 'skip', 'new-tab links: the built site was not read — see the bundle secrets line'],
+  ]);
+  assert.match(r.checks[3].line, /^backend CSP: every API response sends /);
+  assert.equal(r.exit, 1);
+});
+
+test('DEADLINE: a check deadline shorter than the read\'s ends the run, and the read with it', async () => {
+  const b = built(SITE, { 'index.html': SLOW_PAGE });
+  const started = Date.now();
+  const r = await audit(options(b, { checks: AUDIT_CHECKS.filter((c) => c.id === 'bundle-secrets'), siteMs: 600_000, deadlineMs: 500 }));
+  assert.ok(Date.now() - started < 3_000);
+  assert.equal(r.checks[0].line, 'bundle secrets: no answer after 0.5s');
+  // The worker is terminated once the report is in: if it were not, this test file would not exit for minutes.
+});
+
 test('SECURITY: a planted secret\'s value never reaches the report, text or JSON', async () => {
   const b = built(BACKEND, {
     'index.html': PAGE('', `<a target="_blank" href="/x?k=${PLANTED}">x</a>`),

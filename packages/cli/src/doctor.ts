@@ -2,7 +2,7 @@
  * @az module doctor
  * Purpose: the frame az doctor and az audit share: the check contract, the machine probe, deadlines, and the text and JSON reports.
  * Spec: docs/word-quality-gate.md §5 (§5.1 detect everything, install almost nothing; §5.2 exit codes)
- * Exports: Check, CheckResult, Command, Finding, Status, Probe, RunResult, DoctorContext, DoctorReport, runChecks, systemProbe, report, formatReport, shellQuote, DEADLINE_MS, CHILD_MS
+ * Exports: Check, CheckResult, Command, Compiled, Finding, Status, Probe, RunResult, WorkerResult, DoctorContext, DoctorReport, runChecks, runWorker, systemProbe, report, formatReport, shellQuote, DEADLINE_MS, CHILD_MS
  * Edit guide: a check reaches the machine only through Probe, so a test can fake it; nothing here installs or writes; never print an environment value.
  * Tests: packages/cli/test/doctor.test.ts, packages/cli/test/audit.test.ts
  */
@@ -20,12 +20,15 @@
  * The deadline is a timer, so it can only fire while the event loop turns:
  * it bounds anything a check awaits — a child, a file read — and not a
  * synchronous loop. Checks therefore read files through fs/promises and
- * read bounded byte counts; the one synchronous step, compiling the .az
- * file, is linear in a file the author wrote.
+ * read bounded byte counts; work that is synchronous and unbounded —
+ * compiling the .az file, reading every built page — runs in a worker
+ * thread (runWorker), which is terminated at its timeout however it is
+ * stuck.
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { homedir } from 'node:os';
+import { cpus, homedir, release } from 'node:os';
+import { Worker } from 'node:worker_threads';
 import type { CompileResult, Manifest } from '../../core/src/index.ts';
 
 export type Status = 'pass' | 'warn' | 'fail' | 'skip';
@@ -70,6 +73,10 @@ export interface Probe {
   readonly arch: string;
   readonly execPath: string;
   readonly home: string;
+  /** `os.release()`: the kernel's version — on darwin it names the macOS release. */
+  readonly osRelease: string;
+  /** `os.cpus()` models: on darwin they tell an arm64 machine whatever build of Node runs. */
+  readonly cpuModels: readonly string[];
   readonly env: Readonly<Record<string, string | undefined>>;
   /** npm's entry script beside this Node, or null — the one az dev runs (serve.ts). */
   readonly npmCli: () => string | null;
@@ -91,15 +98,21 @@ export interface DoctorContext {
    * never runs code from the project.
    */
   readonly projectModules: boolean;
-  /** The file compiled once, from manifests only — no project code runs; or why it could not be. */
-  readonly compiled: () =>
-    | { readonly result: CompileResult; readonly manifests: ReadonlyMap<string, Manifest> }
-    | { readonly error: string };
+  /**
+   * The file compiled once, from manifests only — no project code runs; or
+   * why it could not be. It compiles in a worker, ended at its timeout.
+   */
+  readonly compiled: () => Promise<Compiled>;
 }
+
+/** What compiling the .az file gave: the result and the manifests it used, or why there is none. */
+export type Compiled =
+  | { readonly result: CompileResult; readonly manifests: ReadonlyMap<string, Manifest> }
+  | { readonly error: string };
 
 /** Each check's deadline: past any child's own timeout, so the child is always gone first. */
 export const DEADLINE_MS = 20_000;
-/** A child process's timeout. */
+/** A child process's timeout, and a worker thread's. */
 export const CHILD_MS = 15_000;
 /** A child's report is a few lines; more is cut off. */
 const CHILD_OUTPUT_BYTES = 64 * 1024;
@@ -189,6 +202,47 @@ function runChild(file: string, args: readonly string[], options: RunOptions): P
   });
 }
 
+/** How a worker ended: the one message it posted, or why there is none. */
+export type WorkerResult<T> =
+  | { readonly kind: 'done'; readonly value: T }
+  | { readonly kind: 'timeout'; readonly ms: number }
+  | { readonly kind: 'error'; readonly message: string };
+
+/**
+ * Run `entry` in a worker thread with `data` and take the first message it
+ * posts. Terminated at `timeoutMs`, or when `signal` aborts: termination
+ * stops the thread's JavaScript wherever it is, a synchronous loop
+ * included, which a check's deadline cannot.
+ */
+export function runWorker<T>(entry: URL, data: unknown, timeoutMs: number, signal?: AbortSignal): Promise<WorkerResult<T>> {
+  return new Promise((done) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(entry, { workerData: data });
+    } catch (e) {
+      done({ kind: 'error', message: (e as Error).message });
+      return;
+    }
+    let settled = false;
+    const finish = (r: WorkerResult<T>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', stop);
+      // Its message is in hand, or it is past its time: either way it is done.
+      void worker.terminate();
+      done(r);
+    };
+    const stop = () => finish({ kind: 'error', message: 'stopped' });
+    const timer = setTimeout(() => finish({ kind: 'timeout', ms: timeoutMs }), timeoutMs);
+    if (signal?.aborted) stop();
+    else signal?.addEventListener('abort', stop, { once: true });
+    worker.once('message', (value: T) => finish({ kind: 'done', value }));
+    worker.once('error', (e: Error) => finish({ kind: 'error', message: e.message }));
+    worker.once('exit', (code) => finish({ kind: 'error', message: `ended (code ${code}) without an answer` }));
+  });
+}
+
 /** This machine. `npmCli` is serve.ts's finder, passed in so this file imports no command module. */
 export function systemProbe(npmCli: () => string | null): Probe {
   return {
@@ -197,6 +251,8 @@ export function systemProbe(npmCli: () => string | null): Probe {
     arch: process.arch,
     execPath: process.execPath,
     home: homedir(),
+    osRelease: release(),
+    cpuModels: cpus().map((c) => c.model),
     env: process.env,
     npmCli,
     run: runChild,

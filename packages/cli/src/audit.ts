@@ -2,8 +2,8 @@
  * @az module audit
  * Purpose: az audit — the built output's checks: secrets in the shipped files, dependency advisories, page and backend CSP, new-tab links.
  * Spec: docs/word-quality-gate.md §2 B, §4 rule 2, §5 (and §5.5, what is built)
- * Exports: AUDIT_CHECKS, audit, cspProblems, backendHeaderProblems, readAdvisory, AuditContext, AuditOptions
- * Edit guide: read-only — nothing here writes, fixes or installs; a secret is reported by file, offset and shape, never by value; files are read through fs/promises, bounded.
+ * Exports: AUDIT_CHECKS, audit, analyseSite, cspProblems, backendHeaderProblems, readAdvisory, AuditContext, AuditOptions, SiteReport
+ * Edit guide: read-only — nothing here writes, fixes or installs; a secret is reported by file, offset and shape, never by value; files are read through fs/promises, bounded; the built pages are read in a worker (audit-site.ts), never on the main thread.
  * Tests: packages/cli/test/audit.test.ts
  */
 
@@ -19,6 +19,12 @@
  * allowed — and, in a file, the digests of what it carries inline (a page's
  * policy pins them). The advisory check is the only one that uses the network,
  * so it runs only when asked (`--online`).
+ *
+ * Reading the built site is synchronous work over files of up to 16MB each:
+ * a page its patterns are slow on would hold the thread, and a deadline is a
+ * timer on that same thread. So the site is read once, in a worker
+ * (analyseSite, run by audit-site.ts), terminated at its timeout; the checks
+ * format what it found.
  */
 
 import { stat } from 'node:fs/promises';
@@ -30,8 +36,9 @@ import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
 import { ownDigests } from '../../target-web/src/csp.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
 import { FILE_MAX_BYTES, MAX_FILES, readRegular, shippedSecrets, walkShipped, type Shipped } from './shipped.ts';
+import type { SiteJob } from './audit-site.ts';
 import {
-  CHILD_MS, report, runChecks, shellQuote,
+  CHILD_MS, report, runChecks, runWorker, shellQuote,
   type Check, type CheckResult, type DoctorReport, type Probe, type RunResult,
 } from './doctor.ts';
 
@@ -54,10 +61,37 @@ const SHOW = 5;
 const SERVER_SOURCE = fileURLToPath(new URL('../../backend/src/server/', import.meta.url));
 const HEADER_FILES = ['http.ts', 'app.ts', 'main.ts'] as const;
 
-/** The built site, walked once for every check; `unread` names what was too large or past the cap. */
+/** The built site, walked once; `unread` names what was too large or past the cap. */
 type Site =
   | { readonly kind: 'missing'; readonly dir: string }
   | { readonly kind: 'site'; readonly dir: string; readonly files: readonly Shipped[]; readonly unread: readonly string[] };
+
+/**
+ * What the worker found in the built site, as plain data the checks format:
+ * every location already in its printable form. `unanswered` is the worker
+ * that did not finish.
+ */
+export type SiteReport =
+  | { readonly kind: 'missing'; readonly dir: string }
+  | { readonly kind: 'unanswered'; readonly why: string }
+  | {
+    readonly kind: 'site';
+    readonly dir: string;
+    /** Text files read, and what was too large or past the cap. */
+    readonly files: number;
+    readonly unread: readonly string[];
+    /** `file:offset (rule)` per key-shaped string; files a package published, judged by key shape only. */
+    readonly secrets: readonly string[];
+    readonly published: number;
+    /** Pages, and by route: without a policy, with a weak one, with only inline styles open. */
+    readonly pages: number;
+    readonly bare: readonly string[];
+    readonly weak: readonly string[];
+    readonly styled: readonly string[];
+    /** Links that open a new tab, and those that can redirect this page. */
+    readonly newTab: number;
+    readonly openers: readonly string[];
+  };
 
 export interface AuditContext {
   /** The absolute output folder of a build (`--out`, default .az-build). */
@@ -67,8 +101,8 @@ export interface AuditContext {
   readonly probe: Probe;
   /** May a check use the network? Only the advisory check does, and only when this is true. */
   readonly online: boolean;
-  /** The built site under dist/, read once and shared. */
-  readonly site: () => Promise<Site>;
+  /** What the built site under dist/ holds, read once in a worker and shared. */
+  readonly site: () => Promise<SiteReport>;
 }
 
 const shown = (cwd: string, abs: string) => {
@@ -97,6 +131,14 @@ async function walkSite(outDir: string): Promise<Site> {
   const tree = await walkShipped(dir, outDir);
   return tree === null ? { kind: 'missing', dir } : { kind: 'site', dir, files: tree.files, unread: tree.unread.map(named) };
 }
+
+/** The worker reading the built site gave no answer: said by bundle secrets, pointed to by the rest. */
+const unanswered = (ctx: AuditContext, why: string): CheckResult => ({
+  status: 'fail',
+  line: `bundle secrets: ${why} reading ${shown(ctx.cwd, join(ctx.outDir, DIST))} — nothing it ships was checked`,
+  fix: ['run az audit again; if this line repeats, a file there keeps the reader busy — look for one far larger than a build writes'],
+});
+const notRead = (title: string): CheckResult => ({ status: 'skip', line: `${title}: the built site was not read — see the bundle secrets line` });
 
 const notBuilt = (ctx: AuditContext, site: { dir: string }): CheckResult => ({
   status: 'fail',
@@ -127,15 +169,8 @@ const bundleSecrets: Check<AuditContext> = {
   run: async (ctx) => {
     const site = await ctx.site();
     if (site.kind === 'missing') return notBuilt(ctx, site);
-    const allow = await publicValues(ctx);
-    // A file a package published is judged by key shape only (shipped.ts).
-    const scan = (text: string) => {
-      const own = ownDigests(text);
-      return scanText(text, own.length > 0 ? new Set([...allow, ...own]) : allow);
-    };
-    const { hits: found, published } = await shippedSecrets(site.files, join(ctx.outDir, 'node_modules'), scan);
-    // file:offset and the rule (the key's shape) — never a character of the value.
-    const hits = found.map(({ path, finding: s }) => `${named(path)}:${s.where.replace(/^@/, '')} (${s.rule})`);
+    if (site.kind === 'unanswered') return unanswered(ctx, site.why);
+    const hits = site.secrets;
     if (hits.length > 0) {
       return {
         status: 'fail',
@@ -154,8 +189,8 @@ const bundleSecrets: Check<AuditContext> = {
         fix: more(site.unread),
       };
     }
-    const copies = published.size > 0 ? `; ${count(published.size, 'file')} a package published judged by key shape only` : '';
-    return { status: 'pass', line: `bundle secrets: none in ${count(site.files.length, 'shipped text file')} — the build guard's patterns, after pre-render${copies}` };
+    const copies = site.published > 0 ? `; ${count(site.published, 'file')} a package published judged by key shape only` : '';
+    return { status: 'pass', line: `bundle secrets: none in ${count(site.files, 'shipped text file')} — the build guard's patterns, after pre-render${copies}` };
   },
 };
 
@@ -415,30 +450,15 @@ const pageCsp: Check<AuditContext> = {
   run: async (ctx) => {
     const site = await ctx.site();
     if (site.kind === 'missing') return { status: 'skip', line: 'page CSP: no built site — see the bundle secrets line' };
-    const pages = pagesOf(site);
-    if (pages.length === 0) return { status: 'skip', line: 'page CSP: the built site has no pages' };
-    const bare: string[] = [];
-    const weak: string[] = [];
-    const styled: string[] = [];
-    for (const p of pages) {
-      const policies = tags(p.text, 'meta')
-        .filter((a) => a.get('http-equiv')?.toLowerCase() === 'content-security-policy')
-        .map((a) => a.get('content') ?? '');
-      if (policies.length === 0) {
-        bare.push(route(p.path));
-        continue;
-      }
-      // Several policies are all enforced: a page is open only where every one of them is.
-      const each = policies.map(cspProblems);
-      const open = each[0].filter((x) => each.every((list) => list.includes(x)));
-      if (open.length > 0) (open.every((x) => x === STYLE_INLINE) ? styled : weak).push(`${route(p.path)}: ${open.join('; ')}`);
-    }
+    if (site.kind === 'unanswered') return notRead('page CSP');
+    const { pages, bare, weak, styled } = site;
+    if (pages === 0) return { status: 'skip', line: 'page CSP: the built site has no pages' };
     const host = 'a policy your host sends as a header is not visible here — check it in the browser\'s network panel';
-    if (bare.length === pages.length) {
+    if (bare.length === pages) {
       // word-quality-gate §2 B: no CSP is a medium risk — a warning, never a failure.
       return {
         status: 'warn',
-        line: `page CSP: none of ${count(pages.length, 'page')} sets a Content-Security-Policy — an injected script would run`,
+        line: `page CSP: none of ${count(pages, 'page')} sets a Content-Security-Policy — an injected script would run`,
         fix: ['az build gives every page one (word-quality-gate §2 B): rebuild with this az, then npm run build in the output — or have the host send a Content-Security-Policy header', host],
       };
     }
@@ -454,7 +474,7 @@ const pageCsp: Check<AuditContext> = {
         fix: [...more([...bare.map((r) => `${r}: no policy`), ...weak, ...styled]), host],
       };
     }
-    return { status: 'pass', line: `page CSP: ${count(pages.length, 'page')}, each with a strict policy` };
+    return { status: 'pass', line: `page CSP: ${count(pages, 'page')}, each with a strict policy` };
   },
 };
 
@@ -520,18 +540,8 @@ const newTabLinks: Check<AuditContext> = {
   run: async (ctx) => {
     const site = await ctx.site();
     if (site.kind === 'missing') return { status: 'skip', line: 'new-tab links: no built site — see the bundle secrets line' };
-    let total = 0;
-    const open: string[] = [];
-    for (const p of pagesOf(site)) {
-      for (const a of tags(p.text, 'a')) {
-        if (a.get('target')?.toLowerCase() !== '_blank') continue;
-        total++;
-        const rel = (a.get('rel') ?? '').toLowerCase().split(/\s+/);
-        // noreferrer implies noopener.
-        // A link may carry a token in its query: printed only when it is not shaped like one.
-        if (!rel.includes('noopener') && !rel.includes('noreferrer')) open.push(`${route(p.path)}: ${quotable(a.get('href') ?? '(no href)')}`);
-      }
-    }
+    if (site.kind === 'unanswered') return notRead('new-tab links');
+    const { newTab: total, openers: open } = site;
     if (open.length > 0) {
       // word-quality-gate §2 B: reverse tabnabbing, a medium risk.
       return {
@@ -546,6 +556,71 @@ const newTabLinks: Check<AuditContext> = {
   },
 };
 
+/* ---- the built site, read in a worker ------------------------------------ */
+
+/**
+ * Everything the checks need from the built site, read once: its secrets,
+ * each page's policy, each new-tab link. Run by the worker (audit-site.ts),
+ * where the synchronous scans can be stopped; `allow` is the public values
+ * the build inlined (publicValues).
+ */
+export async function analyseSite(outDir: string, allow: readonly string[]): Promise<SiteReport> {
+  const site = await walkSite(outDir);
+  if (site.kind === 'missing') return site;
+  const allowed = new Set(allow);
+  // A file a package published is judged by key shape only (shipped.ts).
+  const scan = (text: string) => {
+    const own = ownDigests(text);
+    return scanText(text, own.length > 0 ? new Set([...allowed, ...own]) : allowed);
+  };
+  const { hits, published } = await shippedSecrets(site.files, join(outDir, 'node_modules'), scan);
+  const pages = pagesOf(site);
+  const bare: string[] = [];
+  const weak: string[] = [];
+  const styled: string[] = [];
+  let newTab = 0;
+  const openers: string[] = [];
+  for (const p of pages) {
+    const policies = tags(p.text, 'meta')
+      .filter((a) => a.get('http-equiv')?.toLowerCase() === 'content-security-policy')
+      .map((a) => a.get('content') ?? '');
+    if (policies.length === 0) {
+      bare.push(route(p.path));
+    } else {
+      // Several policies are all enforced: a page is open only where every one of them is.
+      const each = policies.map(cspProblems);
+      const open = each[0].filter((x) => each.every((list) => list.includes(x)));
+      if (open.length > 0) (open.every((x) => x === STYLE_INLINE) ? styled : weak).push(`${route(p.path)}: ${open.join('; ')}`);
+    }
+    for (const a of tags(p.text, 'a')) {
+      if (a.get('target')?.toLowerCase() !== '_blank') continue;
+      newTab++;
+      const rel = (a.get('rel') ?? '').toLowerCase().split(/\s+/);
+      // noreferrer implies noopener.
+      // A link may carry a token in its query: printed only when it is not shaped like one.
+      if (!rel.includes('noopener') && !rel.includes('noreferrer')) openers.push(`${route(p.path)}: ${quotable(a.get('href') ?? '(no href)')}`);
+    }
+  }
+  return {
+    kind: 'site',
+    dir: site.dir,
+    files: site.files.length,
+    unread: site.unread,
+    // file:offset and the rule (the key's shape) — never a character of the value.
+    secrets: hits.map(({ path, finding: s }) => `${named(path)}:${s.where.replace(/^@/, '')} (${s.rule})`),
+    published: published.size,
+    pages: pages.length,
+    bare,
+    weak,
+    styled,
+    newTab,
+    openers,
+  };
+}
+
+/** The worker that runs analyseSite. */
+const SITE_READER = new URL('./audit-site.ts', import.meta.url);
+
 /** Every check, in the order the report prints them. */
 export const AUDIT_CHECKS: readonly Check<AuditContext>[] = [bundleSecrets, dependencies, pageCsp, backendCsp, newTabLinks];
 
@@ -556,6 +631,10 @@ export interface AuditOptions {
   readonly online: boolean;
   readonly checks?: readonly Check<AuditContext>[];
   readonly deadlineMs?: number;
+  /** The worker module that reads the built site (audit-site.ts); a test passes one that never answers. */
+  readonly siteReader?: URL;
+  /** Its timeout: under the deadline, so the bundle secrets line says what stopped. */
+  readonly siteMs?: number;
 }
 
 /**
@@ -572,13 +651,24 @@ export async function audit(options: AuditOptions): Promise<DoctorReport> {
       fix: ['run: az build site.az (and az audit --out <dir> for another folder)'],
     }]);
   }
-  let site: Promise<Site> | undefined;
+  let site: Promise<SiteReport> | undefined;
+  // Ends a read still running once the report is in, so nothing outlives it.
+  const done = new AbortController();
   const ctx: AuditContext = {
     outDir: options.outDir,
     cwd: options.cwd,
     probe: options.probe,
     online: options.online,
-    site: () => (site ??= walkSite(options.outDir)),
+    site: () => (site ??= publicValues(ctx).then(async (allow): Promise<SiteReport> => {
+      const job: SiteJob = { outDir: options.outDir, allow: [...allow] };
+      const r = await runWorker<SiteReport>(options.siteReader ?? SITE_READER, job, options.siteMs ?? CHILD_MS, done.signal);
+      if (r.kind === 'done') return r.value;
+      return { kind: 'unanswered', why: r.kind === 'timeout' ? `no answer after ${r.ms / 1000}s` : r.message.split('\n')[0] };
+    })),
   };
-  return report(await runChecks(options.checks ?? AUDIT_CHECKS, ctx, options.deadlineMs, 'az audit'));
+  try {
+    return report(await runChecks(options.checks ?? AUDIT_CHECKS, ctx, options.deadlineMs, 'az audit'));
+  } finally {
+    done.abort();
+  }
 }

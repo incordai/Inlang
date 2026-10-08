@@ -8,10 +8,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
+import { cpus, release, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { CHECKS, doctor, glbGeometry, type DoctorOptions } from '../src/doctor-checks.ts';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { browserPlatform, CHECKS, doctor, glbGeometry, type DoctorOptions } from '../src/doctor-checks.ts';
 import { formatReport, runChecks, shellQuote, systemProbe, type Check, type DoctorContext, type Probe, type RunResult } from '../src/doctor.ts';
 import { findNpmCli } from '../src/serve.ts';
 
@@ -156,6 +157,74 @@ test('test browsers: skipped unless the project uses the browser-test package; m
   assert.match(r.fix![0], /npx playwright install chromium$/);
   mkdirSync(join(cache, 'chromium-999999'));
   assert.equal((await check('browsers', p, fakeProbe({ env: { PLAYWRIGHT_BROWSERS_PATH: cache } }))).status, 'pass');
+});
+
+/** The platform name as the browser-test package this repository pins computes it, on this machine. */
+function pinnedHostPlatform(): string {
+  const pkg = createRequire(join(ROOT, 'package.json')).resolve(`${BROWSER_TEST}/package.json`);
+  const core = createRequire(pkg)(`${BROWSER_TEST}-core/lib/coreBundle`) as { utils: { hostPlatform: string } };
+  return core.utils.hostPlatform;
+}
+const BROWSER_TEST = 'playwright';
+
+/** A project using the browser-test package, its browsers.json listing chromium as given, and an empty browser cache. */
+function browserProject(chromium: object) {
+  const p = project(GOOD, {
+    'package.json': JSON.stringify({ devDependencies: { [BROWSER_TEST]: '1.0.0' } }),
+    [`node_modules/${BROWSER_TEST}-core/browsers.json`]: JSON.stringify({ browsers: [{ name: 'chromium', ...chromium }, { name: 'firefox', revision: '1' }] }),
+  });
+  return { p, cache: mkdtempSync(join(tmpdir(), 'az-browsers-')) };
+}
+
+test('test browsers: a revision override for this platform is read as the package reads it — its revision, its own folder', async () => {
+  const host = pinnedHostPlatform();
+  const { p, cache } = browserProject({ revision: '999999', revisionOverrides: { [host]: '777777', 'no-such-platform': '555555' } });
+  const probe = fakeProbe({ env: { PLAYWRIGHT_BROWSERS_PATH: cache } });
+  // The default revision is installed, but this platform runs the override's.
+  mkdirSync(join(cache, 'chromium-999999'));
+  const missing = await check('browsers', p, probe);
+  assert.equal(missing.status, 'warn', missing.line);
+  assert.equal(missing.line, "test browsers: chromium 777777 is not installed — the project's browser tests can't start");
+  mkdirSync(join(cache, `chromium_${host.replace(/-/g, '_')}_special-777777`));
+  const ok = await check('browsers', p, probe);
+  assert.deepEqual([ok.status, ok.line], ['pass', 'test browsers: chromium 777777 is installed']);
+  // An override for another platform only: the default revision, in the default folder.
+  const other = browserProject({ revision: '999999', revisionOverrides: { 'no-such-platform': '555555' } });
+  mkdirSync(join(other.cache, 'chromium-999999'));
+  assert.equal((await check('browsers', other.p, fakeProbe({ env: { PLAYWRIGHT_BROWSERS_PATH: other.cache } }))).line, 'test browsers: chromium 999999 is installed');
+});
+
+test('test browsers: the package\'s own platform override names the platform, as it does for the package', async () => {
+  const { p, cache } = browserProject({ revision: '999999', revisionOverrides: { 'ubuntu22.04-x64': '424242' } });
+  mkdirSync(join(cache, 'chromium_ubuntu22.04_x64_special-424242'));
+  const r = await check('browsers', p, fakeProbe({ env: { PLAYWRIGHT_BROWSERS_PATH: cache, PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: 'ubuntu22.04-x64' } }));
+  assert.deepEqual([r.status, r.line], ['pass', 'test browsers: chromium 424242 is installed']);
+});
+
+test('browserPlatform: the package\'s names — macOS by darwin release and CPU, Linux by distribution, Windows', () => {
+  const mac = (osRelease: string, cpu: string) => browserPlatform({ platform: 'darwin', arch: 'arm64', osRelease, cpuModels: [cpu] });
+  assert.equal(mac('25.6.0', 'Apple M1'), 'mac26-arm64');
+  assert.equal(mac('23.1.0', 'Apple M2'), 'mac14-arm64');
+  assert.equal(mac('23.1.0', 'Intel(R) Core(TM) i7'), 'mac14');
+  assert.equal(mac('19.6.0', 'Intel(R) Core(TM) i7'), 'mac10.15');
+  assert.equal(mac('30.0.0', 'Apple M5'), 'mac26-arm64', 'a later macOS is named as the newest the package knows');
+  const linux = (id: string, version: string, arch = 'x64') => browserPlatform({ platform: 'linux', arch, osRelease: '6.1', cpuModels: [], distro: { id, version } });
+  assert.equal(linux('ubuntu', '22.04'), 'ubuntu22.04-x64');
+  assert.equal(linux('ubuntu', '25.10', 'arm64'), 'ubuntu24.04-arm64');
+  assert.equal(linux('pop', '20.04'), 'ubuntu20.04-x64');
+  assert.equal(linux('linuxmint', '21.3'), 'ubuntu22.04-x64');
+  assert.equal(linux('debian', '12'), 'debian12-x64');
+  assert.equal(linux('debian', ''), 'debian13-x64');
+  assert.equal(linux('fedora', '40'), 'ubuntu24.04-x64');
+  assert.equal(linux('ubuntu', '22.04', 'ia32'), '<unknown>');
+  assert.equal(browserPlatform({ platform: 'linux', arch: 'x64', osRelease: '6.1', cpuModels: [] }), 'ubuntu24.04-x64', 'no os-release file');
+  assert.equal(browserPlatform({ platform: 'win32', arch: 'x64', osRelease: '10.0', cpuModels: [] }), 'win64');
+  assert.equal(browserPlatform({ platform: 'freebsd', arch: 'x64', osRelease: '14', cpuModels: [] }), '<unknown>');
+  // CONTROL: on this machine, the same name the pinned package computes (on Linux the
+  // distribution comes from /etc/os-release — the check-level test above covers it).
+  if (process.platform !== 'linux') {
+    assert.equal(browserPlatform({ platform: process.platform, arch: process.arch, osRelease: release(), cpuModels: cpus().map((c) => c.model) }), pinnedHostPlatform());
+  }
 });
 
 /* ---- the project -------------------------------------------------------- */
@@ -333,6 +402,47 @@ test('DEADLINE: a hung check reports no answer and the run goes on', async () =>
     ['fine', 'pass', 'fine'],
     ['thrown', 'fail', 'thrown: the check stopped (boom)'],
   ]);
+});
+
+/** A compile worker that never answers: a synchronous loop, which no timer on its own thread could end. */
+function stuckCompiler(): URL {
+  const file = join(mkdtempSync(join(tmpdir(), 'az-doctor-compiler-')), 'stuck.mjs');
+  writeFileSync(file, 'for (;;) { /* never yields */ }\n');
+  return pathToFileURL(file);
+}
+
+test('DEADLINE: a compile that never returns is ended at its timeout — the compile line says so, every other check finishes', async () => {
+  const p = project(BACKEND(RULED));
+  const ids = new Set(['node', 'platform', 'compile', 'data-lock', 'table-rules', 'models', 'assets', 'backend-env', 'build-secrets']);
+  const started = Date.now();
+  const r = await doctor({ ...options(p), checks: CHECKS.filter((c) => ids.has(c.id)), compiler: stuckCompiler(), compileMs: 400, deadlineMs: 5_000 });
+  const took = Date.now() - started;
+  assert.ok(took < 4_000, `ended at the compile's timeout, not the deadline (${took}ms)`);
+  const by = new Map(r.checks.map((c) => [c.id, c]));
+  assert.equal(by.get('compile')!.status, 'fail');
+  assert.equal(by.get('compile')!.line, "site.az: can't be compiled (no answer after 0.4s)");
+  // The checks that read the compile say it gave nothing; the rest answer for themselves.
+  for (const id of ['data-lock', 'table-rules', 'models', 'assets', 'backend-env']) assert.equal(by.get(id)!.status, 'skip', `${id}: ${by.get(id)!.line}`);
+  assert.equal(by.get('node')!.status, 'pass');
+  assert.equal(by.get('platform')!.status, 'pass');
+  assert.equal(by.get('build-secrets')!.status, 'pass');
+  assert.ok(r.checks.every((c) => !/no answer after 5s/.test(c.line)), 'no check waited for the deadline');
+});
+
+test('DEADLINE: a check deadline shorter than the compile\'s ends the run, and the stuck compile with it', async () => {
+  const p = project(GOOD);
+  const started = Date.now();
+  const r = await doctor({ ...options(p), checks: CHECKS.filter((c) => c.id === 'compile'), compiler: stuckCompiler(), compileMs: 60_000, deadlineMs: 300 });
+  assert.ok(Date.now() - started < 3_000);
+  assert.equal(r.checks[0].line, 'compile: no answer after 0.3s');
+  // The worker is terminated once the report is in: if it were not, this test file would never exit.
+});
+
+test('compile: the real worker compiles the file — the result crosses the thread whole', async () => {
+  const p = project(BACKEND(RULED));
+  const r = await doctor({ ...options(p), checks: CHECKS.filter((c) => c.id === 'compile' || c.id === 'table-rules') });
+  assert.deepEqual(r.checks.map((c) => c.status), ['pass', 'pass']);
+  assert.equal(r.checks[1].line, 'table rules: every table has allow lines (1 table)');
 });
 
 test('DEADLINE: a child that never exits is killed at its timeout', async () => {
