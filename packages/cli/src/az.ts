@@ -28,6 +28,7 @@ import {
   compile, envMessage, explain, formatDiagnostics, formatExplained, scanEnv, serialiseSpec,
 } from '../../core/src/index.ts';
 import { emitProject, PathEscapeError, RUNTIME_DIR, safeAssetPath, USER_DIR } from '../../target-web/src/emit.ts';
+import type { ByteSource } from '../../target-web/src/image-size.ts';
 import { isFromMark } from '../../core/src/emit-contract.ts';
 import type { Spec } from '../../core/src/spec.ts';
 import { ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
@@ -142,13 +143,14 @@ function readProjectText(projectDir: string, path: string): string | null {
   throw new PathEscapeError(found.problems[0]);
 }
 
-/** How much of an image is read for its size: past any EXIF, ICC or XMP a header carries. */
+/** How much of a file readProjectHead reads: an icon's header, an SVG's root. */
 const IMAGE_HEAD_BYTES = 1024 * 1024;
 
 /**
- * The start of a project file, for the target to read an image's size from
- * its header (gallery-spec §7) — the same sandbox as readProjectText, and
- * never more than IMAGE_HEAD_BYTES, however large the file.
+ * The start of a project file, for compile()'s icon check and the target's
+ * icon type (an image's size goes through openProjectImage) — the same
+ * sandbox as readProjectText, and never more than IMAGE_HEAD_BYTES, however
+ * large the file.
  */
 function readProjectHead(projectDir: string, path: string): Uint8Array | null {
   const found = locateAssets(projectDir, [path]);
@@ -161,6 +163,37 @@ function readProjectHead(projectDir: string, path: string): Uint8Array | null {
     } finally {
       closeSync(fd);
     }
+  }
+  if (!existsSync(resolve(realpathSync(projectDir), path))) return null;
+  throw new PathEscapeError(found.problems[0]);
+}
+
+/**
+ * A project file opened for the target to read an image's size anywhere in
+ * it (gallery-spec §7 rule 1: a JPEG's frame header may lie megabytes in,
+ * behind EXIF and XMP) — the same sandbox as readProjectHead, one file
+ * descriptor, positioned reads only; the target closes it. How much it
+ * reads is the target's bound (image-size.ts MAX_READ_BYTES).
+ */
+function openProjectImage(projectDir: string, path: string): ByteSource | null {
+  const found = locateAssets(projectDir, [path]);
+  if (found.sources.length === 1) {
+    const fd = openSync(found.sources[0], 'r');
+    let size: number;
+    try {
+      size = fstatSync(fd).size;
+    } catch (e) {
+      closeSync(fd);
+      throw e;
+    }
+    return {
+      size,
+      read: (offset, length) => {
+        const into = Buffer.alloc(length);
+        return into.subarray(0, readSync(fd, into, 0, length, offset));
+      },
+      close: () => closeSync(fd),
+    };
   }
   if (!existsSync(resolve(realpathSync(projectDir), path))) return null;
   throw new PathEscapeError(found.problems[0]);
@@ -248,6 +281,7 @@ export function build(options: BuildOptions): BuildOutcome {
     emitters: words.emitters,
     readText: (path) => readProjectText(projectDir, path),
     readBytes: (path) => readProjectHead(projectDir, path),
+    openImage: (path) => openProjectImage(projectDir, path),
     resize: resizer?.resize,
     touchIcon: resizer?.touchIcon,
   });

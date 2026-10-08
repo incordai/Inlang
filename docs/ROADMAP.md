@@ -357,7 +357,13 @@ Images (gallery-spec §7, 2026-10-06): every `<img>` of a project file ships
 its header's `width`/`height` (rule 1), and gallery images ship a `srcset`
 resized at build (rule 3, owner option A): up to four WebP widths (480, 768,
 1200, 1800), never upscaled, with a `sizes` from the layout; the original
-stays the `src`. The CLI encodes in a bounded child process with the
+stays the `src`. Since 2026-10-07 line art (a palette, alpha in use, or at
+most 4096 colours in a 256px sample; never a JPEG) is encoded lossless —
+near-lossless where lossless outgrows the source — and photographs lossy;
+a variant larger than its source is not shipped, the original standing in
+(gallery-spec §7, encoding scheme 2); and a JPEG's size is read by walking
+its segments through the sandbox, APPn skipped unread, up to 16MB read, so
+a frame header behind megabytes of EXIF/XMP is sized. The CLI encodes in a bounded child process with the
 backend's vetted image library and limits (stack-evaluation §16), names each
 file by a hash of its bytes and the pinned options, and caches it outside the
 output; the lightbox carries each image's srcset and size. §11's 500KB

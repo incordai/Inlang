@@ -2,7 +2,7 @@
  * @az module image-size
  * Purpose: an image's displayed width and height from its header bytes — PNG, GIF, JPEG, WebP, AVIF/HEIF, SVG.
  * Spec: docs/gallery-block-spec.md §7
- * Exports: imageSize, ImageSize, MAX_DIMENSION
+ * Exports: imageSize, imageSizeOf, bytesSource, ByteSource, ImageSize, MAX_DIMENSION, HEAD_BYTES, MAX_READ_BYTES
  * Edit guide: never throws and never guesses: anything unreadable or out of bounds is null; every read is bounds-checked.
  * Tests: packages/target-web/test/image-size.test.ts
  */
@@ -20,6 +20,11 @@
  *     file is null, never an exception and never a partly-read number
  *   - loops over segments and boxes are capped (MAX_STEPS), so a file that
  *     points back at itself ends
+ *   - a JPEG is walked through its file (imageSizeOf), not its first bytes:
+ *     each segment's length leads to the next, an APPn block is skipped
+ *     unread, so a frame header behind megabytes of EXIF or XMP is found;
+ *     the walk reads at most MAX_READ_BYTES in all and never past the
+ *     file's end, and running out of either is null
  *   - a width or height of 0, or over MAX_DIMENSION, is null: wrong
  *     dimensions would distort the page, missing ones only let it shift
  *   - the size returned is the one the browser DISPLAYS: a JPEG whose EXIF
@@ -32,11 +37,50 @@ export interface ImageSize {
   readonly height: number;
 }
 
+/**
+ * Random access to one file's bytes: the CLI's, through its asset sandbox,
+ * or bytes already in memory (bytesSource). `read` returns up to `length`
+ * bytes from `offset` — fewer only at the end of the file — and may throw
+ * (a file removed mid-build), which reads as "no size". `close` releases
+ * the file; the caller calls it once, when done.
+ */
+export interface ByteSource {
+  readonly size: number;
+  read(offset: number, length: number): Uint8Array;
+  close(): void;
+}
+
+/** Bytes in memory as a ByteSource. */
+export const bytesSource = (bytes: Uint8Array): ByteSource => ({
+  size: bytes.length,
+  read: (offset, length) => bytes.subarray(offset, Math.min(bytes.length, offset + length)),
+  close: () => {},
+});
+
 /** Larger than any image a site should ship; beyond it the header is not trusted. */
 export const MAX_DIMENSION = 100_000;
 
 /** Segments, chunks or boxes walked before giving up on a file. */
 const MAX_STEPS = 4096;
+
+/**
+ * What imageSizeOf reads of a file that is not a JPEG: its first bytes,
+ * past any metadata box an AVIF or an SVG prolog carries before its size.
+ */
+export const HEAD_BYTES = 1024 * 1024;
+
+/**
+ * The most a JPEG walk reads of one file, in all: segments are followed by
+ * their lengths and skipped unread, so this is spent only on segment
+ * headers and EXIF; past it the size is unknown (null), never guessed.
+ */
+export const MAX_READ_BYTES = 16 * 1024 * 1024;
+
+/** What one read of a JPEG walk fetches: a few segment headers at a time. */
+const WINDOW = 4096;
+
+/** The bytes the format sniff needs. */
+const SNIFF = 16;
 
 /** How much of an SVG is read to find its root element. */
 const SVG_HEAD_BYTES = 64 * 1024;
@@ -56,12 +100,29 @@ function sized(width: number, height: number, swap = false): ImageSize | null {
   return swap ? { width: height, height: width } : { width, height };
 }
 
-/** The displayed size of an image file, or null when it cannot be read with certainty. */
+/**
+ * The displayed size of an image file, read from `source` as far as its
+ * header needs: a JPEG segment by segment (any distance into the file, up
+ * to MAX_READ_BYTES read), any other format from its first HEAD_BYTES. Null
+ * when it cannot be read with certainty. Does not close `source`.
+ */
+export function imageSizeOf(source: ByteSource): ImageSize | null {
+  try {
+    const sniff = source.read(0, Math.min(source.size, SNIFF));
+    if (sniff[0] === 0xff && sniff[1] === 0xd8) return jpeg(new Walk(source));
+    return imageSize(source.read(0, Math.min(source.size, HEAD_BYTES)));
+  } catch {
+    // A read that failed, or a bounds-checked parse's last guard: no size.
+    return null;
+  }
+}
+
+/** The displayed size of an image file in memory, or null when it cannot be read with certainty. */
 export function imageSize(bytes: Uint8Array): ImageSize | null {
   try {
     if (bytes.length >= 24 && ascii(bytes, 1, 3) === 'PNG' && bytes[0] === 0x89) return png(bytes);
     if (ascii(bytes, 0, 6) === 'GIF87a' || ascii(bytes, 0, 6) === 'GIF89a') return sized(u16le(bytes, 6), u16le(bytes, 8));
-    if (bytes[0] === 0xff && bytes[1] === 0xd8) return jpeg(bytes);
+    if (bytes[0] === 0xff && bytes[1] === 0xd8) return jpeg(new Walk(bytesSource(bytes)));
     if (ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 4) === 'WEBP') return webp(bytes);
     if (ascii(bytes, 4, 4) === 'ftyp') return isobmff(bytes);
     return svg(bytes);
@@ -83,23 +144,91 @@ function png(b: Uint8Array): ImageSize | null {
 /** Start-of-frame markers carry the size; C4 (DHT), C8 (JPG) and CC (DAC) do not. */
 const SOF = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
 
-function jpeg(b: Uint8Array): ImageSize | null {
+/**
+ * A JPEG walk's view of its source: one window of bytes at a time, each
+ * read counted, and nothing past the file's end or MAX_READ_BYTES in all —
+ * both read as the end (-1, null), so a walk that runs out ends as null.
+ */
+class Walk {
+  private start = 0;
+  private window: Uint8Array = new Uint8Array(0);
+  private spent = 0;
+  private readonly source: ByteSource;
+
+  constructor(source: ByteSource) {
+    this.source = source;
+  }
+
+  get size(): number {
+    return this.source.size;
+  }
+
+  /** The byte at `i`, or -1. */
+  byte(i: number): number {
+    if (i < this.start || i >= this.start + this.window.length) {
+      if (!this.load(i, WINDOW)) return -1;
+    }
+    return i - this.start < this.window.length ? this.window[i - this.start] : -1;
+  }
+
+  /** A big-endian u16 at `i`, or -1. */
+  u16(i: number): number {
+    const hi = this.byte(i);
+    const lo = this.byte(i + 1);
+    return hi < 0 || lo < 0 ? -1 : (hi << 8) | lo;
+  }
+
+  /** Exactly the `n` bytes at `i`, or null. */
+  bytes(i: number, n: number): Uint8Array | null {
+    if (i < this.start || i + n > this.start + this.window.length) {
+      if (!this.load(i, n)) return null;
+    }
+    return i + n <= this.start + this.window.length ? this.window.subarray(i - this.start, i - this.start + n) : null;
+  }
+
+  private load(i: number, n: number): boolean {
+    if (i < 0 || n < 1 || i >= this.source.size) return false;
+    const want = Math.min(n, this.source.size - i);
+    if (this.spent + want > MAX_READ_BYTES) return false;
+    this.spent += want;
+    this.window = this.source.read(i, want);
+    this.start = i;
+    return this.window.length > 0;
+  }
+}
+
+/** The bytes after an APP1 segment's length that say what it holds. */
+const EXIF_ID = 'Exif\0\0';
+
+function jpeg(b: Walk): ImageSize | null {
   let i = 2;
   let turned = false;
   for (let step = 0; step < MAX_STEPS; step++) {
-    if (i >= b.length || b[i] !== 0xff) return null;
-    while (i < b.length && b[i] === 0xff) i++;       // fill bytes before a marker
-    if (i >= b.length) return null;
-    const marker = b[i];
+    if (b.byte(i) !== 0xff) return null;
+    while (b.byte(i) === 0xff) i++;                   // fill bytes before a marker
+    const marker = b.byte(i);
+    if (marker < 0) return null;
     i++;
     if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
     if (marker === 0xd9 || marker === 0xda) return null;   // end, or scan data before any frame
-    const length = u16be(b, i);
-    if (length < 2 || i + length > b.length) return null;
-    if (marker === 0xe1 && ascii(b, i + 2, 6) === 'Exif\0\0') turned = exifTurned(b, i + 8, i + length);
+    const length = b.u16(i);
+    if (length < 2 || i + length > b.size) return null;
+    if (marker === 0xe1) {
+      // Only an EXIF segment is read whole (at most 64KB, a u16 length); any
+      // other APPn — XMP, ICC, a maker's preview — is skipped unread.
+      const id = b.bytes(i + 2, EXIF_ID.length);
+      if (id !== null && ascii(id, 0, EXIF_ID.length) === EXIF_ID) {
+        const segment = b.bytes(i, length);
+        if (segment === null) return null;
+        turned = exifTurned(segment, 2 + EXIF_ID.length, length);
+      }
+    }
     if (SOF.has(marker)) {
       if (length < 7) return null;
-      return sized(u16be(b, i + 5), u16be(b, i + 3), turned);
+      const height = b.u16(i + 3);
+      const width = b.u16(i + 5);
+      if (height < 0 || width < 0) return null;
+      return sized(width, height, turned);
     }
     i += length;
   }

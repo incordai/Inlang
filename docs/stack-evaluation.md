@@ -936,10 +936,13 @@ and to the versions the encoder checks at run time.
    for AVIF — now one constant, `IMAGE_DECODERS`, shared with the server),
    the header-only check (≤ 8000px a side, ≤ 40 MP), `limitInputPixels`,
    `failOn: 'error'`, `autoOrient()`, and no metadata written;
-3. pinned output: WebP at quality 80, effort 4, alpha quality 100, no
-   smart subsampling or deblocking, lanczos3, never enlarged — every option,
-   and the library, core and WebP codec versions, hashed into each file's
-   name; the child refuses to encode under any other library version;
+3. pinned output: WebP, effort 4, alpha quality 100, no smart
+   subsampling or deblocking, lanczos3, never enlarged — lossy at quality
+   80 for a photograph, lossless (near-lossless, level 60, where lossless
+   outgrows the source) for line art, by gallery-spec §7's rule, and no
+   variant larger than its source shipped; every option, the rule, and the
+   library, core and WebP codec versions, hashed into each file's name; the
+   child refuses to encode under any other library version;
 4. a cache outside the build output (`AZ_IMAGE_CACHE`, default
    `$XDG_CACHE_HOME/az/images` or `~/.cache/az/images`), keyed by that hash;
    an entry is used only when every file matches its recorded SHA-256.

@@ -138,9 +138,15 @@ widths = 800 encodes, so output is content-hashed and cached, or CONVENTIONS §6
 byte-identical rebuild stops being cheap.
 
 > **Status (rules 1 and 3 built, 2026-10-06).** Rule 1 ships: the
-> CLI reads the first 1MB of each image the build copies, through the asset
-> sandbox, and `target-web/src/image-size.ts` reads its size from the
-> header — PNG, GIF, JPEG (EXIF orientation applied), WebP (VP8, VP8L,
+> CLI opens each image the build copies through the asset sandbox, and
+> `target-web/src/image-size.ts` reads its size from the header as far into
+> the file as the header goes — a JPEG segment by segment (built
+> 2026-10-07): each segment's length leads to the next, every APPn but an
+> EXIF one is skipped unread, so a frame header behind megabytes of EXIF
+> or XMP (an editor's extended XMP, a maker's preview) is found; the walk
+> reads at most 16MB of one file in all, never past its end, and running
+> out of either is no size, never a guess. Every other format is read from
+> its first 1MB — PNG, GIF, JPEG (EXIF orientation applied), WebP (VP8, VP8L,
 > VP8X), AVIF/HEIF (the primary item's `ispe`, turned by `irot`) and SVG
 > (`width`/`height` in px, else the `viewBox`). It applies to every `<img>`
 > any word emits through the sandbox — gallery images and poster, feature
@@ -243,11 +249,40 @@ byte-identical rebuild stops being cheap.
 >   plain `vw`. `full` has no frame and `reading` is a measure in `ch` (a
 >   length of the page's font, which no px states), so those two sites keep
 >   the uncapped viewport share — still an upper bound.
-> - **Output.** WebP, quality 80, every encoder option pinned; EXIF
->   orientation applied to the pixels; no metadata written. Each file is
+> - **Output.** WebP, every encoder option pinned; EXIF orientation
+>   applied to the pixels; no metadata written. Each file is
 >   `/az-img/<hash>-<width>.webp`, the hash over the input bytes and every
->   option (with the library and codec versions), so the same file always
->   gives the same names and bytes (CONVENTIONS §6).
+>   option (with the library and codec versions, and the rule below), so
+>   the same file always gives the same names and bytes (CONVENTIONS §6).
+> - **Lossless for line art, lossy for photographs** (built 2026-10-07,
+>   `ENCODING` scheme 2 — every scheme-1 name is retired, so no lossy
+>   variant of a logo is reused from an old cache). One mode per source,
+>   chosen by a deterministic rule over the pinned library's own reads:
+>   - a JPEG is a photograph: **lossy**, quality 80;
+>   - any other source (PNG, WebP, AVIF) is **lossless** when it is a
+>     palette image, when its alpha channel is in use (a pixel not fully
+>     opaque), or when a nearest-neighbour copy of it fitted inside
+>     256×256 — source colours only, none blended — holds at most 4096
+>     distinct colours: a logo, a diagram, a screenshot. Measured: line art
+>     75–223 colours, a UI screenshot 241–258, a noisy photograph 41 038 of
+>     42 496 sampled pixels. Else it is a photograph: lossy;
+>   - a lossless variant larger than the source file is written
+>     **near-lossless** (level 60) instead;
+>   - **a variant larger than the source file, in every mode it tries, is
+>     not shipped.** The cache entry records the widths asked for and the
+>     ones shipped; the page names only those, and when the widest asked
+>     for is the one dropped, the original stands in as a candidate at its
+>     own width — past 1800px too — so a wide screen is never served less.
+>   A lossless variant's pixels are exactly the straight resize's
+>   (`images.test.ts`). The library's statistics give no colour count, so
+>   the count is of that bounded sample (at most 65 536 pixels).
+>   Measured (2000×1300 sources, widths 480/768/1200/1800): a 68KB line-art
+>   PNG went from lossy 4.2/7.3/12.3/19.9KB with edge errors up to 96 levels
+>   to lossless 9.0/14.3/20.1/38.6KB with none; a 115KB screenshot from
+>   lossy 15.0/31.6/59.0/95.9KB to lossless 24.8/65.2/16.4/28.2KB; a 23KB
+>   palette PNG ships lossless 480/768/1200 and drops 1800 (38.6KB lossless,
+>   larger than it in both modes) for the original; photographs (a 2.7MB
+>   PNG and a 184KB JPEG) are unchanged, lossy.
 > - **Cache.** Outside the build output — `AZ_IMAGE_CACHE`, default
 >   `$XDG_CACHE_HOME/az/images` (else `~/.cache/az/images`) — keyed by that
 >   hash; an entry is trusted only when every file matches its recorded

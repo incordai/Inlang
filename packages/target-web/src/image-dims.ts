@@ -28,7 +28,7 @@
  */
 
 import type { EmittedNode, StyleMap } from '../../core/src/emit-contract.ts';
-import { imageSize, type ImageSize } from './image-size.ts';
+import { imageSizeOf, type ByteSource, type ImageSize } from './image-size.ts';
 
 /** The intrinsic size of an emitted `src`, or null when it has none the build can read. */
 export type SizeOf = (src: string) => ImageSize | null;
@@ -57,25 +57,34 @@ function sizeImg(node: EmittedNode, sizeOf: SizeOf): EmittedNode {
 
 /**
  * The build's `sizeOf`: an emitted `src` → its project file → the size in
- * its header, read once per file. A file the build can read but whose size
- * it cannot is a warning — the image still ships, it may only shift the
- * page as it loads. A missing file is not this function's report: the asset
- * copy refuses it with its own error. Undefined without a reader.
+ * its header, read once per file, as far into it as the header needs
+ * (imageSizeOf); the file is closed after. A file the build can open but
+ * whose size it cannot read is a warning — the image still ships, it may
+ * only shift the page as it loads. A missing file is not this function's
+ * report: the asset copy refuses it with its own error. Undefined without
+ * an opener.
  */
 export function imageSizes(
-  readBytes: ((projectPath: string) => Uint8Array | null) | undefined,
+  openImage: ((projectPath: string) => ByteSource | null) | undefined,
   srcs: ReadonlyMap<string, string>,
   warnings: string[],
 ): SizeOf | undefined {
-  if (!readBytes) return undefined;
+  if (!openImage) return undefined;
   const known = new Map<string, ImageSize | null>();
   return (src) => {
     const path = srcs.get(src);
     if (path === undefined) return null;
     if (known.has(path)) return known.get(path)!;
-    const bytes = readBytes(path);
-    const size = bytes === null ? null : imageSize(bytes);
-    if (bytes !== null && size === null) {
+    const source = openImage(path);
+    let size: ImageSize | null = null;
+    if (source !== null) {
+      try {
+        size = imageSizeOf(source);
+      } finally {
+        source.close();
+      }
+    }
+    if (source !== null && size === null) {
       warnings.push(path.toLowerCase().endsWith('.svg')
         ? `image: './${path}' has no size the browser can use — give its <svg> a viewBox, or width and height in px`
         : `image: can't read the size of './${path}' — the page will shift as it loads; export it as WebP, AVIF, JPEG, PNG or GIF`);

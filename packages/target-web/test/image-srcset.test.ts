@@ -86,9 +86,29 @@ test('no srcset: the sizes hint is removed and nothing else changes', () => {
     { src: '/assets/tiny.png', alt: '' }, 'no width to make: an original of 480 or less');
   assert.deepEqual(srcsetImages(img('{row.photo}'), srcs, sizeOf, fakeResize()).attrs,
     { src: '{row.photo}', alt: '' }, 'a row\'s URL has no file at build');
-  const wrong: Resize = (_path, widths) => widths.slice(1).map((width) => ({ url: `/x-${width}.webp`, width }));
+  const wrong: Resize = (_path, widths) => widths.map((width) => ({ url: `/x-${width}.webp`, width: width + 1 }));
   assert.deepEqual(srcsetImages(img('/assets/big.jpg'), srcs, sizeOf, wrong).attrs, plain,
     'variants that are not the widths asked for are not used');
+  const backwards: Resize = (_path, widths) => [...widths].reverse().map((width) => ({ url: `/x-${width}.webp`, width }));
+  assert.deepEqual(srcsetImages(img('/assets/big.jpg'), srcs, sizeOf, backwards).attrs, plain, 'nor out of their order');
+  const twice: Resize = (_path, widths) => [widths[0], widths[0]].map((width) => ({ url: `/x-${width}.webp`, width }));
+  assert.deepEqual(srcsetImages(img('/assets/big.jpg'), srcs, sizeOf, twice).attrs, plain, 'nor one width twice');
+  assert.deepEqual(srcsetImages(img('/assets/big.jpg'), srcs, sizeOf, () => []).attrs, plain, 'no variant shipped: no srcset');
+});
+
+test('a width the resizer did not ship (larger than the original) is left out; the original stands in for the widest', () => {
+  // The widest variants came out larger than the file: only 480 and 768 ship.
+  const firstTwo: Resize = (path, widths) => fakeResize()(path, widths)!.slice(0, 2);
+  const big = srcsetImages(img('/assets/big.jpg'), srcs, sizeOf, firstTwo);
+  assert.equal(big.attrs?.srcset,
+    '/az-img/assets_big_jpg-480.webp 480w, /az-img/assets_big_jpg-768.webp 768w, /assets/big.jpg 2400w',
+    'past 1800 too: the original is the candidate for what the 1800 variant would have been');
+  // A middle width dropped: the widest still ships and tops the set.
+  const noMiddle: Resize = (path, widths) => fakeResize()(path, widths)!.filter((v) => v.width !== 768);
+  assert.equal(srcsetImages(img('/assets/big.jpg'), srcs, sizeOf, noMiddle).attrs?.srcset,
+    '/az-img/assets_big_jpg-480.webp 480w, /az-img/assets_big_jpg-1200.webp 1200w, /az-img/assets_big_jpg-1800.webp 1800w');
+  const cover = srcsetImages(img('/assets/big.jpg', { sizes: SIZES, [COVER_ATTR]: '1 / 1' }), srcs, sizeOf, firstTwo);
+  assert.equal(cover.attrs?.sizes, '(width < 768px) 75vw, min(51vw, 2400px)', 'a cover crop is capped at the largest candidate: the original');
 });
 
 test('an img without a sizes hint is never resized — the word did not ask', () => {

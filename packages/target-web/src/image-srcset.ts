@@ -23,6 +23,9 @@
  *   - the original is the widest candidate while it is no wider than the
  *     largest fixed width — past that the largest variant tops the set and
  *     the original is only the fallback for a browser without srcset;
+ *   - a width the resizer did not ship (its variant was larger than the
+ *     original) is left out; when that is the widest asked for, the
+ *     original is a candidate whatever its width, standing in for it;
  *   - no resizer (the playground, unit tests), a file the build cannot read
  *     or resize, or an original no wider than the smallest width: no srcset,
  *     and the `sizes` is removed — it means nothing alone, so the page is
@@ -57,8 +60,10 @@ export interface Variant {
 
 /**
  * The build's resizer: the project file at `projectPath` resized to each of
- * `widths`, in that order — or null when it cannot be (a format that is not
- * resized, a file that does not decode). The caller owns the files.
+ * `widths`, in that order — or to some of them, in that order, where a
+ * variant would be larger than the file itself — or null when it cannot be
+ * (a format that is not resized, a file that does not decode). The caller
+ * owns the files.
  */
 export type Resize = (projectPath: string, widths: readonly number[]) => readonly Variant[] | null;
 
@@ -169,11 +174,14 @@ function srcsetImg(
   const size = src === undefined || !sizeOf ? null : sizeOf(src);
   const widths = size ? srcsetWidths(size.width) : [];
   const variants = resize && path !== undefined && widths.length > 0 ? resize(path, widths) : null;
-  const usable = variants !== null && variants.length === widths.length && variants.every((v, i) => v.width === widths[i]);
+  // Some of the widths asked for, in their order: a variant larger than its source is not shipped.
+  const usable = variants !== null && variants.length > 0 &&
+    variants.map((v) => v.width).join() === widths.filter((w) => variants.some((v) => v.width === w)).join();
   if (!usable || !size || src === undefined) {
     return { ...node, attrs: Object.fromEntries(Object.entries(attrs).filter(([name]) => name !== 'sizes')) };
   }
-  const own = size.width <= LARGEST;
+  // The original stands in for a dropped widest variant, past LARGEST too.
+  const own = size.width <= LARGEST || variants[variants.length - 1].width !== widths[widths.length - 1];
   const candidates = [
     ...variants.map((v) => `${v.url} ${v.width}w`),
     ...(own ? [`${src} ${size.width}w`] : []),

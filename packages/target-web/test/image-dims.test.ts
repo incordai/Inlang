@@ -14,6 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
 import { emitProject } from '../src/emit.ts';
 import { imageSizes, sizeImages } from '../src/image-dims.ts';
+import { bytesSource, type ByteSource } from '../src/image-size.ts';
 import { WEB_EMITTERS } from '../../words/registry.ts';
 import type { EmittedNode } from '../../core/src/emit-contract.ts';
 
@@ -64,12 +65,18 @@ test('an author\'s own width or height is never replaced', () => {
   assert.deepEqual(out.attrs, { src: '/a.png', width: '10' });
 });
 
-test('imageSizes: one read per file; unreadable is a warning, missing is not', () => {
+test('imageSizes: one open per file, each closed; unreadable is a warning, missing is not', () => {
   const reads: string[] = [];
+  const closed: string[] = [];
   const files: Record<string, Uint8Array> = { 'a.png': png(64, 32), 'b.bin': Buffer.from('not an image'), 'c.svg': Buffer.from('<svg/>') };
   const warnings: string[] = [];
   const srcs = new Map([['/a.png', 'a.png'], ['/b.bin', 'b.bin'], ['/c.svg', 'c.svg'], ['/gone.png', 'gone.png']]);
-  const sizeOf = imageSizes((p) => { reads.push(p); return files[p] ?? null; }, srcs, warnings)!;
+  const open = (p: string): ByteSource | null => {
+    reads.push(p);
+    const bytes = files[p];
+    return bytes === undefined ? null : { ...bytesSource(bytes), close: () => closed.push(p) };
+  };
+  const sizeOf = imageSizes(open, srcs, warnings)!;
   assert.deepEqual(sizeOf('/a.png'), { width: 64, height: 32 });
   assert.deepEqual(sizeOf('/a.png'), { width: 64, height: 32 });
   assert.equal(sizeOf('/b.bin'), null);
@@ -77,6 +84,7 @@ test('imageSizes: one read per file; unreadable is a warning, missing is not', (
   assert.equal(sizeOf('/gone.png'), null);
   assert.equal(sizeOf('/never-resolved.png'), null);
   assert.deepEqual(reads, ['a.png', 'b.bin', 'c.svg', 'gone.png']);
+  assert.deepEqual(closed, ['a.png', 'b.bin', 'c.svg'], 'every opened file is closed');
   assert.deepEqual(warnings, [
     "image: can't read the size of './b.bin' — the page will shift as it loads; export it as WebP, AVIF, JPEG, PNG or GIF",
     "image: './c.svg' has no size the browser can use — give its <svg> a viewBox, or width and height in px",

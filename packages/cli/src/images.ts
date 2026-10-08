@@ -2,7 +2,7 @@
  * @az module images
  * Purpose: the build's image resizer: content-hashed WebP variants, and the PNG home-screen icon, from a cache outside the build output, encoded by a bounded child process.
  * Spec: docs/gallery-block-spec.md §7 rule 3 · docs/GRAMMAR.md §4.4 (touch icon) · docs/stack-evaluation.md §16
- * Exports: createResizer, Resizer, ENCODING, TOUCH_ENCODING, VARIANT_DIR, imageCacheDir, imageId, touchIconId, variantName, VariantFormat, entryName, CacheEntry, EncodeJob
+ * Exports: createResizer, Resizer, ENCODING, TOUCH_ENCODING, VARIANT_DIR, imageCacheDir, imageId, touchIconId, variantName, VariantFormat, VariantMode, entryName, CacheEntry, EncodeJob
  * Edit guide: a cache entry is used only when every file is there with its recorded hash; the image library runs only in the child (image-encode.ts).
  * Tests: packages/cli/test/images.test.ts, packages/cli/test/touch-icon.test.ts
  */
@@ -27,7 +27,9 @@
  * failure (a file that does not decode, one over the size limits). A failure
  * is a warning, and that image ships as its original only — as before this
  * rule existed. Only raster formats are resized (JPEG, PNG, WebP, AVIF, by
- * their first bytes); SVG and GIF never are.
+ * their first bytes); SVG and GIF never are. Line art is written lossless,
+ * photographs lossy (ENCODING), and a variant larger than its source file
+ * is not shipped: the page names only the widths the entry records.
  *
  * The home-screen ("touch") icon (GRAMMAR §4.4) goes the same way: a square
  * PNG `site icon` larger than TOUCH_ICON_SIZE is resized down to it, as a
@@ -48,23 +50,39 @@ import { TOUCH_ICON_SIZE, pngSize } from '../../core/src/index.ts';
 import type { TouchIcon } from '../../target-web/src/head.ts';
 import type { Resize, Variant } from '../../target-web/src/image-srcset.ts';
 
+/** The WebP writer's options every mode shares. */
+const WEBP_COMMON = { alphaQuality: 100, effort: 4, smartSubsample: false, smartDeblock: false, preset: 'default', exact: false } as const;
+
 /**
  * Everything that decides a variant's bytes, pinned — and hashed into every
  * name. The library and codec versions are checked by the child against the
  * library it loads, so a name always means these exact versions. The decode
  * limits are the backend upload pipeline's (data-spec §8).
+ *
+ * The mode is chosen once per source (image-encode.ts, gallery-spec §7
+ * rule 3): a JPEG is a photograph — `lossy`. Any other source is `lossless`
+ * when it is a palette image, when its alpha channel is in use, or when a
+ * `choose.sample`-sided nearest-neighbour copy of it (source pixels only,
+ * none blended) holds at most `choose.fewColours` distinct colours — line
+ * art, a logo, a screenshot; else it is a photograph too. A lossless
+ * variant larger than the source file is written `nearLossless` instead;
+ * and a variant of any mode larger than the source file is not shipped.
+ * Scheme 2 is this rule: every name of scheme 1 (lossy only) is retired.
  */
 export const ENCODING = {
-  scheme: 1,
+  scheme: 2,
   versions: { library: '0.35.5', core: '8.18.7', webp: '1.6.0' },
   decode: { limitInputPixels: IMAGE_LIMITS.maxPixels, failOn: 'error', sequentialRead: true },
   maxSide: IMAGE_LIMITS.maxSide,
   resize: { kernel: 'lanczos3', withoutEnlargement: true },
-  webp: {
-    quality: IMAGE_LIMITS.quality, alphaQuality: 100, effort: 4, lossless: false, nearLossless: false,
-    smartSubsample: false, smartDeblock: false, preset: 'default', exact: false,
-  },
+  choose: { lossyFormats: ['jpeg'], sample: { side: 256, kernel: 'nearest' }, fewColours: 4096 },
+  webp: { ...WEBP_COMMON, quality: IMAGE_LIMITS.quality, lossless: false, nearLossless: false },
+  lossless: { ...WEBP_COMMON, quality: 80, lossless: true, nearLossless: false },
+  nearLossless: { ...WEBP_COMMON, quality: 60, lossless: false, nearLossless: true },
 } as const;
+
+/** How one variant was written: ENCODING's `webp`, `lossless` or `nearLossless` options. */
+export type VariantMode = 'lossy' | 'lossless' | 'near-lossless';
 
 /**
  * Everything that decides the touch icon's bytes, pinned and hashed into its
@@ -135,9 +153,18 @@ export const variantName = (id: string, width: number, format: VariantFormat = '
 /** The cache entry's file name for an image id. */
 export const entryName = (id: string): string => `${id}.json`;
 
-/** The cache's record of one image: its variants with each file's hash, or why it has none. */
+/**
+ * The cache's record of one image: the widths asked for, the ones shipped
+ * (a variant larger than its source is not — ENCODING), each shipped
+ * file's hash and mode; or why it has none.
+ */
 export type CacheEntry =
-  | { readonly widths: number[]; readonly sha256: Record<string, string> }
+  | {
+    readonly widths: number[];
+    readonly shipped: number[];
+    readonly sha256: Record<string, string>;
+    readonly modes: Record<string, VariantMode>;
+  }
   | { readonly failed: 'undecodable' | 'too-large'; readonly width?: number; readonly height?: number };
 
 /**
@@ -181,7 +208,9 @@ function cached(cacheDir: string, id: string, widths: readonly number[], format:
   }
   if ('failed' in entry) return entry.failed === 'undecodable' || entry.failed === 'too-large' ? entry : null;
   if (!Array.isArray(entry.widths) || entry.widths.join() !== widths.join()) return null;
-  for (const w of widths) {
+  // The shipped widths are some of the asked ones, in their order.
+  if (!Array.isArray(entry.shipped) || entry.shipped.join() !== widths.filter((w) => entry.shipped.includes(w)).join()) return null;
+  for (const w of entry.shipped) {
     const file = join(cacheDir, variantName(id, w, format));
     if (!existsSync(file) || sha256(readFileSync(file)) !== entry.sha256?.[String(w)]) return null;
   }
@@ -196,8 +225,9 @@ export interface Resizer {
   readonly touchIcon: TouchIcon;
   /**
    * Encode every planned miss in bounded child processes. True when some
-   * image got no variants after all — the page must be emitted again, and
-   * that image's `resize` now answers null.
+   * image got no variants after all, or fewer than planned (one larger than
+   * its source is not shipped) — the page must be emitted again, and that
+   * image's `resize` now answers null, or the widths it shipped.
    */
   encode(): boolean;
   /** Forget which variants were handed out: a new emit of the page begins. */
@@ -263,8 +293,9 @@ export function createResizer(cacheDir: string, locate: (projectPath: string) =>
       report(path, entry);
       return null;
     }
+    // A miss plans every width: encode() says when some were not shipped, and the page is emitted again.
     if (!entry) pending.set(image.id, { id: image.id, file: image.file, widths: [...widths], path });
-    const variants: Variant[] = widths.map((width) => {
+    const variants: Variant[] = (entry ? entry.shipped : widths).map((width) => {
       const name = variantName(image.id, width);
       used.set(`${VARIANT_DIR}/${name}`, join(cacheDir, name));
       return { url: `/${VARIANT_DIR}/${name}`, width };
@@ -329,9 +360,13 @@ export function createResizer(cacheDir: string, locate: (projectPath: string) =>
     }
     let incomplete = 0;
     let touchless = false;
+    let fewer = false;
     for (const job of jobs) {
       const entry = cached(cacheDir, job.id, job.widths, job.format);
-      if (entry && !('failed' in entry)) continue;
+      if (entry && !('failed' in entry)) {
+        fewer ||= entry.shipped.length !== job.widths.length;
+        continue;
+      }
       without.add(job.id);
       if (entry) report(job.path, entry, job.format);
       else if (job.format === 'png') touchless = true;
@@ -344,7 +379,7 @@ export function createResizer(cacheDir: string, locate: (projectPath: string) =>
     if (touchless) {
       warn('resizer-touch', `icon: ${stopped ?? 'the resizer wrote no home-screen icon'} — the site has none this build; build again to retry`);
     }
-    return jobs.some((job) => without.has(job.id));
+    return fewer || jobs.some((job) => without.has(job.id));
   };
 
   return {

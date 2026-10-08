@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
-import { imageSize, MAX_DIMENSION } from '../src/image-size.ts';
+import { bytesSource, imageSize, imageSizeOf, HEAD_BYTES, MAX_DIMENSION, MAX_READ_BYTES, type ByteSource } from '../src/image-size.ts';
 import { jpegClaiming, phoneJpeg, pngClaiming } from '../../backend/test/image-fixtures.ts';
 
 const base = (width: number, height: number) =>
@@ -165,4 +165,147 @@ test('HOSTILE: self-referencing and overflowing structures end', () => {
   const exif = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0x00, 0x10]), Buffer.from('Exif\0\0II*\0'), u32(0xffffff00).reverse()]);
   assert.equal(imageSize(exif), null);
   assert.equal(imageSize(new Uint8Array(0)), null);
+});
+
+/* ---- a JPEG walked through its file: the frame header past megabytes of metadata ---- */
+
+const MB = 1024 * 1024;
+
+/** An APPn segment of `bytes` payload bytes (at most 65533): an id, then zeros. */
+function appSegment(marker: number, id: string, bytes: number): Buffer {
+  const s = Buffer.alloc(4 + bytes);
+  s[0] = 0xff;
+  s[1] = marker;
+  s.writeUInt16BE(bytes + 2, 2);
+  s.write(id, 4, 'latin1');
+  return s;
+}
+
+/** About `total` bytes of extended-XMP-style APP1 segments, each as long as a segment can be. */
+function metadataRun(total: number): Buffer {
+  const out: Buffer[] = [];
+  for (let left = total; left > 0; left -= 65537) out.push(appSegment(0xe1, 'http://ns.example/extension\0', Math.min(65533, Math.max(32, left - 4))));
+  return Buffer.concat(out);
+}
+
+/** A ByteSource over `bytes` (claiming `size`) that counts what it hands out. */
+function counting(bytes: Uint8Array, size = bytes.length) {
+  const seen = { reads: 0, bytes: 0, closed: false };
+  const inner = bytesSource(bytes);
+  const source: ByteSource = {
+    size,
+    read: (offset, length) => {
+      const got = inner.read(offset, length);
+      seen.reads++;
+      seen.bytes += got.length;
+      return got;
+    },
+    close: () => { seen.closed = true; },
+  };
+  return { source, seen };
+}
+
+/** A phone JPEG (64×32 stored, EXIF orientation 6) with `run` inserted after its EXIF, or before it. */
+async function buriedJpeg(run: Buffer, where: 'after-exif' | 'before-exif' = 'after-exif'): Promise<Buffer> {
+  const phone = await phoneJpeg(64, 32, 6);
+  const exifEnd = 4 + phone.readUInt16BE(4);
+  return where === 'after-exif'
+    ? Buffer.concat([phone.subarray(0, exifEnd), run, phone.subarray(exifEnd)])
+    : Buffer.concat([phone.subarray(0, 2), run, phone.subarray(2)]);
+}
+
+test('a JPEG with 2MB of APP1 before its frame header: the walk finds the size, reading the headers only', async () => {
+  const file = await buriedJpeg(metadataRun(2 * MB));
+  const meta = await sharp(file).metadata();
+  assert.deepEqual([meta.width, meta.height, meta.orientation], [64, 32, 6], 'CONTROL: the library decodes it, a quarter turn');
+  assert.ok(file.indexOf(Buffer.from([0xff, 0xc0]), 4) > 2 * MB, 'CONTROL: the frame header lies past 2MB');
+  // The old read: the first 1MB through the sandbox — no size, and the build warned.
+  assert.equal(imageSize(file.subarray(0, HEAD_BYTES)), null, 'CONTROL: the first 1MB holds no frame header');
+  const { source, seen } = counting(file);
+  assert.deepEqual(imageSizeOf(source), { width: 32, height: 64 }, 'the displayed size: turned by its EXIF');
+  assert.ok(seen.bytes < 256 * 1024, `the metadata is skipped unread: ${seen.bytes} of ${file.length} bytes read in ${seen.reads} reads`);
+  assert.equal(seen.closed, false, 'imageSizeOf leaves closing to its caller');
+  // Its EXIF behind the run: still read, still turned.
+  assert.deepEqual(imageSizeOf(bytesSource(await buriedJpeg(metadataRun(2 * MB), 'before-exif'))), { width: 32, height: 64 });
+  assert.deepEqual(imageSize(file), { width: 32, height: 64 }, 'the same walk over bytes in memory');
+});
+
+test('the walk is bounded: a frame header past 20MB of skipped metadata is found; past 16MB of EXIF read it is not', async () => {
+  const far = counting(await buriedJpeg(metadataRun(20 * MB)));
+  assert.deepEqual(imageSizeOf(far.source), { width: 32, height: 64 }, 'skipping costs a window per segment, not the segment');
+  assert.ok(far.seen.bytes < 2 * MB, `${far.seen.bytes} bytes read`);
+  // Every one of 300 EXIF segments is read whole (the orientation lives there): past MAX_READ_BYTES, no size.
+  const exifRun = Buffer.concat(Array.from({ length: 300 }, () => appSegment(0xe1, 'Exif\0\0', 65533)));
+  const spent = counting(await buriedJpeg(exifRun));
+  assert.equal(imageSizeOf(spent.source), null, 'the budget ran out: unknown, never guessed');
+  assert.ok(spent.seen.bytes <= MAX_READ_BYTES, `${spent.seen.bytes} bytes read, at most ${MAX_READ_BYTES}`);
+  // 20MB of fill bytes: the budget ends the walk.
+  const filled = counting(Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(20 * MB, 0xff)]));
+  assert.equal(imageSizeOf(filled.source), null);
+  assert.ok(filled.seen.bytes <= MAX_READ_BYTES + 16, `${filled.seen.bytes} bytes read`);
+});
+
+test('HOSTILE: the walk never throws and never returns a wrong size — truncated, lying about its size, failing reads', async () => {
+  const file = await buriedJpeg(metadataRun(2 * MB));
+  const truth = { width: 32, height: 64 };
+  const frame = file.indexOf(Buffer.from([0xff, 0xc0]), 4);
+  // Every prefix of the first headers, a stride through the metadata, every prefix around the frame.
+  const cuts = [
+    ...Array.from({ length: 4096 }, (_, n) => n),
+    ...Array.from({ length: 2200 }, (_, k) => 4096 + k * 997),
+    ...Array.from({ length: 2048 }, (_, n) => frame - 1024 + n),
+  ].filter((n) => n <= file.length);
+  for (const n of cuts) {
+    const got = imageSizeOf(bytesSource(file.subarray(0, n)));
+    if (got !== null) assert.deepEqual(got, truth, `prefix ${n}: ${JSON.stringify(got)}`);
+  }
+  const frameEnd = frame + 2 + file.readUInt16BE(frame + 2);
+  assert.deepEqual(imageSizeOf(bytesSource(file.subarray(0, frameEnd))), truth, 'CONTROL: a cut at the end of the frame header is read');
+  assert.equal(imageSizeOf(bytesSource(file.subarray(0, frameEnd - 1))), null, 'CONTROL: a byte short of it is not');
+  // A source claiming more than it holds: its reads come back short, which is the end.
+  assert.equal(imageSizeOf(counting(file.subarray(0, frame), file.length).source), null, 'a file that shrank under the walk');
+  // A read that throws: no size, no throw.
+  const failing: ByteSource = {
+    size: file.length,
+    read: (offset, length) => {
+      if (offset > MB) throw new Error('EIO');
+      return file.subarray(offset, offset + length);
+    },
+    close: () => {},
+  };
+  assert.equal(imageSizeOf(failing), null);
+  // Random segment chains after SOI — markers, lengths that lie, EXIF ids — from a fixed seed.
+  let seed = 0xbeef;
+  const rand = (n: number) => { seed = (seed * 1103515245 + 12345) >>> 0; return (seed >>> 8) % n; };
+  const markers = [0xe0, 0xe1, 0xe2, 0xed, 0xfe, 0xdb, 0xc4, 0xc0, 0xc2, 0x01, 0xd0];
+  for (let k = 0; k < 2000; k++) {
+    const parts: Buffer[] = [Buffer.from([0xff, 0xd8])];
+    for (let s = rand(12); s > 0; s--) {
+      const marker = markers[rand(markers.length)];
+      const body = Buffer.from(Array.from({ length: rand(64) }, () => rand(256)));
+      if (marker === 0xe1 && rand(2) === 0) Buffer.from('Exif\0\0II*\0').copy(body, 0, 0, Math.min(10, body.length));
+      const head = Buffer.from([0xff, marker, 0, 0]);
+      head.writeUInt16BE(rand(4) === 0 ? rand(65536) : body.length + 2, 2);
+      parts.push(head, body);
+    }
+    const bytes = Buffer.concat(parts);
+    const got = imageSizeOf(bytesSource(bytes));
+    assert.deepEqual(got, imageSize(bytes), `chain ${k}: the file walk and the memory walk agree`);
+    if (got) assert.ok(got.width > 0 && got.height > 0 && got.width <= MAX_DIMENSION && got.height <= MAX_DIMENSION);
+  }
+});
+
+test('imageSizeOf: every other format is read from its first HEAD_BYTES, as imageSize reads it', async () => {
+  const files = [
+    await base(48, 24).png().toBuffer(), await base(37, 19).gif().toBuffer(), await base(321, 123).webp().toBuffer(),
+    avif(400, 300, 1), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 12"></svg>'),
+  ];
+  for (const bytes of files) {
+    const { source, seen } = counting(bytes);
+    const got = imageSizeOf(source);
+    assert.ok(got !== null, 'CONTROL: each has a size');
+    assert.deepEqual(got, imageSize(bytes));
+    assert.ok(seen.reads <= 2, 'a sniff and the head');
+  }
+  assert.equal(imageSizeOf(bytesSource(new Uint8Array(0))), null);
 });

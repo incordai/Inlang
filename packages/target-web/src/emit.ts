@@ -47,6 +47,7 @@ import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminVa
 import { ROWS_FILE, fromTables, rowsTsx } from './data-rows.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
 import { imageSizes, sizeImages } from './image-dims.ts';
+import { bytesSource, type ByteSource } from './image-size.ts';
 import { srcsetImages, type Resize } from './image-srcset.ts';
 
 /**
@@ -519,10 +520,18 @@ export interface EmitOptions {
    */
   readonly readBytes?: (projectPath: string) => Uint8Array | null;
   /**
+   * Opens a project file for reading anywhere in it, through the same
+   * sandbox — for an image's size, which a JPEG may carry megabytes into
+   * the file, behind its EXIF and XMP (gallery-spec §7 rule 1). Given it,
+   * sizes are read through it; else from readBytes' start of the file.
+   * Null means the file does not exist.
+   */
+  readonly openImage?: (projectPath: string) => ByteSource | null;
+  /**
    * Resizes a project image to fixed widths — the CLI's, with its vetted
-   * image library. Given it (and readBytes), an <img> whose word gave a
-   * `sizes` gets a srcset (gallery-spec §7 rule 3); without it that `sizes`
-   * is removed and the output is exactly as before.
+   * image library. Given it (and openImage or readBytes), an <img> whose
+   * word gave a `sizes` gets a srcset (gallery-spec §7 rule 3); without it
+   * that `sizes` is removed and the output is exactly as before.
    */
   readonly resize?: Resize;
   /**
@@ -994,7 +1003,13 @@ export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProje
   // gallery-spec §7 rule 1: each image's size from its header, so the page
   // reserves the box before the file arrives. One read per file.
   // Rule 3: a srcset where a word asked for one and the build resized the file.
-  const sizeOf = imageSizes(options.readBytes, srcs, warnings);
+  const readBytes = options.readBytes;
+  const sizeOf = imageSizes(
+    options.openImage ?? (readBytes && ((path: string) => {
+      const bytes = readBytes(path);
+      return bytes === null ? null : bytesSource(bytes);
+    })),
+    srcs, warnings);
   const unique = seeded.pages.map((p) => ({
     ...p,
     nodes: uniqueIds(p.nodes.map((n) => srcsetImages(sizeOf ? sizeImages(n, sizeOf) : n, srcs, sizeOf, options.resize))),
