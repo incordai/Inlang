@@ -329,15 +329,17 @@ const FETCH_DIRECTIVES: Readonly<Record<string, string>> = {
  *
  * - img-src data: — a page with no icon file declares `href="data:,"`, and a
  *   data: image is pixels: it runs nothing and requests nothing.
- * - img-src blob:, connect-src blob: — a 3D model's embedded textures are
- *   decoded to blob: URLs, then loaded and read back. A blob: URL is minted
- *   only by a script already running in the page, so an injected tag cannot
- *   name one of its own.
+ * - connect-src blob: — the model loader fetches a 3D model's embedded
+ *   textures from blob: URLs. A blob: URL is minted only by a script already
+ *   running in the page, so an injected tag cannot name one of its own.
  * - worker-src blob: — the model decoder runs in a worker made from a blob:
  *   URL, for the same reason: only the page's own pinned script can make it.
+ *
+ * img-src blob: is not among them: the loader decodes textures with
+ * createImageBitmap, never an <img>, so az's policy no longer carries it.
  */
 const ALLOWED_SCHEMES: Readonly<Record<string, ReadonlySet<string>>> = {
-  'img-src': new Set(['data:', 'blob:']),
+  'img-src': new Set(['data:']),
   'connect-src': new Set(['blob:']),
   'worker-src': new Set(['blob:']),
 };
