@@ -1102,6 +1102,29 @@ Two gaps closed. Each row has a test that failed on the code before it and a con
 
 Foreign keys that still RESTRICT (a lock from before §18.6) do not meet this code: a build with it fails AZ1701 until the relink step is recorded, and the server does not start until that step is confirmed (§6.3). Were such a key left, a planted row another account points at would make the claim fail as a whole — the sign-in errors and nothing changes — never half-apply.
 
+**`pnpm test:data` in three engines, signed in (2026-10-07).** WebKit ran the
+signed-out flows only: over plain-http loopback it drops the server's
+`__Host-` session cookie — Secure, and WebKit does not count http loopback
+as secure (measured: Chromium and Firefox send it back, WebKit sends nothing;
+over https all three do). The suite now serves the site and the server over
+https on loopback with a certificate made at test time by node:crypto alone
+(`scripts/lib/self-signed.mjs`, no dependency, no key in the repository),
+the server behind a local TLS proxy as a deployment fronts it; browsers
+accept the certificate per context. Like a deployment's proxy it appends the
+client's address and the server runs with `AZ_TRUST_PROXY=true`: each engine
+gets its own documentation address (TEST-NET-1, by user agent), so the
+10-an-hour sign-up limit counts each engine's five sign-ups on their own
+instead of fifteen from one address. Every flow — images, admin, `mine`,
+the pre-claim rows — now runs in WebKit too.
+
+The admin "Save keeps focus" check passed on the code before e161bd0: it
+pressed Save on an unchanged form, and "Nothing has changed." never sets
+busy. It now makes a real save — a field changed, the `PATCH` held while
+the busy state is read: focus stays on Save, busy is `aria-disabled`, never
+`disabled`; saved, focus is on the row's Edit button. Save and Remove photo
+are pressed from the keyboard, whose user the kept focus is for: a mouse
+click does not focus a button in WebKit, so a click proves nothing there.
+
 ---
 
 ## 17. Research sources

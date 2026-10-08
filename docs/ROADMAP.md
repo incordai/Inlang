@@ -431,7 +431,9 @@ the §13 rows without uploads or admin), `pnpm test:backend-db` (every
 migration kind, resume, two migrators, a unique race on PostgreSQL 18.6 and
 MySQL 8.4.11; the spec's three inferences settled, data-spec §18.2) and
 `pnpm test:data` (the typed client from a built site in Chromium, Firefox and
-WebKit — WebKit signed-out only, as it drops Secure cookies on http loopback).
+WebKit — WebKit then signed-out only, as it drops Secure cookies on http
+loopback; since 2026-10-07 every flow runs in all three, over https on
+loopback with a certificate made at test time — data-spec §18.7).
 D2, the admin area: verified accounts listed in `AZ_ADMIN_EMAILS` reach
 `/admin/...` on the server (rules bypassed, validation never, every write an
 `az_data_audit` row without values); the site gets generated `/admin` and

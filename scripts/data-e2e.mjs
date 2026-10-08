@@ -20,16 +20,21 @@
  * and signed in (only the visitor's rows, on a protected page whose content
  * arrives late); axe on every state.
  *
- * Chromium and Firefox run the signed-in flows. WebKit drops a Secure cookie
- * on plain-http loopback (dev-backend.ts notes the same), so against this
- * production server it runs the signed-out flows only.
+ * All three engines run every flow, signed in and out, over https: the site
+ * and the server are served with a certificate made at test time
+ * (lib/self-signed.mjs), the server behind a local TLS proxy as a deployment
+ * fronts it. Over plain http WebKit drops the server's `__Host-` session
+ * cookie — it is Secure, and WebKit does not count http loopback as secure
+ * (dev-backend.ts notes the same) — so it could not sign in.
  */
 
-import { createServer } from 'node:http';
+import { request as httpRequest } from 'node:http';
+import { createServer as createHttpsServer, request as httpsRequest } from 'node:https';
 import { createServer as createNetServer } from 'node:net';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
@@ -39,6 +44,7 @@ import { CLI, COMPILE_MS, ROOT, WORDS, buildSites } from './visual/pipeline.mjs'
 import { metadataFindings, phoneJpeg, plainJpeg, SVG } from '../packages/backend/test/image-fixtures.ts';
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
+import { selfSignedCert } from './lib/self-signed.mjs';
 
 /*
  * Deadlines (lib/bounded.mjs): page.evaluate and close() have no timeout of
@@ -51,6 +57,8 @@ const RUN_MS = 15 * 60_000;
 const CLOSE_MS = 15_000;
 /** Bound on the policy control's load, its wait for the report, and its close. */
 const CONTROL_MS = 10_000;
+/** A save held to read its busy state is let go at once — or past this, so a missed release cannot stall the run. */
+const HOLD_MS = 10_000;
 const progress = { last: 'starting' };
 const run = watchdog(RUN_MS, 'test:data', progress);
 console.log(`deadlines: run ${human(RUN_MS)} · close ${human(CLOSE_MS)}`);
@@ -224,8 +232,67 @@ export default function Notes() {
 }
 `;
 
+/** The certificate the site and the server's proxy are served with; browsers are told to accept it, per context. */
+const tls = selfSignedCert();
+const CONTEXT = { ignoreHTTPSErrors: true };
+/** A Node-side request's deadline. */
+const FETCH_MS = 15_000;
+
+/**
+ * Node-side requests from this file (the server's health, a page's HTML, a
+ * stored image): Node's own fetch takes no certificate per call, so `fetch`
+ * here is an https client that trusts the test's certificate and answers
+ * with a standard Response. Code passed to page.evaluate runs in the browser
+ * and uses the page's fetch.
+ */
+const fetch = (url, init = {}) => new Promise((done, fail) => {
+  const req = httpsRequest(url, { method: init.method ?? 'GET', headers: init.headers, ca: tls.cert, timeout: FETCH_MS }, (res) => {
+    const chunks = [];
+    res.on('data', (c) => chunks.push(c));
+    res.on('error', fail);
+    res.on('end', () => {
+      const headers = Object.entries(res.headers).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : [[k, String(v)]]));
+      const empty = res.statusCode === 204 || res.statusCode === 304;
+      done(new Response(empty ? null : Buffer.concat(chunks), { status: res.statusCode, headers }));
+    });
+  });
+  req.on('timeout', () => req.destroy(new Error(`no answer after ${FETCH_MS / 1000}s: ${url}`)));
+  req.on('error', fail);
+  req.end(init.body);
+});
+
+/**
+ * Each engine as its own client address (TEST-NET-1, RFC 5737), told by its
+ * user agent: every browser here connects from 127.0.0.1, and the server's
+ * per-address limits (10 sign-ups an hour) would count three engines'
+ * visitors as one. Chromium before WebKit: Chromium's agent names AppleWebKit too.
+ */
+const CLIENT_ADDRESSES = [[/Firefox\//, '192.0.2.2'], [/Chrome\//, '192.0.2.1'], [/AppleWebKit\//, '192.0.2.3']];
+
+/**
+ * The server's public https address, in front of its own plain-http port —
+ * TLS ends here and requests and answers pass through unchanged, as a
+ * deployment's proxy does; like one, it appends the client's address to
+ * X-Forwarded-For (the server is started with AZ_TRUST_PROXY=true).
+ */
+function startTlsProxy(port) {
+  const server = createHttpsServer(tls, (req, res) => {
+    const client = CLIENT_ADDRESSES.find(([agent]) => agent.test(req.headers['user-agent'] ?? ''))?.[1] ?? req.socket.remoteAddress;
+    const forwarded = [req.headers['x-forwarded-for'], client].filter(Boolean).join(', ');
+    const headers = { ...req.headers, 'x-forwarded-for': forwarded };
+    const upstream = httpRequest({ host: '127.0.0.1', port, method: req.method, path: req.url, headers }, (answer) => {
+      res.writeHead(answer.statusCode ?? 502, answer.headers);
+      answer.pipe(res);
+    });
+    upstream.on('error', () => { if (res.headersSent) res.destroy(); else res.writeHead(502).end(); });
+    req.pipe(upstream);
+  });
+  return new Promise((done) => server.listen(0, '127.0.0.1', () =>
+    done({ url: `https://localhost:${server.address().port}`, close: () => server.close() })));
+}
+
 function startSite(root) {
-  const server = createServer(async (req, res) => {
+  const server = createHttpsServer(tls, async (req, res) => {
     const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
     const candidates = extname(path) ? [path] : [join(path, 'index.html')];
     for (const rel of candidates) {
@@ -241,7 +308,7 @@ function startSite(root) {
     res.writeHead(404).end();
   });
   return new Promise((done) => server.listen(0, '127.0.0.1', () =>
-    done({ url: `http://localhost:${server.address().port}`, close: () => server.close() })));
+    done({ url: `https://localhost:${server.address().port}`, close: () => server.close() })));
 }
 
 const freePort = () => new Promise((done) => {
@@ -286,7 +353,8 @@ const serverPort = await freePort();
 // judges two IP-literal origins never same-site, so a private image's
 // `Cross-Origin-Resource-Policy: same-site` would block it between
 // 127.0.0.1 ports while allowing it between localhost ports (measured).
-const serverUrl = `http://localhost:${serverPort}`;
+const proxy = await startTlsProxy(serverPort);
+const serverUrl = proxy.url;
 process.env.AZ_PUBLIC_BACKEND_URL = serverUrl;
 
 // The site's folder: its source, its component, and its schema lock — written
@@ -335,8 +403,8 @@ if (!site.dist) {
     (accepted.stdout + accepted.stderr).trim());
 }
 
-/** The browsers that run signed-in flows (WebKit drops the Secure cookie here — see the header). */
-const BROWSERS = ['chromium', 'firefox'];
+/** The browsers that run the signed-in flows: all three, over https (see the header). */
+const BROWSERS = ['chromium', 'firefox', 'webkit'];
 const adminEmail = (browser) => `boss-${browser}@notebook.test`;
 
 const smtp = await startSmtpSink();
@@ -357,7 +425,7 @@ const child = spawn(process.execPath, ['src/main.ts'], {
   env: {
     PATH: process.env.PATH,
     AZ_SESSION_SECRET: randomBytes(32).toString('base64url'),
-    AZ_BACKEND_PUBLIC_URL: serverUrl, AZ_PORT: String(serverPort), AZ_ALLOWED_ORIGINS: host.url,
+    AZ_BACKEND_PUBLIC_URL: serverUrl, AZ_PORT: String(serverPort), AZ_ALLOWED_ORIGINS: host.url, AZ_TRUST_PROXY: 'true',
     AZ_SQLITE_PATH: join(serverDir, 'data/test.db'),
     AZ_FILES_DIR: filesDir,
     AZ_EMAIL_FROM: 'Notebook <no-reply@notebook.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(smtp.port),
@@ -372,7 +440,9 @@ child.stdout.on('data', (c) => { serverLog += c; });
 child.stderr.on('data', (c) => { serverLog += c; });
 const up = await new Promise((done) => {
   const until = Date.now() + 15_000;
-  const poll = () => fetch(`${serverUrl}/health`).then((r) => done(r.ok), () => (Date.now() > until ? done(false) : setTimeout(poll, 200)));
+  // Through the proxy, which answers 502 until the server listens.
+  const retry = () => (Date.now() > until ? done(false) : setTimeout(poll, 200));
+  const poll = () => fetch(`${serverUrl}/health`).then((r) => (r.ok ? done(true) : retry()), retry);
   poll();
 });
 check('the generated server starts and applies the data step', up && /applied data steps 1/.test(serverLog), serverLog.trim().split('\n').slice(0, 3).join(' / '));
@@ -522,7 +592,7 @@ async function proveAddress(page, email) {
  * more sign-up would pass the server's limit of 10 an hour per IP.
  */
 async function squatFlow(b, name, planter, email) {
-  const ownerCtx = await watchedContext(b, csp);
+  const ownerCtx = await watchedContext(b, csp, CONTEXT);
   try {
     await planter.goto(`${host.url}/notes`);
     const planted = await use(planter, 'create', { title: `${name} planted under another address` });
@@ -563,13 +633,13 @@ async function axeViolations(page) {
  * verified, see the refusal; the server refuses them too.
  */
 async function adminFlow(b, name, owner) {
-  const ctx = await watchedContext(b, csp);
+  const ctx = await watchedContext(b, csp, CONTEXT);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`${name} admin: ${e.message}`));
   await verifiedAccount(page, 'Boss', adminEmail(name));
 
   const target = await use(owner, 'create', { title: `${name} for review`, contact: SECRET_CONTACT });
-  const stranger = await (await watchedContext(b, csp)).newPage();
+  const stranger = await (await watchedContext(b, csp, CONTEXT)).newPage();
   await stranger.goto(`${host.url}/`);
   const spam = await stranger.evaluate(async (base) => (await fetch(`${base}/data/messages`, {
     method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', 'x-az-request': '1' },
@@ -631,14 +701,45 @@ async function adminFlow(b, name, owner) {
     const watch = new MutationObserver(() => { for (const el of document.querySelectorAll('.az-admin [role="alert"], .az-admin [role="status"]')) if (el.textContent) said.push(el.textContent); });
     watch.observe(document.querySelector('.az-admin'), { childList: true, subtree: true, characterData: true });
   });
+  // Save is pressed from the keyboard, the user its focus is kept for: a
+  // mouse click does not focus a button in WebKit, so it would prove nothing.
   const save = page.getByRole('button', { name: 'Save changes' });
-  await save.click();
+  await save.focus();
+  await page.keyboard.press('Enter');
   await page.getByText('Nothing has changed.').waitFor();
-  await save.click();
+  await page.keyboard.press('Enter');
   const twice = await page.waitForFunction(() => globalThis.azSaid.filter((t) => t === 'Nothing has changed.').length >= 2, null, { timeout: 5_000 })
     .then(() => true, () => false);
   check(`${name} admin: a repeated message is announced again (cleared, then set)`, twice, JSON.stringify(await page.evaluate(() => globalThis.azSaid)));
-  check(`${name} admin: Save keeps focus while it works and after it refuses`, await save.evaluate((el) => document.activeElement === el));
+  check(`${name} admin: Save keeps focus after it refuses (nothing changed)`, await save.evaluate((el) => document.activeElement === el));
+  // A real save: a field changed, its PATCH held until the busy state is read.
+  // Busy is aria-disabled, never disabled — a disabled button drops the focus
+  // it has — so Save keeps focus while it works; saved, the editor closes and
+  // focus returns to the row's Edit button (the row still matches the search).
+  await page.locator('#az-admin-edit-notes-contact').fill(`kept-${name}@notebook.test`);
+  let release = () => {};
+  const held = new Promise((done) => { release = done; });
+  const rowRoute = (u) => u.origin === serverUrl && u.pathname === `/admin/data/notes/${target.item.id}`;
+  await page.route(rowRoute, async (route) => {
+    if (route.request().method() === 'PATCH') await Promise.race([held, delay(HOLD_MS, undefined, { ref: false })]);
+    await route.continue();
+  });
+  await save.focus();
+  await page.keyboard.press('Enter');
+  const busy = await page.waitForFunction(() => document.querySelector('.az-admin-editor button[type="submit"]')?.getAttribute('aria-busy') === 'true', null, { timeout: 5_000 })
+    .then(() => true, () => false);
+  const during = await save.evaluate((el) => ({ focused: document.activeElement === el, ariaDisabled: el.getAttribute('aria-disabled'), disabled: el.hasAttribute('disabled') }));
+  release();
+  await page.getByText(`Saved “${name} for review”.`).waitFor();
+  const onEdit = await page.waitForFunction((label) => document.activeElement?.getAttribute('aria-label') === label, `Edit “${name} for review”`, { timeout: 5_000 })
+    .then(() => true, () => false);
+  await page.unroute(rowRoute);
+  check(`${name} admin: Save keeps focus while it saves — busy is aria-disabled, never disabled`,
+    busy && during.focused && during.ariaDisabled === 'true' && !during.disabled, JSON.stringify({ busy, ...during }));
+  check(`${name} admin: after a real save the editor closes with focus on the row's Edit button`, onEdit,
+    await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80) ?? 'none'));
+  await page.getByRole('button', { name: `Edit “${name} for review”` }).click();
+  await heading.waitFor();
   // Cancel: focus goes back to the row's Edit button, never to the page.
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   const back = await page.waitForFunction((label) => document.activeElement?.getAttribute('aria-label') === label, `Edit “${name} for review”`, { timeout: 5_000 })
@@ -696,7 +797,9 @@ async function adminFlow(b, name, owner) {
   await page.waitForFunction((old) => { const i = document.querySelector('img.az-admin-preview'); return i && i.getAttribute('src') !== old && i.complete && i.naturalWidth === 300; }, first);
   const replacedOld = await page.evaluate(async (u) => (await fetch(u, { credentials: 'include' })).status, first);
   check(`${name} admin: replacing shows the new image; the old one is gone (404)`, replacedOld === 404, String(replacedOld));
-  await page.getByRole('button', { name: 'Remove photo' }).click();
+  // From the keyboard, as Save: focus has to be on Remove for its move to be seen.
+  await page.getByRole('button', { name: 'Remove photo' }).focus();
+  await page.keyboard.press('Enter');
   await page.getByText('Photo removed.').waitFor();
   check(`${name} admin: Remove clears it; no preview remains`, (await preview.count()) === 0 && (await use(owner, 'get', target.item.id)).item?.photo === null);
   check(`${name} admin: after Remove, focus is on the upload control, not the page`, await photoInput.evaluate((el) => document.activeElement === el),
@@ -816,7 +919,7 @@ async function adminFlow(b, name, owner) {
 
   // Refused: a signed-in account that is not an admin, and a listed one never verified.
   for (const [who, email] of [['an unlisted account', undefined], ['a listed but unverified account', `unverified-${name}@notebook.test`]]) {
-    const other = await (await watchedContext(b, csp)).newPage();
+    const other = await (await watchedContext(b, csp, CONTEXT)).newPage();
     other.on('pageerror', (e) => errors.push(`${name} refused: ${e.message}`));
     await signUp(other, 'Eve', email);
     await other.goto(`${host.url}/admin`);
@@ -890,7 +993,7 @@ async function fromSignedOut(b, name) {
       html.includes('data-az-from-skeleton') && !html.includes('aria-busy') && html.includes('Turn on JavaScript to load this list.')
         && !html.includes('First seeded note') && !html.includes('How long does it take?'), String(html.length));
   }
-  const off = await watchedContext(b, csp, { javaScriptEnabled: false });
+  const off = await watchedContext(b, csp, { ...CONTEXT, javaScriptEnabled: false });
   const still = await off.newPage();
   await still.goto(`${host.url}/board`);
   const noscript = await still.locator('.az-from-noscript').first().isVisible();
@@ -899,7 +1002,7 @@ async function fromSignedOut(b, name) {
   check(`${name} from: without JavaScript the skeleton and the noscript line show; no block is busy forever`, noscript && skeletonShown && busyOff === 0, String(busyOff));
   await off.close();
 
-  const ctx = await watchedContext(b, csp);
+  const ctx = await watchedContext(b, csp, CONTEXT);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`${name} from: ${e.message}`));
   // A hydration mismatch is a console error, not a page error: React
@@ -1026,7 +1129,7 @@ try {
     try {
       const caught = await violationControl(b, `${host.url}/az-policy-control/`, CONTROL_MS);
       check(`${name} CONTROL §2 B: the watch reports a page that breaks its policy`, !cspResult(caught).pass, caught[0] ?? 'nothing reported');
-      const out = await watchedContext(b, csp);
+      const out = await watchedContext(b, csp, CONTEXT);
       const visitor = await out.newPage();
       visitor.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
       await visitor.goto(`${host.url}/notes`);
@@ -1039,12 +1142,8 @@ try {
       await visitor.goto(`${host.url}/admin/notes`);
       await visitor.waitForURL((u) => u.pathname === '/login');
       check(`${name}: signed out, /admin/notes goes to the login page with next`, new URL(visitor.url()).searchParams.get('next') === '/admin/notes', visitor.url());
-      if (name === 'webkit') {
-        await fromSignedOut(b, name);
-        continue;
-      }
 
-      const ownerCtx = await watchedContext(b, csp);
+      const ownerCtx = await watchedContext(b, csp, CONTEXT);
       const owner = await ownerCtx.newPage();
       owner.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
       await signUp(owner, `Ada${name}`);
@@ -1061,7 +1160,7 @@ try {
       await owner.locator(`[data-notes="list"] li[data-mine="true"]`, { hasText: `${name} note` }).waitFor();
       check(`${name}: after a reload the component shows the new row as mine`, true);
 
-      const otherCtx = await watchedContext(b, csp);
+      const otherCtx = await watchedContext(b, csp, CONTEXT);
       const other = await otherCtx.newPage();
       other.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
       const otherEmail = `bo-${name}-${randomBytes(3).toString('hex')}@notebook.test`;
@@ -1097,6 +1196,7 @@ try {
   check('no image file outlived its row: the files folder is empty, no temporary left', stored().files === 0 && stored().temp === 0, JSON.stringify(stored()));
 } finally {
   child.kill('SIGTERM');
+  proxy.close();
   host.close();
   smtp.close();
 }
