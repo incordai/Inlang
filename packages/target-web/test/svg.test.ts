@@ -161,6 +161,35 @@ test('two icons on one page never share an id', () => {
   assert.equal(new Set(all).size, all.length);
 });
 
+/** XML 1.0's Char production (§2.2) leaves these out: each range, by its first and last code point. */
+const NOT_XML_CHARS: Readonly<Record<string, readonly [number, number]>> = {
+  'NUL and the C0 controls before tab': [0x0, 0x8],
+  'the C0 controls between line feed and carriage return': [0xb, 0xc],
+  'the C0 controls after carriage return': [0xe, 0x1f],
+  'the surrogates': [0xd800, 0xdfff],
+  'U+FFFE and U+FFFF': [0xfffe, 0xffff],
+};
+
+for (const [range, [first, last]] of Object.entries(NOT_XML_CHARS)) {
+  test(`a character reference to ${range} (U+${first.toString(16).toUpperCase()}–U+${last.toString(16).toUpperCase()}) is an SvgError naming the file and the reference`, () => {
+    for (const n of new Set([first, first + 1, (first + last) >> 1, last])) {
+      if (n > last) continue;
+      for (const ref of [`&#x${n.toString(16)};`, `&#${n};`]) {
+        assert.throws(() => sanitizeSvg(`<svg viewBox="0 0 1 1"><g id="a${ref}"/></svg>`, './i.svg'),
+          (e: unknown) => e instanceof SvgError && e.message.includes("'./i.svg'") && e.message.includes(ref)
+            && e.message.includes('XML does not allow'), ref);
+      }
+    }
+  });
+}
+
+test('CONTROL: a character reference at each edge of XML\'s characters is decoded', () => {
+  for (const n of [0x9, 0xa, 0xd, 0x20, 0xd7ff, 0xe000, 0xfffd, 0x10000, 0x10ffff]) {
+    const svg = sanitizeSvg(`<svg viewBox="0 0 1 1"><g id="a&#x${n.toString(16)};"/></svg>`, './i.svg');
+    assert.equal(walk(svg).find((x) => x.tag === 'g')?.attrs?.id, `a${String.fromCodePoint(n)}`, n.toString(16));
+  }
+});
+
 test('a character reference beyond Unicode is an SvgError, not a crash', () => {
   for (const ref of ['&#x110000;', '&#1114112;', '&#x99999999999;']) {
     assert.throws(() => sanitizeSvg(`<svg viewBox="0 0 1 1"><g id="a${ref}"/></svg>`, './i.svg'),

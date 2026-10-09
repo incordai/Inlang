@@ -89,11 +89,26 @@ const UNPAINTED = new Set(['mask', 'clipPath']);
 
 const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
+/**
+ * XML 1.0's Char production (§2.2): tab, line feed, carriage return and
+ * U+0020–U+D7FF, U+E000–U+FFFD, U+10000–U+10FFFF. A reference to anything
+ * else — another C0 control, NUL, a surrogate, U+FFFE or U+FFFF — makes the
+ * file not well-formed (§4.1, "Legal Character").
+ */
+function isXmlChar(n: number): boolean {
+  return n === 0x9 || n === 0xa || n === 0xd || (n >= 0x20 && n <= 0xd7ff) || (n >= 0xe000 && n <= 0xfffd) || (n >= 0x10000 && n <= 0x10ffff);
+}
+
 /** A numeric character reference, or an SvgError naming the file — never a RangeError. */
 function codePoint(digits: string, radix: number, file: string): string {
   const n = parseInt(digits, radix);
+  const ref = `&#${radix === 16 ? 'x' : ''}${digits};`;
   if (!Number.isSafeInteger(n) || n > 0x10ffff) {
-    throw new SvgError(`icon: '${file}' has a character reference beyond Unicode (&#${radix === 16 ? 'x' : ''}${digits};)`);
+    throw new SvgError(`icon: '${file}' has a character reference beyond Unicode (${ref})`);
+  }
+  if (!isXmlChar(n)) {
+    throw new SvgError(`icon: '${file}' has a character reference to a character XML does not allow (${ref}) — `
+      + 'only tab, line feed, carriage return and U+0020–U+D7FF, U+E000–U+FFFD, U+10000–U+10FFFF');
   }
   return String.fromCodePoint(n);
 }

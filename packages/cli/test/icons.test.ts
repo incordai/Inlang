@@ -84,6 +84,17 @@ test('a missing icon fails the build with its path', () => {
   assert.match(r.report, /icon: '\.\/icons\/knife\.svg' does not exist/);
 });
 
+test('an icon with a character reference XML does not allow (&#xD800;, &#0;) fails the build with its path — no crash, nothing written', () => {
+  for (const ref of ['&#xD800;', '&#0;']) {
+    const p = project(`<svg viewBox="0 0 1 1"><path d="M0 0" id="a${ref}"/></svg>`);
+    const r = run(p);
+    assert.equal(r.ok, false, ref);
+    assert.equal(r.exit, 1, ref);
+    assert.ok(r.report.includes(`icon: './icons/knife.svg' has a character reference to a character XML does not allow (${ref})`), r.report);
+    assert.ok(!existsSync(join(p.out, 'src/App.tsx')), 'a failed build writes nothing');
+  }
+});
+
 test('SECURITY: an icon with a DOCTYPE (entity tricks) fails the build, it is not guessed at', () => {
   const p = project('<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg viewBox="0 0 1 1"><path d="&x;"/></svg>');
   const r = run(p);
