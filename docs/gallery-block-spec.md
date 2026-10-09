@@ -304,13 +304,16 @@ byte-identical rebuild stops being cheap.
 >   original, never its `currentSrc`, which with a srcset is the small copy
 >   the grid chose), its srcset and its `width`/`height`; the neighbour
 >   preload (§8) asks for the same file the dialog's `sizes` picks.
-> - **`from <table>` rows ship one size.** A row's image URL arrives from
->   the backend after the page, not from a build file, and the backend's
->   upload pipeline stores **one** re-encoded file per upload (WebP, at
->   most 2048px a side — data-spec §8, `IMAGE_LIMITS.storedMax`); it makes
->   no width variants. So a row's `<img>` (gallery `grid`/`masonry`,
->   feature media) gets no `sizes` and no srcset. Variants at upload are a
->   server change of their own (data-spec §8).
+> - **`from <table>` rows: copies made at upload.** A row's image URL
+>   arrives from the backend after the page, not from a build file, so the
+>   build resizes nothing for it. The backend stores each upload fitted to
+>   2048px and at 480, 768 and 1200 wide below that, never upscaled
+>   (data-spec §8, §18.8). The word emits the same `sizes` for a row's
+>   `<img>` (gallery `grid`/`masonry`, feature `rows`/`bento` media) as for
+>   a build image; the target leaves it in place, and the rows runtime
+>   writes the srcset from the row's `variants` — or removes the `sizes` when
+>   the image has none (stored before copies existed). A row's `ratio` tile
+>   gets no cover widening: its file's aspect is unknown at build.
 
 **4 — `content-visibility: auto` with `contain-intrinsic-size` per row.**
 Offscreen rows skip layout and paint entirely, and the intrinsic size comes free

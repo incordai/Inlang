@@ -20,7 +20,8 @@
  *
  *   - a value is only ever text (`textContent`) or an attribute value
  *     (`setAttribute`), and a URL attribute only a safe http(s) URL — a row
- *     is never parsed as markup (data-spec §13, stored XSS);
+ *     is never parsed as markup (data-spec §13, stored XSS); an image's
+ *     srcset only from its row's width copies, each a safe URL (data-spec §8);
  *   - each copy's ids get their own suffix, references rewritten with them;
  *   - the filled list is inserted in one step, so the behaviour runtime's
  *     observer wires it (faq disclosures) like any late content.
@@ -32,7 +33,7 @@
  * Imports only its siblings.
  */
 
-import { attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, type RowsConfig } from './rows-logic.ts';
+import { attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowSrcset, rowText, type RowsConfig } from './rows-logic.ts';
 
 /** What a table's list answers: the generated client's DataResult, narrowed to what this needs. */
 export type RowsResult =
@@ -121,6 +122,7 @@ function fillRow(doc: Document, item: Element, row: unknown, config: RowsConfig,
     : config.types[prop] === 'image' ? image(prop)?.url ?? null : rowText(row, config.map[prop]));
   if (config.label !== null && valueOf(config.label) === null) return null;
   const copy = item.cloneNode(true) as Element;
+  const base = doc.baseURI;
 
   const walker = doc.createTreeWalker(copy, 4 /* NodeFilter.SHOW_TEXT */);
   const markers: Text[] = [];
@@ -152,8 +154,9 @@ function fillRow(doc: Document, item: Element, row: unknown, config: RowsConfig,
     }
   }
 
-  const base = doc.baseURI;
   // An image filled from a row reserves its box: its stored width and height (data-spec §8).
+  // With the word's `sizes`, its copies become the srcset; without copies the `sizes` goes,
+  // as the build drops one it has no srcset for (gallery-spec §7 rule 3).
   for (const img of copy.querySelectorAll('img')) {
     const prop = markerProp(img.getAttribute('src') ?? '');
     const size = prop === null ? null : image(prop);
@@ -161,6 +164,10 @@ function fillRow(doc: Document, item: Element, row: unknown, config: RowsConfig,
       img.setAttribute('width', String(size.width));
       img.setAttribute('height', String(size.height));
     }
+    if (prop === null || !img.hasAttribute('sizes')) continue;
+    const srcset = size ? rowSrcset(size, base) : null;
+    if (srcset === null) img.removeAttribute('sizes');
+    else img.setAttribute('srcset', srcset);
   }
   for (const el of [copy, ...copy.querySelectorAll('*')]) {
     for (const attr of [...el.attributes]) {

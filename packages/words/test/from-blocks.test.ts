@@ -144,11 +144,27 @@ test('feature: media fills from an image field (rows), as a marker the runtime r
   const template = part(out, 'data-az-from-template')!;
   const img = walk(template).find((n) => n.tag === 'img')!;
   assert.equal(img.attrs!.src, fromMark('media'));
-  // data-spec §8: a row's image is the server's one stored file, never
-  // resized at build, so its <img> asks for no srcset.
-  assert.equal(img.attrs!.sizes, undefined, 'a row\'s media carries no sizes');
+  // data-spec §8: a row's image has width copies made at upload; the rows
+  // runtime writes its srcset beside the same `sizes` a build file gets.
   const plain = emit(block(['  feature rows', '    item "A"', '      text "a"', '      media ./a.webp',
     '    item "B"', '      text "b"', '      media ./b.webp'], 'feature'));
   const own = walk(plain).find((n) => n.tag === 'img')!;
   assert.equal(typeof own.attrs!.sizes, 'string', 'CONTROL: a build file\'s media carries the layout\'s sizes');
+  assert.equal(img.attrs!.sizes, own.attrs!.sizes, 'a row\'s media carries the same sizes');
+  assert.equal(img.attrs!.srcset, undefined, 'its srcset is the runtime\'s, from the row');
+  const bento = (lines: string[]) => walk(emit(block(['  feature bento', '    columns 3', ...lines], 'feature'))).find((n) => n.tag === 'img')!.attrs!.sizes;
+  assert.equal(bento(['    from notes', '      title title', '      media photo']),
+    bento(['    item "A"', '      media ./a.webp', '    item "B"', '      media ./b.webp', '    item "C"', '      media ./c.webp']), 'bento too');
+});
+
+test('gallery: a row\'s image carries the layout\'s sizes, the same as a build image; no cover hint (its file is unknown at build)', () => {
+  for (const [head, extra] of [['  gallery grid', ['    columns 4']], ['  gallery grid', ['    ratio 4:3']], ['  gallery masonry', []]] as const) {
+    const rows = emit(block([head, ...extra, '    from notes', '      src photo', '      alt title'], 'gallery'));
+    const row = walk(part(rows, 'data-az-from-template')!).find((n) => n.tag === 'img')!;
+    const plain = emit(block([head, ...extra, '    image ./a.webp', '      alt "A"', '    image ./b.webp', '      alt "B"'], 'gallery'));
+    const own = walk(plain).find((n) => n.tag === 'img')!;
+    assert.equal(typeof own.attrs!.sizes, 'string', `CONTROL ${head} ${extra.join(' ')}`);
+    assert.equal(row.attrs!.sizes, own.attrs!.sizes, `${head} ${extra.join(' ')}`);
+    assert.equal(has(row, 'data-az-cover'), false, 'no cover hint on a row');
+  }
 });

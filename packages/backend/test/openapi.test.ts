@@ -82,7 +82,7 @@ test('type names: one row of each table — never shared between tables, never a
   assert.deepEqual([doc.paths['/data/box'].get.operationId, doc.paths['/data/boxes'].get.operationId], ['listBox', 'listBoxes']);
 });
 
-test('image fields: { url, width, height } in rows, never in a body; GET/PUT/DELETE on their own path as rules allow', () => {
+test('image fields: { url, width, height, variants } in rows, never in a body; GET/PUT/DELETE on their own path as rules allow', () => {
   const doc = JSON.parse(openapi('Shop', tablesOf(`  data products
     name text required
     photo image
@@ -97,13 +97,15 @@ test('image fields: { url, width, height } in rows, never in a body; GET/PUT/DEL
 `), 1));
   const s = doc.components.schemas;
   assert.deepEqual(s.ProductsRow.properties.photo.type, ['object', 'null']);
-  assert.deepEqual(s.ProductsRow.properties.photo.required, ['url', 'width', 'height']);
+  assert.deepEqual(s.ProductsRow.properties.photo.required, ['url', 'width', 'height', 'variants']);
+  assert.deepEqual(s.ProductsRow.properties.photo.properties.variants.items.properties.width.enum, [480, 768, 1200], 'the width copies: the fixed set only');
   assert.ok(!('photo' in s.ProductsRowInput.properties) && !('badge' in s.ProductsRowInput.properties), 'an image is uploaded, never sent as JSON');
   const photo = doc.paths['/data/products/{id}/photo'];
   assert.deepEqual(Object.keys(photo).filter((k) => k !== 'parameters').sort(), ['delete', 'get', 'put']);
   assert.deepEqual(Object.keys(photo.put.requestBody.content), ['application/octet-stream']);
   assert.deepEqual(Object.keys(photo.put.responses).sort(), ['200', '400', '401', '403', '404', '413', '415', '429']);
   assert.deepEqual(Object.keys(photo.get.responses['200'].content), ['image/webp']);
+  assert.deepEqual(photo.get.parameters.map((p: { name: string; schema: { enum?: number[] } }) => [p.name, p.schema.enum ?? null]), [['v', null], ['w', [480, 768, 1200]]]);
   assert.deepEqual(Object.keys(doc.paths['/data/products/{id}/badge']).filter((k) => k !== 'parameters'), ['get'], 'locked: read only');
   assert.deepEqual(Object.keys(doc.paths['/data/gallery/{id}/cover']).filter((k) => k !== 'parameters'), ['get'], 'no edit rule: read only');
 });

@@ -65,7 +65,7 @@ function columnType(d: Database, f: LockField): string {
     case 'ref':
       return d === 'sqlite' ? 'TEXT' : 'VARCHAR(36)';
     case 'image':
-      // The stored file's generated name, `<uuid>.webp` (data-spec §8).
+      // The stored file's generated name, `<uuid>.full.webp` (`<uuid>.webp` before width copies; data-spec §8).
       return d === 'sqlite' ? 'TEXT' : 'VARCHAR(80)';
   }
 }

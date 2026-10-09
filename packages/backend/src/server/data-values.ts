@@ -18,6 +18,7 @@
  */
 
 import { isEmail } from './app.ts';
+import { imageWidths } from './data-images.ts';
 import type { Database } from './env.ts';
 
 export type Who = 'anyone' | 'signedin' | 'owner';
@@ -185,9 +186,11 @@ const NUMERIC: ReadonlySet<FieldType> = new Set(['number', 'money', 'datetime'])
  * The owner's id never leaves the server — `mine` says whether it is the
  * caller. Engines return 64-bit integers as numbers or strings; both become
  * numbers (every stored value is a safe integer). An image is `{ url, width,
- * height }`: `imageBase` is the server's public URL plus the route prefix
+ * height, variants }`: `imageBase` is the server's public URL plus the route prefix
  * (`/data` or `/admin/data`), and the URL's `v` is the stored key's UUID, so
- * a new upload is a new URL and the old one may be cached for good.
+ * a new upload is a new URL and the old one may be cached for good. Its
+ * `variants` are the narrower copies (`…&w=<width>`, data-spec §8), empty
+ * for an image stored before they were made.
  */
 export function outRow(t: Table, row: Record<string, unknown>, user: string | null, imageBase = '/data'): Record<string, unknown> {
   const out: Record<string, unknown> = {
@@ -199,9 +202,16 @@ export function outRow(t: Table, row: Record<string, unknown>, user: string | nu
   for (const f of t.fields) {
     const v = row[f.name];
     if (f.type === 'image') {
-      out[f.name] = typeof v === 'string' && v !== ''
-        ? { url: `${imageBase}/${t.name}/${String(row.id)}/${f.name}?v=${imageVersion(v)}`, width: Number(row[`${f.name}__w`]), height: Number(row[`${f.name}__h`]) }
-        : null;
+      if (typeof v !== 'string' || v === '') {
+        out[f.name] = null;
+        continue;
+      }
+      const url = `${imageBase}/${t.name}/${String(row.id)}/${f.name}?v=${imageVersion(v)}`;
+      const width = Number(row[`${f.name}__w`]);
+      out[f.name] = {
+        url, width, height: Number(row[`${f.name}__h`]),
+        variants: imageWidths(v, width).map((w) => ({ url: `${url}&w=${w}`, width: w })),
+      };
       continue;
     }
     out[f.name] = v === null || v === undefined

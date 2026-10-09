@@ -159,6 +159,19 @@ test('upload sends the file\'s raw bytes with the CSRF header; clear is a DELETE
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('imageSrcset: each width copy and the image at its width; none for an image without copies', async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    const { mod } = await loadClient(() => Response.json({}), IMAGES);
+    const srcset = mod.imageSrcset as (i: unknown) => string | undefined;
+    const url = `https://api.studio.test/data/products/${ID}/photo?v=${ID}`;
+    assert.equal(srcset({ url, width: 1600, height: 1000, variants: [480, 768, 1200].map((w) => ({ url: `${url}&w=${w}`, width: w })) }),
+      `${url}&w=480 480w, ${url}&w=768 768w, ${url}&w=1200 1200w, ${url} 1600w`);
+    assert.equal(srcset({ url, width: 1600, height: 1000, variants: [] }), undefined, 'an image stored before copies: its src alone');
+    assert.ok(!/imageSrcset/.test(dataClient(specOf(DATA).site.data!)), 'CONTROL: none without image fields');
+  } finally { globalThis.fetch = realFetch; }
+});
+
 /** The generated module, loaded with its backend address fixed and fetch recorded. */
 async function loadClient(respond: (url: string, init: RequestInit) => Promise<Response> | Response, data = DATA) {
   const dir = mkdtempSync(join(tmpdir(), 'az-client-'));
@@ -170,8 +183,8 @@ async function loadClient(respond: (url: string, init: RequestInit) => Promise<R
     return respond(url, init);
   }) as typeof fetch;
   type Op = (...a: unknown[]) => Promise<Record<string, unknown>>;
-  const mod = await import(pathToFileURL(join(dir, 'client.ts')).href) as { tables: Record<string, Record<string, Op>>; admin: Record<string, Op> };
-  return { tables: mod.tables, admin: mod.admin, calls };
+  const mod = await import(pathToFileURL(join(dir, 'client.ts')).href) as { tables: Record<string, Record<string, Op>>; admin: Record<string, Op> } & Record<string, unknown>;
+  return { tables: mod.tables, admin: mod.admin, calls, mod };
 }
 
 /** A row id as the server makes one (randomUUID). */

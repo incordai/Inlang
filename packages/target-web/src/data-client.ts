@@ -148,6 +148,18 @@ export interface DataImage {
   readonly url: string;
   readonly width: number;
   readonly height: number;
+  /** Narrower copies of it, widest last (480, 768, 1200 below its width); none for an image stored before copies were made. */
+  readonly variants: readonly { readonly url: string; readonly width: number }[];
+}
+
+/**
+ * An image's \`srcset\` (gallery-spec §7 rule 3): each copy and the image
+ * itself at its width — or undefined when it has no copy, so the <img>
+ * keeps its \`src\` alone. Give it a \`sizes\` saying how wide it is drawn.
+ */
+export function imageSrcset(image: DataImage): string | undefined {
+  if (image.variants.length === 0) return undefined;
+  return [...image.variants, image].map((v) => \`\${v.url} \${v.width}w\`).join(", ");
 }
 ` : ''}
 const BASE: string = import.meta.env.${BACKEND_ENV[0]} ?? "";

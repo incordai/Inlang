@@ -1,7 +1,7 @@
 /**
  * @az server main
- * Purpose: start the backend: config, migrations, store, routes, HTTP server; --migrate --confirm for data steps.
- * Spec: docs/backend-spec.md §8 · docs/data-spec.md §6.3
+ * Purpose: start the backend: config, migrations, store, routes, HTTP server; --migrate --confirm for data steps; --images [--confirm] for the image backfill.
+ * Spec: docs/backend-spec.md §8 · docs/data-spec.md §6.3, §8
  * Exports: (none — entry point)
  * Edit guide: refuse to start on invalid config or an unconfirmed destructive step; never let a handler rejection crash the process.
  * Tests: packages/backend/test/backend.test.ts
@@ -68,18 +68,32 @@ const db: Db = config.setup.database === 'sqlite'
  * `--migrate --confirm <version>`: apply the data steps up to that version,
  * the destructive ones included, then exit (data-spec §6.3). Without
  * `--migrate` the server applies only safe steps and then serves.
+ *
+ * `--images`: count the stored images that have no width copies (data-spec
+ * §8), then exit; `--images --confirm` makes them (the backfill), then
+ * exits. `az backend images <server-dir>` runs these.
  */
-function migrateArgs(argv: readonly string[]): { migrate: boolean; confirm: number } {
+function startArgs(argv: readonly string[]): { migrate: boolean; confirm: number; images: 'count' | 'make' | null } {
   const migrateOnly = argv.includes('--migrate');
+  const imagesOnly = argv.includes('--images');
   const at = argv.indexOf('--confirm');
+  if (imagesOnly) {
+    if (migrateOnly || argv.some((a) => a !== '--images' && a !== '--confirm')) {
+      process.stderr.write('backend: --images goes alone, or with --confirm: node src/main.ts --images --confirm\n');
+      process.exit(1);
+    }
+    return { migrate: false, confirm: 0, images: at >= 0 ? 'make' : 'count' };
+  }
   const raw = at >= 0 ? argv[at + 1] : undefined;
   if (at >= 0 && (!migrateOnly || raw === undefined || !/^[1-9]\d{0,5}$/.test(raw))) {
     process.stderr.write('backend: --confirm takes a step version and goes with --migrate: node src/main.ts --migrate --confirm 3\n');
     process.exit(1);
   }
-  return { migrate: migrateOnly, confirm: raw === undefined ? 0 : Number(raw) };
+  return { migrate: migrateOnly, confirm: raw === undefined ? 0 : Number(raw), images: null };
 }
-const args = migrateArgs(process.argv.slice(2));
+const args = startArgs(process.argv.slice(2));
+/** The backfill starts no new image after this long; a second run resumes (data-spec §8). */
+const IMAGES_RUN_MS = 20 * 60 * 1000;
 
 /**
  * A refusal to migrate is the operator's to act on: its message, then exit —
@@ -136,6 +150,19 @@ if (existsSync(dataFile)) {
   });
   data = api;
   if (images) sweepImages = api.sweepImages;
+  if (args.images !== null) {
+    const r = await api.backfillImages({ confirm: args.images === 'make', deadline: Date.now() + IMAGES_RUN_MS });
+    process.stdout.write(args.images === 'count'
+      ? `backend: ${r.left} stored image(s) have no width copies${r.left > 0 ? ' — make them with: node src/main.ts --images --confirm' : ''}\n`
+      : `backend: gave ${r.widened} stored image(s) their width copies; ${r.skipped} skipped (missing or unreadable)${r.left > 0 ? `; ${r.left} left — run again to continue` : ''}\n`);
+    await db.close();
+    process.exit(0);
+  }
+}
+if (args.images !== null) {
+  process.stdout.write('backend: this server has no data tables, so no stored images\n');
+  await db.close();
+  process.exit(0);
 }
 if (args.migrate) {
   process.stdout.write('backend: migrations are up to date\n');

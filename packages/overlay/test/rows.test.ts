@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, safeUrl,
+  attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowSrcset, rowText, safeUrl,
 } from '../src/runtime/rows-logic.ts';
 
 const MARK = (prop: string) => `\u{E000}${prop}\u{E000}`;
@@ -110,8 +110,8 @@ test('a marker is exactly one prop between the private-use marks', () => {
 
 test('an image field fills by its URL and size; anything else a server should never send is no image', () => {
   const url = 'https://api.shop.test/data/notes/x/photo?v=1';
-  assert.deepEqual(rowImage({ photo: { url, width: 640, height: 480 } }, 'photo'), { url, width: 640, height: 480 });
-  assert.deepEqual(rowImage({ photo: { url, width: -1, height: 1.5 } }, 'photo'), { url, width: 0, height: 0 }, 'a bad size is no size');
+  assert.deepEqual(rowImage({ photo: { url, width: 640, height: 480 } }, 'photo'), { url, width: 640, height: 480, variants: [] }, 'a server from before copies sends none');
+  assert.deepEqual(rowImage({ photo: { url, width: -1, height: 1.5 } }, 'photo'), { url, width: 0, height: 0, variants: [] }, 'a bad size is no size');
   for (const v of [null, 'https://x.test/a.webp', { url: '' }, { url: 5 }, [url], undefined]) {
     assert.equal(rowImage({ photo: v }, 'photo'), null, JSON.stringify(v));
   }
@@ -119,4 +119,25 @@ test('an image field fills by its URL and size; anything else a server should ne
   assert.equal(rowText({ photo: { url, width: 1, height: 1 } }, 'photo'), null, 'CONTROL: an image is never text');
   // The URL still passes the src rule: a javascript: URL from a server is dropped.
   assert.equal(attributeValue('src', MARK('src'), () => rowImage({ p: { url: 'javascript:alert(1)', width: 1, height: 1 } }, 'p')!.url, 'https://shop.test/'), null);
+});
+
+test('a row image\'s srcset: its copies then itself, each a safe URL at its width — or none at all', () => {
+  const url = 'https://api.shop.test/data/notes/x/photo?v=1';
+  const variants = [480, 768, 1200].map((width) => ({ url: `${url}&w=${width}`, width }));
+  const image = rowImage({ photo: { url, width: 1600, height: 1000, variants } }, 'photo')!;
+  assert.deepEqual(image.variants, variants);
+  assert.equal(rowSrcset(image, 'https://shop.test/'), `${url}&w=480 480w, ${url}&w=768 768w, ${url}&w=1200 1200w, ${url} 1600w`);
+  // An image stored before copies: no srcset, its src alone (the CONTROL the browser suite also covers).
+  assert.equal(rowSrcset(rowImage({ photo: { url, width: 1600, height: 1000, variants: [] } }, 'photo')!, 'https://shop.test/'), null);
+  assert.equal(rowSrcset(rowImage({ photo: { url, width: 1600, height: 1000 } }, 'photo')!, 'https://shop.test/'), null);
+  // A set the server did not send whole is no set: one bad copy drops it all.
+  const bad = (vs: unknown[], width = 1600) => rowSrcset(rowImage({ photo: { url, width, height: 1000, variants: vs } }, 'photo')!, 'https://shop.test/');
+  assert.equal(bad([{ url: 'javascript:alert(1)', width: 480 }]), null, 'a script URL');
+  assert.equal(bad([{ url: `${url}&w=768`, width: 768 }, { url: `${url}&w=480`, width: 480 }]), null, 'out of order');
+  assert.equal(bad([{ url: `${url}&w=1200`, width: 1200 }], 1000), null, 'wider than the image: never an upscale');
+  assert.equal(bad(variants, 0), null, 'an image of unknown width');
+  assert.equal(rowSrcset({ url: 'javascript:x', width: 1600, height: 1000, variants }, 'https://shop.test/'), null, 'the image itself unsafe');
+  // Copies that are not a URL and a width are not copies.
+  assert.deepEqual(rowImage({ photo: { url, width: 1600, height: 1000, variants: [{ url: 5, width: 480 }, { url, width: -1 }, 'x', null] } }, 'photo')!.variants, []);
+  assert.equal(attributeValue('srcset', MARK('src'), () => url, 'https://shop.test/'), null, 'CONTROL: a template marker never fills srcset');
 });

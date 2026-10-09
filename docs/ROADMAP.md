@@ -374,8 +374,8 @@ media and cta `split` media ship the same srcset with their own layouts'
 (`min(34vw, 480px)` for three columns on the 1440px container; `full` and
 `reading` stay uncapped). Logos ship one file by decision (fixed height:
 their drawn width is the file's aspect, gallery-spec §7). `from` rows ship
-the backend's one stored size — the upload pipeline makes no width variants
-(data-spec §8). The `3d` hero's poster ships the same srcset in every
+a srcset too: the backend stores 480/768/1200 copies at upload and the rows
+runtime writes them beside the word's `sizes` (data-spec §8, §18.8). The `3d` hero's poster ships the same srcset in every
 variant, with its box's `sizes` (`full` 100vw, uncapped; `split` its column;
 `center`/`stack`/`minimal` the frame), its loading unchanged, and the
 page's preload of it carrying the same srcset and sizes (hero-spec §8,
@@ -384,7 +384,7 @@ word marks the box (a gallery `ratio` tile, the hero's 4:3 and 16:9
 visuals; `full` a height bound, `<height>vh`) and the target multiplies
 each clause by fileAspect / boxAspect, capped at the largest file
 (gallery-spec §7, hero-spec §8; unit, verify:build, and a Chromium check
-at 375×812). Not yet: `orbit`, variants at upload for `from` rows, and a
+at 375×812). Not yet: `orbit`, and a
 `full` header whose copy is taller than its min-height.
 
 **M3 — exit criteria met.** `raw <path>` and `slot <name> <path>` are
@@ -453,6 +453,13 @@ pre-rendered shell (skeleton, status line, Try again, Sign in, noscript),
 rows filled as text — images as checked URLs — by the behaviour runtime
 through the typed client as the visitor — data-spec §18.5; measured in
 `pnpm test` and `pnpm test:data` (three engines, axe in every state).
+Width copies (2026-10-07): uploads are also stored at 480, 768 and 1200 px
+(never upscaled, one decode, the same queue), served as `?w=<width>` under
+the same rule and headers (any other width 404s), listed as `variants`, and
+written as a `from` row image's srcset; images stored earlier keep working
+without one until `az backend images <server-dir> --confirm` backfills them —
+data-spec §18.8; measured in `pnpm test`, `pnpm test:backend-db` and
+`pnpm test:data` (the 480 copy loaded at 375 px).
 Open: gate snapshots of the `from` states; gallery `carousel`, `orbit` and
 `lightbox` with `from` (AZ1214 today).
 

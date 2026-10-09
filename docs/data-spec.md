@@ -569,17 +569,17 @@ implementation over Node's HMAC, a decision of its own.
 then deletes the old file; a crash between leaves an orphan, swept by a
 periodic job comparing the directory to the keys in use.
 
-**One size per upload.** An upload is stored as one file, fitted inside
-2048 px (§18.4); the pipeline makes **no width variants**. So an image a
-`from <table>` row fills in (§10 — gallery `grid`/`masonry` `src`, feature
-`media`) ships that one file, with no `srcset`: the build's resized widths
-(gallery-spec §7 rule 3) are made from build files, and a row's URL comes
-from the server after the page, which no build can see. On a phone, a row's
-image costs up to the 2048 px file where a build image would cost its 480 px
-copy. Variants would be made at upload — the same pinned widths, each a file
-of the row, removed with it, and listed in the API's image value — a change
-to the queue's work per upload and to the sweep, so it is its own piece of
-work, not done yet (§15).
+**Width copies.** An upload is stored fitted inside 2048 px (§18.4) **and**
+at each of 480, 768 and 1200 px wide that is narrower than that — never
+upscaled — in the same queued job, from one decode (as built: §18.8). The
+API's image value lists them: `{ url, width, height, variants: [{ url,
+width }] }`, a copy's URL being the image's with `&w=<width>`. A `from
+<table>` row's image (gallery `grid`/`masonry` `src`, feature `media`)
+gets a `srcset` of its copies beside the `sizes` the word computes for a
+build image (gallery-spec §7 rule 3); the typed client exports
+`imageSrcset(image)` for a `raw` component. An image stored before copies
+existed has `variants: []` and ships its one file with no `srcset` until
+`az backend images <server-dir> --confirm` gives it copies (§18.8).
 
 **Metadata.** Photos from phones carry location (EXIF GPS). Stripping it
 properly means decoding and re-encoding [R22], which needs an image library —
@@ -866,7 +866,7 @@ generated server, as `test:auth` does)
 | **D2 — admin** | `/admin` pages; admin routes; `AZ_ADMIN_EMAILS`; audit table | browser suite admin cases |
 | **D3 — images** | image type, upload/serve, disk storage, orphan sweep — **after Q6** | upload rows of §13 |
 | **D4 — blocks** | `from` on gallery, feature, faq; AZ1260–1269 | browser suite block cases; visual snapshots of skeleton/empty/error |
-| Later | object storage; `file` type (PDF, download-only); snapshot pre-render (`az backend snapshot`); `pricing` from data; a `visible <flag>` table property (rows hidden from the public until switched on); counts/aggregates; CSV import/export; realtime (in-process events, rule-checked per subscriber [R4]; the pooler rule excludes database notifications); many-to-many; API keys; teams; full-text search; image variants; env-tunable limits | each its own spec section first |
+| Later | object storage; `file` type (PDF, download-only); snapshot pre-render (`az backend snapshot`); `pricing` from data; a `visible <flag>` table property (rows hidden from the public until switched on); counts/aggregates; CSV import/export; realtime (in-process events, rule-checked per subscriber [R4]; the pooler rule excludes database notifications); many-to-many; API keys; teams; full-text search; env-tunable limits | each its own spec section first |
 
 ---
 
@@ -1124,6 +1124,46 @@ the busy state is read: focus stays on Save, busy is `aria-disabled`, never
 `disabled`; saved, focus is on the row's Edit button. Save and Remove photo
 are pressed from the keyboard, whose user the kept focus is for: a mouse
 click does not focus a button in WebKit, so a click proves nothing there.
+
+### 18.8 Width copies for row images as built (2026-10-07)
+
+Closes the §8 gap: a `from <table>` row's image shipped the one stored file
+(up to 2048 px) where a build image ships a 480 px copy on a phone.
+Server: `data-images.ts` (copies, placement, removal, sweep, `addWidths`),
+`data-api.ts` (the `w` parameter, `backfillImages`), `data-values.ts`
+(`variants` in the image value), `main.ts` (`--images [--confirm]`),
+`openapi.ts`; CLI `az backend images`; site: `imageSrcset` in the typed
+client, `rowSrcset` in `rows-logic.ts`/`rows.ts`; words: gallery and
+feature keep their `sizes` on a row's `<img>`, and `image-srcset.ts`
+leaves a row's `sizes` for the runtime.
+
+| Decision | Built | Why |
+|---|---|---|
+| Widths | 480, 768, 1200 (`IMAGE_WIDTHS`) below the stored width, plus the stored file (≤ 2048) — never upscaled | The build's widths (gallery-spec §7 rule 3) up to the stored max; 1800 is left out because the stored file, at most 2048, already tops the set |
+| One decode | The original is decoded once (autoOrient, fitted to 2048, 8-bit raw pixels in memory), then encoded to the stored file and each copy, in the **same queued job** | Same limits and decoder allow-list (raw pixels need no loader); the queue still runs one image at a time with 8 waiting and 429 beyond. Measured on a 24 MP JPEG: 155 ms for the old single encode, 220 ms for the four files (+42 %); nine at once through the queue grew RSS by 3–23 MB across runs (CONTROL unqueued: +114–127 MB). The worst wait, 8 queued × ~0.25 s, stays far under the 120 s request timeout, so `queueMax` is unchanged |
+| Names | Key `<uuid>.full.webp`, copies `<uuid>.<width>.webp`; a key from before copies stays `<uuid>.webp` | The key in the row says whether copies exist, with no new column and no migration; `pathOf` serves only a key or a key's listed width — a copy's name is never a key |
+| Atomic | Every file is written to `.tmp` first; only when all are complete are they renamed in, copies first and the key last; any failure removes the parts and whatever was renamed | A row only ever names a key whose files all exist; a crash mid-rename leaves files no row names, which the sweep takes |
+| Removal | `remove(key)` takes the key and every copy; the sweep keeps exactly the files of in-use keys | So replace, clear, row delete (owner and admin), admin clear, cascades and the claim cleanup (rows deleted, files swept) remove every copy |
+| Serving | `GET …/<field>?v=<uuid>&w=<width>`, through the same route: the read rule, `private`, the `v` check and the same headers (CORS, `Vary: Origin`, cache, nosniff, CSP, CORP, security set). `w` must be exactly a listed width of that image (`480`, not `0480`, `480.0` or `+480`), else **404**; `w` twice is `400 bad_query` like `v` | A parameter, not new names: one code path keeps the rule check and headers identical for every copy, and the API hands out complete URLs. Each image has at most four 200 answers, so no query string makes a new cacheable response (no cache-busting amplification) |
+| Client | `DataImage.variants`; `imageSrcset(image)` in `src/data/client.ts`; the rows runtime sets `srcset` from `variants` (each through `safeUrl`, ascending, narrower than the image — one bad copy drops the whole set) beside the word's `sizes`; with no copies it removes `sizes`, as the build does; `width`/`height` stay the stored size | A `srcset` is never filled from a template marker (`attributeValue` still refuses it) |
+| Cover crops | A gallery `ratio` row keeps the box's `sizes`, without the build's cover widening | The file's aspect is unknown at build. Limit: a row file much wider than its tile may load one copy smaller than ideal |
+| Migration | **Backfill**, not lazy generation: `az backend images <server-dir>` counts the images without copies; `--confirm` gives them copies (the server's own `node src/main.ts --images [--confirm]`, run in its folder with its `.env`). The old file is copied byte for byte to `<uuid>.full.webp` (same UUID, so the same URL and cached copies stay right), copies are made through the queue, then the row moves by compare-and-swap from the key it read; a replace or delete meanwhile wins and the backfill's files are removed. Old files are removed 2 s after the last row moved. Rows are read 100 at a time; no image starts after 20 minutes (the CLI kills the child at 25); a second run resumes. A missing or undecodable file is skipped and counted, never named | Lazy generation would put image encodes on anonymous GET requests (CPU on demand for anyone, competing with uploads in the queue) and needs a srcset for images that have no copies yet. The backfill is explicit, bounded, resumable and safe beside a running server. Until it runs, old images keep working: `variants: []`, no srcset, every `w` 404 |
+
+Each test failed on the code before this change (run with the old sources and
+the new tests: 21 failing tests in the seven files) and has a control.
+Proved: `pnpm test` (data-images.test.ts — copies at each width, never
+upscaled, portrait and alpha, clean metadata, a failed placement leaves
+nothing, `remove` and the sweep take every copy, the backfill's byte copy and
+refusals, the queue's 429 for the backfill; data-uploads.test.ts — each copy
+served with the original's headers and CORS, 13 bad widths 404, private
+copies, every delete path, the claim then the sweep, a legacy image, the
+backfill count/deadline/confirm and its compare-and-swap; openapi, client,
+rows-logic, image-srcset and from-blocks tests), `pnpm test:backend-db`
+(COPIES and BACKFILL on PostgreSQL and MySQL), `pnpm test:data` (Chromium
+and Firefox at 375 × 812: a row image's srcset and the word's sizes in a
+`from` gallery and rows block, the browser loading the 480 copy; CONTROL a
+legacy image with no srcset; `az backend images` then `--confirm` through
+the real CLI, after which the same URL has a srcset).
 
 ---
 

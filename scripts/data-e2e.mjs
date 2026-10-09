@@ -7,7 +7,9 @@
  * codes through the browser's own cookie, CORS and CSRF handling; image
  * uploads (data-spec §8) through the client and the admin editor, shown by
  * an <img> across origins, stored without a photo's location, and removed
- * with their row. An account planted under someone else's address loses
+ * with their row; width copies (data-spec §8) as a row image's srcset, the
+ * copy a 375 px phone loads, an image stored before copies shown without
+ * one, and `az backend images --confirm` giving it copies. An account planted under someone else's address loses
  * its rows when the address's owner claims it; a field made public is
  * refused by the CLI until --expose names its table (data-spec §18.7).
  *
@@ -32,16 +34,17 @@ import { request as httpRequest } from 'node:http';
 import { createServer as createHttpsServer, request as httpsRequest } from 'node:https';
 import { createServer as createNetServer } from 'node:net';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { chromium, firefox, webkit } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { CLI, COMPILE_MS, ROOT, WORDS, buildSites } from './visual/pipeline.mjs';
-import { metadataFindings, phoneJpeg, plainJpeg, SVG } from '../packages/backend/test/image-fixtures.ts';
+import { metadataFindings, phoneJpeg, plainJpeg, plainWebp, SVG } from '../packages/backend/test/image-fixtures.ts';
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 import { selfSignedCert } from './lib/self-signed.mjs';
@@ -420,18 +423,21 @@ const stored = () => ({
   files: existsSync(filesDir) ? readdirSync(filesDir).filter((n) => n.endsWith('.webp')).length : 0,
   temp: existsSync(join(filesDir, '.tmp')) ? readdirSync(join(filesDir, '.tmp')).length : 0,
 });
+const sqlitePath = join(serverDir, 'data/test.db');
+/** The server's environment — also what `az backend images` runs it with (data-spec §8). */
+const serverEnv = {
+  PATH: process.env.PATH,
+  AZ_SESSION_SECRET: randomBytes(32).toString('base64url'),
+  AZ_BACKEND_PUBLIC_URL: serverUrl, AZ_PORT: String(serverPort), AZ_ALLOWED_ORIGINS: host.url, AZ_TRUST_PROXY: 'true',
+  AZ_SQLITE_PATH: sqlitePath,
+  AZ_FILES_DIR: filesDir,
+  AZ_EMAIL_FROM: 'Notebook <no-reply@notebook.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(smtp.port),
+  // One admin per signed-in browser, and a listed address nobody verifies.
+  AZ_ADMIN_EMAILS: [...BROWSERS.map((b) => adminEmail(b)), ...BROWSERS.map((b) => `unverified-${b}@notebook.test`)].join(','),
+};
 const child = spawn(process.execPath, ['src/main.ts'], {
   cwd: serverDir,
-  env: {
-    PATH: process.env.PATH,
-    AZ_SESSION_SECRET: randomBytes(32).toString('base64url'),
-    AZ_BACKEND_PUBLIC_URL: serverUrl, AZ_PORT: String(serverPort), AZ_ALLOWED_ORIGINS: host.url, AZ_TRUST_PROXY: 'true',
-    AZ_SQLITE_PATH: join(serverDir, 'data/test.db'),
-    AZ_FILES_DIR: filesDir,
-    AZ_EMAIL_FROM: 'Notebook <no-reply@notebook.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(smtp.port),
-    // One admin per signed-in browser, and a listed address nobody verifies.
-    AZ_ADMIN_EMAILS: [...BROWSERS.map((b) => adminEmail(b)), ...BROWSERS.map((b) => `unverified-${b}@notebook.test`)].join(','),
-  },
+  env: serverEnv,
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 progress.children = [child];
@@ -480,7 +486,7 @@ const uploadVia = (page, id, bytes) => page.evaluate(async ([i, b]) => {
  * across origins, served with the §8 headers; renamed SVG refused; another
  * account refused; deleting the row removes the file.
  */
-async function imageFlow(name, owner, other) {
+async function imageFlow(name, owner, other, b) {
   const made = await use(owner, 'create', { title: `${name} with photo` });
   const up = await uploadVia(owner, made.item.id, await phoneJpeg(640, 320, 6));
   check(`${name}: the owner uploads a phone photo; it comes back rotated, as { url, width, height }`,
@@ -537,15 +543,117 @@ async function imageFlow(name, owner, other) {
   const storiesAxe = await axeViolations(owner);
   check(`${name}: axe finds nothing on the from rows block`, storiesAxe.length === 0, storiesAxe.join(', '));
   await owner.goto(`${host.url}/notes`);
+  await responsiveFlow(b, name, owner, made.item.id, `${name} with photo`);
   const svg = await uploadVia(owner, made.item.id, SVG);
   check(`${name}: an SVG sent as a photo is refused as unsupported_type`, svg.ok === false && svg.code === 'unsupported_type' && svg.field === 'photo', JSON.stringify(svg));
   const theirs = await uploadVia(other, made.item.id, await plainJpeg(20, 20));
   check(`${name}: another account's upload to the row is not_found`, theirs.ok === false && theirs.code === 'not_found', JSON.stringify(theirs));
+  const current = (await use(owner, 'get', made.item.id)).item?.photo;
   const before = stored();
   await use(owner, 'remove', made.item.id);
   const after = stored();
-  const gone = await fetch(up.item.photo.url);
-  check(`${name}: deleting the row removes its file; the url is then not_found`, after.files === before.files - 1 && after.temp === 0 && gone.status === 404, `${JSON.stringify(before)} → ${JSON.stringify(after)}, ${gone.status}`);
+  const gone = await Promise.all([current?.url, ...(current?.variants ?? []).map((v) => v.url)].map(async (u) => (u ? (await fetch(u)).status : 0)));
+  check(`${name}: deleting the row removes its files (the stored file and its three copies); each url is then not_found`, after.files === before.files - 4 && after.temp === 0 && gone.length === 4 && gone.every((st) => st === 404), `${JSON.stringify(before)} → ${JSON.stringify(after)}, ${gone}`);
+}
+
+/** The backfill through the real CLI, against the running server's database and files (data-spec §8). */
+const backfill = (...flags) => spawnSync(process.execPath, [CLI, 'backend', 'images', serverDir, ...flags], {
+  env: serverEnv, encoding: 'utf8', timeout: COMPILE_MS, killSignal: 'SIGKILL',
+});
+
+/** Every <img> a `from` block on the page filled, once each has loaded (bounded by Playwright's own timeout). */
+async function rowImages(page, word) {
+  await settled(page, word);
+  await page.waitForFunction((w) => [...document.querySelectorAll(`section.az-${w} [data-az-from-rows] img`)].every((i) => i.complete && i.naturalWidth > 0), word);
+  return page.evaluate((w) => ({
+    template: document.querySelector(`section.az-${w} [data-az-from-template] img`)?.getAttribute('sizes') ?? null,
+    imgs: [...document.querySelectorAll(`section.az-${w} [data-az-from-rows] img`)].map((i) => ({
+      alt: i.alt, item: i.closest('.az-feature-item')?.querySelector('.az-feature-item-title')?.textContent ?? '',
+      srcset: i.getAttribute('srcset'), sizes: i.getAttribute('sizes'), src: i.getAttribute('src'),
+      current: i.currentSrc, natural: i.naturalWidth, w: i.getAttribute('width'), h: i.getAttribute('height'),
+    })),
+  }), word);
+}
+
+/**
+ * Width copies (data-spec §8) in the browser, on imageFlow's row (`id`,
+ * titled `title`): a fresh 1600 px upload gives the row image of a `from`
+ * gallery and a `from` rows block a srcset of its copies beside the word's
+ * own `sizes`, and on a 375 px phone the browser loads a copy, not the stored
+ * file. CONTROL: a row whose image is stored the way the server stored one
+ * before copies (`<uuid>.webp`, inserted as such) shows with no srcset and no
+ * sizes; `az backend images --confirm` then gives it copies under the same
+ * URL. Only two writes per browser (the upload, the legacy row's delete):
+ * every browser shares one address and its write limit (data-spec §5.5).
+ */
+async function responsiveFlow(b, name, owner, id, title) {
+  const up = await uploadVia(owner, id, await plainJpeg(1600, 1000));
+  const url = up.item?.photo?.url;
+  check(`${name} copies: an upload lists its 480, 768 and 1200 copies`,
+    up.ok === true && JSON.stringify(up.item.photo.variants) === JSON.stringify([480, 768, 1200].map((w) => ({ url: `${url}&w=${w}`, width: w }))),
+    JSON.stringify(up.item?.photo).slice(0, 300));
+  // The control: a row with an image as the server stored one before copies existed.
+  const legacyId = randomUUID();
+  const legacyKey = `${randomUUID()}.webp`;
+  writeFileSync(join(filesDir, legacyKey), await plainWebp(1600, 1000));
+  const sql = new DatabaseSync(sqlitePath);
+  try {
+    const { owner: ownerId } = sql.prepare('SELECT owner FROM azd_notes WHERE id = ?').get(id);
+    sql.prepare('INSERT INTO azd_notes (id, owner, created, updated, title, photo, photo__w, photo__h) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(legacyId, ownerId, Date.now(), Date.now(), `${name} legacy`, legacyKey, 1600, 1000);
+  } finally {
+    sql.close();
+  }
+  const legacyUrl = `${serverUrl}/data/notes/${legacyId}/photo?v=${legacyKey.slice(0, 36)}`;
+  const srcsetOf = (u) => `${u}&w=480 480w, ${u}&w=768 768w, ${u}&w=1200 1200w, ${u} 1600w`;
+  // A fresh phone each time: no image cached from an earlier load can stand in for the copy.
+  const onPhone = async (path, word) => {
+    const ctx = await watchedContext(b, csp, { ...CONTEXT, viewport: { width: 375, height: 812 }, deviceScaleFactor: 1 });
+    try {
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => errors.push(`${name} phone: ${e.message}`));
+      await page.goto(`${host.url}${path}`);
+      const seen = await rowImages(page, word);
+      return { ...seen, axe: await axeViolations(page) };
+    } finally {
+      closed = (await closeWithin(ctx, CLOSE_MS, `${name} phone context close`)) && closed;
+    }
+  };
+
+  const g = await onPhone('/photos', 'gallery');
+  const gw = g.imgs.find((i) => i.alt === title);
+  const gl = g.imgs.find((i) => i.alt === `${name} legacy`);
+  check(`${name} copies: a from gallery's row image has a srcset of its copies and the word's sizes`,
+    gw?.srcset === srcsetOf(url) && typeof g.template === 'string' && g.template !== '' && gw.sizes === g.template && gw.w === '1600' && gw.h === '1000',
+    JSON.stringify({ template: g.template, gw }));
+  check(`${name} copies: at 375 px the browser loads the 480 copy, not the 1600 px file`, gw?.current === `${url}&w=480`, JSON.stringify(gw?.current));
+  check(`${name} copies: CONTROL — an image stored before copies has no srcset and no sizes, and shows its one file`,
+    gl !== undefined && gl.srcset === null && gl.sizes === null && gl.current === legacyUrl && gl.natural === 1600, JSON.stringify(gl));
+  check(`${name} copies: axe finds nothing on the phone gallery`, g.axe.length === 0, g.axe.join(', '));
+
+  const s = await onPhone('/stories', 'feature');
+  const sw = s.imgs.find((i) => i.item === title);
+  check(`${name} copies: a from rows block's media has the srcset and the word's sizes; the phone loads a copy`,
+    sw?.srcset === srcsetOf(url) && typeof s.template === 'string' && s.template !== '' && sw.sizes === s.template && /&w=(480|768)$/.test(sw.current),
+    JSON.stringify({ template: s.template, sw }));
+
+  const counted = backfill();
+  check(`${name} backfill: az backend images counts the image stored before copies, and changes nothing`,
+    counted.status === 0 && /backend: 1 stored image\(s\) have no width copies — make them with: node src\/main\.ts --images --confirm/.test(counted.stdout)
+      && existsSync(join(filesDir, legacyKey)), (counted.stdout + counted.stderr).trim());
+  const made = backfill('--confirm');
+  check(`${name} backfill: with --confirm it gives it copies; the old file is removed`,
+    made.status === 0 && /backend: gave 1 stored image\(s\) their width copies; 0 skipped/.test(made.stdout) && !existsSync(join(filesDir, legacyKey))
+      && readdirSync(filesDir).filter((n) => n.startsWith(legacyKey.slice(0, 36))).length === 4, (made.stdout + made.stderr).trim());
+  const after = (await onPhone('/photos', 'gallery')).imgs.find((i) => i.alt === `${name} legacy`);
+  check(`${name} backfill: the same URL now has a srcset, and the phone loads its 480 copy`,
+    after?.src === legacyUrl && after.srcset === srcsetOf(legacyUrl) && after.current === `${legacyUrl}&w=480`, JSON.stringify(after));
+
+  await owner.goto(`${host.url}/notes`);
+  const before = stored();
+  await use(owner, 'remove', legacyId);
+  const left = stored();
+  check(`${name} copies: deleting the backfilled row removes its four files`, left.files === before.files - 4 && left.temp === 0, `${JSON.stringify(before)} → ${JSON.stringify(left)}`);
 }
 
 /** Call the page's own typed client: `client.notes.<op>(...args)`. */
@@ -1180,7 +1288,7 @@ try {
       check(`${name}: its owner deletes it`, removed.ok === true);
       const gone = await use(owner, 'get', made.item.id);
       check(`${name}: then it is not_found`, gone.ok === false && gone.code === 'not_found');
-      await imageFlow(name, owner, other);
+      await imageFlow(name, owner, other, b);
       await adminFlow(b, name, owner);
       await squatFlow(b, name, other, otherEmail);
     } finally {

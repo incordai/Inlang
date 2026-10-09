@@ -82,6 +82,15 @@ test('az backend init: .env with a fresh secret, owner-only, never overwritten',
   assert.ok(existsSync(envFile));
 });
 
+test('az backend images refuses a folder that is not a built server, and any flag but --confirm', () => {
+  const empty = az('backend', 'images', mkdtempSync(join(tmpdir(), 'az-be-empty-')), '--confirm');
+  assert.equal(empty.status, 1);
+  assert.match(empty.stderr, /no built server in .* — point at the server\/ folder az build wrote/);
+  const flag = az('backend', 'images', mkdtempSync(join(tmpdir(), 'az-be-empty-')), '--yes');
+  assert.equal(flag.status, 2);
+  assert.match(flag.stderr, /try: az backend images <server-dir> \[--confirm\]/);
+});
+
 test('az backend init refuses a folder that is not a generated server', () => {
   const r = az('backend', 'init', mkdtempSync(join(tmpdir(), 'az-be-empty-')));
   assert.notEqual(r.status, 0);

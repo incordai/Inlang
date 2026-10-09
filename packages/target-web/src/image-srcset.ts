@@ -29,7 +29,10 @@
  *   - no resizer (the playground, unit tests), a file the build cannot read
  *     or resize, or an original no wider than the smallest width: no srcset,
  *     and the `sizes` is removed — it means nothing alone, so the page is
- *     exactly what it was before this rule existed.
+ *     exactly what it was before this rule existed;
+ *   - an image a `from` row fills in (its `src` a row marker) keeps its
+ *     `sizes` and gets no srcset here: the server makes its widths at upload
+ *     and the rows runtime writes them (data-spec §8).
  *
  * Cover crops. `sizes` says how wide the BOX is; an image drawn with
  * `object-fit: cover` in a box of another shape is drawn wider than the box
@@ -46,7 +49,7 @@
  * The hint is always removed; it means nothing in the page.
  */
 
-import type { EmittedNode } from '../../core/src/emit-contract.ts';
+import { isFromMark, type EmittedNode } from '../../core/src/emit-contract.ts';
 import type { SizeOf } from './image-dims.ts';
 
 /** §7 rule 3: the widths generated at build, px. */
@@ -170,6 +173,9 @@ function srcsetImg(
   const { [COVER_ATTR]: cover, ...attrs } = node.attrs ?? {};
   if (attrs.sizes === undefined) return cover === undefined ? node : { ...node, attrs };
   const src = attrs.src;
+  // A `from` row's image (data-spec §8, §10): its file is the server's, so
+  // its srcset is the rows runtime's to write from the row; the `sizes` stays for it.
+  if (src !== undefined && isFromMark(src)) return { ...node, attrs };
   const path = src === undefined ? undefined : srcs.get(src);
   const size = src === undefined || !sizeOf ? null : sizeOf(src);
   const widths = size ? srcsetWidths(size.width) : [];

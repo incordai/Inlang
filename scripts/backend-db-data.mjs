@@ -4,7 +4,8 @@
  * migrators at once, the rules and values through the data routes, the
  * admin routes and their audit (§11), image fields (§8: three columns
  * through every migration kind, upload, replace under a race, clear, delete
- * and the orphan sweep), a
+ * and the orphan sweep; width copies through every delete path, the claim
+ * and the sweep; the backfill and its compare-and-swap), a
  * unique race, foreign keys, keyset order, search case per engine — and
  * the claim of a planted account (its rows go, in one transaction), an
  * exposure step with no SQL, and
@@ -13,7 +14,7 @@
  * inside its containers.
  */
 
-import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -371,7 +372,7 @@ export async function dataSuite(engine, db, openAgain, check, info) {
   const row = await db.get(`SELECT ${['picture', 'picture__w', 'picture__h'].map((c) => (engine === 'mysql' ? `\`${c}\`` : `"${c}"`)).join(', ')} FROM ${engine === 'mysql' ? '`azd_pics`' : '"azd_pics"'} WHERE id = ?`, [pid]);
   check(`${engine} IMAGES: upload stores the key and size; the API answers { url, width, height }`,
     up.status === 200 && up.body.item.picture.width === 300 && Number(row.picture__w) === 300 && Number(row.picture__h) === 200
-      && /^[0-9a-f-]{36}\.webp$/.test(row.picture) && up.body.item.picture.url === `https://api.data.test/data/pics/${pid}/picture?v=${row.picture.slice(0, 36)}`,
+      && /^[0-9a-f-]{36}\.full\.webp$/.test(row.picture) && up.body.item.picture.url === `https://api.data.test/data/pics/${pid}/picture?v=${row.picture.slice(0, 36)}`,
     JSON.stringify([up.status, row]));
   const both = await Promise.all([300, 400].map(async (w) => send('PUT', `/data/pics/${pid}/picture`, users[0], await plainJpeg(w, 100))));
   const after = await db.get(`SELECT ${engine === 'mysql' ? '`picture`' : '"picture"'} AS k FROM ${engine === 'mysql' ? '`azd_pics`' : '"azd_pics"'} WHERE id = ?`, [pid]);
@@ -395,6 +396,89 @@ export async function dataSuite(engine, db, openAgain, check, info) {
   writeFileSync(temp, await plainJpeg(10, 10));
   await images.store(temp);
   check(`${engine} IMAGES: the sweep keeps a young orphan (its row may be on the way)`, (await gallery.sweepImages()) === 0 && stored().length === 1);
+
+  // ---- width copies (data-spec §8), on this engine -------------------------
+  {
+    const Q = (n) => (engine === 'mysql' ? `\`${n}\`` : `"${n}"`);
+    const keyAt = async (id) => (await db.get(`SELECT ${Q('picture')} AS k FROM ${Q('azd_pics')} WHERE id = ?`, [id]))?.k ?? null;
+    const filesOf = (key) => readdirSync(dir).filter((n) => n.startsWith(String(key).slice(0, 36))).sort();
+    const wide = (await send('POST', '/data/pics', users[0])).body.item.id;
+    const big = await send('PUT', `/data/pics/${wide}/picture`, users[0], await plainJpeg(1600, 1000));
+    const bigKey = await keyAt(wide);
+    check(`${engine} COPIES: an upload lists its 480, 768 and 1200 copies; four files under one key`,
+      big.status === 200 && JSON.stringify(big.body.item.picture.variants.map((v) => v.width)) === '[480,768,1200]'
+        && /^[0-9a-f-]{36}\.full\.webp$/.test(bigKey) && filesOf(bigKey).length === 4,
+      JSON.stringify([big.status, big.body.item?.picture, filesOf(bigKey)]));
+    const readW = (id, v, w) => gallery.handle({ method: 'GET', url: new URL(`/data/pics/${id}/picture?v=${v}${w === undefined ? '' : `&w=${w}`}`, 'http://x'), ip: '10.0.2.3', user: async () => null });
+    const okW = await readW(wide, bigKey.slice(0, 36), '768');
+    check(`${engine} COPIES: a listed width is served shared (immutable), a width the image has not is 404`,
+      okW.status === 200 && okW.file?.shared === true && okW.file.path.endsWith('.768.webp')
+        && (await readW(wide, bigKey.slice(0, 36), '500')).status === 404 && (await readW(wide, bigKey.slice(0, 36), '2048')).status === 404,
+      JSON.stringify(okW));
+    await send('PUT', `/data/pics/${wide}/picture`, users[0], await plainJpeg(1600, 1000));
+    const replacedKey = await keyAt(wide);
+    check(`${engine} COPIES: a replace removes all four of the old key's files`, filesOf(bigKey).length === 0 && filesOf(replacedKey).length === 4);
+    await send('DELETE', `/data/pics/${wide}/picture`, users[0]);
+    check(`${engine} COPIES: a clear removes all four`, filesOf(replacedKey).length === 0 && (await keyAt(wide)) === null);
+    await send('PUT', `/data/pics/${wide}/picture`, users[0], await plainJpeg(1600, 1000));
+    const rowKey = await keyAt(wide);
+    await send('DELETE', `/data/pics/${wide}`, users[0]);
+    check(`${engine} COPIES: a row delete removes all four`, filesOf(rowKey).length === 0);
+
+    // The backfill: an image stored before copies (`<uuid>.webp`) gets them; the row moves only from the key it read.
+    const legacyRow = (await send('POST', '/data/pics', users[0])).body.item.id;
+    const legacyKey = `${randomUUID()}.webp`;
+    {
+      const temp = images.tempPath();
+      writeFileSync(temp, await plainJpeg(1600, 1000));
+      const made = await images.store(temp);
+      // The stored-max file of a fresh upload, renamed to the legacy pattern: a WebP this module wrote.
+      writeFileSync(join(dir, legacyKey), readFileSync(join(dir, made.key)));
+      await images.remove(made.key);
+    }
+    await db.run(`UPDATE ${Q('azd_pics')} SET ${Q('picture')} = ?, ${Q('picture__w')} = ?, ${Q('picture__h')} = ? WHERE id = ?`, [legacyKey, 1600, 1000, legacyRow]);
+    const legacyItem = (await send('GET', `/data/pics/${legacyRow}`, null)).body.item.picture;
+    check(`${engine} BACKFILL: an image stored before copies lists none and keeps its url`, Array.isArray(legacyItem?.variants) && legacyItem.variants.length === 0
+      && legacyItem.url.endsWith(`?v=${legacyKey.slice(0, 36)}`), JSON.stringify(legacyItem));
+    const counted = await gallery.backfillImages({ confirm: false, deadline: Infinity });
+    check(`${engine} BACKFILL: without confirm it counts and changes nothing`, counted.left === 1 && counted.widened === 0 && (await keyAt(legacyRow)) === legacyKey, JSON.stringify(counted));
+    const made = await gallery.backfillImages({ confirm: true, deadline: Infinity, settleMs: 0 });
+    const movedKey = await keyAt(legacyRow);
+    const after2 = (await send('GET', `/data/pics/${legacyRow}`, null)).body.item.picture;
+    check(`${engine} BACKFILL: with confirm the row moves to <uuid>.full.webp, the same url, three copies; the old file is gone`,
+      made.widened === 1 && movedKey === `${legacyKey.slice(0, 36)}.full.webp` && after2.url === legacyItem.url
+        && after2.variants.length === 3 && !existsSync(join(dir, legacyKey)) && filesOf(movedKey).length === 4,
+      JSON.stringify([made, movedKey, filesOf(movedKey)]));
+    // A replace while the backfill works wins (compare-and-swap on this engine).
+    const raceRow = (await send('POST', '/data/pics', users[0])).body.item.id;
+    const raceKey = `${randomUUID()}.webp`;
+    writeFileSync(join(dir, raceKey), readFileSync(join(dir, movedKey)));
+    await db.run(`UPDATE ${Q('azd_pics')} SET ${Q('picture')} = ?, ${Q('picture__w')} = ?, ${Q('picture__h')} = ? WHERE id = ?`, [raceKey, 1600, 1000, raceRow]);
+    const racing = { ...images, addWidths: async (k) => {
+      const r = await images.addWidths(k);
+      await send('PUT', `/data/pics/${raceRow}/picture`, users[0], await plainJpeg(900, 600));
+      return r;
+    } };
+    const raced = await createData({ db, tables: pics.tables, images: racing }).backfillImages({ confirm: true, deadline: Infinity, settleMs: 0 });
+    const winner = await keyAt(raceRow);
+    check(`${engine} BACKFILL: a replace during it wins; the backfill's own files are removed`,
+      raced.widened === 0 && winner !== raceKey && /\.full\.webp$/.test(winner) && filesOf(raceKey).length === 0 && filesOf(winner).length === 3,
+      JSON.stringify([raced, winner, filesOf(raceKey)]));
+
+    // The claim cleanup: a planted account's rows go in one transaction; the sweep then takes every copy.
+    const planter = randomUUID();
+    await db.run('INSERT INTO az_users (id, email, name, password_hash, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 1, 1)', [planter, `pics-${engine}@data.test`, 'Planted', 'planted-hash']);
+    const plantedPic = (await send('POST', '/data/pics', planter)).body.item.id;
+    await send('PUT', `/data/pics/${plantedPic}/picture`, planter, await plainJpeg(1600, 1000));
+    const plantedKey = await keyAt(plantedPic);
+    const picClaimer = createStore(db, Buffer.alloc(32, 9), Date.now, undefined, ownedRowDeletes(engine, pics.tables));
+    const claimedPics = await picClaimer.claimUnverified(planter);
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    for (const n of filesOf(plantedKey)) utimesSync(join(dir, n), old, old);
+    const swept = await gallery.sweepImages();
+    check(`${engine} COPIES: the claim deletes the planted row; the sweep then removes all four of its files`,
+      claimedPics === true && (await keyAt(plantedPic)) === null && swept === 4 && filesOf(plantedKey).length === 0, `${claimedPics} ${swept} ${filesOf(plantedKey)}`);
+  }
 
   if (engine === 'postgres') {
     await db.run(`INSERT INTO azd_items (id, owner, created, updated, name, price)

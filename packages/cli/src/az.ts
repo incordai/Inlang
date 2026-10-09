@@ -22,6 +22,7 @@ import {
   readFileSync, readdirSync, writeFileSync, existsSync, realpathSync, statSync,
   openSync, fstatSync, readSync, closeSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -447,6 +448,9 @@ const USAGE = `az — words to a website
   az backend plan <file.az>        show the data schema step the file needs
   az backend schema <file.az> [--rename a=b] [--drop x] [--unique t.f] [--expose t]
                                    record that step in <file>.data.json
+  az backend images <server-dir> [--confirm]
+                                   count stored images without width copies;
+                                   with --confirm, make them
   az mcp   [--root dir]            serve these tools to an AI agent (MCP, stdio)
   az explain <term...>             one line per term: az explain hero center
   az doctor [file.az] [--out dir] [--json]
@@ -476,8 +480,9 @@ function runBackend(sub: string, rest: string[]): number {
       ? runDataPlan(rest[0], manifests, io)
       : runDataSchema(rest[0], manifests, rest.slice(1), io);
   }
+  if (sub === 'images' && rest[0]) return runBackendImages(resolve(rest[0]), rest.slice(1));
   if (sub !== 'init' || !rest[0]) {
-    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az or az backend schema site.az\n');
+    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az, az backend schema site.az or az backend images <server-dir>\n');
     return EXIT.config;
   }
   const r = initBackendEnv(resolve(rest[0]));
@@ -487,6 +492,38 @@ function runBackend(sub: string, rest: string[]): number {
   }
   process.stdout.write(`az: wrote ${r.path} (owner read/write only) with a fresh AZ_SESSION_SECRET — fill in the empty values\n`);
   return EXIT.ok;
+}
+
+/**
+ * The server's backfill (`--images`) is given this long: it starts no image
+ * after 20 minutes (main.ts IMAGES_RUN_MS), and one image is at most a few
+ * seconds. Past it the child is killed; a second run resumes.
+ */
+const IMAGES_CHILD_MS = 25 * 60 * 1000;
+
+/**
+ * `az backend images <server-dir> [--confirm]` (data-spec §8): the built
+ * server's own backfill, run in its folder so it reads its `.env`, its
+ * database and its files — the server does the work, this only starts it.
+ * Without --confirm it counts; with it, it makes the width copies.
+ */
+function runBackendImages(dir: string, flags: readonly string[]): number {
+  if (flags.some((f) => f !== '--confirm')) {
+    process.stderr.write('az: try: az backend images <server-dir> [--confirm]\n');
+    return EXIT.config;
+  }
+  if (!existsSync(join(dir, 'az.config.json')) || !existsSync(join(dir, 'src/main.ts'))) {
+    process.stderr.write(`az: no built server in ${dir} — point at the server/ folder az build wrote\n`);
+    return EXIT.missing;
+  }
+  const r = spawnSync(process.execPath, ['src/main.ts', '--images', ...(flags.includes('--confirm') ? ['--confirm'] : [])], {
+    cwd: dir, stdio: 'inherit', timeout: IMAGES_CHILD_MS, killSignal: 'SIGKILL',
+  });
+  if (r.error || r.signal) {
+    process.stderr.write(`az: the backfill stopped (${r.signal ?? r.error?.name}) — what it finished is kept; run it again to continue\n`);
+    return EXIT.missing;
+  }
+  return r.status === 0 ? EXIT.ok : EXIT.missing;
 }
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;

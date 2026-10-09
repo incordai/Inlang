@@ -31,7 +31,29 @@ import { BodyError, createLimiter } from './http.ts';
 import { adminCount, adminSelectList, adminSelectOne, cursorOf, LIMIT_DEFAULT, LIMIT_MAX, parseQuery, QueryError, selectList, selectOne } from './data-query.ts';
 import { isEmail } from './app.ts';
 import { checkValue, imageVersion, isUuid, outRow, physical, q, storedDefault, type Field, type Stored, type Table, type Who } from './data-values.ts';
-import { ImageError, type Images, type StoredImage } from './data-images.ts';
+import { IMAGE_WIDTHS, ImageError, imageWidths, type Images, type StoredImage } from './data-images.ts';
+
+/** An image read's parameters: the upload it names, and the width copy asked for (NaN: a width no image has). */
+interface ImageParams { readonly v: string | undefined; readonly w: number | undefined }
+
+/** What the image backfill did or, without `confirm`, would do (data-spec §8, `az backend images`). */
+export interface BackfillReport {
+  /** Images given their width copies (with `confirm`), or 0. */
+  readonly widened: number;
+  /** Images still without copies: all of them without `confirm`; past the deadline, the rest. */
+  readonly left: number;
+  /** Rows whose file is missing or does not decode: left as they are, named in the log by count only. */
+  readonly skipped: number;
+}
+
+/** Rows read per backfill page: memory stays one page's worth however large the table. */
+const BACKFILL_PAGE = 100;
+/**
+ * A read that found an old key just before the backfill moved its row opens
+ * the file right after; old files are removed this long after the last row
+ * moved, so none of those reads finds its file gone.
+ */
+const BACKFILL_SETTLE_MS = 2000;
 
 /** A full longtext is up to 40 KB of UTF-8; auth routes keep 16 KB (data-spec §5.2). */
 export const DATA_BODY_LIMIT = 64 * 1024;
@@ -126,8 +148,16 @@ export interface DataDeps {
 const AUDIT_ACTIONS = ['create', 'edit', 'delete'] as const;
 type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
-/** The routes, and the periodic orphan sweep for image files (data-spec §8). */
-export type DataApi = DataRoutes & { sweepImages(): Promise<number> };
+/**
+ * The routes, the periodic orphan sweep for image files, and the backfill
+ * that gives images stored before width copies existed their copies
+ * (data-spec §8). `deadline` is a time (`now()` scale) after which no new
+ * image is started; what is left is counted, and a second run resumes.
+ */
+export type DataApi = DataRoutes & {
+  sweepImages(): Promise<number>;
+  backfillImages(opts: { readonly confirm: boolean; readonly deadline: number; readonly settleMs?: number }): Promise<BackfillReport>;
+};
 
 export function createData(deps: DataDeps): DataApi {
   const { db } = deps;
@@ -337,23 +367,35 @@ export function createData(deps: DataDeps): DataApi {
     }
   }
 
-  /** The image itself, if the caller may read its row (data-spec §8); `v` must name the current upload. */
-  function imageFile(t: Table, f: Field, key: unknown, v: string | undefined, admin: boolean): Result {
+  /**
+   * The image itself, if the caller may read its row (data-spec §8); `v`
+   * must name the current upload, and `w`, when given, one of the widths
+   * this image has a copy at (imageWidths) — any other width is 404 like a
+   * stale `v`, so no query string makes a new answer to cache.
+   */
+  function imageFile(t: Table, f: Field, row: Record<string, unknown> | undefined, p: ImageParams, admin: boolean): Result {
+    const key = row?.[f.name];
     if (typeof key !== 'string') return NOT_FOUND;
-    const path = images!.pathOf(key);
-    if (path === null || (v !== undefined && v !== imageVersion(key))) return NOT_FOUND;
-    const shared = !admin && v !== undefined && t.rules.read.includes('anyone') && !f.private;
+    if (p.w !== undefined && !imageWidths(key, Number(row![`${f.name}__w`])).includes(p.w)) return NOT_FOUND;
+    const path = images!.pathOf(key, p.w);
+    if (path === null || (p.v !== undefined && p.v !== imageVersion(key))) return NOT_FOUND;
+    const shared = !admin && p.v !== undefined && t.rules.read.includes('anyone') && !f.private;
     return { status: 200, file: { path, type: 'image/webp', shared } };
   }
 
-  /** `v` once, or nothing: the only parameter an image read takes. */
-  function versionParam(params: URLSearchParams): { ok: true; v: string | undefined } | { ok: false; result: Result } {
-    let v: string | undefined;
+  /**
+   * `v` and `w`, each at most once, or nothing: the only parameters an image
+   * read takes. `w` is a width exactly as IMAGE_WIDTHS writes it (`480`, not
+   * `0480` or `480.0`); any other value is `NaN`, which no image has.
+   */
+  function imageParams(params: URLSearchParams): { ok: true; params: ImageParams } | { ok: false; result: Result } {
+    const seen: Partial<Record<'v' | 'w', string>> = {};
     for (const [k, value] of params) {
-      if (k !== 'v' || v !== undefined) return { ok: false, result: fail(400, 'bad_query', k) };
-      v = value;
+      if ((k !== 'v' && k !== 'w') || seen[k] !== undefined) return { ok: false, result: fail(400, 'bad_query', k) };
+      seen[k] = value;
     }
-    return { ok: true, v };
+    const w = seen.w === undefined ? undefined : IMAGE_WIDTHS.find((x) => String(x) === seen.w) ?? Number.NaN;
+    return { ok: true, params: { v: seen.v, w } };
   }
 
   /**
@@ -417,17 +459,17 @@ export function createData(deps: DataDeps): DataApi {
   /** The image routes: GET by the read rule; PUT and DELETE edit the owner's row (an admin's: any row). */
   async function imageRoute(t: Table, f: Field, id: string, req: DataRequest, admin: string | null): Promise<Result> {
     if (req.method === 'GET') {
-      const p = versionParam(req.url.searchParams);
+      const p = imageParams(req.url.searchParams);
       if (!p.ok) return p.result;
       if (admin !== null) {
         const s = adminSelectOne(d, t, id);
-        return imageFile(t, f, (await db.get(s.sql, s.params))?.[f.name], p.v, true);
+        return imageFile(t, f, await db.get(s.sql, s.params), p.params, true);
       }
       const user = await req.user();
       const g = grant(t.rules.read, user);
       if (!g.ok) return g.result;
       const s = selectOne(d, t, id, user, g.ownerOnly);
-      return imageFile(t, f, (await db.get(s.sql, s.params))?.[f.name], p.v, false);
+      return imageFile(t, f, await db.get(s.sql, s.params), p.params, false);
     }
     const stray = req.url.searchParams.keys().next().value;
     if (stray !== undefined) return fail(400, 'bad_query', stray);
@@ -733,9 +775,75 @@ export function createData(deps: DataDeps): DataApi {
     return images.sweep(inUse);
   }
 
+  /**
+   * The backfill (data-spec §8): every image whose key is from before width
+   * copies (`<uuid>.webp`) gets them, one at a time through the image queue.
+   * The row is moved to the new key only if it still names the old one
+   * (compare-and-swap, as an upload does), so a replace, clear or delete
+   * running at the same time wins and the new files are removed. The URL
+   * keeps its `v` — the same UUID — so a cached copy stays right. Old files
+   * are removed after the last row moved (BACKFILL_SETTLE_MS later). Rows are
+   * read a page at a time by id; nothing is started past `deadline`.
+   */
+  async function backfillImages(opts: { readonly confirm: boolean; readonly deadline: number; readonly settleMs?: number }): Promise<BackfillReport> {
+    if (!images) return { widened: 0, left: 0, skipped: 0 };
+    let [widened, left, skipped] = [0, 0, 0];
+    const moved: string[] = [];
+    for (const t of tables.values()) {
+      const table = q(d, physical(t.name));
+      for (const f of t.fields.filter((x) => x.type === 'image')) {
+        const col = q(d, f.name);
+        const old = `${col} IS NOT NULL AND ${col} NOT LIKE '%.full.webp'`;
+        if (!opts.confirm || now() > opts.deadline) {
+          left += Number((await db.get(`SELECT COUNT(*) AS n FROM ${table} WHERE ${old}`, []))?.n ?? 0);
+          continue;
+        }
+        let after = '';
+        for (;;) {
+          const page = await db.all(
+            `SELECT ${q(d, 'id')} AS id, ${col} AS k FROM ${table} WHERE ${old} AND ${q(d, 'id')} > ? ORDER BY ${q(d, 'id')} LIMIT ${BACKFILL_PAGE}`, [after]);
+          for (const row of page) {
+            const [id, key] = [String(row.id), String(row.k)];
+            after = id;
+            if (now() > opts.deadline) {
+              left++;
+              continue;
+            }
+            let stored: StoredImage | null;
+            try {
+              stored = await images.addWidths(key);
+            } catch (e) {
+              if (!(e instanceof ImageError)) throw e;
+              stored = null;
+            }
+            if (stored === null) {
+              skipped++;
+              continue;
+            }
+            const n = await db.run(`UPDATE ${table} SET ${col} = ? WHERE ${q(d, 'id')} = ? AND ${col} = ?`, [stored.key, id, key]);
+            if (n > 0) {
+              widened++;
+              moved.push(key);
+            } else {
+              await removeFiles([stored.key]);
+            }
+          }
+          if (page.length < BACKFILL_PAGE) break;
+        }
+      }
+    }
+    if (moved.length > 0) {
+      await new Promise((r) => setTimeout(r, opts.settleMs ?? BACKFILL_SETTLE_MS));
+      await removeFiles(moved);
+    }
+    if (skipped > 0) log(`data: ${skipped} stored image(s) could not be given width copies (missing or unreadable file); they are served as they are`);
+    return { widened, left, skipped };
+  }
+
   return {
     handle,
     sweep: () => { for (const l of Object.values(limits)) l.sweep(); },
     sweepImages,
+    backfillImages,
   };
 }

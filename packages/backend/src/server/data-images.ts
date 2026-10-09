@@ -1,10 +1,11 @@
 /**
  * @az server data-images
- * Purpose: image fields' bytes: magic-byte sniff, the vetted decode/re-encode pipeline, a bounded queue, disk storage, orphan sweep.
+ * Purpose: image fields' bytes: magic-byte sniff, the vetted decode/re-encode pipeline, width copies, a bounded queue, disk storage, orphan sweep.
  * Spec: docs/data-spec.md §8 · docs/stack-evaluation.md (image library vetting)
- * Exports: createImages, sniffImage, ImageError, IMAGE_LIMITS, IMAGE_DECODERS, Images, StoredImage
+ * Exports: createImages, sniffImage, ImageError, IMAGE_LIMITS, IMAGE_DECODERS, IMAGE_WIDTHS, hasWidths, imageWidths, Images, StoredImage
  * Edit guide: the order is the defence — sniff, then a header-only size check, then decode with the loader allow-list,
  *   then re-encode without metadata. Never keepMetadata/withMetadata/withExif; never decode SVG; names are always generated.
+ *   A key's files appear together or not at all (copies first, the key last); every removal takes all of them.
  * Tests: packages/backend/test/data-images.test.ts, packages/backend/test/data-api.test.ts
  */
 
@@ -15,6 +16,15 @@
  * decompression bomb before any pixel is decoded, and the pixels are
  * re-encoded to WebP — which carries no EXIF, GPS, XMP, ICC or comment, so a
  * phone photo's location never reaches the site (data-spec §8, §16 Q6).
+ *
+ * Width copies (data-spec §8, gallery-spec §7 rule 3). The decoded pixels,
+ * fitted inside the stored max, are held once in memory and encoded to the
+ * stored file and to each of IMAGE_WIDTHS narrower than it — never wider, so
+ * nothing is upscaled — in the same queued job: the large original is
+ * decoded once. Such an upload's key is `<uuid>.full.webp`, its copies
+ * `<uuid>.<width>.webp`. A key stored before copies existed is `<uuid>.webp`
+ * and has none until `addWidths` (the backfill, `az backend images`) gives
+ * it them under the same UUID, so its URL and cached copies stay valid.
  *
  * The image library (sharp 0.35.5, libvips) is loaded only by a server whose
  * tables have an image field; it is configured once here: its cache off, one
@@ -28,7 +38,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadDriver } from './drivers.ts';
 
@@ -59,11 +69,34 @@ export const IMAGE_DECODERS = {
   allowed: ['VipsForeignLoadJpeg', 'VipsForeignLoadPng', 'VipsForeignLoadWebp', 'VipsForeignLoadHeif'],
 } as const;
 
-/** The stored format: always WebP, re-encoded, whatever was uploaded. */
-const STORED_EXT = '.webp';
-/** `<uuid>.webp` — the only names this module creates or serves. */
-const KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp$/;
+/**
+ * data-spec §8: the widths, px, an upload is also stored at beside its
+ * stored-max file — the build's widths (gallery-spec §7 rule 3) below the
+ * stored max. Served as `?w=<width>`; no other value names a file.
+ */
+export const IMAGE_WIDTHS: readonly number[] = [480, 768, 1200];
+
+/** Stored files are always WebP, re-encoded, whatever was uploaded. */
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** `<uuid>.full.webp` — the key of an upload stored with its width copies. */
+const KEY = new RegExp(`^${UUID}\\.full\\.webp$`);
+/** `<uuid>.webp` — a key stored before width copies existed; it has none. */
+const LEGACY_KEY = new RegExp(`^${UUID}\\.webp$`);
+/** A key's file or one of its copies (`<uuid>.<width>.webp`): the names the sweep may remove. */
+const NAME = new RegExp(`^${UUID}\\.(?:full|${IMAGE_WIDTHS.join('|')})\\.webp$`);
 const TMP_DIR = '.tmp';
+
+/** Whether a stored key has width copies beside it (a key from before them has none). */
+export const hasWidths = (key: string): boolean => KEY.test(key);
+/** The widths a stored key has copies at, for its stored image `width` px wide: only narrower ones, never upscaled. */
+export const imageWidths = (key: string, width: number): number[] =>
+  hasWidths(key) ? IMAGE_WIDTHS.filter((w) => w < width) : [];
+const isKey = (key: string): boolean => KEY.test(key) || LEGACY_KEY.test(key);
+const uuidOf = (key: string): string => key.slice(0, key.indexOf('.'));
+/** A copy's file name: its key's UUID and the width. */
+const widthName = (key: string, width: number): string => `${uuidOf(key)}.${width}.webp`;
+/** Every file a key can have; a copy its image is too narrow for does not exist. */
+const filesOf = (key: string): string[] => (hasWidths(key) ? [key, ...IMAGE_WIDTHS.map((w) => widthName(key, w))] : [key]);
 
 export type ImageProblem = 'unsupported_type' | 'too_large' | 'rate_limited';
 
@@ -110,10 +143,22 @@ export interface Images {
   tempPath(): string;
   /** Sniff, check, re-encode and store the file at `temp` (always removed); the new key and size, or ImageError. */
   store(temp: string): Promise<StoredImage>;
-  /** The stored file for a key, or null when the key is not one this module made. */
-  pathOf(key: string): string | null;
-  /** Remove a stored file; a missing one is not an error. */
+  /**
+   * The stored file for a key, or with `width` its copy at that width — null
+   * when the key is not one this module made, or when `width` is not one of
+   * IMAGE_WIDTHS for a key with copies.
+   */
+  pathOf(key: string, width?: number): string | null;
+  /** Remove a key's file and every copy of it; a missing one is not an error. */
   remove(key: string | null | undefined): Promise<void>;
+  /**
+   * The backfill: a key stored before width copies existed, given them —
+   * its file copied byte for byte to `<uuid>.full.webp` (the same UUID, so
+   * the same URL) with a copy at each narrower width, through the same
+   * queue. The old key's file stays for the caller to drop once no row
+   * names it. Null when `key` is not such a key or its file is gone.
+   */
+  addWidths(key: string): Promise<StoredImage | null>;
   /** Remove files no row names, older than the grace period; returns how many. */
   sweep(inUse: ReadonlySet<string>, now?: number): Promise<number>;
   /** Uploads processing or waiting — for tests and the log. */
@@ -155,16 +200,24 @@ async function head(path: string): Promise<Uint8Array> {
   }
 }
 
+/** Decoded pixels, 8 bits a channel, and their size. */
+interface Pixels {
+  readonly data: Uint8Array;
+  readonly info: { readonly width: number; readonly height: number; readonly channels: 1 | 2 | 3 | 4 };
+}
 /** The part of the image library this module uses (sharp 0.35.5's API). */
 interface Pipeline {
   metadata(): Promise<{ width?: number; height?: number }>;
   autoOrient(): Pipeline;
-  resize(options: { width: number; height: number; fit: 'inside'; withoutEnlargement: boolean }): Pipeline;
+  resize(options: { width: number; height?: number; fit?: 'inside'; withoutEnlargement?: boolean }): Pipeline;
+  raw(): Pipeline;
+  toBuffer(options: { resolveWithObject: true }): Promise<Pixels>;
   webp(options: { quality: number }): Pipeline;
   toFile(path: string): Promise<{ width: number; height: number }>;
 }
 interface ImageLibrary {
   (input: string, options: { limitInputPixels: number | false; failOn: 'error'; sequentialRead: boolean }): Pipeline;
+  (input: Uint8Array, options: { raw: Pixels['info'] }): Pipeline;
   cache(on: boolean): unknown;
   concurrency(threads: number): unknown;
   block(options: { operation: string[] }): void;
@@ -201,24 +254,77 @@ export async function createImages(opts: { readonly dir: string }): Promise<Imag
     const h = meta.height ?? 0;
     if (w < 1 || h < 1) throw new ImageError('unsupported_type');
     if (w > IMAGE_LIMITS.maxSide || h > IMAGE_LIMITS.maxSide || w * h > IMAGE_LIMITS.maxPixels) throw new ImageError('too_large');
-    const key = `${randomUUID()}${STORED_EXT}`;
-    const part = join(tmp, `${key}.part`);
-    let info;
+    let pixels: Pixels;
     try {
-      // autoOrient reads the EXIF orientation, rotates the pixels, and the
-      // WebP encode writes no metadata at all: GPS, XMP, ICC, comments gone.
-      info = await sharp(temp, input)
+      // autoOrient reads the EXIF orientation and rotates the pixels; raw
+      // pixels carry no metadata, and the WebP encodes write none at all:
+      // GPS, XMP, ICC, comments gone.
+      pixels = await sharp(temp, input)
         .autoOrient()
         .resize({ width: IMAGE_LIMITS.storedMax, height: IMAGE_LIMITS.storedMax, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: IMAGE_LIMITS.quality })
-        .toFile(part);
+        .raw()
+        .toBuffer({ resolveWithObject: true });
     } catch {
-      await rm(part, { force: true });
       throw new ImageError('unsupported_type');
     }
-    // Written beside, then renamed: a stored key is never a half-written file.
-    await rename(part, join(dir, key));
-    return { key, width: info.width, height: info.height };
+    return place(`${randomUUID()}.full.webp`, pixels);
+  }
+
+  /**
+   * A key's files from its pixels: the stored file (encoded, or with `full`
+   * copied byte for byte from that path) and a copy at each width narrower
+   * than it. All are written beside, in the temporary folder; only when each
+   * is complete are they renamed in — the copies first, the key last — so a
+   * key that exists has all its files, and a failure leaves none of them.
+   */
+  async function place(key: string, pixels: Pixels, full?: string): Promise<StoredImage> {
+    const { width, height } = pixels.info;
+    const files: [name: string, width: number | null][] = [
+      ...imageWidths(key, width).map((w): [string, number] => [widthName(key, w), w]),
+      [key, null],
+    ];
+    const part = (name: string) => join(tmp, `${name}.part`);
+    const placed: string[] = [];
+    const undo = () => Promise.all([
+      ...files.map(([name]) => rm(part(name), { force: true })),
+      ...placed.map((name) => rm(join(dir, name), { force: true })),
+    ]);
+    try {
+      for (const [name, w] of files) {
+        if (w === null && full !== undefined) {
+          await copyFile(full, part(name));
+          continue;
+        }
+        const pipeline = sharp(pixels.data, { raw: pixels.info });
+        try {
+          await (w === null ? pipeline : pipeline.resize({ width: w })).webp({ quality: IMAGE_LIMITS.quality }).toFile(part(name));
+        } catch {
+          throw new ImageError('unsupported_type');
+        }
+      }
+      for (const [name] of files) {
+        await rename(part(name), join(dir, name));
+        placed.push(name);
+      }
+    } catch (e) {
+      await undo();
+      throw e;
+    }
+    return { key, width, height };
+  }
+
+  /** addWidths: a stored WebP this module wrote, decoded under the same allow-list and limits. */
+  async function widen(key: string): Promise<StoredImage | null> {
+    if (!LEGACY_KEY.test(key)) return null;
+    const from = join(dir, key);
+    if (!await stat(from).then((s) => s.isFile(), () => false)) return null;
+    let pixels: Pixels;
+    try {
+      pixels = await sharp(from, input).raw().toBuffer({ resolveWithObject: true });
+    } catch {
+      throw new ImageError('unsupported_type');
+    }
+    return place(`${uuidOf(key)}.full.webp`, pixels, from);
   }
 
   return {
@@ -230,12 +336,20 @@ export async function createImages(opts: { readonly dir: string }): Promise<Imag
         await rm(temp, { force: true });
       }
     },
-    pathOf: (key) => (KEY.test(key) ? join(dir, key) : null),
-    async remove(key) {
-      if (typeof key === 'string' && KEY.test(key)) await rm(join(dir, key), { force: true });
+    pathOf(key, width) {
+      if (width === undefined) return isKey(key) ? join(dir, key) : null;
+      return hasWidths(key) && IMAGE_WIDTHS.includes(width) ? join(dir, widthName(key, width)) : null;
     },
+    async remove(key) {
+      // The copies first, the key last: stopped part-way, what is left is a
+      // set of files no row names, which the sweep takes.
+      if (typeof key === 'string' && isKey(key)) for (const name of filesOf(key).reverse()) await rm(join(dir, name), { force: true });
+    },
+    addWidths: (key) => queue.run(() => widen(key)),
     async sweep(inUse, now = Date.now()) {
       let removed = 0;
+      // A file is in use when it is one of an in-use key's files.
+      const keep = new Set([...inUse].filter(isKey).flatMap(filesOf));
       const old = async (path: string) => {
         try {
           return now - (await stat(path)).mtimeMs > IMAGE_LIMITS.sweepGraceMs;
@@ -244,7 +358,7 @@ export async function createImages(opts: { readonly dir: string }): Promise<Imag
         }
       };
       for (const name of await readdir(dir)) {
-        if (!KEY.test(name) || inUse.has(name)) continue;
+        if (!(NAME.test(name) || LEGACY_KEY.test(name)) || keep.has(name)) continue;
         if (await old(join(dir, name))) { await rm(join(dir, name), { force: true }); removed++; }
       }
       for (const name of await readdir(tmp)) {

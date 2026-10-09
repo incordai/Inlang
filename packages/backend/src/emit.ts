@@ -157,9 +157,15 @@ function dataReadme(data: BackendData): string {
 (the raw bytes, at most \`AZ_UPLOAD_MAX_MB\`) after its row exists. Only
 JPEG, PNG, WebP and AVIF are accepted, by their first bytes; each is decoded
 and stored re-encoded as WebP, at most 2048 px a side, with no metadata — a
-photo's location never reaches the disk. Files live in \`AZ_FILES_DIR\` under
-generated names; back that folder up with the database. Files no row names
-are removed hourly once an hour old.
+photo's location never reaches the disk — and as copies 480, 768 and 1200 px
+wide where narrower, for the pages' \`srcset\`. Files live in \`AZ_FILES_DIR\`
+under generated names; back that folder up with the database. Files no row
+names are removed hourly once an hour old.
+
+Images uploaded before width copies existed are served as they are, without
+copies. \`node src/main.ts --images\` counts them; \`node src/main.ts --images
+--confirm\` makes their copies (resumable, safe while the server runs; from a
+machine with the CLI: \`az backend images server --confirm\`).
 
 The image library is a native package (libvips, LGPL-3.0-or-later, bundled
 per platform): \`npm install\` on the machine that runs the server, not a copy

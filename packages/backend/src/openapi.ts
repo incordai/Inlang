@@ -15,6 +15,7 @@
 
 import { pascal, typeName, writeEcho, type SpecField, type SpecTable } from '../../core/src/data.ts';
 import { generatedJson } from '../../core/src/generated.ts';
+import { IMAGE_WIDTHS } from './server/data-images.ts';
 
 /** data-spec §5.3, closed. */
 export const DATA_ERROR_CODES = [
@@ -48,8 +49,17 @@ function fieldSchema(f: SpecField): Schema {
       case 'date': return { type: 'string', format: 'date' };
       case 'ref': return { type: 'string', format: 'uuid', description: `id of a ${f.ref!} row` };
       case 'image': return {
-        type: 'object', required: ['url', 'width', 'height'], additionalProperties: false,
-        properties: { url: { type: 'string', format: 'uri' }, width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 } },
+        type: 'object', required: ['url', 'width', 'height', 'variants'], additionalProperties: false,
+        properties: {
+          url: { type: 'string', format: 'uri' }, width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 },
+          variants: {
+            type: 'array', description: 'narrower copies, widest last, for a srcset with the url at its width; empty for an image stored before copies were made',
+            items: {
+              type: 'object', required: ['url', 'width'], additionalProperties: false,
+              properties: { url: { type: 'string', format: 'uri' }, width: { type: 'integer', enum: [...IMAGE_WIDTHS] } },
+            },
+          },
+        },
         description: 'uploaded with PUT …/{field}; the url changes on every upload',
       };
     }
@@ -167,7 +177,10 @@ export function openapi(siteName: string, tables: readonly SpecTable[], version:
       if (g.read) {
         ops.get = {
           operationId: `get${op}${field}`,
-          parameters: [{ name: 'v', in: 'query', required: false, schema: { type: 'string' }, description: 'the upload this url names; another one is not_found' }],
+          parameters: [
+            { name: 'v', in: 'query', required: false, schema: { type: 'string' }, description: 'the upload this url names; another one is not_found' },
+            { name: 'w', in: 'query', required: false, schema: { type: 'integer', enum: [...IMAGE_WIDTHS] }, description: 'a width copy the image lists in its variants; any other width is not_found' },
+          ],
           responses: {
             200: { description: 'the image, re-encoded as WebP; no Origin needed (an <img> sends none)', content: { 'image/webp': { schema: { type: 'string', format: 'binary' } } } },
             ...ERRORS, ...notFound,

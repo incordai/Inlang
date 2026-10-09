@@ -2,7 +2,7 @@
  * @az runtime rows-logic
  * Purpose: the decisions of a `from` block's runtime as pure functions: its config, values, links, copy.
  * Spec: docs/data-spec.md §10.3, §13 (stored XSS, dangerous links)
- * Exports: parseRowsConfig, rowText, rowImage, safeUrl, attributeValue, emptyWithout, paragraphs, problemCopy, markerProp, RowsConfig
+ * Exports: parseRowsConfig, rowText, rowImage, rowSrcset, safeUrl, attributeValue, emptyWithout, paragraphs, problemCopy, markerProp, RowsConfig, RowImage, RowVariant
  * Edit guide: keep pure (no DOM); every decision here has a unit test; never turn a value into markup.
  * Tests: packages/overlay/test/rows.test.ts
  */
@@ -88,16 +88,57 @@ export function rowText(row: unknown, field: string): string | null {
   return null;
 }
 
+/** A row image's narrower copy (data-spec §8). */
+export interface RowVariant { readonly url: string; readonly width: number }
+
+/** A row's image, as rowImage reads it. */
+export interface RowImage {
+  readonly url: string;
+  readonly width: number;
+  readonly height: number;
+  readonly variants: readonly RowVariant[];
+}
+
+const size = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n > 0 ? n : 0);
+
 /**
- * A row's image field (data-spec §8: `{ url, width, height }` or null) — its
- * URL and size, or null. The URL still goes through safeUrl where it is used.
+ * A row's image field (data-spec §8: `{ url, width, height, variants }` or
+ * null) — its URL, size and copies, or null. A copy that is not a URL and a
+ * width is dropped; a server from before copies sends none. The URLs still
+ * go through safeUrl where they are used.
  */
-export function rowImage(row: unknown, field: string): { url: string; width: number; height: number } | null {
+export function rowImage(row: unknown, field: string): RowImage | null {
   if (!isRecord(row) || !Object.hasOwn(row, field)) return null;
   const v = row[field];
   if (!isRecord(v) || typeof v.url !== 'string' || v.url === '') return null;
-  const size = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n > 0 ? n : 0);
-  return { url: v.url, width: size(v.width), height: size(v.height) };
+  const variants = Array.isArray(v.variants)
+    ? v.variants.filter((x): x is RowVariant => isRecord(x) && typeof x.url === 'string' && size(x.width) > 0)
+      .map((x) => ({ url: x.url, width: x.width }))
+    : [];
+  return { url: v.url, width: size(v.width), height: size(v.height), variants };
+}
+
+/**
+ * A row image's `srcset` (gallery-spec §7 rule 3, data-spec §8): each copy,
+ * then the image itself at its width — or null, and the <img> keeps its
+ * `src` alone, when it has no copy (an image stored before copies), its
+ * width is unknown, or any copy is not a safe URL narrower than the one
+ * before it would allow. Never part of one: a set the server did not send
+ * whole is no set.
+ */
+export function rowSrcset(image: RowImage, base: string): string | null {
+  if (image.variants.length === 0 || image.width === 0) return null;
+  const own = safeUrl(image.url, base);
+  if (own === null) return null;
+  const candidates: string[] = [];
+  let last = 0;
+  for (const v of image.variants) {
+    const url = safeUrl(v.url, base);
+    if (url === null || v.width <= last || v.width >= image.width) return null;
+    candidates.push(`${url} ${v.width}w`);
+    last = v.width;
+  }
+  return [...candidates, `${own} ${image.width}w`].join(', ');
 }
 
 /**

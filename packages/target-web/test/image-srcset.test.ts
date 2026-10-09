@@ -4,7 +4,8 @@
  * The target decides the widths (never upscaling), writes `srcset` beside
  * the `sizes` a word gave, and removes that `sizes` whenever there is no
  * srcset — so with no resizer (the playground, these tests) a page is what
- * it was before the rule. The resizer here is a fake: the CLI's real one is
+ * it was before the rule. A `from` row's image is the exception: it keeps its
+ * `sizes` for the rows runtime (data-spec §8). The resizer here is a fake: the CLI's real one is
  * tested in packages/cli/test/images.test.ts.
  */
 
@@ -16,7 +17,7 @@ import { SITE_WIDTHS } from '../../core/src/link.ts';
 import { emitProject } from '../src/emit.ts';
 import { COVER_ATTR, SRCSET_WIDTHS, coverSizes, srcsetImages, srcsetWidths, type Resize } from '../src/image-srcset.ts';
 import { WEB_EMITTERS } from '../../words/registry.ts';
-import { contentShare, framePx, type EmittedNode, type ThemeLike } from '../../core/src/emit-contract.ts';
+import { contentShare, framePx, fromMark, type EmittedNode, type ThemeLike } from '../../core/src/emit-contract.ts';
 
 /** A PNG header for w×h: signature, IHDR length and type, then the size. */
 function png(width: number, height: number): Uint8Array {
@@ -109,6 +110,15 @@ test('a width the resizer did not ship (larger than the original) is left out; t
     '/az-img/assets_big_jpg-480.webp 480w, /az-img/assets_big_jpg-1200.webp 1200w, /az-img/assets_big_jpg-1800.webp 1800w');
   const cover = srcsetImages(img('/assets/big.jpg', { sizes: SIZES, [COVER_ATTR]: '1 / 1' }), srcs, sizeOf, firstTwo);
   assert.equal(cover.attrs?.sizes, '(width < 768px) 75vw, min(51vw, 2400px)', 'a cover crop is capped at the largest candidate: the original');
+});
+
+test('a `from` row\'s image keeps its sizes for the rows runtime, with or without a resizer, and gets no srcset at build', () => {
+  const asked: [string, readonly number[]][] = [];
+  const row = img(fromMark('src'), { sizes: SIZES, [COVER_ATTR]: '4 / 3' });
+  for (const resize of [fakeResize(asked), undefined]) {
+    assert.deepEqual(srcsetImages(row, srcs, sizeOf, resize).attrs, { src: fromMark('src'), alt: '', sizes: SIZES }, 'sizes kept; the cover hint removed');
+  }
+  assert.deepEqual(asked, [], 'nothing is resized for a row: its file is the server\'s');
 });
 
 test('an img without a sizes hint is never resized — the word did not ask', () => {

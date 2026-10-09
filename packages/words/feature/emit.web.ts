@@ -103,8 +103,9 @@ function featureItem(
           loading: 'lazy',
           decoding: 'async',
           // gallery-spec §7 rule 3: the layout's widths, for the srcset the
-          // build writes. A row's file is the server's, never resized at build.
-          ...(fromRow ? {} : { sizes: mediaSizes(variant, columns, ctx) }),
+          // build writes — or, for a row (whose file is the server's), the
+          // one the rows runtime writes from its width copies (data-spec §8).
+          sizes: mediaSizes(variant, columns, ctx),
         },
         style: {
           display: 'block',
