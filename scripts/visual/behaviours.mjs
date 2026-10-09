@@ -673,28 +673,31 @@ export async function faqDeepLink(page) {
   return { pass: problems.length === 0, detail: problems.join('; ') };
 }
 
-/** Animation frames a track must hold still before its glide counts as finished. */
-const STILL_FRAMES = 3;
+/**
+ * How long a track must hold still before its glide counts as finished. In
+ * time, not frames: a glide's slow tail can sit on one pixel for several
+ * frames (Firefox: ~80ms) before the last one.
+ */
+const STILL_MS = 250;
 
 /**
  * True once the carousel's track has moved past `from` and then held still
- * for STILL_FRAMES frames — a step's glide is over; false past WAIT_MS.
+ * for STILL_MS — a step's glide is over; false past WAIT_MS.
  */
 const glided = (page, wrap, from) => page.evaluate(([w, start, still, ms]) => new Promise((done) => {
   const t = document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`);
   let over = false;
   const late = setTimeout(() => { over = true; done(false); }, ms);
   let last = t.scrollLeft;
-  let held = 0;
-  const tick = () => {
+  let since = performance.now();
+  const tick = (now) => {
     if (over) return;
-    const now = t.scrollLeft;
-    held = now === last ? held + 1 : 0;
-    last = now;
-    if (now > start + 1 && held >= still) { clearTimeout(late); done(true); } else requestAnimationFrame(tick);
+    const left = t.scrollLeft;
+    if (left !== last) { last = left; since = now; }
+    if (left > start + 1 && now - since >= still) { clearTimeout(late); done(true); } else requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
-}), [wrap, from, STILL_FRAMES, WAIT_MS]);
+}), [wrap, from, STILL_MS, WAIT_MS]);
 
 /**
  * gallery §6/§10: a carousel's previous/next buttons — at the start
