@@ -16,6 +16,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
 import { decodeAttribute, startTags } from '../src/html-scan.ts';
+import { LEGACY_NAMES, NAMED_REFERENCES } from '../src/named-references.ts';
 import { inlineScripts, inlineStyles, ownDigests, styleAttributes } from '../src/csp.ts';
 import { legacyOwnDigests, legacyTags, scanDifferences } from './legacy-scan.ts';
 
@@ -102,10 +103,64 @@ test('decodeAttribute: the `;` is optional after digits; `&#` with no digits is 
   assert.equal(decodeAttribute('&#; &#x; &#xg; & &#-1;'), '&#; &#x; &#xg; & &#-1;');
 });
 
-test('decodeAttribute: named references only as HTML spells them, each with its `;`', () => {
+/* ---- decodeAttribute: HTML §13.2.5.73, named character reference state -- */
+
+test('decodeAttribute: named references only as HTML spells them', () => {
   assert.equal(decodeAttribute('&amp;&AMP;&lt;&LT;&gt;&GT;&quot;&QUOT;&apos;'), '&&<<>>""\'');
-  assert.equal(decodeAttribute('&Amp; &APOS; &nbsp; &ampx;'), '&Amp; &APOS; &nbsp; &ampx;', 'not in the table as written: kept');
+  assert.equal(decodeAttribute('&Amp; &APOS; &Nbsp; &xyz; &; & &#'), '&Amp; &APOS; &Nbsp; &xyz; &; & &#', 'not in the table as written: kept');
   assert.equal(decodeAttribute('&amp;#x41;'), '&#x41;', 'decoded once, left to right');
+});
+
+test('decodeAttribute: the whole table — a sample of names, each to the characters HTML gives it', () => {
+  // Written out here, apart from the table: HTML §13.5's characters for each name.
+  const sample: Readonly<Record<string, string>> = {
+    nbsp: '\u00A0', eacute: '\u00E9', Eacute: '\u00C9', copy: '\u00A9', hellip: '\u2026', mdash: '\u2014', euro: '\u20AC',
+    rarr: '\u2192', hearts: '\u2665', frac12: '\u00BD', sup2: '\u00B2', Tab: '\t', NewLine: '\n', ZeroWidthSpace: '\u200B',
+    Afr: '\u{1D504}', NotEqualTilde: '\u2242\u0338', bne: '=\u20E5', fjlig: 'fj',
+    CounterClockwiseContourIntegral: '\u2233', ThickSpace: '\u205F\u200A',
+  };
+  for (const [name, characters] of Object.entries(sample)) {
+    assert.equal(decodeAttribute(`a&${name};b`), `a${characters}b`, `&${name};`);
+  }
+  // The table is whole: 2,231 names, 106 of them also without their `;`.
+  const named = NAMED_REFERENCES.trim().split(/\s+/);
+  const legacy = LEGACY_NAMES.trim().split(/\s+/);
+  assert.equal(named.length + legacy.length, 2231);
+  assert.equal(legacy.length, 106);
+  for (const entry of named) {
+    const name = entry.split(':')[0];
+    assert.notEqual(decodeAttribute(`&${name};`), `&${name};`, `&${name}; is decoded`);
+  }
+});
+
+test('decodeAttribute: the longest name the text begins with is the match', () => {
+  assert.equal(decodeAttribute('&notin;'), '\u2209', '&notin;, not &not then "in;"');
+  assert.equal(decodeAttribute('&not;'), '\u00AC');
+  assert.equal(decodeAttribute('&not '), '\u00AC ', '&not, a legacy name, then a space');
+  assert.equal(decodeAttribute('&notin '), '&notin ', 'the longest match is &not, followed by a letter: kept');
+  assert.equal(decodeAttribute('&ltrif;'), '\u25C2', '&ltrif;, not &lt then "rif;"');
+  assert.equal(decodeAttribute('&amp;amp;'), '&amp;', 'one name per `&`');
+  assert.equal(decodeAttribute(`&${'a'.repeat(40)};`), `&${'a'.repeat(40)};`, 'a run longer than any name: kept');
+});
+
+test('decodeAttribute: the 106 legacy names decode without their `;`; every other name needs it', () => {
+  assert.equal(decodeAttribute('&amp &lt &gt &quot &copy &reg &nbsp &eacute.'), '& < > " \u00A9 \u00AE \u00A0 \u00E9.');
+  assert.equal(decodeAttribute('x&nbsp'), 'x\u00A0', 'at the end of the value');
+  assert.equal(decodeAttribute('&AMP &frac12-'), '& \u00BD-');
+  for (const name of LEGACY_NAMES.trim().split(/\s+/)) {
+    assert.equal(decodeAttribute(`&${name} `), `${decodeAttribute(`&${name};`)} `, `&${name} without its ;`);
+  }
+  assert.equal(decodeAttribute('&hellip &mdash &apos &euro'), '&hellip &mdash &apos &euro', 'not legacy names: kept');
+});
+
+test('decodeAttribute: in an attribute, a match without `;` followed by `=` or a letter or digit is NOT decoded', () => {
+  assert.equal(decodeAttribute('&ampx'), '&ampx');
+  assert.equal(decodeAttribute('&amp='), '&amp=');
+  assert.equal(decodeAttribute('&amp1 &ampX; &copy=2 &not3'), '&amp1 &ampX; &copy=2 &not3');
+  assert.equal(decodeAttribute('/s?a=1&copy=2&lang=en&gt=1'), '/s?a=1&copy=2&lang=en&gt=1', 'a query string is kept');
+  // CONTROL: any other character after it, or the `;`, and it is decoded.
+  assert.equal(decodeAttribute('&amp- &amp_ &amp. &amp\u00E9 &amp&amp'), '&- &_ &. &\u00E9 &&');
+  assert.equal(decodeAttribute('&amp;x &amp;= &amp;1'), '&x &= &1', 'with its `;`, the next character does not matter');
 });
 
 /* ---- cost: linear on any input ------------------------------------------ */
@@ -169,6 +224,16 @@ test('LINEAR: a 5MB page of real, closed markup', () => {
   const page = fill('<p class="x" style="color:red">t &amp; u</p><script type="application/ld+json">{"a":1}</script><!-- -->', 5 * MB);
   const ms = cpuMs(() => scans(page), 1);
   assert.ok(ms <= (page.length * NS_PER_CHAR) / 1e6, `${ms.toFixed(1)}ms CPU for ${page.length} characters`);
+});
+
+test('LINEAR: decodeAttribute on 5MB of references — under the bound per character', () => {
+  for (const unit of ['&notit', '&ampx', '&nbsp;', '&#x41', '&&&&', `&${'a'.repeat(1000)}`, '&frac12x']) {
+    const value = fill(unit, 5 * MB);
+    const ms = cpuMs(() => decodeAttribute(value), 1);
+    assert.ok(ms <= (value.length * NS_PER_CHAR) / 1e6, `${unit.slice(0, 12)}: ${ms.toFixed(1)}ms CPU for ${value.length} characters`);
+  }
+  const run = `&${'a'.repeat(5 * MB)}`;
+  assert.equal(decodeAttribute(run), run, 'CONTROL: one 5MB run is read once, and kept');
 });
 
 /** The old scans the build and the audit ran over a page. */

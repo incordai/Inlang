@@ -3,7 +3,7 @@
  * Purpose: one pass over a page's markup — every start tag, its attributes, and the text of each raw-text element — for the build's policy and az audit.
  * Spec: docs/word-quality-gate.md §5.5 · HTML §13.2.5 (tokenization)
  * Exports: StartTag, startTags, decodeAttribute
- * Edit guide: imports nothing — the CLI copies this file verbatim into az-vite/ beside csp.ts, which imports it.
+ * Edit guide: imports only named-references.ts, which imports nothing — the CLI copies both verbatim into az-vite/ beside csp.ts, which imports this file.
  *   Linear in the page's length on any input: every character is read a bounded number of times, and nothing backtracks.
  * Tests: packages/target-web/test/html-scan.test.ts
  */
@@ -34,6 +34,8 @@
  * quadratic, so a 900KB page of 300 000 `<a ` held a build for minutes. This
  * reads each character a bounded number of times, whatever the page holds.
  */
+
+import { LEGACY_NAMES, NAMED_REFERENCES } from './named-references.ts';
 
 /** One start tag in a page. */
 export interface StartTag {
@@ -212,13 +214,30 @@ const C1_REMAP: ReadonlyMap<number, number> = new Map([
   [0x98, 0x02dc], [0x99, 0x2122], [0x9a, 0x0161], [0x9b, 0x203a], [0x9c, 0x0153], [0x9e, 0x017e], [0x9f, 0x0178],
 ]);
 
-/**
- * The named references decoded, each spelt exactly as in HTML's table
- * (which has `&AMP;` but no `&APOS;`) — the ones a server renderer writes.
- */
-const NAMED: ReadonlyMap<string, string> = new Map([
-  ['amp', '&'], ['AMP', '&'], ['lt', '<'], ['LT', '<'], ['gt', '>'], ['GT', '>'], ['quot', '"'], ['QUOT', '"'], ['apos', "'"],
-]);
+/** HTML's table, read from named-references.ts. */
+interface Table {
+  /** Every name the table spells with its `;` (left off here), to its characters. */
+  readonly named: ReadonlyMap<string, string>;
+  /** The names the table also allows without their `;`, each for the characters of its `name;`. */
+  readonly legacy: ReadonlySet<string>;
+  /** The longest name in `legacy`, so a match is looked for in a bounded prefix of the run. */
+  readonly legacyMax: number;
+}
+
+let table: Table | undefined;
+
+/** The table, built on the first named reference read — a compile that decodes none never pays for it. */
+function references(): Table {
+  if (table === undefined) {
+    const named = new Map(NAMED_REFERENCES.trim().split(/\s+/).map((entry): [string, string] => {
+      const [name, points] = entry.split(':');
+      return [name, String.fromCodePoint(...points.split('+').map((p) => parseInt(p, 16)))];
+    }));
+    const legacy = new Set(LEGACY_NAMES.trim().split(/\s+/));
+    table = { named, legacy, legacyMax: Math.max(...[...legacy].map((name) => name.length)) };
+  }
+  return table;
+}
 
 /**
  * A numeric reference's character, as HTML §13.2.5.80 (numeric character
@@ -237,21 +256,55 @@ function numeric(digits: string, radix: 10 | 16): string {
 
 /**
  * Hexadecimal or decimal digits after `&#` (the `;` is optional, as in the
- * tokenizer), or one of the named references above with its `;`. A match
- * that starts never fails later, so nothing backtracks.
+ * tokenizer), or the run of ASCII letters and digits after `&` with the
+ * `;` that may end it. Every name in HTML's table is such a run, alone or
+ * with its `;`, so the run holds the longest match there is. A match that
+ * starts never fails later, so nothing backtracks.
  */
-const REFERENCE = /&(?:#[xX]([0-9a-fA-F]+);?|#([0-9]+);?|(amp|AMP|lt|LT|gt|GT|quot|QUOT|apos);)/g;
+const REFERENCE = /&(?:#[xX]([0-9a-fA-F]+);?|#([0-9]+);?|([A-Za-z0-9]+)(;?))/g;
+
+/** One ASCII letter or digit. */
+const ALPHANUMERIC = /^[A-Za-z0-9]$/;
 
 /**
- * An attribute value as the browser's tokenizer reads it: numeric
- * character references decoded exactly as HTML §13.2.5 decodes them, and
- * the named ones in `NAMED`; any other `&` is kept as written. Never
- * throws, whatever the value holds — it is an author's markup.
+ * A run of letters and digits after `&`, as HTML §13.2.5.73 (named
+ * character reference state) reads it in an attribute value: the longest
+ * name in the table the run begins with is decoded and the rest of the run
+ * kept as text. A match that does not end in `;` is NOT decoded, for
+ * historical reasons, when the character after it is `=` or a letter or
+ * digit (`&ampx`, `&copy=`). With no match, the `&` and the run are text.
+ * `next` is the character after the run and its `;` ('' at the end).
+ */
+function named(run: string, semicolon: boolean, next: string): string {
+  const { named: names, legacy, legacyMax } = references();
+  if (semicolon) {
+    const characters = names.get(run);
+    if (characters !== undefined) return characters;
+  }
+  // No `name;` matched, so the match, if any, is the longest legacy name the run begins with.
+  for (let length = Math.min(run.length, legacyMax); length > 0; length--) {
+    const name = run.slice(0, length);
+    if (!legacy.has(name)) continue;
+    const after = length < run.length ? run[length] : semicolon ? ';' : next;
+    if (after === '=' || ALPHANUMERIC.test(after)) break;
+    return `${names.get(name) ?? ''}${run.slice(length)}${semicolon ? ';' : ''}`;
+  }
+  return `&${run}${semicolon ? ';' : ''}`;
+}
+
+/**
+ * An attribute value as the browser's tokenizer reads it: character
+ * references decoded exactly as HTML §13.2.5 decodes them in an attribute
+ * value — numeric ones, and every name in HTML's table (named-references.ts)
+ * with the attribute's historical exception; any other `&` is kept as
+ * written. Never throws, whatever the value holds — it is an author's
+ * markup.
  */
 export function decodeAttribute(value: string): string {
-  return value.replace(REFERENCE, (whole, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
+  return value.replace(REFERENCE, (whole: string, hex: string | undefined, dec: string | undefined,
+    run: string | undefined, semicolon: string | undefined, offset: number) => {
     if (hex !== undefined) return numeric(hex, 16);
     if (dec !== undefined) return numeric(dec, 10);
-    return NAMED.get(name ?? '') ?? whole;
+    return named(run ?? '', semicolon === ';', value.charAt(offset + whole.length));
   });
 }

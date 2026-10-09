@@ -3,7 +3,7 @@
  * Purpose: each built page's Content-Security-Policy, from what the page needs and the markup it ships.
  * Spec: docs/word-quality-gate.md §2 B, §5.5 · docs/ARCHITECTURE.md §4.2
  * Exports: PageNeeds, CSP_META, PolicyError, pagePolicy, withPolicy, inlineScripts, inlineStyles, styleAttributes, sha256Source, ownDigests, originOf
- * Edit guide: imports only node:crypto and html-scan.ts — the CLI copies both verbatim into az-vite/, where build.mjs imports this file.
+ * Edit guide: imports only node:crypto and html-scan.ts — the CLI copies both (and the table html-scan.ts imports) verbatim into az-vite/, where build.mjs imports this file.
  *   A source is added only for something a page really does; never 'unsafe-inline' or 'unsafe-eval'.
  * Tests: packages/target-web/test/csp.test.ts
  */

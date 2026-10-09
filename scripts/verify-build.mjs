@@ -327,8 +327,8 @@ try {
         const at = text.indexOf('http-equiv="Content-Security-Policy"');
         return policies[r] !== null && at > 0 && at < text.indexOf('<script') && at < text.indexOf('<link rel="stylesheet"');
       }), routes.filter((r) => policies[r] === null).join(' '));
-    check('§2 B: the build ships csp.ts verbatim beside build.mjs, with the page scanner it imports',
-      ['csp.ts', 'html-scan.ts'].every((f) =>
+    check('§2 B: the build ships csp.ts verbatim beside build.mjs, with the page scanner it imports and the scanner\'s table',
+      ['csp.ts', 'html-scan.ts', 'named-references.ts'].every((f) =>
         readFileSync(join(proj, 'az-vite', f), 'utf8') === readFileSync(join(ROOT, 'packages/target-web/src', f), 'utf8')));
     // The fixture's / carries two author components with inline styles (M3);
     // a pre-rendered page carries no inline script of its own.
@@ -547,18 +547,26 @@ try {
   /* ---- §2 B: a style attribute's character references, hashed as the browser decodes them -- */
   // An author's raw component writes any markup into a pre-rendered page. A
   // reference past U+10FFFF, a surrogate, zero and a C1 code point: HTML
-  // §13.2.5.80 makes them U+FFFD, U+FFFD, U+FFFD and U+20AC. The build must
-  // hash exactly that — the old decoder threw (a RangeError, so the build
-  // crashed) — and every engine must then apply the attribute unrefused.
+  // §13.2.5.80 makes them U+FFFD, U+FFFD, U+FFFD and U+20AC. Named ones
+  // beyond the few a server renderer writes: HTML §13.2.5.73 makes &nbsp;
+  // and &eacute; U+00A0 and U+00E9, and keeps &ampx and &amp= as written (a
+  // match without `;` before a letter, digit or `=`, in an attribute). The
+  // build must hash exactly that — the first decoder threw (a RangeError, so
+  // the build crashed), the next knew nine names — and every engine must
+  // then apply the attribute unrefused.
   {
     const refs = join(work, 'proj-refs');
     cpSync(proj, refs, { recursive: true, filter: (f) => !f.startsWith(join(proj, 'dist')) && !f.startsWith(join(proj, 'node_modules')) });
     symlinkSync(join(proj, 'node_modules'), join(refs, 'node_modules'), 'dir');
-    const raw = "color:rgb(1, 2, 3);font-family:'&#x110000;&#xD800;&#0;&#x80;',serif";
+    const raw = "color:rgb(1, 2, 3);font-family:'&#x110000;&#xD800;&#0;&#x80;&nbsp;&eacute;&ampx&amp=',serif";
     // Written out here, apart from the decoder: what the spec makes of `raw`.
-    const decoded = "color:rgb(1, 2, 3);font-family:'\uFFFD\uFFFD\uFFFD\u20AC',serif";
-    // CONTROL: the old decoding where it did not throw — U+0000 kept, 0x80 not remapped.
-    const misread = "color:rgb(1, 2, 3);font-family:'\uFFFD\uFFFD\u0000\u0080',serif";
+    const decoded = "color:rgb(1, 2, 3);font-family:'\uFFFD\uFFFD\uFFFD\u20AC\u00A0\u00E9&ampx&amp=',serif";
+    // CONTROLS: the old decoders' readings. The first where it did not throw —
+    // U+0000 kept, 0x80 not remapped; the next — numeric ones right, &nbsp; and &eacute; kept.
+    const misreads = [
+      ['the first decoder', "color:rgb(1, 2, 3);font-family:'\uFFFD\uFFFD\u0000\u0080&nbsp;&eacute;&ampx&amp=',serif"],
+      ['the nine-name decoder', "color:rgb(1, 2, 3);font-family:'\uFFFD\uFFFD\uFFFD\u20AC&nbsp;&eacute;&ampx&amp=',serif"],
+    ];
     const badge = join(refs, 'src/user/custom/Badge.tsx');
     const badgeSource = readFileSync(badge, 'utf8');
     const markup = `<i class="fixture-refs" style="${raw}">refs</i>`;
@@ -569,20 +577,23 @@ try {
     // Read from the shipped bytes, independently of csp.ts, as the §2 B checks above read them.
     const styleSources = /<meta http-equiv="Content-Security-Policy" content="[^"]*?style-src ([^;"]*)/.exec(refsPage)?.[1].replace(/&amp;/g, '&').split(' ') ?? [];
     const sha256Of = (text) => `'sha256-${createHash('sha256').update(Buffer.from(text, 'utf8')).digest('base64')}'`;
-    check('§2 B: a style attribute with &#x110000; &#xD800; &#0; &#x80; builds — no RangeError, nothing reported',
+    check('§2 B: a style attribute with &#x110000; &#xD800; &#0; &#x80; &nbsp; &eacute; &ampx &amp= builds — no RangeError, nothing reported',
       badgeSource.includes('Handmade in the studio') && refsLog.trim() === '' && refsPage.includes(markup), refsLog.trim().split('\n')[0]);
-    check('§2 B: its hash is of the value as HTML §13.2.5.80 decodes it — not as the old decoder read it',
-      styleSources.includes(sha256Of(decoded)) && !styleSources.includes(sha256Of(misread)), styleSources.join(' '));
-    // The same page with the misread value's hash in its place: every engine must refuse it.
-    const controlDir = join(work, 'refs-control');
-    cpSync(join(refs, 'dist'), controlDir, { recursive: true });
-    writeFileSync(join(controlDir, 'index.html'), refsPage.replace(sha256Of(decoded), sha256Of(misread)));
+    check('§2 B: its hash is of the value as HTML §13.2.5.73 and §13.2.5.80 decode it — not as either old decoder read it',
+      styleSources.includes(sha256Of(decoded)) && misreads.every(([, misread]) => !styleSources.includes(sha256Of(misread))), styleSources.join(' '));
+    // The same page with each misread value's hash in its place: every engine must refuse it.
+    const controls = misreads.map(([label, misread], i) => {
+      const dir = join(work, `refs-control-${i}`);
+      cpSync(join(refs, 'dist'), dir, { recursive: true });
+      writeFileSync(join(dir, 'index.html'), refsPage.replace(sha256Of(decoded), sha256Of(misread)));
+      return [dir, label];
+    });
     const server = await startServer();
     try {
       for (const [engine, type] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
         const browser = await within(BROWSER_MS, `${engine}.launch`, () => type.launch());
         try {
-          for (const [dir, ours] of [[join(refs, 'dist'), true], [controlDir, false]]) {
+          for (const [dir, control] of [[join(refs, 'dist'), null], ...controls]) {
             server.serve(dir);
             const context = await within(BROWSER_MS, `${engine} newContext`, () => browser.newContext());
             try {
@@ -599,13 +610,13 @@ try {
                 });
               });
               const violations = cspResult(sink);
-              if (ours) {
+              if (control === null) {
                 check(`§2 B ${engine}: the browser decodes the attribute as the build did, applies it, and reports no violation`,
                   seen?.value === decoded && seen.color === 'rgb(1, 2, 3)' && violations.pass,
-                  `${seen?.color ?? 'no element'}; ${violations.detail}`);
+                  `${JSON.stringify(seen?.value ?? null)} ${seen?.color ?? 'no element'}; ${violations.detail}`);
               } else {
                 // Its value is not compared: Firefox reads a refused style attribute back as empty.
-                check(`CONTROL ${engine}: the misread value's hash is refused — a violation, the attribute not applied`,
+                check(`CONTROL ${engine}: ${control}'s hash is refused — a violation, the attribute not applied`,
                   seen !== null && seen.color !== 'rgb(1, 2, 3)' && !violations.pass,
                   `${seen?.color ?? 'no element'}; ${violations.detail || 'no violation reported'}`);
               }

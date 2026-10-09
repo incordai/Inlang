@@ -69,8 +69,8 @@ test('CONTROL: a private variable WITHOUT the public prefix is not inlined, so i
   // And the walk the guard reads its output back with — az audit's own.
   assert.equal(readFileSync(join(p.out, 'az-vite/shipped.ts'), 'utf8'),
     readFileSync(join(ROOT, 'packages/cli/src/shipped.ts'), 'utf8'));
-  // And the page policy, with the page scanner it imports.
-  for (const f of ['csp.ts', 'html-scan.ts']) {
+  // And the page policy, with the page scanner it imports and the scanner's table.
+  for (const f of ['csp.ts', 'html-scan.ts', 'named-references.ts']) {
     assert.equal(readFileSync(join(p.out, `az-vite/${f}`), 'utf8'), readFileSync(join(ROOT, `packages/target-web/src/${f}`), 'utf8'), f);
   }
   assert.ok(!existsSync(join(p.out, 'src/az-auth')), 'no auth runtime for a site without auth');
