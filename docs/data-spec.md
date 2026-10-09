@@ -1159,8 +1159,8 @@ served with the original's headers and CORS, 13 bad widths 404, private
 copies, every delete path, the claim then the sweep, a legacy image, the
 backfill count/deadline/confirm and its compare-and-swap; openapi, client,
 rows-logic, image-srcset and from-blocks tests), `pnpm test:backend-db`
-(COPIES and BACKFILL on PostgreSQL and MySQL), `pnpm test:data` (Chromium
-and Firefox at 375 × 812: a row image's srcset and the word's sizes in a
+(COPIES and BACKFILL on PostgreSQL and MySQL), `pnpm test:data` (Chromium,
+Firefox and WebKit, over https, at 375 × 812: a row image's srcset and the word's sizes in a
 `from` gallery and rows block, the browser loading the 480 copy; CONTROL a
 legacy image with no srcset; `az backend images` then `--confirm` through
 the real CLI, after which the same URL has a srcset).
