@@ -115,10 +115,13 @@ test('pixel bombs and over-side images are refused from the header, before decod
     ['jpeg 60000²', await jpegClaiming(60_000, 60_000)],
     ['jpeg 8001 tall', await jpegClaiming(10, IMAGE_LIMITS.maxSide + 1)],
   ];
+  // Timed by this process's CPU (decoding would run on its thread pool),
+  // not the wall clock, which also counts whatever else the machine is running.
   for (const [what, b] of cases) {
-    const t0 = performance.now();
+    const t0 = process.cpuUsage();
     assert.equal(await refusal(images, b), 'too_large', what);
-    assert.ok(performance.now() - t0 < 1000, `${what}: refused without decoding`);
+    const used = process.cpuUsage(t0);
+    assert.ok((used.user + used.system) / 1000 < 1000, `${what}: refused without decoding`);
   }
 });
 

@@ -206,10 +206,14 @@ test('sign-in: one answer for "no such account" and "wrong password", with the s
   const h = await startBackend();
   try {
     await client(h.url).post('/auth/sign-up', ada);
+    // The work is timed by this process's CPU (the backend runs in it, its
+    // scrypt on the thread pool), not the wall clock, which also counts
+    // whatever else the machine is running.
     const time = async (email: string) => {
-      const t = performance.now();
+      const t = process.cpuUsage();
       const r = await client(h.url).post('/auth/sign-in', { email, password: 'not-the-password' });
-      return { ms: performance.now() - t, status: r.status, body: await r.json() };
+      const used = process.cpuUsage(t);
+      return { ms: (used.user + used.system) / 1000, status: r.status, body: await r.json() };
     };
     await time('warmup@studio.test');
     const known = await time('ada@studio.test');
