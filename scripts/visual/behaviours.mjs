@@ -674,32 +674,6 @@ export async function faqDeepLink(page) {
 }
 
 /**
- * How long a track must hold still before its glide counts as finished. In
- * time, not frames: a glide's slow tail can sit on one pixel for several
- * frames (Firefox: ~80ms) before the last one.
- */
-const STILL_MS = 250;
-
-/**
- * True once the carousel's track has moved past `from` and then held still
- * for STILL_MS — a step's glide is over; false past WAIT_MS.
- */
-const glided = (page, wrap, from) => page.evaluate(([w, start, still, ms]) => new Promise((done) => {
-  const t = document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`);
-  let over = false;
-  const late = setTimeout(() => { over = true; done(false); }, ms);
-  let last = t.scrollLeft;
-  let since = performance.now();
-  const tick = (now) => {
-    if (over) return;
-    const left = t.scrollLeft;
-    if (left !== last) { last = left; since = now; }
-    if (left > start + 1 && now - since >= still) { clearTimeout(late); done(true); } else requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
-}), [wrap, from, STILL_MS, WAIT_MS]);
-
-/**
  * gallery §6/§10: a carousel's previous/next buttons — at the start
  * "previous" says it cannot go (aria-disabled), "next" scrolls the track by
  * a slide, and at the end "next" says so and does nothing. Reached by
@@ -747,20 +721,17 @@ export async function carousel(page) {
     problems.push(`the focused "next" is not a visible 44px control (${Math.round(focused.nextBox.w)}x${Math.round(focused.nextBox.h)})`);
   }
   await page.keyboard.press('Enter');
-  if (!(await glided(page, wrap, 0))) problems.push('"next" did not scroll the track');
-  // Step to the end, bounded by the number of slides. Each step waits for
-  // its glide to finish — not for a fixed time, which a loaded machine
-  // outlasts, and not just for the first frame of it: a press mid-glide
-  // cuts the glide short.
+  const moved = await until(page, (w) => (document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`)).scrollLeft > 0, wrap);
+  if (!moved) problems.push('"next" did not scroll the track');
+  // Step to the end, bounded by the number of slides.
   const slides = await page.$$eval(`${wrap} li`, (l) => l.length);
   for (let i = 0; i < slides + 1; i++) {
     const now = await read();
     if (now.next === 'true') break;
     await page.keyboard.press('Enter');
-    if (!(await glided(page, wrap, now.left))) break;
+    await page.waitForTimeout(250);
   }
-  // At the end, "next" says so once the last scroll has been read.
-  await until(page, (w) => document.querySelector(`${w} button[data-az-step="1"]`).getAttribute('aria-disabled') === 'true', wrap);
+  await page.waitForTimeout(400);
   const end = await read();
   if (end.next !== 'true') problems.push('at the end "next" is not marked unavailable');
   if (end.left < end.room - 1) problems.push(`"next" stopped short of the end (${Math.round(end.left)} of ${end.room})`);
