@@ -29,9 +29,10 @@ import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { watchdog, human, within, closeWithin } from './lib/bounded.mjs';
 import { startServer } from './visual/serve.mjs';
+import { watchCsp, cspResult } from './visual/csp.mjs';
 import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -541,6 +542,84 @@ try {
     check('§5.5 fixed: the refused pre-render removed its output — no dist/, no server build, no file holding the key',
       !existsSync(join(ssr, 'dist')) && !existsSync(join(ssr, '.az-ssr')),
       existsSync(join(ssr, 'dist')) ? `dist/ remains: ${leftWith(join(ssr, 'dist'), pageKey).join(', ') || 'no file with the key'}` : '');
+  }
+
+  /* ---- §2 B: a style attribute's character references, hashed as the browser decodes them -- */
+  // An author's raw component writes any markup into a pre-rendered page. A
+  // reference past U+10FFFF, a surrogate, zero and a C1 code point: HTML
+  // §13.2.5.80 makes them U+FFFD, U+FFFD, U+FFFD and U+20AC. The build must
+  // hash exactly that — the old decoder threw (a RangeError, so the build
+  // crashed) — and every engine must then apply the attribute unrefused.
+  {
+    const refs = join(work, 'proj-refs');
+    cpSync(proj, refs, { recursive: true, filter: (f) => !f.startsWith(join(proj, 'dist')) && !f.startsWith(join(proj, 'node_modules')) });
+    symlinkSync(join(proj, 'node_modules'), join(refs, 'node_modules'), 'dir');
+    const raw = "color:rgb(1, 2, 3);font-family:'&#x110000;&#xD800;&#0;&#x80;',serif";
+    // Written out here, apart from the decoder: what the spec makes of `raw`.
+    const decoded = "color:rgb(1, 2, 3);font-family:'\uFFFD\uFFFD\uFFFD\u20AC',serif";
+    // CONTROL: the old decoding where it did not throw — U+0000 kept, 0x80 not remapped.
+    const misread = "color:rgb(1, 2, 3);font-family:'\uFFFD\uFFFD\u0000\u0080',serif";
+    const badge = join(refs, 'src/user/custom/Badge.tsx');
+    const badgeSource = readFileSync(badge, 'utf8');
+    const markup = `<i class="fixture-refs" style="${raw}">refs</i>`;
+    writeFileSync(badge, badgeSource.replace('Handmade in the studio',
+      `Handmade in the studio<b dangerouslySetInnerHTML={{ __html: ${JSON.stringify(markup)} }} />`));
+    const refsLog = shippedBuild(refs);
+    const refsPage = readFileSync(join(refs, 'dist/index.html'), 'utf8');
+    // Read from the shipped bytes, independently of csp.ts, as the §2 B checks above read them.
+    const styleSources = /<meta http-equiv="Content-Security-Policy" content="[^"]*?style-src ([^;"]*)/.exec(refsPage)?.[1].replace(/&amp;/g, '&').split(' ') ?? [];
+    const sha256Of = (text) => `'sha256-${createHash('sha256').update(Buffer.from(text, 'utf8')).digest('base64')}'`;
+    check('§2 B: a style attribute with &#x110000; &#xD800; &#0; &#x80; builds — no RangeError, nothing reported',
+      badgeSource.includes('Handmade in the studio') && refsLog.trim() === '' && refsPage.includes(markup), refsLog.trim().split('\n')[0]);
+    check('§2 B: its hash is of the value as HTML §13.2.5.80 decodes it — not as the old decoder read it',
+      styleSources.includes(sha256Of(decoded)) && !styleSources.includes(sha256Of(misread)), styleSources.join(' '));
+    // The same page with the misread value's hash in its place: every engine must refuse it.
+    const controlDir = join(work, 'refs-control');
+    cpSync(join(refs, 'dist'), controlDir, { recursive: true });
+    writeFileSync(join(controlDir, 'index.html'), refsPage.replace(sha256Of(decoded), sha256Of(misread)));
+    const server = await startServer();
+    try {
+      for (const [engine, type] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
+        const browser = await within(BROWSER_MS, `${engine}.launch`, () => type.launch());
+        try {
+          for (const [dir, ours] of [[join(refs, 'dist'), true], [controlDir, false]]) {
+            server.serve(dir);
+            const context = await within(BROWSER_MS, `${engine} newContext`, () => browser.newContext());
+            try {
+              const sink = await watchCsp(context);
+              const tab = await context.newPage();
+              tab.setDefaultTimeout(BROWSER_MS);
+              const seen = await within(BROWSER_MS, `${engine} references page`, async () => {
+                await tab.goto(server.url, { waitUntil: 'load', timeout: BROWSER_MS });
+                // One frame, so every report the load produced has arrived.
+                await tab.evaluate(() => new Promise((done) => requestAnimationFrame(() => done(null))));
+                return tab.evaluate(() => {
+                  const el = document.querySelector('i.fixture-refs');
+                  return el ? { value: el.getAttribute('style'), color: getComputedStyle(el).color } : null;
+                });
+              });
+              const violations = cspResult(sink);
+              if (ours) {
+                check(`§2 B ${engine}: the browser decodes the attribute as the build did, applies it, and reports no violation`,
+                  seen?.value === decoded && seen.color === 'rgb(1, 2, 3)' && violations.pass,
+                  `${seen?.color ?? 'no element'}; ${violations.detail}`);
+              } else {
+                // Its value is not compared: Firefox reads a refused style attribute back as empty.
+                check(`CONTROL ${engine}: the misread value's hash is refused — a violation, the attribute not applied`,
+                  seen !== null && seen.color !== 'rgb(1, 2, 3)' && !violations.pass,
+                  `${seen?.color ?? 'no element'}; ${violations.detail || 'no violation reported'}`);
+              }
+            } finally {
+              await closeWithin(context, BROWSER_MS, `${engine} context.close`);
+            }
+          }
+        } finally {
+          await closeWithin(browser, BROWSER_MS, `${engine}.close`);
+        }
+      }
+    } finally {
+      await closeWithin(server, BROWSER_MS, 'server.close');
+    }
   }
 
   /* ---- M4: `azbackend` — the build refuses a URL the cookie cannot cross -- */

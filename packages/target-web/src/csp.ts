@@ -25,7 +25,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { startTags, type StartTag } from './html-scan.ts';
+import { decodeAttribute, startTags, type StartTag } from './html-scan.ts';
 
 /** What one page needs beyond its own files — written by the emitter into build.mjs. */
 export interface PageNeeds {
@@ -61,15 +61,6 @@ const parsed = (html: string) => html.replace(/\r\n?/g, '\n');
 /** Script types a browser executes (HTML §4.12.1.1); every other type is a data block, which CSP does not govern. */
 const EXECUTED = /^(?:|module|text\/javascript|application\/javascript|text\/ecmascript|application\/ecmascript)$/i;
 
-/** An attribute value as the browser reads it: character references decoded. */
-function decode(value: string): string {
-  return value.replace(/&(?:#x([0-9a-f]+)|#(\d+)|(amp|quot|apos|lt|gt));/gi, (_m, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
-    if (hex !== undefined) return String.fromCodePoint(parseInt(hex, 16));
-    if (dec !== undefined) return String.fromCodePoint(parseInt(dec, 10));
-    return ({ amp: '&', quot: '"', apos: "'", lt: '<', gt: '>' } as Record<string, string>)[(name ?? '').toLowerCase()] ?? '';
-  });
-}
-
 /** What a page carries inline that its policy must allow, each in document order. */
 interface Inline {
   readonly scripts: string[];
@@ -79,7 +70,7 @@ interface Inline {
 
 /** An executed inline script: no `src`, and a type a browser runs. */
 const executed = (tag: StartTag) =>
-  !tag.attrs.has('src') && EXECUTED.test(decode(tag.attrs.get('type') ?? '').trim());
+  !tag.attrs.has('src') && EXECUTED.test(decodeAttribute(tag.attrs.get('type') ?? '').trim());
 
 /**
  * Everything inline in a page, read in one pass (html-scan.ts) over its text
@@ -90,7 +81,7 @@ function inline(html: string): Inline {
   const out: Inline = { scripts: [], styles: [], attrs: [] };
   for (const tag of startTags(parsed(html))) {
     const style = tag.attrs.get('style');
-    if (style !== undefined) out.attrs.push(decode(style));
+    if (style !== undefined) out.attrs.push(decodeAttribute(style));
     if (tag.text === undefined) continue;
     if (tag.name === 'style') out.styles.push(tag.text);
     else if (executed(tag)) out.scripts.push(tag.text);

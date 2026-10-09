@@ -1,27 +1,28 @@
 /**
  * The page scans as they were before the single-pass scanner (html-scan.ts):
  * regular expressions over the whole page, copied unchanged from csp.ts and
- * cli/src/audit.ts. Kept only as the oracle the scanner is tested against —
- * equivalence on real pages, and the quadratic cost the scanner removes.
+ * cli/src/audit.ts but for attribute decoding (below). Kept only as the
+ * oracle the scanner is tested against — equivalence on real pages, and
+ * the quadratic cost the scanner removes.
  * Nothing outside the tests and the build checks (scripts/verify-build.mjs,
  * scripts/visual.mjs) imports it.
  */
 
 import { createHash } from 'node:crypto';
 import { inlineScripts, inlineStyles, ownDigests, styleAttributes } from '../src/csp.ts';
-import { startTags } from '../src/html-scan.ts';
+import { decodeAttribute, startTags } from '../src/html-scan.ts';
 
 const parsed = (html: string) => html.replace(/\r\n?/g, '\n');
 
 const EXECUTED = /^(?:|module|text\/javascript|application\/javascript|text\/ecmascript|application\/ecmascript)$/i;
 
-function decode(value: string): string {
-  return value.replace(/&(?:#x([0-9a-f]+)|#(\d+)|(amp|quot|apos|lt|gt));/gi, (_m, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
-    if (hex !== undefined) return String.fromCodePoint(parseInt(hex, 16));
-    if (dec !== undefined) return String.fromCodePoint(parseInt(dec, 10));
-    return ({ amp: '&', quot: '"', apos: "'", lt: '<', gt: '>' } as Record<string, string>)[(name ?? '').toLowerCase()] ?? '';
-  });
-}
+/**
+ * Values are decoded with the build's own decoder, not the old one: the
+ * old one threw on a reference past U+10FFFF and read others unlike the
+ * browser, and the decoding is not what the scanner replaced — this
+ * oracle measures the tokenizing.
+ */
+const decode = decodeAttribute;
 
 function attributes(text: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -68,9 +69,6 @@ export function legacyOwnDigests(html: string): string[] {
   return [...legacyInlineScripts(html), ...legacyInlineStyles(html), ...legacyStyleAttributes(html)].map((t) => sha256Source(t).slice(1, -1));
 }
 
-/** audit.ts's own entity decoding: the few a server renderer writes. */
-const auditDecode = (v: string) => v.replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-
 /** audit.ts `tags`: each start tag of one element, as its attributes. */
 export function legacyTags(html: string, element: string): Map<string, string>[] {
   const text = html.replace(/<!--[\s\S]*?-->/g, '');
@@ -79,16 +77,16 @@ export function legacyTags(html: string, element: string): Map<string, string>[]
     const attrs = new Map<string, string>();
     for (const a of m[1].matchAll(/([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g)) {
       const name = a[1].toLowerCase();
-      if (!attrs.has(name)) attrs.set(name, auditDecode(a[2] ?? a[3] ?? a[4] ?? ''));
+      if (!attrs.has(name)) attrs.set(name, decode(a[2] ?? a[3] ?? a[4] ?? ''));
     }
     out.push(attrs);
   }
   return out;
 }
 
-/** audit.ts's view of a page through the scanner: one element's tags, with its own decoding. */
+/** audit.ts's view of a page through the scanner: one element's tags, decoded as audit.ts decodes them. */
 const scannedTags = (html: string, element: string) => startTags(html).filter((t) => t.name === element)
-  .map((t) => new Map([...t.attrs].map(([k, v]) => [k, auditDecode(v)])));
+  .map((t) => new Map([...t.attrs].map(([k, v]) => [k, decode(v)])));
 
 const same = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y);
 const entries = (tags: Map<string, string>[]) => tags.map((t) => [...t]);

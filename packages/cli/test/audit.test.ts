@@ -152,6 +152,19 @@ test('bundle secrets: a page\'s policy may pin digests of what it carries inline
   assert.ok((bad.fix ?? []).some((f) => /^dist\/index\.html:\d+ \(entropy\)$/.test(f)), (bad.fix ?? []).join(' | '));
 });
 
+test('a page whose attributes hold any numeric reference is read as the browser reads it — never a RangeError', async () => {
+  // Past U+10FFFF, a surrogate, zero and a C1 remap in a style attribute; the
+  // policy itself written with references the old decoding left as text.
+  const style = "font-family:'&#x110000;&#xD800;&#0;&#x80;'";
+  const own = sha256Source("font-family:'\uFFFD\uFFFD\uFFFD\u20AC'");
+  const content = `default-src &#X27;self&#X27;; style-src &#39;self&#39; &#x27;unsafe-hashes&#x27; ${own}; object-src &#39;none&#39;; base-uri &#39;self&#39;`;
+  const b = built(SITE, { 'index.html': PAGE(`<meta http-equiv="Content-Security-Policy" content="${content}" />`, `<div id="root"><p style="${style}">hi</p></div>`) });
+  const secrets = await check('bundle-secrets', b);
+  assert.equal(secrets.status, 'pass', secrets.line);
+  const csp = await check('page-csp', b);
+  assert.deepEqual([csp.status, csp.line], ['pass', 'page CSP: 1 page, each with a strict policy']);
+});
+
 /* ---- Content-Security-Policy ---------------------------------------------- */
 
 test('cspProblems: a strict policy has none; each weakness is named', () => {

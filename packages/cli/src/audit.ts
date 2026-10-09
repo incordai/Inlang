@@ -34,7 +34,7 @@ import { PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
 import { ownDigests } from '../../target-web/src/csp.ts';
-import { startTags } from '../../target-web/src/html-scan.ts';
+import { decodeAttribute, startTags } from '../../target-web/src/html-scan.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
 import { FILE_MAX_BYTES, MAX_FILES, readRegular, shippedSecrets, walkShipped, type Shipped } from './shipped.ts';
 import type { SiteJob } from './audit-site.ts';
@@ -422,9 +422,6 @@ export function cspProblems(policy: string): string[] {
   return out;
 }
 
-/** The few entities a server renderer writes in an attribute. */
-const decode = (v: string) => v.replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-
 /**
  * Each start tag of the named elements in an HTML text, as its attributes
  * (lowercased names, values decoded), by element. One pass (html-scan.ts,
@@ -434,7 +431,7 @@ const decode = (v: string) => v.replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g,
 function tags(html: string, elements: readonly string[]): Map<string, Map<string, string>[]> {
   const out = new Map(elements.map((e) => [e, [] as Map<string, string>[]]));
   for (const tag of startTags(html)) {
-    out.get(tag.name)?.push(new Map([...tag.attrs].map(([name, value]) => [name, decode(value)])));
+    out.get(tag.name)?.push(new Map([...tag.attrs].map(([name, value]) => [name, decodeAttribute(value)])));
   }
   return out;
 }

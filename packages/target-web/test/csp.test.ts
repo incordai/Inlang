@@ -81,6 +81,16 @@ test('style attributes: allowed by hash only, with unsafe-hashes — decoded as 
     'an inline sheet needs its hash, not unsafe-hashes');
 });
 
+test('a style attribute with any numeric reference: hashed as the browser decodes it (HTML §13.2.5.80), never a RangeError', () => {
+  // An author's raw component can write any markup into a pre-rendered page.
+  const html = page('<b style="font-family:\'&#x110000;&#xD800;&#0;&#x80;&#x81;\',serif">a</b>' +
+    `<i style="content:'&#${'9'.repeat(400)};&#65'">b</i>`);
+  const decoded = ["font-family:'\uFFFD\uFFFD\uFFFD\u20AC\u0081',serif", "content:'\uFFFDA'"];
+  assert.deepEqual(styleAttributes(html), decoded);
+  const style = /style-src ([^;]*)/.exec(pagePolicy(PLAIN, html, {}))?.[1].split(' ') ?? [];
+  assert.deepEqual(style, ["'self'", "'unsafe-hashes'", ...decoded.map(digest).sort()]);
+});
+
 test('a page with a 3D model: wasm-unsafe-eval and a blob: worker for the decoder — never unsafe-eval', () => {
   const policy = pagePolicy({ ...PLAIN, decoder: true }, page(''), {});
   assert.match(policy, /script-src 'self' 'wasm-unsafe-eval'; /);

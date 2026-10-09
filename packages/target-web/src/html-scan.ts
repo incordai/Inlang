@@ -2,7 +2,7 @@
  * @az module html-scan
  * Purpose: one pass over a page's markup — every start tag, its attributes, and the text of each raw-text element — for the build's policy and az audit.
  * Spec: docs/word-quality-gate.md §5.5 · HTML §13.2.5 (tokenization)
- * Exports: StartTag, startTags
+ * Exports: StartTag, startTags, decodeAttribute
  * Edit guide: imports nothing — the CLI copies this file verbatim into az-vite/ beside csp.ts, which imports it.
  *   Linear in the page's length on any input: every character is read a bounded number of times, and nothing backtracks.
  * Tests: packages/target-web/test/html-scan.test.ts
@@ -23,9 +23,11 @@
  * ends inside is dropped too: a browser never runs a script the page ends
  * in, and the regular expressions this replaced never hashed either.
  *
- * Values are returned as written, character references NOT decoded: each
- * caller decodes as it must. The caller normalises line breaks when it needs
- * the text as the browser receives it (csp.ts does).
+ * Values are returned as written, character references NOT decoded: a
+ * caller that needs a value as the browser reads it decodes it with
+ * `decodeAttribute`, the one decoder the build and az audit share. The
+ * caller normalises line breaks when it needs the text as the browser
+ * receives it (csp.ts does).
  *
  * Why not regular expressions: a pattern such as `<a\b([^>]*)>` restarts at
  * every `<` of an unclosed tag and reads to the end of the page each time —
@@ -190,4 +192,66 @@ export function startTags(html: string): StartTag[] {
     }
   }
   return out;
+}
+
+/* ---- character references in an attribute value (HTML §13.2.5.72–80) ---- */
+
+/** The highest Unicode code point; a reference past it is U+FFFD. */
+const MAX_CODE_POINT = 0x10ffff;
+const REPLACEMENT = '\uFFFD';
+
+/**
+ * HTML §13.2.5.80's C1 table: a reference to one of these code points
+ * names the character the legacy single-byte encoding put there. 0x81,
+ * 0x8D, 0x8F, 0x90 and 0x9D are not in it and are kept as they are.
+ */
+const C1_REMAP: ReadonlyMap<number, number> = new Map([
+  [0x80, 0x20ac], [0x82, 0x201a], [0x83, 0x0192], [0x84, 0x201e], [0x85, 0x2026], [0x86, 0x2020], [0x87, 0x2021],
+  [0x88, 0x02c6], [0x89, 0x2030], [0x8a, 0x0160], [0x8b, 0x2039], [0x8c, 0x0152], [0x8e, 0x017d],
+  [0x91, 0x2018], [0x92, 0x2019], [0x93, 0x201c], [0x94, 0x201d], [0x95, 0x2022], [0x96, 0x2013], [0x97, 0x2014],
+  [0x98, 0x02dc], [0x99, 0x2122], [0x9a, 0x0161], [0x9b, 0x203a], [0x9c, 0x0153], [0x9e, 0x017e], [0x9f, 0x0178],
+]);
+
+/**
+ * The named references decoded, each spelt exactly as in HTML's table
+ * (which has `&AMP;` but no `&APOS;`) — the ones a server renderer writes.
+ */
+const NAMED: ReadonlyMap<string, string> = new Map([
+  ['amp', '&'], ['AMP', '&'], ['lt', '<'], ['LT', '<'], ['gt', '>'], ['GT', '>'], ['quot', '"'], ['QUOT', '"'], ['apos', "'"],
+]);
+
+/**
+ * A numeric reference's character, as HTML §13.2.5.80 (numeric character
+ * reference end state) makes it. The value is capped once it passes
+ * U+10FFFF while its digits are read, so no digit string overflows; 0, a
+ * value past U+10FFFF and a surrogate are U+FFFD; 0x80–0x9F go through the
+ * C1 table; every other code point — noncharacters and controls among
+ * them — is kept.
+ */
+function numeric(digits: string, radix: 10 | 16): string {
+  let n = 0;
+  for (let i = 0; i < digits.length && n <= MAX_CODE_POINT; i++) n = n * radix + parseInt(digits[i], radix);
+  if (n === 0 || n > MAX_CODE_POINT || (n >= 0xd800 && n <= 0xdfff)) return REPLACEMENT;
+  return String.fromCodePoint(C1_REMAP.get(n) ?? n);
+}
+
+/**
+ * Hexadecimal or decimal digits after `&#` (the `;` is optional, as in the
+ * tokenizer), or one of the named references above with its `;`. A match
+ * that starts never fails later, so nothing backtracks.
+ */
+const REFERENCE = /&(?:#[xX]([0-9a-fA-F]+);?|#([0-9]+);?|(amp|AMP|lt|LT|gt|GT|quot|QUOT|apos);)/g;
+
+/**
+ * An attribute value as the browser's tokenizer reads it: numeric
+ * character references decoded exactly as HTML §13.2.5 decodes them, and
+ * the named ones in `NAMED`; any other `&` is kept as written. Never
+ * throws, whatever the value holds — it is an author's markup.
+ */
+export function decodeAttribute(value: string): string {
+  return value.replace(REFERENCE, (whole, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
+    if (hex !== undefined) return numeric(hex, 16);
+    if (dec !== undefined) return numeric(dec, 10);
+    return NAMED.get(name ?? '') ?? whole;
+  });
 }

@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
-import { startTags } from '../src/html-scan.ts';
+import { decodeAttribute, startTags } from '../src/html-scan.ts';
 import { inlineScripts, inlineStyles, ownDigests, styleAttributes } from '../src/csp.ts';
 import { legacyOwnDigests, legacyTags, scanDifferences } from './legacy-scan.ts';
 
@@ -53,6 +53,59 @@ test('input that ends inside a tag, a quoted value, a comment or a script ends t
   assert.deepEqual(tags('<i><!-- <b>'), [['i', {}, null]]);
   assert.deepEqual(tags('<i><script>a()'), [['i', {}, null]], 'a browser never runs a script the page ends in');
   assert.deepEqual(tags('<i><style>p{}</style'), [['i', {}, null]]);
+});
+
+/* ---- decodeAttribute: HTML §13.2.5.80, numeric character reference end state ---- */
+
+const FFFD = '\uFFFD';
+
+test('decodeAttribute: past U+10FFFF, a surrogate, or zero is U+FFFD — never a RangeError', () => {
+  for (const ref of ['&#x110000;', '&#1114112;', '&#xD800;', '&#xDBFF;', '&#xDC00;', '&#xDFFF;', '&#55296;', '&#0;', '&#x0;', '&#X00;']) {
+    assert.equal(decodeAttribute(`a${ref}b`), `a${FFFD}b`, ref);
+  }
+  assert.equal(decodeAttribute('&#x10FFFF;'), '\u{10FFFF}', 'CONTROL: the last code point is kept');
+  assert.equal(decodeAttribute('&#1114111;'), '\u{10FFFF}');
+});
+
+test('decodeAttribute: an overlong digit string is capped while it is read — U+FFFD, with no overflow', () => {
+  assert.equal(decodeAttribute(`&#${'9'.repeat(400)};x`), `${FFFD}x`, 'a decimal past Number.MAX_VALUE');
+  assert.equal(decodeAttribute(`&#x${'F'.repeat(400)};x`), `${FFFD}x`, 'a hexadecimal past Number.MAX_VALUE');
+  assert.equal(decodeAttribute(`&#${'1'.repeat(200_000)}`), FFFD, 'every digit is consumed, as the tokenizer does');
+  assert.equal(decodeAttribute(`&#x${'0'.repeat(1000)}41;`), 'A', 'CONTROL: leading zeros are no overflow');
+});
+
+test('decodeAttribute: 0x80–0x9F through the C1 table; the five it leaves out are kept', () => {
+  // HTML §13.2.5.80's table, written out here apart from the source's.
+  const table: Record<number, number> = {
+    0x80: 0x20ac, 0x82: 0x201a, 0x83: 0x0192, 0x84: 0x201e, 0x85: 0x2026, 0x86: 0x2020, 0x87: 0x2021, 0x88: 0x02c6,
+    0x89: 0x2030, 0x8a: 0x0160, 0x8b: 0x2039, 0x8c: 0x0152, 0x8e: 0x017d, 0x91: 0x2018, 0x92: 0x2019, 0x93: 0x201c,
+    0x94: 0x201d, 0x95: 0x2022, 0x96: 0x2013, 0x97: 0x2014, 0x98: 0x02dc, 0x99: 0x2122, 0x9a: 0x0161, 0x9b: 0x203a,
+    0x9c: 0x0153, 0x9e: 0x017e, 0x9f: 0x0178,
+  };
+  for (let n = 0x80; n <= 0x9f; n++) {
+    const want = String.fromCodePoint(table[n] ?? n);
+    assert.equal(decodeAttribute(`&#x${n.toString(16)};`), want, `&#x${n.toString(16)};`);
+    assert.equal(decodeAttribute(`&#${n};`), want, `&#${n};`);
+  }
+  assert.deepEqual([0x81, 0x8d, 0x8f, 0x90, 0x9d].map((n) => decodeAttribute(`&#${n};`)), ['\x81', '\x8d', '\x8f', '\x90', '\x9d']);
+});
+
+test('decodeAttribute: noncharacters and controls are kept, as the spec keeps them (a parse error only)', () => {
+  for (const n of [0xfdd0, 0xfdef, 0xfffe, 0xffff, 0x1fffe, 0x10fffe, 0x01, 0x0b, 0x0d, 0x1f, 0x7f]) {
+    assert.equal(decodeAttribute(`&#x${n.toString(16)};`), String.fromCodePoint(n), n.toString(16));
+  }
+});
+
+test('decodeAttribute: the `;` is optional after digits; `&#` with no digits is text', () => {
+  assert.equal(decodeAttribute('&#65x &#x41g &#X41;'), 'Ax Ag A');
+  assert.equal(decodeAttribute('&#x110000 '), `${FFFD} `);
+  assert.equal(decodeAttribute('&#; &#x; &#xg; & &#-1;'), '&#; &#x; &#xg; & &#-1;');
+});
+
+test('decodeAttribute: named references only as HTML spells them, each with its `;`', () => {
+  assert.equal(decodeAttribute('&amp;&AMP;&lt;&LT;&gt;&GT;&quot;&QUOT;&apos;'), '&&<<>>""\'');
+  assert.equal(decodeAttribute('&Amp; &APOS; &nbsp; &ampx;'), '&Amp; &APOS; &nbsp; &ampx;', 'not in the table as written: kept');
+  assert.equal(decodeAttribute('&amp;#x41;'), '&#x41;', 'decoded once, left to right');
 });
 
 /* ---- cost: linear on any input ------------------------------------------ */
