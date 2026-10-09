@@ -256,6 +256,43 @@ Now it is `bundle secrets: no answer after 15s reading .az-build/dist —
 nothing it ships was checked` (fail), page CSP and new-tab links skip
 pointing to it, and dependencies and backend CSP answer as usual.
 
+*Fixed (follow-up): the page scans are linear.* The same patterns ran in the
+build — `az-vite/build.mjs` hashes and secret-scans every pre-rendered page,
+and an author's `raw`/`slot` component puts arbitrary markup into one — so a
+pathological page could hang `az build` too. Every regular-expression scan
+over a page was quadratic on some input: `csp.ts` `styleAttributes` (the
+tag pattern restarts at each `<` of an unclosed tag), the script/style
+extraction behind `inlineScripts`, `inlineStyles` and `ownDigests`
+(`<script\b[^>]*>`, `[\s\S]*?</script>`), the comment strip both ran first
+(`<!--[\s\S]*?-->` on unterminated comments), audit's `<meta>`/`<a>` tag
+scan, and core `secrets.ts`'s JWT rule (a run of `eyJ`: 40 000 took 9s), with
+its per-run search of every JWT span. They are now one pass each:
+`target-web/src/html-scan.ts` `startTags` — a tokenizer that walks `<`…`>`
+once, honours quoted values (a `>` inside one does not end the tag),
+comments, doctypes and the raw text of `script`/`style`, never backtracks,
+and stops where the input ends inside a token, as a browser drops it. It is
+shared: `csp.ts` (copied with it into `az-vite/`) and `audit.ts` both read
+pages through it. The JWT rule is a run-by-run scan with a span cursor.
+
+Measured (CPU time): 300 000 `<a ` (900KB) — about 20ms, where the old
+`styleAttributes`, audit's `<a>` scan and the old JWT rule (on 300 000
+`eyJ`) were each still running when killed at 5 minutes; each adversarial 5MB page
+(unclosed tags, scripts, metas, attribute soup, unterminated quotes and
+comments, `<` noise) — under 130ms. The tests bound every shape at 1µs of
+CPU per character and eight times the input at under 24 times the cost
+(linear ~8, quadratic ~64); the old code fails the same bound
+(`target-web/test/html-scan.test.ts`, `core/test/secrets.test.ts`).
+
+Results are unchanged on real pages, so every policy hash is the one the old
+build wrote: the old scans are kept as a test oracle (`legacy-scan.ts`,
+`legacy-secrets.ts`), and old and new are compared on 500 generated
+pre-render pages, on every page `verify:build` ships, and on every page of
+every word preview `test:visual` builds (its `scan` check, gate item 3).
+Where the two could differ — only on markup no renderer writes — the scanner
+reads as the browser does: a `>` in a quoted value, text inside a script or
+style body (a `<style>` in a script string is not a sheet), a `style`
+attribute on a `<script>` tag, a custom element named `script-x`.
+
 | Check | Fails / warns when | Fix it prints |
 |---|---|---|
 | bundle secrets | a key-shaped string in any file `dist/` ships (fail) — §4 rule 2's scanner, `scanText`, the build guard's own, now also over the pre-rendered pages; `AZ_PUBLIC_` values (the output folder's `.env*`, then the environment) allowed, as by the guard. A file that is byte-for-byte one an installed package published (the 3D decoder, found by name in the output's `node_modules`) is judged by the key-shape rules only — compiled decoders are dense, and the entropy rule is for inlined values. **Location and shape only** (`dist/assets/a.js:1234 (secret-prefix)`); a file name or link shaped like a key is printed by its length. `dist/` missing fails; a file over 16MB is a warning, not read | remove it, rebuild, rotate it if deployed |

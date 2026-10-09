@@ -93,7 +93,53 @@ function privilegedJwt(token: string): boolean {
   return typeof role === 'string' && PRIVILEGED_ROLES.has(role.toLowerCase());
 }
 
-const JWT = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
+/** A token's characters: the base64url alphabet. */
+const isTokenChar = (c: number) =>
+  (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) || c === 0x2d || c === 0x5f;
+/** The fewest characters each of a JWT's three parts is taken to have. */
+const JWT_PART_MIN = 8;
+/** How a JWT starts: its JSON header, `{"…`, in base64url. */
+const JWT_HEADER = 'eyJ';
+
+/** The end of the run of token characters that starts at `at`. */
+function runEnd(text: string, at: number): number {
+  let i = at;
+  while (i < text.length && isTokenChar(text.charCodeAt(i))) i++;
+  return i;
+}
+
+/**
+ * Every JWT-shaped token in a text, left to right: `eyJ`, then three dot-
+ * separated runs of at least JWT_PART_MIN token characters — the first
+ * counted after `eyJ` — each run taken whole. A regular expression of that
+ * shape restarts at every `eyJ` of a long run and reads it to its end each
+ * time (quadratic: 40 000 `eyJ` took 9s); this reads each run at most three
+ * times. A run with no part long enough after its first `eyJ` holds none
+ * further on either, since every later start leaves less of it.
+ */
+function jwts(text: string): { readonly at: number; readonly value: string }[] {
+  const out: { at: number; value: string }[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (!isTokenChar(text.charCodeAt(i))) {
+      i++;
+      continue;
+    }
+    const end = runEnd(text, i);
+    const head = text.slice(i, end).indexOf(JWT_HEADER);
+    const at = i + head;
+    i = end;
+    if (head < 0 || end - (at + JWT_HEADER.length) < JWT_PART_MIN || text[end] !== '.') continue;
+    const second = runEnd(text, end + 1);
+    if (second - (end + 1) < JWT_PART_MIN || text[second] !== '.') continue;
+    const third = runEnd(text, second + 1);
+    if (third - (second + 1) < JWT_PART_MIN) continue;
+    out.push({ at, value: text.slice(at, third) });
+    i = third;
+  }
+  return out;
+}
+
 const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
 const SECRET_PREFIX = /\b(?:sk|rk)_(?:live|test)?_?[A-Za-z0-9]{16,}/g;
 const SERVICE_ROLE = /\bservice_role\b/g;
@@ -126,18 +172,21 @@ export function scanText(text: string, allow: ReadonlySet<string> = new Set()): 
   for (const m of text.matchAll(SERVICE_ROLE)) add('service-role', m.index ?? 0, m[0]);
 
   const jwtSpans: [number, number][] = [];
-  for (const m of text.matchAll(JWT)) {
-    const at = m.index ?? 0;
-    jwtSpans.push([at, at + m[0].length]);
-    if (privilegedJwt(m[0])) add('jwt-privileged', at, m[0]);
+  for (const { at, value } of jwts(text)) {
+    jwtSpans.push([at, at + value.length]);
+    if (privilegedJwt(value)) add('jwt-privileged', at, value);
   }
 
+  // Both lists run left to right and spans never overlap, so one cursor
+  // walks the spans once instead of searching them for every run.
+  let span = 0;
   for (const m of text.matchAll(HIGH_ENTROPY)) {
     const value = m[0];
     const at = m.index ?? 0;
     if (allow.has(value)) continue;
     // A JWT is judged by its role above; its parts are not separate keys.
-    if (jwtSpans.some(([a, b]) => at >= a && at < b)) continue;
+    while (span < jwtSpans.length && jwtSpans[span][1] <= at) span++;
+    if (span < jwtSpans.length && jwtSpans[span][0] <= at) continue;
     // Inlined assets are base64 by design (a small image in a data: URL).
     if (/(?:data:[^,]{0,64},|base64,)$/.test(text.slice(Math.max(0, at - 72), at))) continue;
     if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) continue;

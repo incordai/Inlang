@@ -93,7 +93,8 @@ imports only its own files because the CLI copies it verbatim into
 only the wiring (`target-web/src/auth.ts`). `core/src/secrets.ts` is copied
 the same way, into every site's build guard, and so imports nothing.
 `target-web/src/csp.ts` is copied beside it into `az-vite/` (it imports only
-`node:crypto`): after the pre-render, `az-vite/build.mjs` gives every page a
+`node:crypto` and `html-scan.ts`, the single-pass page scanner copied with
+it, which imports nothing): after the pre-render, `az-vite/build.mjs` gives every page a
 `<meta http-equiv="Content-Security-Policy">` as the first tag after its
 charset — what the page loads beyond its own files from the emitter's
 per-page needs (written into `build.mjs`), and a `sha256` hash of every

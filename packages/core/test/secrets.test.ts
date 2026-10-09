@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { compile, type Manifest } from '../src/index.ts';
 import { isSecretLiteral, redact, scanEnv, scanText } from '../src/secrets.ts';
+import { legacyScanText } from './legacy-secrets.ts';
 
 const b64url = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const jwt = (role: string) => `${b64url({ alg: 'HS256' })}.${b64url({ role, iss: 'probe' })}.c2lnbmF0dXJlLXByb2Jl`;
@@ -127,4 +128,70 @@ test('env: a backend server setting given a public name fails the site build (ba
   assert.ok(found.every((f) => f.rule === 'private-name'));
   // The server's own names carry no public prefix and are never judged, never inlined.
   assert.deepEqual(scanEnv({ AZ_SMTP_PASSWORD: 'hunter2hunter2', AZ_DATABASE_URL: 'postgres://u:p@h/db' }), []);
+});
+
+/* ---- the JWT rule: one pass, exactly the old regular expression's finds ---- */
+
+/** CPU milliseconds `f` takes: the least of `runs` (process.cpuUsage, so a loaded machine cannot fail it). */
+function cpuMs(f: () => unknown, runs = 3): number {
+  let best = Infinity;
+  for (let i = 0; i < runs; i++) {
+    const start = process.cpuUsage();
+    f();
+    const used = process.cpuUsage(start);
+    best = Math.min(best, (used.user + used.system) / 1000);
+  }
+  return best;
+}
+/** The bound: CPU time per input character. Measured ~10ns here; 1µs leaves room for a slow machine. */
+const NS_PER_CHAR = 1_000;
+/** Eight times the input may cost at most this many times more — linear is ~8, quadratic ~64. */
+const GROWTH_8X = 24;
+
+test('LINEAR: a 5MB run of `eyJ` — no token, under the bound, and eight times the input about eight times the cost', () => {
+  const big = 'eyJ'.repeat(Math.ceil((5 * 1024 * 1024) / 3));
+  const small = big.slice(0, big.length / 8);
+  const tBig = cpuMs(() => scanText(big), 1);
+  const tSmall = cpuMs(() => scanText(small));
+  assert.ok(tBig <= (big.length * NS_PER_CHAR) / 1e6, `${tBig.toFixed(1)}ms CPU for ${big.length} characters`);
+  assert.ok(tBig <= GROWTH_8X * Math.max(tSmall, 1), `8× the input took ${(tBig / tSmall).toFixed(1)}× (${tSmall.toFixed(1)} → ${tBig.toFixed(1)}ms)`);
+});
+
+test('LINEAR: a 5MB text of short tokens — the JWT spans are walked once, not searched for every run', () => {
+  const token = jwt('anon');
+  const big = `${token} `.repeat(Math.ceil((5 * 1024 * 1024) / (token.length + 1)));
+  const tBig = cpuMs(() => scanText(big), 1);
+  assert.ok(tBig <= (big.length * NS_PER_CHAR) / 1e6, `${tBig.toFixed(1)}ms CPU for ${big.length} characters`);
+});
+
+test('QUADRATIC (old code): a run of `eyJ` — eight times the input costs far more than eight times as much, past the bound', () => {
+  const small = 'eyJ'.repeat(2_000);
+  const big = 'eyJ'.repeat(16_000);
+  const tSmall = cpuMs(() => legacyScanText(small));
+  const tBig = cpuMs(() => legacyScanText(big), 1);
+  assert.ok(tBig > GROWTH_8X * Math.max(tSmall, 1), `8× the input took ${(tBig / tSmall).toFixed(1)}× (${tSmall.toFixed(1)} → ${tBig.toFixed(1)}ms)`);
+  assert.ok(tBig > (big.length * NS_PER_CHAR) / 1e6, `CONTROL: ${tBig.toFixed(1)}ms CPU for ${big.length} characters is past the bound`);
+});
+
+test('EQUIVALENCE: every finding exactly the old scan\'s — real tokens, near-misses, and 2 000 generated texts', () => {
+  const service = jwt('service_role');
+  const anon = jwt('anon');
+  const fixed = [
+    `t="${service}"`, `a ${anon} b ${service}.x`, `x${service}`, `eyJ${service}`, `${service}.${anon}`,
+    `eyJabcdefgh.abcdefgh.abcdefg`, `eyJabcdefg.abcdefgh.abcdefgh`, `eyJabcdefgh.abcdefgh.abcdefgh`, `eyJeyJabcdefgh.abcdefgh.abcdefgh`,
+    `abcdeyJ12345678.12345678.12345678.12345678`, `eyJ1234567eyJ12345678.12345678.12345678`, `${RANDOMISH} ${anon} ${RANDOMISH}`,
+  ];
+  for (const text of fixed) assert.deepEqual(scanText(text), legacyScanText(text), text);
+  // Seeded, so a failure reproduces: texts made of the pieces the rule reads.
+  let seed = 7;
+  const next = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return seed / 2 ** 32; };
+  const pieces = ['eyJ', 'eyJh', 'abcdefgh', 'Q9', '.', '.', '-', '_', ' ', '"', 'x', RANDOMISH, service, anon, '12345678'];
+  let found = 0;
+  for (let i = 0; i < 2_000; i++) {
+    const text = Array.from({ length: 4 + Math.floor(next() * 24) }, () => pieces[Math.floor(next() * pieces.length)]).join('');
+    const want = legacyScanText(text);
+    assert.deepEqual(scanText(text), want, text);
+    found += want.length;
+  }
+  assert.ok(found > 500, `CONTROL: the generated texts hold findings (${found})`);
 });

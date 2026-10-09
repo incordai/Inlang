@@ -23,7 +23,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync, existsSync, symlinkSync } from 'node:fs';
-import { join, dirname, basename, relative } from 'node:path';
+import { join, dirname, basename, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
@@ -32,6 +32,7 @@ import sharp from 'sharp';
 import { chromium } from 'playwright';
 import { watchdog, human, within, closeWithin } from './lib/bounded.mjs';
 import { startServer } from './visual/serve.mjs';
+import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 /** PRD §9: "Bundle, non-3D pages < 150KB gz". */
@@ -325,8 +326,9 @@ try {
         const at = text.indexOf('http-equiv="Content-Security-Policy"');
         return policies[r] !== null && at > 0 && at < text.indexOf('<script') && at < text.indexOf('<link rel="stylesheet"');
       }), routes.filter((r) => policies[r] === null).join(' '));
-    check('§2 B: the build ships csp.ts verbatim beside build.mjs',
-      readFileSync(join(proj, 'az-vite/csp.ts'), 'utf8') === readFileSync(join(ROOT, 'packages/target-web/src/csp.ts'), 'utf8'));
+    check('§2 B: the build ships csp.ts verbatim beside build.mjs, with the page scanner it imports',
+      ['csp.ts', 'html-scan.ts'].every((f) =>
+        readFileSync(join(proj, 'az-vite', f), 'utf8') === readFileSync(join(ROOT, 'packages/target-web/src', f), 'utf8')));
     // The fixture's / carries two author components with inline styles (M3);
     // a pre-rendered page carries no inline script of its own.
     const decoded = (v) => v.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
@@ -1153,6 +1155,23 @@ try {
   const c = join(work, 'c');
   node(CLI, ['build', changed, '--out', c], work);
   check('CONTROL: a CHANGED source produces different output', read(a) !== read(c));
+
+  /* ---- §5.5: the page scanner reads every shipped page as the old scans did -- */
+  // Every page every build in this run shipped: the single-pass scanner
+  // (html-scan.ts) and the regular expressions it replaced (legacy-scan.ts)
+  // give the same scripts, styles, style attributes, digests and tags.
+  {
+    const pagesUnder = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const path = join(dir, e.name);
+      if (e.isDirectory()) return e.name === 'node_modules' ? [] : pagesUnder(path);
+      return e.isFile() && e.name.endsWith('.html') && path.includes(`${sep}dist${sep}`) ? [path] : [];
+    });
+    const shipped = pagesUnder(work);
+    const differing = shipped.map((f) => [relative(work, f), scanDifferences(readFileSync(f, 'utf8'))]).filter(([, d]) => d.length > 0);
+    check('§5.5: on every shipped page, the page scanner and the old regular expressions agree',
+      shipped.length >= 10 && differing.length === 0,
+      differing.length > 0 ? differing.map(([f, d]) => `${f}: ${d.join(', ')}`).join(' | ') : `${shipped.length} pages`);
+  }
 } finally {
   // Keep the directory when something failed — it is the evidence.
   if (failures === 0) rmSync(work, { recursive: true, force: true });

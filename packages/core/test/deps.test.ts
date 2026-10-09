@@ -167,6 +167,11 @@ test('the output walk imports only node built-ins — it is copied whole into ev
   for (const spec of specs) assert.ok(spec.startsWith('node:'), `shipped.ts imports '${spec}' — only node:*`);
 });
 
+test('the page policy imports only node:crypto and the page scanner, which imports nothing — both are copied whole into every site (§2 B)', () => {
+  assert.deepEqual(importsOf(join(ROOT, 'packages/target-web/src/csp.ts')).sort(), ['./html-scan.ts', 'node:crypto']);
+  assert.deepEqual(importsOf(join(ROOT, 'packages/target-web/src/html-scan.ts')), []);
+});
+
 test('mcp imports only its siblings and node built-ins — the CLI injects every operation', () => {
   const files = sources('packages/mcp');
   assert.ok(files.length >= 3, 'CONTROL: the mcp sources are found');

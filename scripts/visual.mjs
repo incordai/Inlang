@@ -52,6 +52,7 @@ import { withVariant } from './thumbnails.mjs';
 import { COMPILE_MS, INSTALL_MS, PROJECT_BUILD_MS } from './visual/pipeline.mjs';
 import { Overdue, within, closeWithin, watchdog, human, slowest } from './lib/bounded.mjs';
 import { cspResult, watchCsp } from './visual/csp.mjs';
+import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
@@ -122,7 +123,7 @@ const CHECKS = ['compile', 'deadline', 'overflow', 'axe', 'keyboard', 'reduced-m
   'no-js', 'hydration', 'image-shift', 'over-media', 'centred',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
-  'firefox', 'webkit', 'csp'];
+  'firefox', 'webkit', 'csp', 'scan'];
 
 /**
  * Responsive-table rows the gate measures, per word and variant: the
@@ -395,7 +396,23 @@ async function buildAll(words, work, everyVariant) {
     s.dist = join(proj, 'dist');
   });
   console.log(`built ${built.length} sites (client + pre-render)\n`);
+  for (const s of built) record(s.word, 'scan', s.label, scanned(s.dist));
   return built;
+}
+
+/**
+ * word-quality-gate §5.5: on every page a site ships, the single-pass page
+ * scanner (html-scan.ts) reads what the regular expressions it replaced
+ * read (legacy-scan.ts) — the same scripts, styles, style attributes,
+ * digests and tags, so every policy hash is the one the old build wrote.
+ */
+function scanned(dist) {
+  const pages = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? (e.name === 'assets' ? [] : pages(join(dir, e.name))) : e.name.endsWith('.html') ? [join(dir, e.name)] : []);
+  const found = pages(dist);
+  const differing = found.map((f) => [f.slice(dist.length + 1), scanDifferences(readFileSync(f, 'utf8'))]).filter(([, d]) => d.length > 0);
+  if (found.length === 0) return { pass: false, detail: 'no page in dist/' };
+  return { pass: differing.length === 0, detail: differing.map(([f, d]) => `${f}: ${d.join(', ')}`).join(' | ') };
 }
 
 /** The first `page <route>` of a .az source, as a URL path. */

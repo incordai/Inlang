@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AUDIT_CHECKS, audit, backendHeaderProblems, cspProblems, readAdvisory, type AuditOptions } from '../src/audit.ts';
 import { formatReport, runChecks, systemProbe, type Check, type Probe, type RunOptions, type RunResult } from '../src/doctor.ts';
 import { findNpmCli } from '../src/serve.ts';
@@ -416,13 +416,25 @@ test('DEADLINE: a hung audit check reports no answer and says to run az audit ag
   assert.match(r.fix?.[0] ?? '', /run az audit again/);
 });
 
-/** A page of unclosed tags: every tag scan over it is quadratic — minutes of synchronous work for one 900KB file. */
-const SLOW_PAGE = PAGE('', '<a '.repeat(300_000));
+/** A site reader that never answers: a synchronous loop, which no timer on its own thread could end. */
+function stuckReader(): URL {
+  const file = join(mkdtempSync(join(tmpdir(), 'az-audit-reader-')), 'stuck.mjs');
+  writeFileSync(file, 'for (;;) { /* never yields */ }\n');
+  return pathToFileURL(file);
+}
 
-test('DEADLINE: a built page the scans are slow on is ended at the read\'s timeout — the line says so, every other check finishes', async () => {
-  const b = built(BACKEND, { 'index.html': SLOW_PAGE });
+test('a page of 300 000 unclosed tags is read, not timed out — the page scans are one linear pass (html-scan.ts)', async () => {
+  // The regular-expression scans this replaced were quadratic on it: minutes of synchronous work for one 900KB file.
+  const b = built(SITE, { 'index.html': PAGE(STRICT, '<a '.repeat(300_000)) });
+  const r = await audit(options(b, { checks: AUDIT_CHECKS.filter((c) => c.id === 'page-csp' || c.id === 'new-tab-links') }));
+  assert.deepEqual(r.checks.map((c) => [c.id, c.status]), [['page-csp', 'pass'], ['new-tab-links', 'skip']],
+    r.checks.map((c) => c.line).join(' | '));
+});
+
+test('DEADLINE: a read of the built site that never answers is ended at its timeout — the line says so, every other check finishes', async () => {
+  const b = built(BACKEND);
   const started = Date.now();
-  const r = await audit(options(b, { siteMs: 1_000, deadlineMs: 10_000 }));
+  const r = await audit(options(b, { siteReader: stuckReader(), siteMs: 1_000, deadlineMs: 10_000 }));
   const took = Date.now() - started;
   assert.ok(took < 8_000, `ended at the read's timeout, not the scan's end (${took}ms)`);
   assert.deepEqual(r.checks.map((c) => [c.id, c.status, c.line]), [
@@ -437,9 +449,9 @@ test('DEADLINE: a built page the scans are slow on is ended at the read\'s timeo
 });
 
 test('DEADLINE: a check deadline shorter than the read\'s ends the run, and the read with it', async () => {
-  const b = built(SITE, { 'index.html': SLOW_PAGE });
+  const b = built(SITE);
   const started = Date.now();
-  const r = await audit(options(b, { checks: AUDIT_CHECKS.filter((c) => c.id === 'bundle-secrets'), siteMs: 600_000, deadlineMs: 500 }));
+  const r = await audit(options(b, { checks: AUDIT_CHECKS.filter((c) => c.id === 'bundle-secrets'), siteReader: stuckReader(), siteMs: 600_000, deadlineMs: 500 }));
   assert.ok(Date.now() - started < 3_000);
   assert.equal(r.checks[0].line, 'bundle secrets: no answer after 0.5s');
   // The worker is terminated once the report is in: if it were not, this test file would not exit for minutes.

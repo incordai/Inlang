@@ -3,7 +3,7 @@
  * Purpose: each built page's Content-Security-Policy, from what the page needs and the markup it ships.
  * Spec: docs/word-quality-gate.md §2 B, §5.5 · docs/ARCHITECTURE.md §4.2
  * Exports: PageNeeds, CSP_META, PolicyError, pagePolicy, withPolicy, inlineScripts, inlineStyles, styleAttributes, sha256Source, ownDigests, originOf
- * Edit guide: dependency-free besides node:crypto — the CLI copies this file verbatim into az-vite/, where build.mjs imports it.
+ * Edit guide: imports only node:crypto and html-scan.ts — the CLI copies both verbatim into az-vite/, where build.mjs imports this file.
  *   A source is added only for something a page really does; never 'unsafe-inline' or 'unsafe-eval'.
  * Tests: packages/target-web/test/csp.test.ts
  */
@@ -25,6 +25,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { startTags, type StartTag } from './html-scan.ts';
 
 /** What one page needs beyond its own files — written by the emitter into build.mjs. */
 export interface PageNeeds {
@@ -60,16 +61,6 @@ const parsed = (html: string) => html.replace(/\r\n?/g, '\n');
 /** Script types a browser executes (HTML §4.12.1.1); every other type is a data block, which CSP does not govern. */
 const EXECUTED = /^(?:|module|text\/javascript|application\/javascript|text\/ecmascript|application\/ecmascript)$/i;
 
-/** The attributes of one start tag's text, by lowercased name; the first of a name wins, as in HTML. */
-function attributes(text: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const a of text.matchAll(/([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g)) {
-    const name = a[1].toLowerCase();
-    if (!out.has(name)) out.set(name, decode(a[2] ?? a[3] ?? a[4] ?? ''));
-  }
-  return out;
-}
-
 /** An attribute value as the browser reads it: character references decoded. */
 function decode(value: string): string {
   return value.replace(/&(?:#x([0-9a-f]+)|#(\d+)|(amp|quot|apos|lt|gt));/gi, (_m, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
@@ -79,26 +70,42 @@ function decode(value: string): string {
   });
 }
 
-/** Each `<element …>…</element>` of a raw-text element (script, style): its attributes and its exact text. */
-function rawText(html: string, element: 'script' | 'style'): { attrs: Map<string, string>; text: string }[] {
-  const out: { attrs: Map<string, string>; text: string }[] = [];
-  const text = parsed(html).replace(/<!--[\s\S]*?-->/g, '');
-  for (const m of text.matchAll(new RegExp(`<${element}\\b([^>]*)>([\\s\\S]*?)</${element}\\s*>`, 'gi'))) {
-    out.push({ attrs: attributes(m[1]), text: m[2] });
+/** What a page carries inline that its policy must allow, each in document order. */
+interface Inline {
+  readonly scripts: string[];
+  readonly styles: string[];
+  readonly attrs: string[];
+}
+
+/** An executed inline script: no `src`, and a type a browser runs. */
+const executed = (tag: StartTag) =>
+  !tag.attrs.has('src') && EXECUTED.test(decode(tag.attrs.get('type') ?? '').trim());
+
+/**
+ * Everything inline in a page, read in one pass (html-scan.ts) over its text
+ * as the browser's parser receives it — linear in the page's length, so no
+ * page an author's component renders can hold the build.
+ */
+function inline(html: string): Inline {
+  const out: Inline = { scripts: [], styles: [], attrs: [] };
+  for (const tag of startTags(parsed(html))) {
+    const style = tag.attrs.get('style');
+    if (style !== undefined) out.attrs.push(decode(style));
+    if (tag.text === undefined) continue;
+    if (tag.name === 'style') out.styles.push(tag.text);
+    else if (executed(tag)) out.scripts.push(tag.text);
   }
   return out;
 }
 
 /** The text of every inline script a browser would run, byte for byte as the page carries it. */
 export function inlineScripts(html: string): string[] {
-  return rawText(html, 'script')
-    .filter((s) => !s.attrs.has('src') && EXECUTED.test((s.attrs.get('type') ?? '').trim()))
-    .map((s) => s.text);
+  return inline(html).scripts;
 }
 
 /** The text of every inline <style> element. */
 export function inlineStyles(html: string): string[] {
-  return rawText(html, 'style').map((s) => s.text);
+  return inline(html).styles;
 }
 
 /**
@@ -106,14 +113,7 @@ export function inlineStyles(html: string): string[] {
  * bodies and comments are passed over: their text is not markup.
  */
 export function styleAttributes(html: string): string[] {
-  const markup = parsed(html).replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
-  const out: string[] = [];
-  for (const m of markup.matchAll(/<[a-zA-Z][^\s/>]*((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>/g)) {
-    const style = attributes(m[1]).get('style');
-    if (style !== undefined) out.push(style);
-  }
-  return out;
+  return inline(html).attrs;
 }
 
 /**
@@ -124,7 +124,8 @@ export function styleAttributes(html: string): string[] {
  * file really holds; any other value is judged.
  */
 export function ownDigests(html: string): string[] {
-  return [...inlineScripts(html), ...inlineStyles(html), ...styleAttributes(html)].map((t) => sha256Source(t).slice(1, -1));
+  const { scripts, styles, attrs } = inline(html);
+  return [...scripts, ...styles, ...attrs].map((t) => sha256Source(t).slice(1, -1));
 }
 
 /** An error in the build's public settings that a policy cannot be made from. */
@@ -156,9 +157,10 @@ const sorted = (items: Iterable<string>): string[] => [...new Set(items)].sort((
 export function pagePolicy(needs: PageNeeds, html: string, env: Readonly<Record<string, string | undefined>>): string {
   const origins = (names: readonly string[]) =>
     sorted(names.map((n) => originOf(n, env[n])).filter((o): o is string => o !== null));
-  const scripts = sorted(inlineScripts(html).map(sha256Source));
-  const attrs = sorted(styleAttributes(html).map(sha256Source));
-  const sheets = sorted(inlineStyles(html).map(sha256Source));
+  const page = inline(html);
+  const scripts = sorted(page.scripts.map(sha256Source));
+  const attrs = sorted(page.attrs.map(sha256Source));
+  const sheets = sorted(page.styles.map(sha256Source));
   const directives: [string, string[]][] = [
     ['default-src', ["'self'"]],
     ['script-src', ["'self'", ...(needs.decoder ? ["'wasm-unsafe-eval'"] : []), ...scripts]],

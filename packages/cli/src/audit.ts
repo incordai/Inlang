@@ -34,6 +34,7 @@ import { PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
 import { ownDigests } from '../../target-web/src/csp.ts';
+import { startTags } from '../../target-web/src/html-scan.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
 import { FILE_MAX_BYTES, MAX_FILES, readRegular, shippedSecrets, walkShipped, type Shipped } from './shipped.ts';
 import type { SiteJob } from './audit-site.ts';
@@ -424,17 +425,16 @@ export function cspProblems(policy: string): string[] {
 /** The few entities a server renderer writes in an attribute. */
 const decode = (v: string) => v.replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
-/** Each start tag of one element in an HTML text, as its attributes (lowercased names). Comments are skipped. */
-function tags(html: string, element: string): Map<string, string>[] {
-  const text = html.replace(/<!--[\s\S]*?-->/g, '');
-  const out: Map<string, string>[] = [];
-  for (const m of text.matchAll(new RegExp(`<${element}\\b([^>]*)>`, 'gi'))) {
-    const attrs = new Map<string, string>();
-    for (const a of m[1].matchAll(/([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g)) {
-      const name = a[1].toLowerCase();
-      if (!attrs.has(name)) attrs.set(name, decode(a[2] ?? a[3] ?? a[4] ?? ''));
-    }
-    out.push(attrs);
+/**
+ * Each start tag of the named elements in an HTML text, as its attributes
+ * (lowercased names, values decoded), by element. One pass (html-scan.ts,
+ * the build's own scanner): linear in the page's length, and comments and
+ * script or style text are not markup.
+ */
+function tags(html: string, elements: readonly string[]): Map<string, Map<string, string>[]> {
+  const out = new Map(elements.map((e) => [e, [] as Map<string, string>[]]));
+  for (const tag of startTags(html)) {
+    out.get(tag.name)?.push(new Map([...tag.attrs].map(([name, value]) => [name, decode(value)])));
   }
   return out;
 }
@@ -581,7 +581,8 @@ export async function analyseSite(outDir: string, allow: readonly string[]): Pro
   let newTab = 0;
   const openers: string[] = [];
   for (const p of pages) {
-    const policies = tags(p.text, 'meta')
+    const found = tags(p.text, ['meta', 'a']);
+    const policies = (found.get('meta') ?? [])
       .filter((a) => a.get('http-equiv')?.toLowerCase() === 'content-security-policy')
       .map((a) => a.get('content') ?? '');
     if (policies.length === 0) {
@@ -592,7 +593,7 @@ export async function analyseSite(outDir: string, allow: readonly string[]): Pro
       const open = each[0].filter((x) => each.every((list) => list.includes(x)));
       if (open.length > 0) (open.every((x) => x === STYLE_INLINE) ? styled : weak).push(`${route(p.path)}: ${open.join('; ')}`);
     }
-    for (const a of tags(p.text, 'a')) {
+    for (const a of found.get('a') ?? []) {
       if (a.get('target')?.toLowerCase() !== '_blank') continue;
       newTab++;
       const rel = (a.get('rel') ?? '').toLowerCase().split(/\s+/);
