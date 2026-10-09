@@ -482,9 +482,16 @@ function wireLightboxes(ctx: Ctx, root: ParentNode): void {
  * gallery-spec §6/§10: the carousel's previous/next buttons scroll the track
  * by one slide and say when an end is reached (aria-disabled). Scrolling is
  * instant under reduced motion (§10: all carousel motion is off there).
+ * The ends are read again whenever the track or a slide changes size, not
+ * only on scroll and window resize: the runtime can attach before the
+ * stylesheet applies (WebKit runs the module script ahead of a stylesheet
+ * linked after it), when the unstyled track has nothing to scroll — and a
+ * reading taken then would mark "next" unavailable for good.
  */
 function wireCarousels(ctx: Ctx, root: ParentNode): void {
-  const { win, on } = ctx;
+  const { on } = ctx;
+  // The document's view, typed with its globals (ResizeObserver).
+  const win = ctx.doc.defaultView;
   if (!win) return;
   for (const carousel of find<HTMLElement>(root, '[data-az-behaviour="carousel"]')) {
     if (!ctx.fresh(carousel, 'carousel')) continue;
@@ -497,6 +504,9 @@ function wireCarousels(ctx: Ctx, root: ParentNode): void {
     };
     for (const b of buttons) {
       on(b, 'click', () => {
+        // Read from the layout as it is now: a size change is reported only
+        // at the next frame, and a click can come before it.
+        update();
         if (b.getAttribute('aria-disabled') === 'true') return;
         const slide = track.querySelector('li');
         const gap = parseFloat(win.getComputedStyle(track).columnGap) || 0;
@@ -507,6 +517,11 @@ function wireCarousels(ctx: Ctx, root: ParentNode): void {
     }
     on(track, 'scroll', update, { passive: true });
     on(win, 'resize', update, { passive: true });
+    if (typeof win.ResizeObserver === 'function') {
+      const sizes = new win.ResizeObserver(update);
+      for (const el of [track, ...track.children]) sizes.observe(el);
+      ctx.undo.push(() => sizes.disconnect());
+    }
     update();
   }
 }

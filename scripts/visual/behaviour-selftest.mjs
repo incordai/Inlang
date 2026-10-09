@@ -33,7 +33,21 @@ const LATE = `<ul data-az-behaviour="faq" data-single="false" id="late-faq">
 </ul>`;
 const LATER = `<script>setTimeout(() => document.querySelector('main').insertAdjacentHTML('beforeend', ${JSON.stringify(LATE)}), 300);</script>`;
 
-const page = ({ runtime, net }) => `<!doctype html><html lang="en"><head><title>behaviours</title><style>
+/** The carousel track's layout: inline, or in a stylesheet that lands after the runtime. */
+const TRACK_CSS = `.track { display: flex; overflow-x: auto; width: 400px; margin: 0; padding: 0; list-style: none; }
+.track li { flex: 0 0 300px; }
+.track img { display: block; width: 300px; height: 100px; }`;
+/** How long the late stylesheet is held back: well past the runtime's attach, well inside a check's wait. */
+const TRACK_CSS_DELAY_MS = 300;
+/**
+ * The track's stylesheet linked once the runtime has attached — as WebKit
+ * runs a site's module script ahead of the stylesheet linked after it. Held
+ * back on its way to the page (TRACK_CSS_DELAY_MS), it still delays `load`,
+ * so a check meets the styled track; the runtime first met it unstyled.
+ */
+const LATE_TRACK = '<script type="module">const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "./track.css"; document.head.append(l);</script>';
+
+const page = ({ runtime, net, lateTrack = false }) => `<!doctype html><html lang="en"><head><title>behaviours</title><style>
 [hidden]:not([hidden="until-found"]) { display: none !important; }
 dialog[data-az-overlay="drawer"] { margin: 0; height: 100%; max-height: 100%; transform: translateX(-100%); transition: transform 120ms; }
 dialog[data-az-overlay="drawer"][data-state="open"] { transform: none; transition: transform 240ms; }
@@ -52,9 +66,7 @@ nav[data-scrolled="true"] { background: rgb(250, 250, 250); }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 .target { margin-top: 1200px; }
 button { min-width: 44px; min-height: 44px; }
-.track { display: flex; overflow-x: auto; width: 400px; margin: 0; padding: 0; list-style: none; }
-.track li { flex: 0 0 300px; }
-.track img { display: block; width: 300px; height: 100px; }
+${lateTrack ? '' : TRACK_CSS}
 ${net ? NET : ''}
 </style></head><body>
 <div class="frame"><nav data-az-behaviour="solid" data-az-hide data-az-shrink aria-label="Main">
@@ -108,10 +120,11 @@ ${net ? NET : ''}
 <footer><p>© <span data-year="dynamic">2019</span> Aurora</p></footer>
 ${LATER}
 ${runtime ? SCRIPT : ''}
+${lateTrack ? LATE_TRACK : ''}
 </body></html>`;
 
 /** The runtime's modules as browser JavaScript, imports pointed at .js. */
-function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = false, withoutDrag = false } = {}) {
+function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = false, withoutDrag = false, withoutSizeWatch = false } = {}) {
   mkdirSync(join(dir, 'az'), { recursive: true });
   for (const f of readdirSync(RUNTIME).filter((n) => n.endsWith('.ts'))) {
     const js = stripTypeScriptTypes(readFileSync(join(RUNTIME, f), 'utf8'))
@@ -121,7 +134,9 @@ function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = f
       // The regression revealReduced guards against: reveal ignoring reduced motion.
       .replace(withoutReducedGuard ? /^.*prefers-reduced-motion: reduce\)'\)\.matches\) return;.*$/m : /(?!)/, '')
       // The regression sheetDrag guards against: the sheet's drag unwired.
-      .replace(withoutDrag ? /^.*wireSheetDrag\(ctx, dialog, close\);.*$/m : /(?!)/, '');
+      .replace(withoutDrag ? /^.*wireSheetDrag\(ctx, dialog, close\);.*$/m : /(?!)/, '')
+      // The regression the late-track carousel guards against: the ends read only on scroll and resize.
+      .replace(withoutSizeWatch ? /^.*sizes\.observe\(el\);.*$/m : /(?!)/, '');
     writeFileSync(join(dir, 'az', f.replace(/\.ts$/, '.js')), js);
   }
 }
@@ -132,16 +147,22 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
     nomatch: { runtime: true, net: true, withoutBeforematch: true },
     noguard: { runtime: true, net: true, withoutReducedGuard: true },
     nodrag: { runtime: true, net: true, withoutDrag: true },
+    latetrack: { runtime: true, net: true, lateTrack: true },
+    latenowatch: { runtime: true, net: true, lateTrack: true, withoutSizeWatch: true },
   };
   for (const [name, form] of Object.entries(forms)) {
     mkdirSync(join(dir, `b-${name}`), { recursive: true });
     writeFileSync(join(dir, `b-${name}`, 'index.html'), page(form));
     writeRuntime(join(dir, `b-${name}`), form);
+    if (form.lateTrack) writeFileSync(join(dir, `b-${name}`, 'track.css'), TRACK_CSS);
   }
   const run = async (name, width, check, reducedMotion = 'no-preference') => {
     server.serve(join(dir, `b-${name}`));
     const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion });
     const p = await ctx.newPage();
+    if (forms[name].lateTrack) {
+      await p.route('**/track.css', (route) => new Promise((done) => setTimeout(done, TRACK_CSS_DELAY_MS)).then(() => route.continue()));
+    }
     await p.goto(server.url, { waitUntil: 'load' });
     const r = await check(p);
     await ctx.close();
@@ -167,6 +188,8 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
   expect('behaviour: nav motion without the reduced-motion net', await run('nonet', 1440, navMotion, 'reduce'), false);
   expect('behaviour: nav motion with it', await run('good', 1440, navMotion, 'reduce'), true);
   expect('behaviour: sheet drag with the drag unwired', await run('nodrag', 390, sheetDrag), false);
+  expect('behaviour: carousel styled after attach, ends read only on scroll and resize', await run('latenowatch', 1440, carousel), false);
+  expect('behaviour: carousel styled after attach', await run('latetrack', 1440, carousel), true);
   expect('behaviour: reveal ignoring reduced motion', await run('noguard', 1440, revealReduced, 'reduce'), false);
   expect('behaviour: reveal under reduced motion', await run('good', 1440, revealReduced, 'reduce'), true);
 }

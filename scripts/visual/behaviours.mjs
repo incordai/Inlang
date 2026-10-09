@@ -673,6 +673,29 @@ export async function faqDeepLink(page) {
   return { pass: problems.length === 0, detail: problems.join('; ') };
 }
 
+/** Animation frames a track must hold still before its glide counts as finished. */
+const STILL_FRAMES = 3;
+
+/**
+ * True once the carousel's track has moved past `from` and then held still
+ * for STILL_FRAMES frames — a step's glide is over; false past WAIT_MS.
+ */
+const glided = (page, wrap, from) => page.evaluate(([w, start, still, ms]) => new Promise((done) => {
+  const t = document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`);
+  let over = false;
+  const late = setTimeout(() => { over = true; done(false); }, ms);
+  let last = t.scrollLeft;
+  let held = 0;
+  const tick = () => {
+    if (over) return;
+    const now = t.scrollLeft;
+    held = now === last ? held + 1 : 0;
+    last = now;
+    if (now > start + 1 && held >= still) { clearTimeout(late); done(true); } else requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}), [wrap, from, STILL_FRAMES, WAIT_MS]);
+
 /**
  * gallery §6/§10: a carousel's previous/next buttons — at the start
  * "previous" says it cannot go (aria-disabled), "next" scrolls the track by
@@ -697,6 +720,16 @@ export async function carousel(page) {
     };
   }, wrap);
   const problems = [];
+  // The ends follow the layout, and a size change is reported at the next
+  // rendering frame: at `load` a stylesheet may have applied that no frame
+  // has rendered yet. So the controls are given until WAIT_MS to agree with
+  // the track's position; a runtime that never re-reads its ends still
+  // disagrees then, and is caught below.
+  await until(page, (w) => {
+    const t = document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`);
+    const said = (s) => document.querySelector(`${w} button[data-az-step="${s}"]`).getAttribute('aria-disabled');
+    return said('-1') === String(t.scrollLeft <= 1) && said('1') === String(t.scrollLeft + t.clientWidth >= t.scrollWidth - 1);
+  }, wrap);
   const start = await read();
   // Everything fits: nothing to step through, so neither control may offer to.
   if (start.room <= 0) {
@@ -711,17 +744,20 @@ export async function carousel(page) {
     problems.push(`the focused "next" is not a visible 44px control (${Math.round(focused.nextBox.w)}x${Math.round(focused.nextBox.h)})`);
   }
   await page.keyboard.press('Enter');
-  const moved = await until(page, (w) => (document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`)).scrollLeft > 0, wrap);
-  if (!moved) problems.push('"next" did not scroll the track');
-  // Step to the end, bounded by the number of slides.
+  if (!(await glided(page, wrap, 0))) problems.push('"next" did not scroll the track');
+  // Step to the end, bounded by the number of slides. Each step waits for
+  // its glide to finish — not for a fixed time, which a loaded machine
+  // outlasts, and not just for the first frame of it: a press mid-glide
+  // cuts the glide short.
   const slides = await page.$$eval(`${wrap} li`, (l) => l.length);
   for (let i = 0; i < slides + 1; i++) {
     const now = await read();
     if (now.next === 'true') break;
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(250);
+    if (!(await glided(page, wrap, now.left))) break;
   }
-  await page.waitForTimeout(400);
+  // At the end, "next" says so once the last scroll has been read.
+  await until(page, (w) => document.querySelector(`${w} button[data-az-step="1"]`).getAttribute('aria-disabled') === 'true', wrap);
   const end = await read();
   if (end.next !== 'true') problems.push('at the end "next" is not marked unavailable');
   if (end.left < end.room - 1) problems.push(`"next" stopped short of the end (${Math.round(end.left)} of ${end.room})`);
