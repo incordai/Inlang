@@ -216,7 +216,7 @@ export function createApp(deps: AppDeps) {
 
   /** A new session for `user`, replacing whatever session the request carried (rotation). */
   async function startSession(req: IncomingMessage, user: User): Promise<{ header: string; body: Json }> {
-    const old = readCookies(req)[names.session];
+    const old = readCookies(req).get(names.session);
     if (old) await store.deleteSession(old);
     const s = await store.createSession(user.id);
     return { header: sessionCookie(s.token), body: { session: view(user, s.expiresAt) } };
@@ -329,7 +329,7 @@ export function createApp(deps: AppDeps) {
   }
 
   async function sessionRead(req: IncomingMessage) {
-    const token = readCookies(req)[names.session];
+    const token = readCookies(req).get(names.session);
     if (!token) return { status: 200, body: { session: null } };
     const found = await store.sessionUser(token);
     if (!found) return { status: 200, body: { session: null }, cookies: [clearSession] };
@@ -337,7 +337,7 @@ export function createApp(deps: AppDeps) {
   }
 
   async function signOut(req: IncomingMessage) {
-    const token = readCookies(req)[names.session];
+    const token = readCookies(req).get(names.session);
     if (token) await store.deleteSession(token);          // ended on the server, not just forgotten
     return { status: 204, body: undefined, cookies: [clearSession] };
   }
@@ -354,7 +354,7 @@ export function createApp(deps: AppDeps) {
    */
   async function linkVerify(req: IncomingMessage, res: ServerResponse, url: URL) {
     const token = url.searchParams.get('token') ?? '';
-    const binding = readCookies(req)[names.link];
+    const binding = readCookies(req).get(names.link);
     const spent = token && binding ? await store.spendToken(token, 'link', binding) : 'expired';
     if (spent === 'expired' || !allowed.has(spent.site)) {
       return redirect(res, failTo(home, 'expired_token'), { 'set-cookie': clearLink });
@@ -400,7 +400,7 @@ export function createApp(deps: AppDeps) {
 
   async function oauthCallback(req: IncomingMessage, res: ServerResponse, p: Provider, url: URL) {
     const state = url.searchParams.get('state') ?? '';
-    const bound = readCookies(req)[names.state] ?? '';
+    const bound = readCookies(req).get(names.state) ?? '';
     // The state must be the one THIS browser was given, and unused.
     const trip = state && bound && safeEqual(state, bound) ? await store.takeOAuthState(state) : null;
     const back = (code: string) => redirect(res, failTo(trip?.site ?? home, code), { 'set-cookie': clearState });
@@ -506,11 +506,11 @@ export function createApp(deps: AppDeps) {
         url,
         ip,
         user: async () => {
-          const token = readCookies(req)[names.session];
+          const token = readCookies(req).get(names.session);
           return token ? (await store.sessionUser(token))?.user.id ?? null : null;
         },
         account: async () => {
-          const token = readCookies(req)[names.session];
+          const token = readCookies(req).get(names.session);
           const u = token ? (await store.sessionUser(token))?.user : undefined;
           return u ? { id: u.id, email: u.email, verified: u.emailVerified } : null;
         },

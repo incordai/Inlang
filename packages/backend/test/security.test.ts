@@ -208,12 +208,13 @@ test('SECURITY crash: request targets the URL parser rejects are answered 400, a
 test('SECURITY cookies: a name that is not sent reads as absent, even one Object.prototype carries', () => {
   const sent = (cookie?: string) => readCookies({ headers: cookie === undefined ? {} : { cookie } } as IncomingMessage);
   for (const name of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
-    assert.equal(sent('az_s=1')[name], undefined, name);
-    assert.equal(sent()[name], undefined, `${name}, no cookie header`);
+    assert.equal(sent('az_s=1').get(name), undefined, name);
+    assert.equal(sent().get(name), undefined, `${name}, no cookie header`);
   }
-  assert.equal(sent('__proto__=planted; az_s=1')['__proto__'], 'planted', 'a cookie with that name is read like any other');
-  assert.equal(sent('a=1; b=x=y')['b'], 'x=y', 'CONTROL: the value runs to the end, = and all');
-  assert.equal(sent('a=1; b=2')['a'], '1', 'CONTROL: an ordinary cookie');
+  assert.equal(sent('__proto__=planted; az_s=1').get('__proto__'), 'planted', 'a cookie with that name is read like any other');
+  assert.equal(sent('a=1; b=x=y').get('b'), 'x=y', 'CONTROL: the value runs to the end, = and all');
+  assert.equal(sent('a=1; b=2').get('a'), '1', 'CONTROL: an ordinary cookie');
+  assert.equal(sent('a=1; a=2').get('a'), '2', 'CONTROL: a repeated name keeps its last value, as before');
 });
 
 test('SECURITY redirect: dot segments and encoded dots cannot turn a path into //host', () => {

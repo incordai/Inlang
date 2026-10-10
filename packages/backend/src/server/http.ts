@@ -97,15 +97,16 @@ export async function sendFile(res: ServerResponse, path: string, headers: Recor
 }
 
 /**
- * The request's cookies by name. The map has no prototype: on a plain object
- * a cookie named `__proto__` was dropped, and asking for a name that was not
- * sent, such as `constructor`, answered with a function, not undefined.
+ * The request's cookies by name, in a Map: on a plain object a cookie named
+ * `__proto__` was dropped, and asking for a name that was not sent, such as
+ * `constructor`, answered with a function, not undefined. A repeated name
+ * keeps its last value.
  */
-export function readCookies(req: IncomingMessage): Record<string, string> {
-  const out: Record<string, string> = Object.create(null);
+export function readCookies(req: IncomingMessage): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
   for (const part of (req.headers.cookie ?? '').split(/;\s*/)) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i)] = part.slice(i + 1);
+    if (i > 0) out.set(part.slice(0, i), part.slice(i + 1));
   }
   return out;
 }
