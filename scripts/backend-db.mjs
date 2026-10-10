@@ -10,7 +10,6 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { createApp } from '../packages/backend/src/server/app.ts';
