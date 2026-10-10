@@ -1,0 +1,21 @@
+# Secret scanning configuration (docs/security-scanning.md).
+# The default rules apply in full; the only exceptions are two test fixtures
+# whose values are made up so the tests can prove a real secret is handled.
+[extend]
+useDefault = true
+
+# Each entry names one rule, one file and the exact fixture value: all three
+# must match (condition AND), so a real key in the same file is still reported.
+[[allowlists]]
+description = "Planted session secret: the MCP test writes it to a throwaway .env and asserts no tool result repeats it."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^packages/mcp/test/mcp\.test\.ts$''']
+regexes = ['''^planted-mcp-secret-0123456789abcdef0123$''']
+
+[[allowlists]]
+description = "Made-up random key: the secrets scanner test asserts it is still caught after the graphics-name exemptions."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^packages/core/test/secrets\.test\.ts$''']
+regexes = ['''^Xk9vQ2mZr7Lp4sBw8TnC3yHd6JfA1gKe$''']
