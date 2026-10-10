@@ -118,14 +118,18 @@ page /login
 Every variant renders distinctly, and every form is wired (M4): submit calls
 the adapter, errors show in a focused summary and beside their fields, `reset`
 switches to its set-new-password form when the link carries a token, and
-protected pages show a signed-in bar with sign-out. `pnpm coverage` lists
-`impl` and `protect` as unread by the word — the target's auth wiring reads
-them, not the form's markup.
+protected pages show a signed-in bar with sign-out. `pnpm coverage` reports
+every property implemented: the site-level `adapter`, `profile`, `impl` and
+`protect` are read by the target's auth wiring (`target-web/src/auth.ts`),
+not the form's markup, and are counted there.
 
 Known gaps:
 
 - No login has been run against a real hosted provider (needs an account);
-  the flows pass against a local mock of the §3.2 protocol
+  the flows pass against a local mock of the §3.2 protocol. The
+  `token-endpoint` profile has its own suite, `pnpm test:cloud-auth`, which
+  runs the open-source server software such a provider uses in a local
+  container (needs Docker)
 - `azbackend` and `methods oauth` are available (protocol: spec §3.4); `signup` asks for name, email, password, its retype and an optional location
 - The spec's responsive table is implemented through the style contract (`below`), and each layout change is checked at 390px against 1440px by `pnpm test:visual`
 
@@ -135,7 +139,7 @@ What is automated today:
 
 - `packages/words/test/props.test.ts`, `variants.test.ts`, `structure.test.ts` and `conformance.test.ts` run every word: each property changes the output, each variant renders differently, lists are valid HTML, and the emitter reads only declared properties
 - `words.test.ts` runs the theme lint over the emitter (also `az lint`)
-- Word-specific: `auth-props.test.ts`
+- Also exercising this word (its emitter header's `Tests`): `auth-props.test.ts`, `packages/target-web/test/auth.test.ts`
 - `scripts/verify-build.mjs` compiles the GRAMMAR §8 fixture, which includes this word, builds it with the real toolchain and checks the server-rendered HTML — and proves the build guard fails for a service key in the env (by name and by token role) and for a key pattern in the bundle
 - `pnpm test:auth` (in CI) builds a site with login, signup, reset and a protected page, and walks every flow in Chromium against a local mock provider: validation and the focused summary, wrong password, sign-in and `?next`, the session across pages, sign-out, an off-site `next` refused, `email_taken`, and both reset states
 - `packages/auth-runtime/test` covers the adapters' requests, error mapping and sessions
