@@ -273,9 +273,16 @@ Format per CONVENTIONS §5. Errors block the build; taste warnings never do.
   },
   "slots": { "plan": { "min": 1, "max": 4 } },
   "requires": {},
-  "themeReads": ["color.accent","color.accent-contrast","color.surface",
-                 "color.surface-alt","color.text","color.muted","color.border",
-                 "color.focus","space.*","radius.md","radius.lg","type.body"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "color.accent", "color.bg", "color.border", "color.muted", "color.surface",
+    "color.surface-alt", "color.text", "radius.md", "size.edge-emphasis",
+    "size.gutter-sm", "size.measure-body", "size.measure-display", "size.tap",
+    "space.4", "space.8", "space.12", "space.16", "space.24", "space.32",
+    "space.48", "space.96", "type.display", "type.leading-body",
+    "type.leading-tight", "type.size.2xl", "type.size.lg", "type.size.sm",
+    "type.size.xs", "type.weight-display"
+  ],
   "deps": {},
   "targets": ["web"],
   "tested": { "browsers": ["chrome-latest","safari-latest","firefox-latest","ios-17"],

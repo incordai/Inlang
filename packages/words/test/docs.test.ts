@@ -57,3 +57,31 @@ for (const w of words) {
     });
   }
 }
+
+/*
+ * Each block spec's example manifest shows the word's real themeReads list.
+ * `az lint` holds word.json to the code; this holds the spec to word.json.
+ */
+const SPEC_READS = /^ *"themeReads": (\[[^\]]*\])/gm;
+
+/** The example themeReads lists in a spec, in order. */
+function specReads(spec: string): string[][] {
+  return [...spec.matchAll(SPEC_READS)].map((m) => JSON.parse(m[1]) as string[]);
+}
+
+test('CONTROL: the spec parser finds a list, and a stale one differs from word.json', () => {
+  const stale = '```jsonc\n{\n  "themeReads": [\n    "color.text", "space.*"\n  ],\n}\n```\n';
+  assert.deepEqual(specReads(stale), [['color.text', 'space.*']]);
+  assert.notDeepEqual(specReads(stale)[0], ['color.text']);
+  assert.deepEqual(specReads('no manifest here'), []);
+});
+
+for (const w of words) {
+  test(`${w}: the spec's example themeReads equals word.json's`, () => {
+    const spec = readFileSync(join(WORDS, '..', '..', 'docs', `${w}-block-spec.md`), 'utf8');
+    const manifest = JSON.parse(readFileSync(join(WORDS, w, 'word.json'), 'utf8')) as { themeReads: string[] };
+    const found = specReads(spec);
+    assert.equal(found.length, 1, `docs/${w}-block-spec.md shows exactly one themeReads list`);
+    assert.deepEqual(found[0], manifest.themeReads);
+  });
+}

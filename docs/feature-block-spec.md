@@ -277,10 +277,15 @@ otherwise do at 11pm.
     "alt":  { "max": 1 }
   },
   "requires": {},
-  "themeReads": ["color.text","color.muted","color.surface","color.accent","color.border",
-                 "color.focus","space.*","type.*","radius.md","motion.slow","motion.reduced",
-                 "motion.ease.emphasis","size.measure-display","size.measure-body","size.ring",
-                 "size.ring-offset","breakpoint.sm"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "breakpoint.md", "breakpoint.sm", "color.bg", "color.muted", "color.text",
+    "radius.md", "size.gutter-sm", "size.measure-body", "size.measure-display",
+    "space.8", "space.12", "space.16", "space.24", "space.32", "space.48",
+    "space.96", "type.body", "type.display", "type.leading-body",
+    "type.leading-tight", "type.size.2xl", "type.size.base", "type.size.lg",
+    "type.weight-bold", "type.weight-display"
+  ],
   "deps": {},
   "targets": ["web"],
   "tested": { "with": ["nav", "hero", "footer"],

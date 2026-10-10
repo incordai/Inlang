@@ -245,8 +245,12 @@ ragged block with more whitespace than content.
   },
   "slots": { "group": { "max": 5 }, "link": { "max": 24 }, "social": { "max": 6 }, "legal": { "max": 4 } },
   "requires": { "columns": ["group"], "mega": ["group"], "dynamic": ["since"] },
-  "themeReads": ["color.surface", "color.muted", "color.border", "color.text",
-                 "space.*", "type.body", "type.size.sm", "radius.sm"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "color.border", "color.muted", "color.surface", "color.text", "size.column-min",
+    "size.gutter-sm", "size.measure-body", "size.tap", "space.8", "space.16",
+    "space.24", "space.32", "space.48", "type.body", "type.size.sm", "type.size.xs"
+  ],
   "deps": {},
   "targets": ["web"],
   "tested": {

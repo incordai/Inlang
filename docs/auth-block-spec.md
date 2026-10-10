@@ -614,8 +614,15 @@ CONVENTIONS §5.
   "slots": { "alt": { "max": 2 } },
   "requires": { "signup": ["terms"] },
   "requiresWhen": { "adapter": { "custom": ["impl"] } },
-  "themeReads": ["color.surface", "color.text", "color.muted", "color.border", "color.accent",
-                 "color.danger", "space.*", "type.body", "type.size.sm", "radius.md"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "color.bg", "color.border", "color.danger", "color.muted", "color.surface",
+    "color.text", "radius.md", "radius.sm", "size.gutter-sm", "size.measure-body",
+    "size.measure-display", "size.tap", "space.4", "space.8", "space.12",
+    "space.16", "space.24", "space.32", "space.96", "type.display",
+    "type.leading-body", "type.leading-tight", "type.size.2xl", "type.size.base",
+    "type.size.sm", "type.weight-bold", "type.weight-display"
+  ],
   "deps": {},
   "targets": ["web"],
   "tested": {

@@ -265,10 +265,13 @@ word-count rows are warnings: they are taste, and taste never blocks a build
     "alt": { "max": 1 }
   },
   "requires": {},
-  "themeReads": ["color.text","color.muted","color.accent","color.border","color.focus",
-                 "color.surface-alt","space.*","type.*","motion.slow","motion.reduced",
-                 "motion.ease.emphasis","size.measure-body","size.measure-display",
-                 "breakpoint.sm"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "color.text", "color.veil", "size.gutter-sm", "size.measure-body",
+    "size.measure-display", "space.16", "space.24", "space.48", "space.96",
+    "type.display", "type.leading-body", "type.leading-tight", "type.size.2xl",
+    "type.size.base", "type.weight-display"
+  ],
   // Exact pins resolved at implementation time (CONVENTIONS §7 — never a
   // range). "<PIN>" marks an unverified value, not a guessed one.
   "deps": { "micromark": "4.0.2", "micromark-extension-gfm": "3.0.0" },

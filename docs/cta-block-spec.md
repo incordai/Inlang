@@ -257,9 +257,15 @@ and unlike the layout checks, it is advice no linter or screenshot gives.
     "alt": { "max": 1 }
   },
   "requires": { "split": ["media"] },
-  "themeReads": ["color.accent","color.accent-contrast","color.surface",
-                 "color.surface-alt","color.text","color.muted","color.focus",
-                 "space.*","radius.lg","type.display","type.body"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "breakpoint.sm", "color.accent", "color.accent-contrast", "color.bg",
+    "color.border", "color.muted", "color.surface", "color.text", "radius.lg",
+    "size.gutter-lg", "size.gutter-sm", "size.measure-body", "size.measure-display",
+    "space.16", "space.24", "space.32", "space.48", "space.64", "space.96",
+    "type.display", "type.leading-body", "type.leading-tight", "type.size.2xl",
+    "type.size.lg", "type.weight-display"
+  ],
   "deps": {},
   "targets": ["web"],
   "tested": {

@@ -266,9 +266,15 @@ Format per CONVENTIONS §5. Errors block the build; taste warnings never do.
     "schema": { "type": "enum", "values": ["on", "off"], "default": "on" }
   },
   "slots": { "item": { "min": 1, "max": 12 } }, "requires": {},
-  "themeReads": ["color.surface","color.text","color.muted","color.border",
-                 "color.border-strong","color.focus","space.*","radius.sm",
-                 "type.body"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "color.bg", "color.border", "color.focus", "color.muted", "color.text",
+    "motion.ease", "motion.fast", "size.gutter-sm", "size.measure-body",
+    "size.measure-display", "size.ring", "size.ring-offset", "size.tap", "space.8",
+    "space.16", "space.24", "space.48", "space.96", "type.display",
+    "type.leading-body", "type.leading-tight", "type.size.2xl", "type.size.base",
+    "type.size.lg", "type.weight-display"
+  ],
   "deps": {},
   "targets": ["web"],
   "tested": { "browsers": ["chrome-latest","safari-latest","firefox-latest","ios-17"],

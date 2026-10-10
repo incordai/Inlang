@@ -213,12 +213,14 @@ validation.
   "children": ["link", "group", "cta"],
   "limits": { "link": { "max": 7 }, "cta": { "max": 1 }, "depth": 2 },
   "requires": { "solid": ["inverse"] },
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
   "themeReads": [
-    "color.bg", "color.surface", "color.text", "color.muted",
-    "color.accent", "color.accent-contrast", "color.scrim", "color.on-scrim",
-    "space.*", "type.body", "motion.*", "size.ring",
-    "layer.sticky", "layer.dropdown", "layer.scrim", "layer.skip",
-    "size.nav", "size.nav-shrink", "size.tap"
+    "color.bg", "color.border-strong", "color.focus", "color.muted", "color.scrim",
+    "color.surface", "color.text", "layer.skip", "layer.sticky", "motion.ease",
+    "motion.fast", "motion.normal", "radius.full", "shadow.sm", "size.gutter-lg",
+    "size.gutter-sm", "size.nav", "size.nav-shrink", "size.nav-side", "size.ring",
+    "size.ring-offset", "size.tap", "space.4", "space.8", "space.12", "space.16",
+    "space.24", "space.32", "type.body", "type.size.sm"
   ],
   "deps": {},
   "targets": ["web"],

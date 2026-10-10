@@ -456,11 +456,16 @@ boilerplate generator gives anyone.
     "alt": { "max": 1 }
   },
   "requires": { "orbit": ["poster"] },
-  "themeReads": ["color.text","color.muted","color.surface","color.focus","color.scrim",
-                 "color.on-scrim","color.overlay","space.*","type.*","radius.md",
-                 "motion.emphasis","motion.backdrop","motion.fast","motion.reduced",
-                 "motion.ease.emphasis","layer.modal","layer.backdrop","size.measure-display",
-                 "size.measure-body","size.tap","size.ring","size.ring-offset","breakpoint.sm","breakpoint.md"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "breakpoint.md", "breakpoint.sm", "color.bg", "color.border", "color.focus",
+    "color.muted", "color.surface", "color.surface-alt", "color.text",
+    "radius.full", "radius.md", "size.column-min", "size.gutter-sm",
+    "size.measure-body", "size.measure-display", "size.ring", "size.ring-offset",
+    "size.tap", "space.8", "space.16", "space.24", "space.48", "space.96",
+    "type.display", "type.leading-body", "type.leading-tight", "type.size.2xl",
+    "type.size.lg", "type.size.sm", "type.weight-display"
+  ],
   "deps": { "three": "0.170.0", "@react-three/fiber": "8.17.10" },
   "targets": ["web"],
   "tested": { "with": ["nav", "hero", "footer"],

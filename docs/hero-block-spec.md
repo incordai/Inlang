@@ -429,10 +429,14 @@ lint, auto-install and validation are all generated from it.
   "slots": { "cta": { "max": 2 }, "alt": { "max": 1 } },
   "requires": { "scroll": ["3d"] },
   "recommends": { "3d": ["poster", "describe"] },
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
   "themeReads": [
-    "color.bg", "color.text", "color.muted", "color.accent",
-    "color.accent-contrast", "color.scrim", "color.on-scrim",
-    "space.*", "type.display", "type.body", "motion.*", "size.ring"
+    "breakpoint.sm", "color.muted", "color.on-scrim", "color.scrim", "color.text",
+    "color.veil", "layer.behind", "size.gutter-sm", "size.measure-body",
+    "size.measure-display", "space.16", "space.24", "space.48", "space.96",
+    "type.display", "type.leading-body", "type.leading-display",
+    "type.size.display", "type.size.display-lg", "type.size.lg", "type.size.xs",
+    "type.weight-display"
   ],
   "deps": { "three": "0.170.0", "@react-three/fiber": "8.17.10" },
   "targets": ["web"],

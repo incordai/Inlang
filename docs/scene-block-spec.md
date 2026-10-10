@@ -376,7 +376,12 @@ phone is a quarter of a desktop monitor's pixels for something nobody inspects.
   },
   "slots": {},
   "requires": { "3d": ["poster", "alt"] },
-  "themeReads": ["color.surface", "color.border", "space.*", "type.caption", "radius.md"],
+  // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
+  "themeReads": [
+    "color.bg", "color.focus", "color.muted", "color.surface-alt", "color.text",
+    "layer.behind", "radius.md", "size.gutter-sm", "size.measure-body", "size.ring",
+    "size.ring-offset", "space.12", "space.64", "type.size.xs"
+  ],
   "deps": { "three": "0.170.0", "@react-three/fiber": "8.17.10" },
   "targets": ["web"],
   "tested": {
