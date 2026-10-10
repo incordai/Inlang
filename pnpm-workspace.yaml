@@ -1,2 +1,11 @@
 packages:
   - 'packages/*'
+
+# Supply-chain settings (docs/security-scanning.md). A transitive dependency
+# may not come from a repository URL or a tarball; a version published with
+# weaker provenance than an earlier one is refused; and a version must be a
+# week old before a resolution picks it. An urgent fix younger than that is
+# named in minimumReleaseAgeExclude, never by lowering the age for everything.
+blockExoticSubdeps: true
+trustPolicy: no-downgrade
+minimumReleaseAge: 10080
