@@ -53,6 +53,22 @@ machine for you.
 
 ## Quick start
 
+A site is written in three steps, in this order:
+
+1. **Colour.** Choose the `theme`, its `accent` (one hue, or a pair for a
+   gradient) and its `pattern` first, from the brand or mood — see
+   [Colour](#colour):
+
+   ```sh
+   az explain theme         # one line per theme
+   az explain theme accent  # each hue and the hues it makes a gradient with
+   ```
+
+2. **Frame.** `width` and `font` under `site` (`az explain site width`,
+   `az explain font`).
+3. **Sections.** The pages and their words — `hero center`, `faq list` — from
+   the [words](#words) below (`az explain hero center`).
+
 Write `site.az` (the example above), then:
 
 ```sh
@@ -73,7 +89,8 @@ broken.az:6:3 error AZ1201  nonsense: unknown word — see the word list
 ```
 
 The generated project carries `AZ.md`, its own map for people and AI tools:
-which file each route and block went to, and where to change things.
+it opens with the site's colour lines and their legal values, then which
+file each route and block went to, and where to change things.
 
 ## Colour
 
@@ -277,6 +294,10 @@ Start with [AGENTS.md](docs/AGENTS.md) (reading order and the rules), then
 
 ## Using with an AI assistant
 
+- **Colour comes first.** An assistant chooses the theme, accent and pattern
+  with the user before it writes any section, then the frame, then the
+  sections. `az mcp`'s instructions say so, and docs/WORDS.md and every
+  generated `AZ.md` open with that step and its legal values.
 - **`az mcp`** serves the compiler as tools — `az_words`, `az_explain`,
   `az_word_docs`, `az_grammar`, `az_check`, `az_spec`, `az_build` and more —
   with read-only tools that never run project code. Setup and the safety

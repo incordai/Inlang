@@ -690,7 +690,10 @@ with no family, or `font` with no roles, is AZ1205; a repeated role warns
 
 **Theme settings.** `theme <name>` takes one of `midnight`, `paper`,
 `signal`, `clay`, `petal`, `volt` (theme-spec §5); any other is
-`theme: 'purple' is not a theme — use midnight, paper, signal, clay, petal, volt` (AZ1417). Its
+`theme: 'purple' is not a theme — use midnight, paper, signal, clay, petal, volt` (AZ1417).
+A site without `theme` gets `midnight`, with no diagnostic; colour is still
+the first thing to choose (PRD §6.1a), and the generated `AZ.md` opens with
+the lines to change. Its
 indented settings are `accent` and `pattern`; any other is
 `theme: 'sparkle' is not a theme setting — use accent, pattern` (AZ1405).
 `accent <hue>` names one hue from a closed set — `violet`, `indigo`, `blue`,

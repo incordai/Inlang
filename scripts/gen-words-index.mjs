@@ -11,12 +11,19 @@
  * packages/words/test/words-index.test.ts regenerates both and fails unless
  * the committed files equal a fresh run, byte for byte.
  *
+ * The index opens with "Step 1: colour" (PRD §6.1a): the legal themes, hues,
+ * pairs and patterns come from the compiler's own tables
+ * (packages/core/src/colour.ts), the same text the generated AZ.md prints.
+ *
  * Run: node scripts/gen-words-index.mjs
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_THEME_NAME, colourChoicesMd, themeLinesAz } from '../packages/core/src/colour.ts';
+import { ACCENT_PAIRS } from '../packages/core/src/accent-pairs.ts';
+import { PATTERN_ORIGIN_NAMES, PATTERN_SHAPE_NAMES } from '../packages/core/src/link.ts';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WORDS_DIR = 'packages/words';
@@ -176,6 +183,40 @@ function wordSection(w) {
   return out.join('\n');
 }
 
+/**
+ * "Step 1: colour" — the authoring order and every legal colour value, from
+ * the compiler's tables. The example is the default theme, its first hue and
+ * that hue's first partner, and the first shape that paints, so it is always
+ * a pair the compiler allows.
+ */
+export function colourStepSource() {
+  const [hue, partners] = Object.entries(ACCENT_PAIRS[DEFAULT_THEME_NAME]).find(([, p]) => p.length > 0);
+  const shape = Object.keys(PATTERN_SHAPE_NAMES).find((s) => s !== 'none');
+  const example = themeLinesAz({
+    site: 'aurora', theme: DEFAULT_THEME_NAME, accent: hue, accent2: partners[0],
+    pattern: `${shape} ${Object.keys(PATTERN_ORIGIN_NAMES)[0]}`,
+  });
+  return [
+    '## Step 1: colour',
+    '',
+    'Every site starts with colour, before any section is written (PRD §6.1a): pick the',
+    'theme, the accent (one hue, or an allowed pair for a gradient) and the pattern from the',
+    "user's brand or mood, and confirm them with the user. Then the frame (`width`, `font`),",
+    'then the sections — the words below. Colours come only from the theme: there is no hex',
+    'value or colour name to write, in a `.az` file or in a word (`pnpm lint`).',
+    '',
+    '```az',
+    ...example,
+    '```',
+    '',
+    '`az explain theme` lists the themes and `az explain theme accent` the pairs. The legal',
+    "values, from the compiler's own tables:",
+    '',
+    ...colourChoicesMd(null),
+    '',
+  ];
+}
+
 /** docs/WORDS.md, in full. */
 export function wordsIndexSource(words = loadWords()) {
   const head = [
@@ -191,6 +232,7 @@ export function wordsIndexSource(words = loadWords()) {
     '`packages/words/test/words-index.test.ts` regenerates this file and fails when',
     'the committed copy differs, so it always matches the code.',
     '',
+    ...colourStepSource(),
     '## Where a change goes',
     '',
     ...table(['Request', 'Edit'], [

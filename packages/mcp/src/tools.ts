@@ -150,7 +150,7 @@ function existing(sb: Sandbox, path: string): string {
 export const TOOLS: ToolDef[] = [
   {
     name: 'az_check',
-    description: 'Compile a .az file and report its diagnostics (errors and warnings with line and column). Writes nothing.',
+    description: 'Compile a .az file and report its diagnostics (errors and warnings with line and column). A site without a theme line gets midnight: choose the colour (theme, accent, pattern) with the user first. Writes nothing.',
     inputSchema: obj({ file: FILE }, ['file']),
     annotations: READ,
     run: ({ file }, box, sb) => ({ diagnostics: box.check(existing(sb, file)) }),
@@ -164,7 +164,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'az_build',
-    description: 'WRITES FILES AND RUNS PROJECT CODE. Compile a .az file into a runnable project in the output folder (default .az-build), copying referenced assets. Words the project owns (its words/ folder) are its own code and run during the build. Refuses to overwrite any file az did not generate, and removes files it generated before but no longer does. Returns the files written. Fails, writing nothing, on any compile error.',
+    description: 'WRITES FILES AND RUNS PROJECT CODE. Compile a .az file into a runnable project in the output folder (default .az-build), copying referenced assets. Words the project owns (its words/ folder) are its own code and run during the build. Refuses to overwrite any file az did not generate, and removes files it generated before but no longer does. Returns the files written; the project\'s AZ.md opens with the site\'s colour lines and their legal values. Fails, writing nothing, on any compile error.',
     inputSchema: obj({ file: FILE, out: 'Output folder, relative to the project root. Default: .az-build' }, ['file']),
     annotations: RUNS_PROJECT_CODE,
     run: ({ file, out }, box, sb) => {
@@ -188,7 +188,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'az_explain',
-    description: 'The cheapest lookup: one ≤60-character line per .az term, in context — "hero center" explains hero and its center variant; "hero height peek" a prop and its value; "backend database postgres" a keyword. Unknown terms get a did-you-mean. Writes nothing.',
+    description: 'The cheapest lookup: one ≤60-character line per .az term, in context — "hero center" explains hero and its center variant; "hero height peek" a prop and its value; "backend database postgres" a keyword. For the colour step, which comes first: "theme" lists the themes, "theme accent" the hues and their gradient pairs. Unknown terms get a did-you-mean. Writes nothing.',
     inputSchema: obj({ terms: 'Terms as written in .az, space-separated, e.g. "hero center" or "nav sticky mobile drawer".' }, ['terms']),
     annotations: READ,
     run: ({ terms }, box) => {

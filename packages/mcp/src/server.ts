@@ -2,7 +2,7 @@
  * @az module mcp-server
  * Purpose: MCP over stdio: JSON-RPC framing, initialize, tools, resources.
  * Spec: docs/mcp.md
- * Exports: serve, handle, PROTOCOL_VERSIONS
+ * Exports: serve, handle, PROTOCOL_VERSIONS, INSTRUCTIONS
  * Edit guide: imports Node built-ins only; stdout is the protocol, logs go to stderr.
  * Tests: packages/mcp/test/mcp.test.ts
  */
@@ -30,6 +30,23 @@ export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '202
 const ERR = { parse: -32700, request: -32600, method: -32601, params: -32602, internal: -32603 } as const;
 
 const GRAMMAR_URI = 'az://grammar';
+
+/**
+ * Sent once at initialize (the result's `instructions` field). It states the
+ * authoring order — colour, then the frame, then sections (PRD §6.1a) — and
+ * the trust rules. Every client pays for it on every session, so it is short.
+ */
+export const INSTRUCTIONS = 'Tools for the az website compiler. Write a site in this order. '
+  + '1) Colour first: theme, accent (one hue, or an allowed pair for a gradient) and pattern, chosen '
+  + 'from the user\'s brand or mood. Call az_palette or az_explain "theme" / "theme accent" for the '
+  + 'choices, show the user 2-3 options with their exact .az lines, and confirm one. Colours come only '
+  + 'from the theme; there is no hex. '
+  + '2) Then the frame: site width and font. '
+  + '3) Then sections: az_words and az_grammar for the vocabulary; write the .az file, then az_check it. '
+  + 'Read-only tools never run code from the project. '
+  + 'az_build runs the project\'s own words (its words/ folder) as a build does — only call '
+  + 'it on a project you trust. Tools marked WRITES FILES change the project; every path is '
+  + 'confined to the project root. After editing an ejected word, restart this server.';
 
 export interface ServerOptions {
   readonly root: string;
@@ -92,11 +109,7 @@ async function dispatch(req: Request, root: string, toolbox: Toolbox, version: s
         protocolVersion,
         capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
         serverInfo: { name: 'az', version },
-        instructions: 'Tools for the az website compiler. Start with az_words and az_grammar, '
-          + 'write a .az file, then az_check it. Read-only tools never run code from the project. '
-          + 'az_build runs the project\'s own words (its words/ folder) as a build does — only call '
-          + 'it on a project you trust. Tools marked WRITES FILES change the project; every path is '
-          + 'confined to the project root. After editing an ejected word, restart this server.',
+        instructions: INSTRUCTIONS,
       };
     }
     case 'notifications/initialized':

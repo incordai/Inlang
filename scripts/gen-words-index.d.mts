@@ -13,6 +13,7 @@ export declare const CATALOGUE_START: string;
 export declare const CATALOGUE_END: string;
 export declare function loadWords(root?: string): WordFolder[];
 export declare function headerFields(src: string): Record<string, string>;
+export declare function colourStepSource(): string[];
 export declare function wordsIndexSource(words?: WordFolder[]): string;
 export declare function catalogueSource(words?: WordFolder[]): string;
 export declare function withCatalogue(readme: string, words?: WordFolder[]): string;

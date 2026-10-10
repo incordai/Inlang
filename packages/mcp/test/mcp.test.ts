@@ -64,6 +64,27 @@ test('initialize echoes a supported protocol version and names the server', asyn
   assert.ok(r.result.capabilities.tools && r.result.capabilities.resources);
 });
 
+test('initialize instructions give the authoring order: colour (theme, accent, pattern), then the frame, then sections', async () => {
+  const [r] = await session(project(), [INIT]);
+  const text = r.result.instructions as string;
+  assert.equal(typeof text, 'string');
+  const at = (s: string) => {
+    const i = text.indexOf(s);
+    assert.ok(i >= 0, `instructions name '${s}':\n${text}`);
+    return i;
+  };
+  const colour = at('Colour first');
+  for (const s of ['theme', 'accent', 'pattern', 'az_palette', 'az_explain', '2-3 options', 'exact .az lines', 'confirm']) {
+    assert.ok(at(s) > colour, `'${s}' is part of the colour step`);
+  }
+  const frame = at('Then the frame');
+  const sections = at('Then sections');
+  assert.ok(colour < frame && frame < sections, 'colour, then frame, then sections');
+  assert.ok(at('width') > frame && at('font') > frame, 'the frame is width and font');
+  assert.ok(at('az_check') > sections, 'sections are checked last');
+  assert.ok(text.length < 1200, `short: ${text.length} characters`);
+});
+
 test('CONTROL: an unknown protocol version is answered with the newest supported one', async () => {
   const [r] = await session(project(), [{ ...INIT, params: { ...INIT.params, protocolVersion: '1999-01-01' } }]);
   assert.equal(r.result.protocolVersion, '2025-11-25');

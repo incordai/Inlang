@@ -57,8 +57,12 @@ works — a change that breaks one is sent back:
   needs a same-line reason (CONVENTIONS §1). Fix the cause, at its source.
 - **Words read theme tokens only** — no hex, `rgb(`/`hsl(`, off-scale px,
   `font-family` or numeric `z-index` in `packages/words` or `target-*`
-  (CONVENTIONS §4, `pnpm lint`). `pnpm lint` also fails a word whose
-  `themeReads` is not exactly the tokens its code reads.
+  (CONVENTIONS §4, `pnpm lint`). Colour is the site's first decision
+  (PRD §6.1a), made by its `theme`, `accent` and `pattern`, so a word —
+  new or changed — takes every colour from theme tokens (`color.*`,
+  `gradient.accent`) and names them in its `themeReads`. `pnpm lint` fails a
+  word whose `themeReads` is not exactly the tokens its code reads
+  ([the themeReads check](packages/theme/src/theme-reads.ts)).
 - **No vendor, product or client names** in code, identifiers, comments,
   diagnostics or commit messages. Use neutral words — "hosted adapter",
   "managed provider", "token-endpoint profile". The secret patterns are

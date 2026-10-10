@@ -16,7 +16,7 @@ import {
   ACTION_DESCRIPTIONS, MODIFIER_DESCRIPTIONS, TYPE_DESCRIPTIONS, WHO_DESCRIPTIONS,
 } from './data.ts';
 import { FROM_SETTINGS } from './from.ts';
-import { ACCENT_PAIRS } from './accent-pairs.ts';
+import { partnersOf } from './colour.ts';
 import { closest } from './suggest.ts';
 
 /** The owner's limit: short enough for an AI to read every one cheaply. */
@@ -43,14 +43,9 @@ interface TermInfo {
  * allow is named with the themes that refuse it.
  */
 function pairLines(): Record<string, string> {
-  const themes = Object.keys(ACCENT_PAIRS);
   const out: Record<string, string> = {};
   for (const hue of Object.keys(ACCENT_HUES)) {
-    const named = Object.keys(ACCENT_HUES).filter((h) => themes.some((t) => ACCENT_PAIRS[t][hue]?.includes(h)));
-    const parts = named.map((h) => {
-      const refusing = themes.filter((t) => !ACCENT_PAIRS[t][hue]?.includes(h));
-      return refusing.length ? `${h} (not ${refusing.join('/')})` : h;
-    });
+    const parts = partnersOf(hue);
     out[hue] = parts.length ? `Pairs with ${parts.join(', ')}` : 'Pairs with no hue';
   }
   return out;

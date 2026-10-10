@@ -10,6 +10,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
 import { emitProject } from '../src/emit.ts';
 import { WEB_EMITTERS } from '../../words/registry.ts';
+import { DEFAULT_THEME_NAME, colourChoicesMd } from '../../core/src/colour.ts';
+import { ACCENT_HUES, PATTERN_SHAPE_NAMES, THEME_NAMES } from '../../core/src/link.ts';
+import { ACCENT_PAIRS } from '../../core/src/accent-pairs.ts';
 
 const wordsDir = new URL('../../words/', import.meta.url);
 const manifests = new Map<string, Manifest>();
@@ -96,4 +99,57 @@ test('AZ.md names the runtimes, env keys and server only when the site uses them
 test('SECURITY: AZ.md lists key names, never values or server secrets', () => {
   const md = map(FULL);
   assert.ok(!/AZ_SESSION_SECRET|AZ_DATABASE_URL|AZ_SMTP_PASSWORD|AZ_EMAIL_API_KEY|=\S/.test(md), 'a secret name or an assignment reached the map');
+});
+
+/* ---- colour first (PRD §6.1a) ------------------------------------------- */
+
+const COLOURED = (theme: string, settings: string) =>
+  `az 1\nsite aurora\n  theme ${theme}\n${settings}page /\n  hero center\n    title "Built in the dark"\n`;
+
+/** The `## Colour (change this first)` section, up to the next heading. */
+const colourSection = (md: string): string => {
+  const at = md.indexOf('\n## Colour (change this first)\n');
+  assert.ok(at >= 0, 'AZ.md has a colour section');
+  const end = md.indexOf('\n## ', at + 1);
+  return md.slice(at, end < 0 ? undefined : end);
+};
+
+test('AZ.md opens with the colour section: before every other section, with the current theme, accent and pattern', () => {
+  const md = map(COLOURED('signal', '    accent violet blue\n    pattern glow left\n'));
+  assert.equal(md.indexOf('\n## Colour (change this first)\n'), md.indexOf('\n## '), 'colour is the first section');
+  const c = colourSection(md);
+  assert.ok(c.includes('Now: theme `signal`. Accent: `violet blue` — a gradient pair'), c);
+  assert.ok(c.includes('Pattern: `glow left`'), c);
+  assert.ok(c.includes('```az\nsite aurora\n  theme signal\n    accent violet blue\n    pattern glow left\n```'), c);
+  assert.ok(c.includes('no hex'), 'colours come only from the theme');
+  assert.ok(c.includes(`without a \`theme\` line the site gets \`${DEFAULT_THEME_NAME}\``), c);
+});
+
+test("AZ.md's colour section lists the legal values from the shared tables, with its own theme's pairs", () => {
+  const c = colourSection(map(COLOURED('signal', '')));
+  assert.ok(c.includes(colourChoicesMd('signal').join('\n')), c);
+  for (const [t, text] of Object.entries(THEME_NAMES)) assert.ok(c.includes(`  - \`${t}\` — ${text}`), t);
+  for (const h of Object.keys(ACCENT_HUES)) {
+    const partners = ACCENT_PAIRS.signal[h];
+    assert.ok(c.includes(`  - \`${h}\` with ${partners.length ? partners.join(', ') : 'no hue'}\n`), h);
+  }
+  for (const [s, text] of Object.entries(PATTERN_SHAPE_NAMES)) assert.ok(c.includes(`  - \`${s}\` — ${text}`), s);
+});
+
+test("AZ.md's colour section changes when the theme, accent or pattern changes", () => {
+  const signal = colourSection(map(COLOURED('signal', '')));
+  const paper = colourSection(map(COLOURED('paper', '    accent teal\n')));
+  assert.notEqual(paper, signal);
+  assert.ok(paper.includes('Now: theme `paper`. Accent: `teal` — regenerated from its hue ramp'), paper);
+  assert.ok(paper.includes('```az\nsite aurora\n  theme paper\n    accent teal\n```'), paper);
+  // Pairs are per theme: paper allows green with amber, signal refuses it.
+  assert.ok(paper.includes('  - `green` with teal, amber\n'), paper);
+  assert.ok(signal.includes('  - `green` with teal\n'), signal);
+  assert.ok(signal.includes("Accent: the theme's own. Pattern: none."), signal);
+});
+
+test('AZ.md for a site without a theme line names the default and the line to add', () => {
+  const c = colourSection(map(PLAIN));
+  assert.ok(c.includes(`Now: theme \`${DEFAULT_THEME_NAME}\`.`), c);
+  assert.ok(c.includes(`\`\`\`az\nsite aurora\n  theme ${DEFAULT_THEME_NAME}\n\`\`\``), c);
 });

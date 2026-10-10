@@ -1,6 +1,6 @@
 /**
  * @az module azmd
- * Purpose: writes AZ.md, the generated project's map — pages, blocks → classes, files, runtimes, env, build.
+ * Purpose: writes AZ.md, the generated project's map — colour first, then pages, blocks → classes, files, runtimes, env, build.
  * Spec: docs/ARCHITECTURE.md §7
  * Exports: azMd, MapInput
  * Edit guide: keep it deterministic (input order only, no timestamps) and short — it is read to SAVE tokens.
@@ -10,6 +10,7 @@
 import type { EmittedNode } from '../../core/src/emit-contract.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 import { generatedMd } from './generated.ts';
+import { DEFAULT_THEME_NAME, colourChoicesMd, themeLinesAz } from '../../core/src/colour.ts';
 import type { SpecTable } from '../../core/src/data.ts';
 import type { SpecFrom } from '../../core/src/spec-block.ts';
 import { DATA_DIR } from './data-client.ts';
@@ -69,15 +70,22 @@ export function azMd(m: MapInput): string {
   out.push('`az eject <word>` copies it into your project (one-way).');
   out.push('What any term means: `az explain <term...>`, e.g. `az explain hero center`.', '');
 
-  const set = ['display', 'body', 'mono'].filter((r) => m.fonts[r]).map((r) => `${r} ${m.fonts[r]}`);
-  out.push(`Theme \`${m.theme}\` — colours, space and type come from its tokens. Fonts: ${set.length
-    ? `${set.join(' · ')}; any role not set keeps the theme's family`
-    : "the theme's own families"} (change with \`font\` in the .az; \`az explain font\`).`, '');
-  out.push(`Accent: ${m.accent && m.accent2
+  out.push('## Colour (change this first)', '');
+  out.push('Colour is the first decision of a site, made before any section. Every colour comes from the theme:');
+  out.push('there is no hex value or colour name to write, in the .az file or in a word.', '');
+  out.push(`Now: theme \`${m.theme}\`. Accent: ${m.accent && m.accent2
     ? `\`${m.accent} ${m.accent2}\` — a gradient pair from two hue ramps, every point contrast-checked`
     : m.accent ? `\`${m.accent}\` — regenerated from its hue ramp, every step contrast-checked`
-    : "the theme's own"}. Pattern: ${m.pattern ? `\`${m.pattern}\`, painted on the hero in the accent` : 'none'}`
-    + ' (change under `theme` in the .az; `az explain theme accent`).', '');
+    : "the theme's own"}. Pattern: ${m.pattern ? `\`${m.pattern}\`, painted on the hero in the accent` : 'none'}.`, '');
+  out.push(`The lines to edit, under \`site\` in the .az file (without a \`theme\` line the site gets \`${DEFAULT_THEME_NAME}\`):`, '');
+  out.push('```az', ...themeLinesAz(m), '```', '');
+  out.push('Then rebuild. `az explain theme` and `az explain theme accent` print the choices. The legal values:', '');
+  out.push(...colourChoicesMd(m.theme), '');
+
+  const set = ['display', 'body', 'mono'].filter((r) => m.fonts[r]).map((r) => `${r} ${m.fonts[r]}`);
+  out.push(`Space and type come from the theme's tokens too. Fonts: ${set.length
+    ? `${set.join(' · ')}; any role not set keeps the theme's family`
+    : "the theme's own families"} (change with \`font\` in the .az; \`az explain font\`).`, '');
 
   out.push('## Pages', '', '| Route | File | Blocks, in order |', '|---|---|---|');
   for (const p of m.pages) {

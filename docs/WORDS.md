@@ -10,6 +10,50 @@ rules behind it.
 `packages/words/test/words-index.test.ts` regenerates this file and fails when
 the committed copy differs, so it always matches the code.
 
+## Step 1: colour
+
+Every site starts with colour, before any section is written (PRD §6.1a): pick the
+theme, the accent (one hue, or an allowed pair for a gradient) and the pattern from the
+user's brand or mood, and confirm them with the user. Then the frame (`width`, `font`),
+then the sections — the words below. Colours come only from the theme: there is no hex
+value or colour name to write, in a `.az` file or in a word (`pnpm lint`).
+
+```az
+site aurora
+  theme midnight
+    accent violet blue
+    pattern glow top
+```
+
+`az explain theme` lists the themes and `az explain theme accent` the pairs. The legal
+values, from the compiler's own tables:
+
+- `theme <name>`, under `site`; without it the site gets `midnight`:
+  - `midnight` — Dark-native, near-black ground, one electric accent
+  - `paper` — Light editorial: warm paper, ink type, oxblood accent
+  - `signal` — High-contrast industrial: square edges, orange accent
+  - `clay` — Warm and crafted: cream ground, serif type, terracotta
+  - `petal` — Soft and friendly: lavender ground, rounded type, violet
+  - `volt` — Loud and graphic: black on white, heavy type, hot magenta
+- `accent <hue> [<hue2>]`, under `theme`; without it the theme keeps its own accent. Hues: `violet` `indigo` `blue` `teal` `green` `lime` `amber` `orange` `rose`. A second hue makes a gradient, allowed only with these partners:
+  - `violet` with blue, teal, orange, rose
+  - `indigo` with teal, rose
+  - `blue` with violet, teal
+  - `teal` with violet, indigo, blue, green, lime, amber
+  - `green` with teal, amber (not signal/volt)
+  - `lime` with teal, amber, orange, rose
+  - `amber` with teal, green (not signal/volt), lime, rose
+  - `orange` with violet, lime, rose
+  - `rose` with violet, indigo, lime, amber, orange
+- `pattern <shape> [<origin>]`, under `theme`; without it there is none. Origins: `top` `bottom` `left` `right` `center` (default `top`). Shapes:
+  - `none` — No background pattern
+  - `glow` — Accent light blooming from one edge
+  - `spotlight` — A soft circle of accent light at the origin
+  - `ramp` — Directional accent fade away from the origin
+  - `grid` — Perpendicular accent hairlines
+  - `hatch` — Diagonal accent hairlines
+  - `dots` — Accent dot lattice
+
 ## Where a change goes
 
 | Request | Edit |

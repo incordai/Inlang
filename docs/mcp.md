@@ -24,6 +24,26 @@ and key vary by client; the shape is:
 }
 ```
 
+## Authoring order
+
+The server's `instructions` (sent in the `initialize` result) tell the agent
+to write a site in the order of [PRD §6.1a](PRD.md):
+
+1. **Colour first** — `theme`, `accent` (one hue, or an allowed pair for a
+   gradient) and `pattern`, chosen from the user's brand or mood. The agent
+   calls `az_palette` or `az_explain "theme"` / `"theme accent"` for the
+   choices, shows the user 2–3 options with their exact `.az` lines, and
+   confirms one. Colours come only from the theme; there is no hex.
+2. **Then the frame** — `site width` and `font`.
+3. **Then sections** — `az_words` and `az_grammar` for the vocabulary, then
+   `az_check`.
+
+The text is `INSTRUCTIONS` in `packages/mcp/src/server.ts`; it is kept short
+because every session pays for it. A site without a `theme` line builds with
+`midnight` (no diagnostic: the bundled word previews are theme-less on
+purpose, so the browser suites can render each one in every theme). The
+server offers no MCP prompts.
+
 ## Tools
 
 | Tool | Writes? | What it does |

@@ -17,9 +17,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CATALOGUE_END, CATALOGUE_START, INDEX_FILE, README_FILE, ROOT,
-  catalogueSource, loadWords, withCatalogue, wordsIndexSource,
+  catalogueSource, colourStepSource, loadWords, withCatalogue, wordsIndexSource,
 } from '../../../scripts/gen-words-index.mjs';
 import { compile, formatDiagnostics, type Manifest } from '../../core/src/index.ts';
+import { partnersOf } from '../../core/src/colour.ts';
+import { ACCENT_HUES, PATTERN_SHAPE_NAMES, THEME_NAMES } from '../../core/src/link.ts';
 
 const REGENERATE = 'regenerate with: node scripts/gen-words-index.mjs';
 const words = loadWords();
@@ -28,6 +30,24 @@ const readme = readFileSync(join(ROOT, README_FILE), 'utf8');
 
 test('docs/WORDS.md is exactly the generator output — no hand edits, no drift', () => {
   assert.equal(index, wordsIndexSource(words), REGENERATE);
+});
+
+test('docs/WORDS.md opens with "Step 1: colour", a generator run, before the word catalogue', () => {
+  const section = colourStepSource().join('\n');
+  assert.ok(index.includes(`\n${section}\n`), REGENERATE);
+  const at = index.indexOf('\n## Step 1: colour\n');
+  assert.equal(at, index.indexOf('\n## '), 'colour is the first section');
+  assert.ok(at < index.indexOf('\n## Words\n'), 'colour comes before the catalogue');
+  // Every legal value is the compiler's: each theme, hue, pair and shape.
+  for (const [t, text] of Object.entries(THEME_NAMES)) assert.ok(section.includes(`  - \`${t}\` — ${text}`), t);
+  for (const h of Object.keys(ACCENT_HUES)) assert.ok(section.includes(`  - \`${h}\` with ${partnersOf(h).join(', ')}\n`), h);
+  for (const [s, text] of Object.entries(PATTERN_SHAPE_NAMES)) assert.ok(section.includes(`  - \`${s}\` — ${text}`), s);
+  // The example is a pair the default theme allows, so it compiles.
+  const example = /```az\n([\s\S]*?)```/.exec(section);
+  assert.ok(example, 'the colour step shows the .az lines');
+  const manifests = new Map<string, Manifest>(words.map((w) => [w.manifest.name, w.manifest as unknown as Manifest]));
+  const r = compile(`az 1\n${example[1]}page /\n  hero center\n    title "Colour first"\n`, { manifests });
+  assert.equal(r.diagnostics.length, 0, formatDiagnostics(r.diagnostics, 'WORDS.md colour example'));
 });
 
 test('README.md holds exactly the generated words catalogue', () => {
