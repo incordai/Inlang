@@ -1,4 +1,13 @@
 /**
+ * @az module registry
+ * Purpose: every bundled word's web emitter, by word name, as static imports a bundler can see.
+ * Spec: docs/ARCHITECTURE.md §1a · docs/ARCHITECTURE.md §4.3
+ * Exports: WEB_EMITTERS
+ * Edit guide: a new word adds one import and one map entry; the caller passes this map to the target, which never imports it.
+ * Tests: packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/target-web/test/emit.test.ts
+ */
+
+/**
  * The web emitters, as a map.
  *
  * Static imports, not a directory scan: a bundler must be able to see every
