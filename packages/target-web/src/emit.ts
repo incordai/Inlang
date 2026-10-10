@@ -1170,8 +1170,9 @@ ${frameCss(theme)}${schemeCss(named)}${patternCss(pattern)}${pinnedNavCss(spec, 
     },
     {
       path: 'vite.config.ts',
-      content: `${generated('Vite config: one HTML entry per page, public env prefix, secret guard')}import { defineConfig } from "vite";
+      content: `${generated('Vite config: one HTML entry per page, public env prefix, secret guard, stylesheets first')}import { defineConfig } from "vite";
 import { secretGuard } from "./${GUARD_DIR}/guard.ts";
+import { stylesFirst } from "./${GUARD_DIR}/head-order.ts";
 
 export default defineConfig({
   // A site is served from a domain root: its routes (/work), asset URLs
@@ -1181,7 +1182,9 @@ export default defineConfig({
   // Only this prefix reaches the browser (auth-spec §4), and the guard
   // refuses the build if a service key would be among it.
   envPrefix: ${JSON.stringify(PUBLIC_ENV_PREFIX)},
-  plugins: [secretGuard()],
+  // Each page links its stylesheet before its module script (head-order.ts).
+  // "post": after Vite has written its own tags, which put the script first.
+  plugins: [secretGuard(), { name: "az-styles-first", transformIndexHtml: { order: "post", handler: stylesFirst } }],
   build: {
     outDir: "dist",
     emptyOutDir: true,

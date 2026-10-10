@@ -34,6 +34,7 @@ import { watchdog, human, within, closeWithin } from './lib/bounded.mjs';
 import { startServer } from './visual/serve.mjs';
 import { watchCsp, cspResult } from './visual/csp.mjs';
 import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
+import { startTags } from '../packages/target-web/src/html-scan.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 /** PRD §9: "Bundle, non-3D pages < 150KB gz". */
@@ -309,6 +310,17 @@ try {
       `${described('/')} | ${described('/legal')}`);
     check('every page declares its icon, so the browser requests no /favicon.ico',
       routes.every((r) => head(r).includes('<link rel="icon" href="data:," />')));
+    // The bundler writes the entry script before the stylesheet; one engine
+    // runs a module script without waiting for a stylesheet linked after it,
+    // and the behaviour runtime then reads the unstyled page's layout. Read
+    // with the page scanner, so a `<link` in a script's text is not a link.
+    const misordered = routes.filter((r) => {
+      const tags = startTags(readFileSync(join(proj, 'dist', r === '/' ? '' : r.slice(1), 'index.html'), 'utf8'));
+      const sheets = tags.filter((t) => t.name === 'link' && (t.attrs.get('rel') ?? '').toLowerCase().split(/\s+/).includes('stylesheet'));
+      const scripts = tags.filter((t) => t.name === 'script');
+      return sheets.length === 0 || scripts.some((js) => sheets.some((css) => css.start > js.start));
+    });
+    check('every shipped page links its stylesheet before every script', misordered.length === 0, misordered.join(' '));
   }
   /* ---- word-quality-gate §2 B: each page's Content-Security-Policy ------ */
   // Recomputed here from the shipped bytes, independently of csp.ts: every
@@ -327,8 +339,8 @@ try {
         const at = text.indexOf('http-equiv="Content-Security-Policy"');
         return policies[r] !== null && at > 0 && at < text.indexOf('<script') && at < text.indexOf('<link rel="stylesheet"');
       }), routes.filter((r) => policies[r] === null).join(' '));
-    check('§2 B: the build ships csp.ts verbatim beside build.mjs, with the page scanner it imports and the scanner\'s table',
-      ['csp.ts', 'html-scan.ts', 'named-references.ts'].every((f) =>
+    check('§2 B: the build ships csp.ts verbatim beside build.mjs, with the page scanner it imports, the scanner\'s table and the head order',
+      ['csp.ts', 'html-scan.ts', 'named-references.ts', 'head-order.ts'].every((f) =>
         readFileSync(join(proj, 'az-vite', f), 'utf8') === readFileSync(join(ROOT, 'packages/target-web/src', f), 'utf8')));
     // The fixture's / carries two author components with inline styles (M3);
     // a pre-rendered page carries no inline script of its own.
@@ -423,7 +435,7 @@ try {
       readFileSync(join(proj, 'az-vite/secrets.ts'), 'utf8') === readFileSync(join(ROOT, 'packages/core/src/secrets.ts'), 'utf8'));
     check('M4: only the AZ_PUBLIC_ prefix reaches the browser, through the guard',
       /envPrefix: "AZ_PUBLIC_"/.test(readFileSync(join(proj, 'vite.config.ts'), 'utf8'))
-      && /plugins: \[secretGuard\(\)\]/.test(readFileSync(join(proj, 'vite.config.ts'), 'utf8')));
+      && /plugins: \[secretGuard\(\), \{ name: "az-styles-first", /.test(readFileSync(join(proj, 'vite.config.ts'), 'utf8')));
 
     const named = failing(process.execPath, [viteBin, 'build'], proj, { AZ_PUBLIC_SERVICE_KEY: 'x'.repeat(40) });
     check('M4 exit: the build FAILS when a service key is present in the env (by name)',

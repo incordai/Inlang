@@ -104,7 +104,9 @@ test('CONTROL: a site without auth carries no auth wiring — but still the guar
   assert.doesNotMatch(file(p, 'src/theme.css'), /az-session/);
   const vite = file(p, 'vite.config.ts');
   assert.match(vite, /envPrefix: "AZ_PUBLIC_"/);
-  assert.match(vite, /plugins: \[secretGuard\(\)\]/);
+  // The guard, and the head order after Vite's own tags (head-order.ts).
+  assert.match(vite, /plugins: \[secretGuard\(\), \{ name: "az-styles-first", transformIndexHtml: \{ order: "post", handler: stylesFirst \} \}\]/);
+  assert.match(vite, /import \{ stylesFirst \} from "\.\/az-vite\/head-order\.ts";/);
 });
 
 test('§3.4: azbackend compiles and wires the backend adapter from its one PUBLIC URL', () => {

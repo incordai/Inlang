@@ -45,6 +45,10 @@ export interface StartTag {
   readonly attrs: ReadonlyMap<string, string>;
   /** For a raw-text element (script, style): its exact text, up to its end tag. */
   readonly text?: string;
+  /** Where its markup starts in the page: the index of its `<`. */
+  readonly start: number;
+  /** Where its markup ends: just past its `>` — for a raw-text element, past its end tag's. */
+  readonly end: number;
 }
 
 /** HTML's raw text elements: their content is text, not markup. */
@@ -163,10 +167,10 @@ export function startTags(html: string): StartTag[] {
         // Its end tag must be whole: one the page ends inside ends nothing.
         const endTag = close < 0 ? null : readTag(html, close + 2);
         if (endTag === null) break;
-        out.push({ name: tag.name, attrs: tag.attrs, text: html.slice(i, close) });
+        out.push({ name: tag.name, attrs: tag.attrs, text: html.slice(i, close), start: lt, end: endTag.end });
         i = endTag.end;
       } else {
-        out.push({ name: tag.name, attrs: tag.attrs });
+        out.push({ name: tag.name, attrs: tag.attrs, start: lt, end: tag.end });
       }
     } else if (c === SLASH && lt + 2 < n && isAlpha(html.charCodeAt(lt + 2))) {
       // An end tag: read like a start tag (its quoted values may hold a `>`), then dropped.

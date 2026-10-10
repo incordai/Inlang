@@ -37,6 +37,12 @@ test('a `>` inside a quoted value does not end the tag; spaces around `=` are al
   ]);
 });
 
+test('each start tag says where its markup is: from its `<` past its `>`, a raw-text element past its end tag', () => {
+  const html = '<p a="x > y">t</p><script>a()</script ><br/>';
+  const spans = startTags(html).map((t) => html.slice(t.start, t.end));
+  assert.deepEqual(spans, ['<p a="x > y">', '<script>a()</script >', '<br/>']);
+});
+
 test('comments, end tags, doctypes and stray `<` are not start tags', () => {
   assert.deepEqual(tags('<!doctype html><!-- <i style="x"> --><!--><!---><?x <u>?></p x=">"><b>1 < 2</b></>'), [['b', {}, null]]);
 });
