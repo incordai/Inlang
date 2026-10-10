@@ -39,7 +39,7 @@ Needs **Node 22.18 or later** (CI runs Node 22, nightly also 24) and pnpm, which
 corepack provides at the version pinned in `package.json`.
 
 ```sh
-git clone <this repository> incord-lang && cd incord-lang
+git clone https://github.com/incordai/incord-lang.git && cd incord-lang
 corepack enable pnpm
 pnpm install --frozen-lockfile --ignore-scripts
 alias az="node $(pwd)/packages/cli/bin/az.js"
@@ -193,7 +193,7 @@ Details: [word-quality-gate §2–§5](docs/word-quality-gate.md),
 | Script | Checks | Needs |
 |---|---|---|
 | `pnpm verify` | `pnpm typecheck` + `pnpm test`: every unit suite — compiler, theme, words (props, variants, headers, descriptions, this README's example, commands and catalogue), target, CLI, runtimes, backend on in-memory SQLite, MCP | nothing |
-| `pnpm lint` | `az lint packages/words`: words use theme tokens only | nothing |
+| `pnpm lint` | `az lint packages/words`: words use theme tokens only, and each `themeReads` lists exactly the tokens its code reads | nothing |
 | `pnpm coverage` | which variants and props each emitter implements | nothing |
 | `pnpm verify:build` | builds the GRAMMAR §8 fixture with the real toolchain and checks the shipped HTML, security and bundle budget | network (installs) |
 | `pnpm test:visual` | every preview in three themes, light and dark: overflow, axe, keyboard, reduced motion, behaviours | browsers |

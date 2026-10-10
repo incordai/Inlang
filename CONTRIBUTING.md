@@ -15,8 +15,9 @@ pnpm verify                                       # typecheck + every unit suite
 pnpm exec playwright install chromium firefox webkit   # once, for the browser suites
 ```
 
-Node 22.18 or later. Tests are `node:test` run with `--experimental-strip-types`
-(no build step); types are checked by `tsc --noEmit`. To run one file:
+Node 22.18 or later. The toolchain — `node:test`, `tsc --noEmit`, `az lint`,
+no build step and no formatter — is [CONVENTIONS §1](docs/CONVENTIONS.md#1-language--tooling).
+To run one file:
 `node --experimental-strip-types --test packages/words/test/faq-schema.test.ts`.
 
 ## Which checks to run
@@ -56,7 +57,8 @@ works — a change that breaks one is sent back:
   needs a same-line reason (CONVENTIONS §1). Fix the cause, at its source.
 - **Words read theme tokens only** — no hex, `rgb(`/`hsl(`, off-scale px,
   `font-family` or numeric `z-index` in `packages/words` or `target-*`
-  (CONVENTIONS §4, `pnpm lint`).
+  (CONVENTIONS §4, `pnpm lint`). `pnpm lint` also fails a word whose
+  `themeReads` is not exactly the tokens its code reads.
 - **No vendor, product or client names** in code, identifiers, comments,
   diagnostics or commit messages. Use neutral words — "hosted adapter",
   "managed provider", "token-endpoint profile". The secret patterns are
@@ -78,8 +80,9 @@ works — a change that breaks one is sent back:
   new runtime dependency in `core` needs a written justification
   (CONVENTIONS §7). `core` and `target-*` import nothing network-capable.
 - **Diagnostics** read `<word>: <what is wrong> — <what to do>`, lowercase,
-  no trailing period, with a stable `AZxxxx` id (CONVENTIONS §5). Errors
-  block the build; taste is a warning.
+  no trailing period, with a stable `AZxxxx` id (CONVENTIONS §5) from the
+  ranges and per-word blocks of [GRAMMAR §7.4–§7.5](docs/GRAMMAR.md#74-diagnostic-id-ranges).
+  Errors block the build; taste is a warning.
 - **Every source file opens with an `@az` header** (`Purpose`, `Spec`,
   `Exports`, `Edit guide`, `Tests`; words also `Renders`, `Variants`,
   `Modifiers`, `Props`, `Styling`, `Behaviour`). `headers.test.ts` checks it
@@ -122,13 +125,15 @@ owner decision: log it in the ROADMAP backlog first. When it is approved:
      (`min`/`max`, nested `props`/`slots`), `requires`, `recommends`,
      `requiresWhen`;
    - `checks`: the spec's validation table as data, using the rule kinds in
-     `packages/core/src/checks.ts`. Codes are `AZ2000+` (GRAMMAR §7.4),
-     permanent, never reused. Each existing word owns a block of twenty in
-     name order — auth `AZ2000`, cta `AZ2020` … text `AZ2200` — so a new
-     word takes the next free block (`AZ2220` today);
-   - `themeReads` (the token paths the emitter uses), `deps` (exact
-     versions), `targets: ["web"]`, and `tested` with only the engines and
-     companions a run actually covered (gate item 12).
+     `packages/core/src/checks.ts`. Codes are permanent and never reused;
+     a new word takes the next free block of twenty and adds its row to the
+     table in [GRAMMAR §7.5](docs/GRAMMAR.md#75-per-word-id-blocks)
+     (`packages/core/test/diagnostic-codes.test.ts` holds every word to it);
+   - `themeReads`: exactly the token paths the word's own code reads
+     through `ctx.theme` (`pnpm lint` fails on one missing or extra; tokens
+     read inside shared helpers such as `framed` are the helper's), `deps`
+     (exact versions), `targets: ["web"]`, and `tested` with only the
+     engines and companions a run actually covered (gate item 12).
 3. **`emit.web.ts`** — `export function emit(block, ctx): EmittedNode`. Every
    design value comes from `ctx.theme`; buttons come from `ctx.action(s)`;
    assets through `ctx.asset`; responsive styles through `below`; user text is
@@ -214,13 +219,10 @@ files and dependencies a site gets.
 
 ## Commits and pull requests
 
-- Branch from `main`; one logical change per commit. Grammar changes are
-  their own commit and update ARCHITECTURE.md with it.
-- Subject: `<scope>: <what is now true>`, lowercase, e.g.
-  `overlay: a modal's scroll lock restores the body's style` (see
-  `git log`). The body says why, what was measured, and how it was verified.
-- Review `git diff --staged` before every commit: no debug output, no
-  commented-out code, no secrets, no vendor names.
+- Branching, the subject format (`<scope>: <what is now true>`), the body
+  and the review of `git diff --staged` before a commit are
+  [CONVENTIONS §8](docs/CONVENTIONS.md#8-commits--branches) — the one source
+  for them.
 - A PR lists the checks you ran and their results, anything you did not
   run and why, and any snapshot or thumbnail change with what changed
   visually. Never blind-accept a snapshot update.

@@ -1,6 +1,8 @@
 # CONVENTIONS
 
-Binding rules. CI enforces most of them; the rest are review-blocking.
+Binding rules. CI enforces most of them; the rest are review-blocking. This
+file is the one source for them; setup, which checks to run for which change,
+and how to add a word are in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ---
 
@@ -8,12 +10,14 @@ Binding rules. CI enforces most of them; the rest are review-blocking.
 
 | | |
 |---|---|
-| Runtime | Node 22+ (CI matrix: 22 and 24) |
-| Package manager | pnpm, workspaces |
-| Language | TypeScript, `strict: true` |
+| Runtime | Node 22.18+ (CI: 22 on every push and PR; the nightly run adds 24) |
+| Package manager | pnpm (the version `packageManager` pins), workspaces |
+| Language | TypeScript, `strict: true`, run as source by Node's type stripping — no build step |
 | Modules | ESM only. No CommonJS |
-| Format / lint | Prettier + ESLint, no per-file overrides |
-| Tests | Vitest (unit), Playwright (browser) |
+| Type check | `tsc --noEmit` over every package (`pnpm typecheck`) |
+| Lint | `az lint` (`pnpm lint`): the theme rule of §4 and each manifest's `themeReads`; there is no formatter or general-purpose linter |
+| Tests | `node:test` with `--experimental-strip-types` (unit, `pnpm test`); Playwright driven by `scripts/*.mjs` (browser) |
+| Gate | `pnpm verify` = typecheck + every unit suite; must be green before a commit |
 
 - **No `any`.** Use `unknown` and narrow. `// @ts-expect-error` requires a
   comment explaining why, on the same line.
@@ -42,15 +46,17 @@ Every word is a self-contained directory. Adding a word must never require
 editing `core`.
 
 ```
-words/hero/
+packages/words/hero/
 ├── word.json           manifest — the source of truth
-├── emit.web.ts         web emitter
+├── emit.web.ts         web emitter, opening with its @az header
 ├── emit.mobile.ts      [Phase 3]
-├── preview.az          minimal example, used for snapshots + LSP thumbnails
-├── hero.test.ts        unit tests
-├── __snapshots__/      visual snapshots (390/768/1440 × light/dark)
+├── preview.az          minimal example: gate, visual checks, thumbnails
+├── preview.<variant>.az  a variant that needs its own content
+├── preview-assets/     images and models the previews use
 └── README.md           docs page source
 ```
+
+A word's tests live in `packages/words/test/` (§9), not in its folder.
 
 **To add a word:** create the directory, fill the manifest, write the emitter,
 add `preview.az`, run `pnpm gate words/<name>`. No core changes. If a word
@@ -95,13 +101,15 @@ nav: 9 links, max is 7 — group them or simplify the IA
 - **Errors block the build. Warnings never do** — taste advice (`weak primary
   CTA`) is always a warning
 - Every diagnostic carries a source position (LSP needs it)
-- Stable IDs (`AZ1042`) so they are documentable and suppressible
+- Stable IDs (`AZ1042`) so they are documentable and suppressible; ranges
+  and per-word blocks are GRAMMAR §7.4–§7.5
 
 ## 6. Generated code
 
 - Header on every emitted file (ARCHITECTURE §7)
-- Emit formatted output — run Prettier on emitted source before writing.
-  Generated code gets read; unreadable output undermines trust in the tool
+- Emit readable output — the target writes indented source and indented JSON
+  itself; no formatter runs at build. Generated code gets read; unreadable
+  output undermines trust in the tool
 - **Never string-concatenate user content into code.** Escape at emit. A
   `title` containing `</script>` must not break out — there is a test for this
 - Deterministic output: no timestamps, no random IDs, stable key order.
@@ -117,23 +125,36 @@ nav: 9 links, max is 7 — group them or simplify the IA
 
 ## 8. Commits & branches
 
-Conventional Commits, scoped by package:
+Subject: `<scope>: <what is now true>` — lowercase, no type prefix, no
+trailing period. The scope is the package, word or area changed (`core`,
+`target-web`, `hero`, `docs`, `test:data`); a change across two names both,
+comma-separated. From `git log`:
 
 ```
-feat(words/hero): add split variant
-fix(core): keep positions through the link stage
-chore(deps): pin three to 0.170.0
-docs(architecture): record the Spec contract
+overlay: a modal's scroll lock restores the body's style
+scene: a change of layout wakes the stopped render loop
+target-web, cli: width/height on every image the build ships (CLS 0)
+docs: root README, CONTRIBUTING, and a generated word index an AI can start from
 ```
 
-One logical change per commit. Grammar changes get their own commit and must
-update `ARCHITECTURE.md` in the same commit.
+The body says why, what was measured, and how it was verified (the checks
+run and their results). Review `git diff --staged` before every commit: no
+debug output, no commented-out code, no secrets, no vendor names.
+
+Branch from `main`. One logical change per commit. Grammar changes get their
+own commit and must update `ARCHITECTURE.md` in the same commit.
 
 ## 9. Tests
 
-- Unit tests colocated: `foo.ts` → `foo.test.ts`
-- Fixtures in `/fixtures`, named for behaviour: `hero-3d-no-model.az`
-- Every diagnostic needs a fixture that triggers it
+- Unit tests live in each package's `test/` folder
+  (`packages/core/src/link.ts` → `packages/core/test/link.test.ts`); the
+  words' tests are in `packages/words/test/`, script helpers' beside them in
+  `scripts/lib/*.test.mjs`
+- A check carries a `CONTROL` test that feeds it a deliberately bad input
+  and requires the failure — a check that cannot fail proves nothing
+- Shared fixtures in `/fixtures` (`minimal.az`, `broken.az`); a test's own
+  cases are inline `.az` sources in the test file
+- Every diagnostic needs a test case that triggers it
 - Every word needs a `preview.az` that renders
 - **Snapshot updates are reviewed, never blind-accepted.** `-u` in a PR
   requires an explanation of what changed visually and why
