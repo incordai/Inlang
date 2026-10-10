@@ -689,8 +689,8 @@ with no family, or `font` with no roles, is AZ1205; a repeated role warns
 (AZ1203) and the first is kept.
 
 **Theme settings.** `theme <name>` takes one of `midnight`, `paper`,
-`signal`; any other is
-`theme: 'purple' is not a theme — use midnight, paper, signal` (AZ1417). Its
+`signal`, `clay`, `petal`, `volt` (theme-spec §5); any other is
+`theme: 'purple' is not a theme — use midnight, paper, signal, clay, petal, volt` (AZ1417). Its
 indented settings are `accent` and `pattern`; any other is
 `theme: 'sparkle' is not a theme setting — use accent, pattern` (AZ1405).
 `accent <hue>` names one hue from a closed set — `violet`, `indigo`, `blue`,
@@ -707,7 +707,8 @@ hue is AZ1418, and a third value AZ1406. `pattern <shape> [origin]` takes a shap
 (the default), `bottom`, `left`, `right`, `center`; an unknown shape or origin
 is AZ1419. Without `pattern` there is none. A setting with no value is AZ1205,
 an extra value AZ1406, and a repeated setting warns (AZ1203) and the first is
-kept. `az explain theme accent` lists every hue with the hues it pairs with.
+kept. `az explain theme` lists the themes, and `az explain theme accent` lists
+every hue with the hues it pairs with.
 
 **Site and page settings: `description` and `icon`.** Both are one value on
 one line, like `width`.

@@ -41,8 +41,16 @@ test('an unknown theme name is AZ1417, naming the themes', () => {
   const r = compileOf(site('purple'));
   const d = r.diagnostics.find((x) => x.code === 'AZ1417');
   assert.ok(d, JSON.stringify(r.diagnostics));
-  assert.match(d.message, /'purple' is not a theme — use midnight, paper, signal/);
+  assert.match(d.message, /'purple' is not a theme — use midnight, paper, signal, clay, petal, volt$/);
   assert.equal(r.ok, false);
+});
+
+test('clay, petal and volt are themes: each compiles, with an accent pair it allows', () => {
+  for (const theme of ['clay', 'petal', 'volt']) {
+    const r = compileOf(site(theme, '    accent violet blue\n'));
+    assert.equal(r.ok, true, `${theme}: ${JSON.stringify(r.diagnostics)}`);
+    assert.equal(r.spec?.site.theme, theme);
+  }
 });
 
 test('an unknown theme setting is AZ1405', () => {

@@ -79,13 +79,14 @@ const put = (word, item, pass, detail = '') => { (results[word] ??= {})[item] = 
 /*
  * Every child is bounded. tsc, lint and check finish in seconds; test:visual
  * bounds itself (per check, per site, its build at 1h and its run at 20m +
- * 2m a site — 4h32m for the 96 sites of --every-variant) and this is only
+ * 2m a site — 7h26m for the 183 sites of --every-variant in six themes,
+ * which ran in 69m) and this is only
  * the backstop above that, so its own deadline, which names the stuck step,
  * comes first. SIGTERM, so test:visual's browsers are closed by Playwright's
  * own handler.
  */
 const CHILD_MS = 10 * 60_000;
-const VISUAL_MS = 5 * 60 * 60_000;
+const VISUAL_MS = 8 * 60 * 60_000;
 const run = (cmd, args) => spawnSync(cmd, args, {
   cwd: ROOT, encoding: 'utf8', env: { ...process.env, AZ_WORDS: WORDS }, maxBuffer: 64 * 1024 * 1024,
   timeout: CHILD_MS, killSignal: 'SIGTERM',

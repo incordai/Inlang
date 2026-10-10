@@ -34,11 +34,15 @@ const files = (src: string) => {
 const read = (fs: { path: string; content: string }[], p: string) => fs.find((f) => f.path === p)?.content ?? '';
 
 for (const theme of Object.keys(THEMES)) {
-  test(`${theme}: display serif puts the serif stack on the h1's rule`, () => {
-    const css = read(files(site(theme, '  font\n    display serif\n')), 'src/az.css');
-    assert.ok(css.includes(`font-family: ${FONT_STACKS.serif}`), 'the serif stack is in az.css');
+  // The role must differ from the theme's own display family, or the
+  // CONTROL below could not fail: serif, unless the theme's display is serif.
+  const own = THEMES[theme as keyof typeof THEMES].type.display;
+  const role = own === FONT_STACKS.serif ? 'mono' : 'serif';
+  test(`${theme}: display ${role} puts the ${role} stack on the h1's rule`, () => {
+    const css = read(files(site(theme, `  font\n    display ${role}\n`)), 'src/az.css');
+    assert.ok(css.includes(`font-family: ${FONT_STACKS[role]}`), `the ${role} stack is in az.css`);
     const plain = read(files(site(theme)), 'src/az.css');
-    assert.ok(!plain.includes(FONT_STACKS.serif), 'CONTROL: without font the serif stack is absent');
+    assert.ok(!plain.includes(FONT_STACKS[role]), `CONTROL: without font the ${role} stack is absent`);
   });
 
   test(`${theme}: theme.css gives the page the body family, and font body overrides it`, () => {

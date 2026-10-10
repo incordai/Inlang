@@ -64,6 +64,17 @@ test('explain: an unknown term suggests only a plausible typo', () => {
   assert.deepEqual(explain(['zzzzzzzz'], manifests).unknown, [{ term: 'zzzzzzzz', suggestion: null }]);
 });
 
+test('explain theme lists every theme, each within the limit; a theme after it is one line', () => {
+  const listed = explain(['theme'], manifests).lines.filter((l) => l.kind === 'theme');
+  assert.deepEqual(listed.map((l) => l.term), ['midnight', 'paper', 'signal', 'clay', 'petal', 'volt']);
+  for (const l of listed) assert.ok(within(l.text), `${l.term}: '${l.text}' (${l.text.length} chars)`);
+  const one = explain(['theme', 'volt'], manifests);
+  assert.deepEqual(one.lines.map((l) => [l.term, l.kind]), [['theme', 'keyword'], ['volt', 'theme']]);
+  assert.deepEqual(one.unknown, []);
+  // Asked about a setting, the keyword does not list the themes first.
+  assert.equal(explain(['theme', 'accent'], manifests).lines.some((l) => l.kind === 'theme'), false);
+});
+
 test('CONTROL: an inherited object key is not a term', () => {
   assert.deepEqual(explain(['constructor'], manifests).lines, []);
 });
@@ -76,9 +87,9 @@ test('explain theme accent lists every hue with its pair partners (theme-spec §
     assert.equal(l.of, 'theme.accent');
     assert.ok(within(l.text), `${l.term}: '${l.text}' (${l.text.length} chars)`);
   }
-  // Every theme allows violet with blue; signal alone refuses green with amber.
+  // Every theme allows violet with blue; signal and volt refuse green with amber.
   assert.match(pairs.find((l) => l.term === 'violet')!.text, /^Pairs with blue, teal, orange, rose$/);
-  assert.match(pairs.find((l) => l.term === 'green')!.text, /amber \(not signal\)/);
+  assert.match(pairs.find((l) => l.term === 'green')!.text, /amber \(not signal\/volt\)/);
   // The hue after `accent` is still a value, and lists nothing more.
   const v = explain(['theme', 'accent', 'violet'], manifests).lines.at(-1);
   assert.deepEqual([v?.kind, v?.term], ['value', 'violet']);

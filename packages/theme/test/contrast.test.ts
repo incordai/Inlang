@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { THEMES, type ThemeName } from '../src/themes.ts';
-import { type Scheme, type Theme, VEIL_PERCENT } from '../src/tokens.ts';
+import { FONT_STACKS, type Scheme, type Theme, VEIL_PERCENT } from '../src/tokens.ts';
 import { ACCENT_NAMES, withAccent } from '../src/accent.ts';
 import type { PAIR_TOKENS } from '../src/gradient.ts';
 
@@ -146,7 +146,33 @@ test('CONTROL: a deliberately bad pair IS caught', () => {
   assert.ok(ratio('hsl(0 0% 96%)', 'hsl(0 0% 100%)') < BODY);
 });
 
-test('the three themes are genuinely different, not hue rotations', () => {
+/* ---------------- theme-spec §10.2 checks 1, 2 and 7: completeness ---------------- */
+
+const keys = (o: object) => Object.keys(o).sort();
+/** midnight is the reference: every theme defines exactly the tokens it does. */
+const REFERENCE = THEMES.midnight;
+
+for (const name of NAMES) {
+  test(`${name}: defines every token, in both schemes, and nothing else`, () => {
+    const t: Theme = THEMES[name];
+    assert.equal(t.name, name, 'the name matches its key in THEMES');
+    for (const scheme of SCHEMES) {
+      assert.deepEqual(keys(t.color[scheme]), keys(REFERENCE.color.light), `color.${scheme}`);
+      assert.deepEqual(keys(t.shadow[scheme]), keys(REFERENCE.shadow.light), `shadow.${scheme}`);
+      for (const [k, v] of Object.entries(t.color[scheme])) assert.match(v, /^hsl\(\d+(\.\d+)? \d+(\.\d+)?% \d+(\.\d+)?%\)$/, `${scheme} ${k}`);
+    }
+    assert.deepEqual(keys(t.size), keys(REFERENCE.size), 'size');
+    assert.deepEqual(keys(t.type), keys(REFERENCE.type), 'type');
+    assert.deepEqual(keys(t.radius), keys(REFERENCE.radius), 'radius');
+    // theme-spec §8.1: a family is one of the system stacks, never a downloaded face.
+    const stacks: string[] = Object.values(FONT_STACKS);
+    for (const role of ['display', 'body', 'mono'] as const) assert.ok(stacks.includes(t.type[role]), `type.${role}: ${t.type[role]}`);
+    // §6.1: the focus fix depends on the ring standing off the fill.
+    assert.ok(t.size['ring-offset'] >= 1, 'size.ring-offset >= 1');
+  });
+}
+
+test('the themes are genuinely different, not hue rotations', () => {
   // PRD §10 risk: "generated 3D sites all look identical". The themes are the
   // mitigation, so sameness here is a product failure, not a style quibble.
   const radii = NAMES.map((n) => JSON.stringify(THEMES[n].radius));

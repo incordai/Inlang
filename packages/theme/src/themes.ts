@@ -1,14 +1,14 @@
 /**
  * @az module themes
- * Purpose: the three themes as data (midnight, paper, signal), light and dark per theme.
+ * Purpose: the six themes as data (midnight, paper, signal, clay, petal, volt), light and dark per theme.
  * Spec: docs/theme-spec.md §5
- * Exports: midnight, paper, signal, THEMES, DEFAULT_THEME
+ * Exports: midnight, paper, signal, clay, petal, volt, THEMES, DEFAULT_THEME
  * Edit guide: a theme is data only; every colour pair must pass the contrast test.
  * Tests: packages/theme/test/contrast.test.ts
  */
 
 /**
- * The three themes.
+ * The six themes.
  *
  * GENERATED FROM docs/theme-spec.md §5 — the colour values are extracted from
  * the specification, not retyped, so the document and the code cannot drift.
@@ -17,7 +17,7 @@
  * CONVENTIONS §4 bans them under `words/` and `target-*`, which read tokens.
  */
 
-import type { Theme } from './tokens.ts';
+import { FONT_STACKS, type Theme } from './tokens.ts';
 
 export const midnight: Theme = {
   name: "midnight",
@@ -272,6 +272,258 @@ export const signal: Theme = {
   radius: { sm: 0, md: 0, lg: 0, full: 0 },
 };
 
-export const THEMES = { midnight, paper, signal } as const;
+export const clay: Theme = {
+  name: "clay",
+  description: "warm and crafted: cream ground, ink type, a terracotta accent",
+  color: {
+    light: {
+      "bg": "hsl(36 45% 94%)",
+      "surface": "hsl(38 50% 98%)",
+      "surface-alt": "hsl(34 32% 88%)",
+      "text": "hsl(20 25% 12%)",
+      "muted": "hsl(22 12% 34%)",
+      "accent": "hsl(14 62% 38%)",
+      "accent-hover": "hsl(14 62% 30%)",
+      "accent-contrast": "hsl(38 50% 98%)",
+      "border": "hsl(30 22% 80%)",
+      "border-strong": "hsl(24 14% 46%)",
+      "focus": "hsl(14 62% 36%)",
+      "scrim": "hsl(20 25% 8%)",
+      "on-scrim": "hsl(38 50% 97%)",
+      "overlay": "hsl(20 25% 12%)",
+      "danger": "hsl(356 64% 36%)",
+      "danger-contrast": "hsl(38 50% 98%)",
+    },
+    dark: {
+      "bg": "hsl(22 18% 10%)",
+      "surface": "hsl(22 15% 14%)",
+      "surface-alt": "hsl(22 13% 19%)",
+      "text": "hsl(36 40% 92%)",
+      "muted": "hsl(32 16% 70%)",
+      "accent": "hsl(16 70% 64%)",
+      "accent-hover": "hsl(18 75% 74%)",
+      "accent-contrast": "hsl(20 40% 10%)",
+      "border": "hsl(22 12% 25%)",
+      "border-strong": "hsl(26 10% 50%)",
+      "focus": "hsl(18 75% 70%)",
+      "scrim": "hsl(22 20% 5%)",
+      "on-scrim": "hsl(36 40% 94%)",
+      "overlay": "hsl(22 20% 5%)",
+      "danger": "hsl(2 75% 70%)",
+      "danger-contrast": "hsl(0 45% 12%)",
+    },
+  },
+  shadow: {
+    light: {
+      sm: '0 1px 2px rgb(60 30 10 / 0.08)',
+      md: '0 4px 12px rgb(60 30 10 / 0.10)',
+      lg: '0 12px 32px rgb(60 30 10 / 0.14)',
+    },
+    dark: {
+      sm: '0 1px 2px rgb(0 0 0 / 0.5)',
+      md: '0 4px 14px rgb(0 0 0 / 0.6)',
+      lg: '0 14px 40px rgb(0 0 0 / 0.7)',
+    },
+  },
+  size: {
+    container: 1200,
+    'gutter-sm': 24,
+    'gutter-lg': 64,
+    nav: 72,
+    'nav-shrink': 56,
+    tap: 44,
+    ring: 2,
+    'ring-offset': 2,
+    'measure-display': 24,
+    'measure-body': 64,
+    'hero-min': 85,
+    'column-min': 240,
+    'edge-emphasis': 2,
+    'nav-side': 256,
+    'glass-blur': 12,
+  },
+  type: {
+    display: FONT_STACKS.serif,
+    body: FONT_STACKS.serif,
+    mono: FONT_STACKS.mono,
+    'leading-display': 1.05,
+    'leading-tight': 1.3,
+    'leading-body': 1.7,
+    'weight-display': 500,
+    'weight-body': 400,
+    'weight-bold': 600,
+  },
+  radius: { sm: 4, md: 6, lg: 12, full: 999 },
+};
+
+export const petal: Theme = {
+  name: "petal",
+  description: "soft and friendly: lavender ground, rounded type, a violet accent",
+  color: {
+    light: {
+      "bg": "hsl(250 60% 98%)",
+      "surface": "hsl(0 0% 100%)",
+      "surface-alt": "hsl(248 50% 94%)",
+      "text": "hsl(250 30% 16%)",
+      "muted": "hsl(248 12% 40%)",
+      "accent": "hsl(258 60% 50%)",
+      "accent-hover": "hsl(258 60% 42%)",
+      "accent-contrast": "hsl(0 0% 100%)",
+      "border": "hsl(248 35% 89%)",
+      "border-strong": "hsl(248 14% 54%)",
+      "focus": "hsl(258 60% 50%)",
+      "scrim": "hsl(250 30% 12%)",
+      "on-scrim": "hsl(250 60% 98%)",
+      "overlay": "hsl(250 30% 16%)",
+      "danger": "hsl(350 65% 42%)",
+      "danger-contrast": "hsl(0 0% 100%)",
+    },
+    dark: {
+      "bg": "hsl(250 22% 11%)",
+      "surface": "hsl(250 20% 15%)",
+      "surface-alt": "hsl(250 18% 20%)",
+      "text": "hsl(250 40% 96%)",
+      "muted": "hsl(250 16% 74%)",
+      "accent": "hsl(258 85% 78%)",
+      "accent-hover": "hsl(258 90% 86%)",
+      "accent-contrast": "hsl(258 40% 14%)",
+      "border": "hsl(250 16% 26%)",
+      "border-strong": "hsl(250 12% 52%)",
+      "focus": "hsl(258 85% 80%)",
+      "scrim": "hsl(250 30% 6%)",
+      "on-scrim": "hsl(250 40% 96%)",
+      "overlay": "hsl(250 30% 6%)",
+      "danger": "hsl(350 85% 74%)",
+      "danger-contrast": "hsl(350 50% 12%)",
+    },
+  },
+  shadow: {
+    light: {
+      sm: '0 1px 3px rgb(80 60 160 / 0.08)',
+      md: '0 6px 16px rgb(80 60 160 / 0.10)',
+      lg: '0 16px 40px rgb(80 60 160 / 0.14)',
+    },
+    dark: {
+      sm: '0 1px 2px rgb(0 0 0 / 0.5)',
+      md: '0 4px 14px rgb(0 0 0 / 0.6)',
+      lg: '0 14px 40px rgb(0 0 0 / 0.7)',
+    },
+  },
+  size: {
+    container: 1280,
+    'gutter-sm': 24,
+    'gutter-lg': 64,
+    nav: 64,
+    'nav-shrink': 56,
+    tap: 44,
+    ring: 2,
+    'ring-offset': 2,
+    'measure-display': 24,
+    'measure-body': 60,
+    'hero-min': 85,
+    'column-min': 240,
+    'edge-emphasis': 2,
+    'nav-side': 256,
+    'glass-blur': 20,
+  },
+  type: {
+    display: FONT_STACKS.rounded,
+    body: FONT_STACKS.rounded,
+    mono: FONT_STACKS.mono,
+    'leading-display': 1.02,
+    'leading-tight': 1.25,
+    'leading-body': 1.6,
+    'weight-display': 650,
+    'weight-body': 400,
+    'weight-bold': 600,
+  },
+  radius: { sm: 10, md: 16, lg: 28, full: 999 },
+};
+
+export const volt: Theme = {
+  name: "volt",
+  description: "loud and graphic: black on white, heavy type, a hot magenta accent",
+  color: {
+    light: {
+      "bg": "hsl(0 0% 100%)",
+      "surface": "hsl(0 0% 97%)",
+      "surface-alt": "hsl(52 100% 88%)",
+      "text": "hsl(0 0% 0%)",
+      "muted": "hsl(0 0% 28%)",
+      "accent": "hsl(340 95% 40%)",
+      "accent-hover": "hsl(340 95% 30%)",
+      "accent-contrast": "hsl(0 0% 100%)",
+      "border": "hsl(0 0% 0%)",
+      "border-strong": "hsl(0 0% 0%)",
+      "focus": "hsl(0 0% 0%)",
+      "scrim": "hsl(0 0% 0%)",
+      "on-scrim": "hsl(0 0% 100%)",
+      "overlay": "hsl(0 0% 0%)",
+      "danger": "hsl(0 90% 36%)",
+      "danger-contrast": "hsl(0 0% 100%)",
+    },
+    dark: {
+      "bg": "hsl(0 0% 0%)",
+      "surface": "hsl(0 0% 7%)",
+      "surface-alt": "hsl(0 0% 13%)",
+      "text": "hsl(0 0% 100%)",
+      "muted": "hsl(0 0% 78%)",
+      "accent": "hsl(340 100% 70%)",
+      "accent-hover": "hsl(340 100% 80%)",
+      "accent-contrast": "hsl(0 0% 0%)",
+      "border": "hsl(0 0% 85%)",
+      "border-strong": "hsl(0 0% 100%)",
+      "focus": "hsl(0 0% 100%)",
+      "scrim": "hsl(0 0% 0%)",
+      "on-scrim": "hsl(0 0% 100%)",
+      "overlay": "hsl(0 0% 0%)",
+      "danger": "hsl(0 100% 70%)",
+      "danger-contrast": "hsl(0 0% 0%)",
+    },
+  },
+  shadow: {
+    light: {
+      sm: '2px 2px 0 0 rgb(0 0 0)',
+      md: '4px 4px 0 0 rgb(0 0 0)',
+      lg: '8px 8px 0 0 rgb(0 0 0)',
+    },
+    dark: {
+      sm: '2px 2px 0 0 rgb(255 255 255)',
+      md: '4px 4px 0 0 rgb(255 255 255)',
+      lg: '8px 8px 0 0 rgb(255 255 255)',
+    },
+  },
+  size: {
+    container: 1440,
+    'gutter-sm': 24,
+    'gutter-lg': 48,
+    nav: 64,
+    'nav-shrink': 52,
+    tap: 44,
+    ring: 2,
+    'ring-offset': 2,
+    'measure-display': 20,
+    'measure-body': 58,
+    'hero-min': 85,
+    'column-min': 240,
+    'edge-emphasis': 2,
+    'nav-side': 256,
+    'glass-blur': 8,
+  },
+  type: {
+    display: FONT_STACKS.sans,
+    body: FONT_STACKS.sans,
+    mono: FONT_STACKS.mono,
+    'leading-display': 0.95,
+    'leading-tight': 1.15,
+    'leading-body': 1.5,
+    'weight-display': 700,
+    'weight-body': 500,
+    'weight-bold': 800,
+  },
+  radius: { sm: 0, md: 0, lg: 0, full: 999 },
+};
+
+export const THEMES = { midnight, paper, signal, clay, petal, volt } as const;
 export type ThemeName = keyof typeof THEMES;
 export const DEFAULT_THEME: ThemeName = 'midnight';

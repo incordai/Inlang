@@ -30,6 +30,11 @@ interface TermInfo {
   readonly values?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /** Lines explaining a setting also prints, one per entry: `theme accent` lists its pairs. */
   readonly lists?: Readonly<Record<string, { readonly kind: string; readonly lines: Readonly<Record<string, string>> }>>;
+  /**
+   * Lines the keyword prints when it is the last term asked about, one per
+   * entry; each entry is also a term after it. `theme` lists the themes.
+   */
+  readonly entries?: { readonly kind: string; readonly lines: Readonly<Record<string, string>> };
 }
 
 /**
@@ -61,7 +66,7 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
     description: 'The site: name, frame, theme; shared nav/footer',
     settings: {
       width: 'Width of the frame every section aligns to',
-      theme: 'Theme name, e.g. midnight, paper or signal',
+      theme: 'Theme name, e.g. midnight, paper, clay or volt',
       font: 'Font roles for display, body and mono text',
       description: 'Search-result text for every page; quoted, ≤160 chars',
       icon: 'Site icon, .svg or .png; square PNG ≥180×180 adds touch icon',
@@ -77,6 +82,7 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
     // A pattern line is `pattern <shape> [origin]`: both are its values.
     values: { accent: ACCENT_HUES, pattern: { ...PATTERN_SHAPE_NAMES, ...PATTERN_ORIGIN_NAMES } },
     lists: { accent: { kind: 'pairs', lines: pairLines() } },
+    entries: { kind: 'theme', lines: THEME_NAMES },
   },
   font: {
     description: 'Font role assignments (under site)',
@@ -176,7 +182,7 @@ export function explain(terms: readonly string[], manifests: ReadonlyMap<string,
   const unknown: { term: string; suggestion: string | null }[] = [];
   let scope: Scope | null = null;
 
-  const startScope = (term: string): boolean => {
+  const startScope = (term: string, last: boolean): boolean => {
     const m = manifests.get(term);
     if (m) {
       scope = { name: term, manifest: m };
@@ -187,12 +193,16 @@ export function explain(terms: readonly string[], manifests: ReadonlyMap<string,
     if (k) {
       scope = { name: term, keyword: k };
       lines.push({ term, kind: 'keyword', of: '', text: k.description });
+      const entries = last ? k.entries : undefined;
+      if (entries) {
+        for (const [entry, text] of Object.entries(entries.lines)) lines.push({ term: entry, kind: entries.kind, of: term, text });
+      }
       return true;
     }
     return false;
   };
 
-  for (const term of terms) {
+  for (const [i, term] of terms.entries()) {
     const s = scope as Scope | null;
     if (s) {
       const found = resolve(s, term);
@@ -208,7 +218,7 @@ export function explain(terms: readonly string[], manifests: ReadonlyMap<string,
         continue;
       }
     }
-    if (startScope(term)) continue;
+    if (startScope(term, i === terms.length - 1)) continue;
     const candidates = new Set<string>([...manifests.keys(), ...Object.keys(STRUCTURE_DESCRIPTIONS)]);
     if (s) for (const c of membersOf(s)) candidates.add(c);
     unknown.push({ term, suggestion: closest(term, candidates) });
@@ -226,6 +236,7 @@ function membersOf(s: Scope): string[] {
     ...Object.keys(d?.props ?? {}),
     ...Object.keys(d?.slots ?? {}),
     ...Object.keys(s.keyword?.settings ?? {}),
+    ...Object.keys(s.keyword?.entries?.lines ?? {}),
     ...Object.keys(s.lastProp?.values ?? {}),
   ];
 }
@@ -239,6 +250,9 @@ function resolve(s: Scope, term: string): { line: ExplainedLine; next?: Scope } 
   const keep = { ...s, lastProp: undefined };
 
   if (s.keyword) {
+    const entries = s.keyword.entries;
+    const entry = own(entries?.lines, term);
+    if (entries && entry !== undefined) return { line: { term, kind: entries.kind, of: s.name, text: entry }, next: keep };
     const setting = own(s.keyword.settings, term);
     if (setting === undefined) return null;
     return {

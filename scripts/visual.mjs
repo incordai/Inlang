@@ -61,7 +61,8 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
 const CLI = join(ROOT, 'packages/cli/bin/az.js');
 const OUT = join(ROOT, '.visual-out');
-const THEMES = ['midnight', 'paper', 'signal'];
+/** Every theme the compiler accepts (theme-spec §5): a new theme is gated by being added to THEMES. */
+const THEMES = Object.keys(THEME_TOKENS);
 const SCHEMES = ['light', 'dark'];
 /** Parallel Vite builds; bounded so a laptop stays usable. */
 const BUILD_CONCURRENCY = 4;
@@ -246,18 +247,31 @@ function themed(source, theme) {
 /**
  * theme-spec §8.1, checked on the hero (it carries the page's <h1>): the
  * preview as written must render the theme's own families, and the same
- * preview with these `font` roles must render the role's stacks — in every
- * theme. The roles differ from every theme's own stacks, so a site that
- * ignored `font` cannot pass both.
+ * preview with `font` roles must render the roles' stacks — in every
+ * theme. Each theme's roles differ from its own stacks (fontRoles), so a
+ * site that ignored `font` cannot pass both.
  */
 const FONT_WORD = 'hero';
-const FONT_ROLES = { display: 'serif', body: 'mono' };
+/**
+ * Each role takes the first family in its order that is not the theme's own,
+ * and display and body differ: serif and mono wherever the theme's own are
+ * the sans stack, and others where a theme sets serif or rounded itself.
+ */
+const FONT_ORDER = { display: ['serif', 'mono', 'rounded', 'sans'], body: ['mono', 'serif', 'rounded', 'sans'] };
+
+/** The `font` roles a theme's font site writes: none of them the theme's own family. */
+function fontRoles(theme) {
+  const t = THEME_TOKENS[theme].type;
+  const display = FONT_ORDER.display.find((f) => FONT_STACKS[f] !== t.display);
+  const body = FONT_ORDER.body.find((f) => FONT_STACKS[f] !== t.body && f !== display);
+  return { display, body };
+}
 
 /** preview.az with a `font` block as the site's first child. */
-function withFonts(source) {
+function withFonts(source, roles) {
   const lines = source.split('\n');
   const at = lines.findIndex((l) => /^site\b/.test(l));
-  lines.splice(at + 1, 0, '  font', ...Object.entries(FONT_ROLES).map(([r, f]) => `    ${r} ${f}`));
+  lines.splice(at + 1, 0, '  font', ...Object.entries(roles).map(([r, f]) => `    ${r} ${f}`));
   return lines.join('\n');
 }
 
@@ -309,8 +323,8 @@ const RENDERS_NOTHING = 'none';
 
 /**
  * The theme the extra variant sites use. Every variant is checked — light
- * and dark, every width, every engine — and the previews are checked in all
- * three themes; checking every variant in every theme as well would triple
+ * and dark, every width, every engine — and the previews are checked in every
+ * theme; checking every variant in every theme as well would multiply by six
  * a run whose theme coverage the previews already give.
  */
 const VARIANT_THEME = 'midnight';
@@ -350,8 +364,9 @@ async function buildAll(words, work, everyVariant) {
   if (words.includes(FONT_WORD)) {
     const preview = readFileSync(join(WORDS, FONT_WORD, 'preview.az'), 'utf8');
     for (const theme of THEMES) {
-      sites.push({ word: FONT_WORD, theme, variant: null, file: 'preview.az + font', source: withFonts(preview),
-        label: `${theme}:font`, roles: FONT_ROLES });
+      const roles = fontRoles(theme);
+      sites.push({ word: FONT_WORD, theme, variant: null, file: 'preview.az + font', source: withFonts(preview, roles),
+        label: `${theme}:font`, roles });
     }
     THEME_SETTINGS.forEach((settings, i) => {
       sites.push({ word: FONT_WORD, theme: VARIANT_THEME, variant: null, file: `preview.az + theme settings ${i + 1}`,

@@ -257,8 +257,8 @@ generated into `packages/theme/src/ramps.ts` by `scripts/gen-ramps.mjs`. The
 compiler picks, per theme and scheme, the first step that holds the
 theme-spec §6 floors and writes it to `color.accent`, `color.accent-hover` and
 `color.accent-contrast` in both schemes; the focus ring stays the theme's own.
-All 54 theme × hue × scheme choices hold (`packages/theme/test/contrast.test.ts`,
-1260 pairs); a hue that could not is a build error, never a low-contrast ship.
+All 108 theme × hue × scheme choices hold (`packages/theme/test/contrast.test.ts`,
+2520 pairs); a hue that could not is a build error, never a low-contrast ship.
 Without `accent` the theme keeps its own. The steps are **not** exposed as
 `color.accent-700`-style tokens — words read the three accent tokens only.
 `pattern` is drawn from the accent token (`color-mix`, no colour of its own),
@@ -266,7 +266,9 @@ declared once in `theme.css` and painted on the hero (not under `full`'s
 scrim). Its peak strength is capped at 10% accent over the ground: the largest
 that holds every reading pair is 12%, and the spike's 55% glow fails
 (`packages/theme/test/pattern.test.ts`). Without `pattern` there is none.
-Unknown theme AZ1417, setting AZ1405, hue AZ1418, shape or origin AZ1419.
+`theme` names one of six themes — `midnight` `paper` `signal` `clay`
+`petal` `volt` (theme-spec §5). Unknown theme AZ1417, setting AZ1405, hue
+AZ1418, shape or origin AZ1419.
 
 *Built (2026-10-10): accent pairs — colour combinations without a palette
 generator.* `accent <hue> [<hue2>]`: a second hue from the same closed set
@@ -277,8 +279,8 @@ point — of the OKLCH gradient, its `color-mix` stop-list fallback and its
 plain sRGB fallback, rest and hover, in both schemes — holds the theme-spec §6
 floors, with one label (`color.on-gradient`) at 4.5:1 against all of it. The
 allowed pairs are a generated table per theme (`scripts/gen-pairs.mjs` →
-`packages/core/src/accent-pairs.ts`; 18 pairs on midnight and paper, 17 on
-signal); any other pair is AZ1423, naming the partners that work, and
+`packages/core/src/accent-pairs.ts`; 16 pairs on midnight, paper, clay and
+petal, 15 on signal and volt); any other pair is AZ1423, naming the partners that work, and
 `az explain theme accent` lists them. With a pair, the primary action, the
 pricing highlighted plan's edge and the `glow`/`spotlight`/`ramp` patterns
 paint the gradient (`gradient.accent`, from `theme.css`, never inline); with
@@ -598,7 +600,10 @@ shadow  sm md lg
 motion  fast normal slow + easing curves
 ```
 
-Ship 3–4 hand-designed themes. Do **not** ship a "generate a theme from a hex
+Ship 3–4 hand-designed themes. *Revised 2026-10-10 (owner decision): six —
+`midnight`, `paper`, `signal`, `clay`, `petal`, `volt` (theme-spec §5) —
+because colour is the first step of every site (§6.1a); each is still
+hand-designed, in both schemes, and proven by theme-spec §6.* Do **not** ship a "generate a theme from a hex
 code" feature — auto-generated palettes are exactly what makes a site look
 templated, and looking non-templated is the entire value proposition.
 

@@ -78,8 +78,11 @@ which file each route and block went to, and where to change things.
 ## Colour
 
 Colour is the first decision, and it is made from closed sets so the contrast
-can be proven, never from a hex code. `theme` picks one of `midnight`,
-`paper`, `signal`; `accent` picks a hue (`violet` `indigo` `blue` `teal`
+can be proven, never from a hex code. `theme` picks one of six
+hand-designed themes, each with a light and a dark scheme: `midnight` (dark
+product), `paper` (editorial), `signal` (industrial), `clay` (warm, cream and
+terracotta), `petal` (soft, lavender and violet), `volt` (loud, black, white
+and magenta). `accent` picks a hue (`violet` `indigo` `blue` `teal`
 `green` `lime` `amber` `orange` `rose`), and the compiler chooses the step of
 its ramp that holds every contrast floor in light and dark. Two hues make a
 gradient pair:

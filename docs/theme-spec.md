@@ -1,12 +1,12 @@
-# Theme tokens — schema, the three themes, and their proof
+# Theme tokens — schema, the six themes, and their proof
 
 **Status** draft for M2 · Companion to PRD v0.2 §7.3 · Expands it into values
 
 The theme is the only thing standing between twenty contributed words and a
 ransom note. PRD §7.3 names the token *categories*; this document closes the
 set, gives every token a type and a purpose, ships the three hand-designed
-themes at ROADMAP M2 with real values, and proves the contrast arithmetic
-instead of asserting it.
+themes of ROADMAP M2 and three more since (§5.4) with real values, and proves
+the contrast arithmetic instead of asserting it.
 
 Two rules govern everything below:
 
@@ -94,7 +94,7 @@ Full scale and the linter rule: **§7**.
 | `size.scrim` | `Px` | height of the nav top-scrim gradient | nav-spec §4 (~120px) |
 | `size.hairline` | `Px` | 1px. A border width is not a spacing step | — |
 | `size.edge-emphasis` | `Px` | 2px. An edge that carries emphasis by weight, not colour alone — pricing-spec §7.3's highlighted plan | — |
-| `size.glass-blur` | `Px` | 16px midnight, 12px paper, 0 signal. How far `glass` blurs what is behind it (nav-spec §3, cta-spec §5); signal's glass is translucent but unblurred, true to its zero-blur rule (§5.3) | per theme |
+| `size.glass-blur` | `Px` | 16px midnight, 12px paper, 0 signal, 12px clay, 20px petal, 8px volt. How far `glass` blurs what is behind it (nav-spec §3, cta-spec §5); signal's glass is translucent but unblurred, true to its zero-blur rule (§5.3) | per theme |
 | `size.ring` | `Px` | focus ring width | hero-spec §9 |
 | `size.ring-offset` | `Px` | focus ring offset. **Load-bearing** — see §6.2 | — |
 
@@ -224,8 +224,8 @@ consequences, and they are the point of the whole design:
    union — one source, no second copy to drift.
 
 **What a word does when it needs a token that does not exist: it doesn't.** It
-proposes the token. The PR that adds it must add it to the union, to all three
-themes in both schemes, and to the contrast table in §6 — which is why adding
+proposes the token. The PR that adds it must add it to the union, to every
+theme in both schemes, and to the contrast table in §6 — which is why adding
 one is deliberately more work than using an existing one. A word that "just
 needs one more grey" is nearly always a word that should have used
 `color.muted`.
@@ -406,7 +406,7 @@ Three notes for whoever writes the rule:
 
 ---
 
-## 5. The three themes
+## 5. The themes
 
 PRD §10 lists *"generated 3D sites all look identical"* as a **high** severity
 risk, mitigated by *"3–4 hand-designed themes … ship distinct signature
@@ -634,11 +634,152 @@ offset is not spacing. They live in `shadow`, so no word ever types them.
 | `ring` | `2px` | `tracking.base` `.sm` `.xs` | `0` |
 | `ring-offset` | `2px` | `tracking.caps` | `0.1em` |
 
+### 5.4 Three more themes: `clay`, `petal`, `volt`
+
+*Added 2026-10-10, by owner decision: colour is the first step of every site
+(PRD §6.1a), so the set grows past PRD §7.3's "3–4" — still hand-designed,
+still no palette generator (§11).* Each is a full light and dark set, proven
+by the same §6 floors, the same accent ramps and pair rule (§13) and the same
+hero scrim (hero-block-spec §10) as the first three. None of them is the
+limiting case for any shared constant: the veil holds at 90% (`VEIL_PERCENT`
+keeps 92), every hue holds under a 12% pattern (`PATTERN_MAX_ALPHA` keeps
+10%), and `on-scrim` holds 4.5:1 over a white pixel at 60% (`clay`, both
+schemes), 60–61% (`petal`) and 54% (`volt`) — so the scrim's 88/65 stops,
+derived from `paper` light at 63%, are unchanged.
+
+The values below are what `packages/theme/src/themes.ts` ships. Type is
+the system stacks of `FONT_STACKS` (§8.1), so no face is downloaded.
+
+| Axis | `clay` | `petal` | `volt` |
+|---|---|---|---|
+| Default scheme | light | light | light |
+| Corner language | soft (4/6/12px) | round (10/16/28px), pills | **square, but pills** (0/0/0, `full` 999) |
+| Elevation | warm-tinted soft shadow | violet-tinted, wide and soft | **hard ink offset, zero blur** |
+| Display / body type | **serif / serif** | **rounded / rounded** | sans / sans, heavy (700 / 500 / 800) |
+| Chroma | warm ground + one terracotta | tinted lavender ground + one violet | none on the ground + one hot magenta |
+| Nav height | 72px | 64px | 64px |
+| Signature | cream page, serif text at 1.7 leading | lavender wash, rounded type and corners | ink borders, a yellow `surface-alt` band, offset shadows |
+
+#### `clay` — warm and crafted, for the maker, the kitchen, the journal
+
+The warm/organic archetype §12 Q1 named as missing. A cream ground and a
+warm brown-black ink, with a terracotta accent; every family is the serif
+stack, so it reads as print rather than as a product. It differs from
+`paper` where `paper` is quiet: the ground carries colour (`paper`'s is a
+near-neutral off-white), the accent is a fired orange-red rather than
+oxblood, the type is serif from display to body, and the corners are soft
+rather than cut. Its dark scheme is roasted brown, not black, and the accent
+lightens to a kiln-glow terracotta so it stays warm on it.
+
+| Token | Light | Dark |
+|---|---|---|
+| `color.bg` | `hsl(36 45% 94%)` | `hsl(22 18% 10%)` |
+| `color.surface` | `hsl(38 50% 98%)` | `hsl(22 15% 14%)` |
+| `color.surface-alt` | `hsl(34 32% 88%)` | `hsl(22 13% 19%)` |
+| `color.text` | `hsl(20 25% 12%)` | `hsl(36 40% 92%)` |
+| `color.muted` | `hsl(22 12% 34%)` | `hsl(32 16% 70%)` |
+| `color.accent` | `hsl(14 62% 38%)` | `hsl(16 70% 64%)` |
+| `color.accent-hover` | `hsl(14 62% 30%)` | `hsl(18 75% 74%)` |
+| `color.accent-contrast` | `hsl(38 50% 98%)` | `hsl(20 40% 10%)` |
+| `color.border` | `hsl(30 22% 80%)` | `hsl(22 12% 25%)` |
+| `color.border-strong` | `hsl(24 14% 46%)` | `hsl(26 10% 50%)` |
+| `color.focus` | `hsl(14 62% 36%)` | `hsl(18 75% 70%)` |
+| `color.scrim` | `hsl(20 25% 8%)` | `hsl(22 20% 5%)` |
+| `color.on-scrim` | `hsl(38 50% 97%)` | `hsl(36 40% 94%)` |
+| `color.overlay` | `hsl(20 25% 12%)` | `hsl(22 20% 5%)` |
+| `color.danger` | `hsl(356 64% 36%)` | `hsl(2 75% 70%)` |
+| `color.danger-contrast` | `hsl(38 50% 98%)` | `hsl(0 45% 12%)` |
+
+`radius` 4 / 6 / 12 / 999px. `shadow` light `0 1px 2px` / `0 4px 12px` /
+`0 12px 32px` in `rgb(60 30 10)` at .08 / .10 / .14 (a brown shadow on a cream
+page; a grey one reads dirty); dark as `midnight`'s. `size.container` 1200px,
+`measure-body` 64ch, `glass-blur` 12px. `type.display` and `type.body`
+`FONT_STACKS.serif`, leading 1.05 / 1.3 / 1.7, weights 500 / 400 / 600.
+
+#### `petal` — soft and friendly, for the app, the onboarding, the SaaS page
+
+The soft product theme: a lavender-washed white ground, a white card
+surface, a violet accent, and the rounded system stack for every family.
+Corners are the roundest in the set and its shadows are tinted with the
+ground's own violet, so raised things look lifted by light rather than cut
+out. Its dark scheme is a deep plum-slate, and the accent lifts to a pastel
+lilac — the "pastel" of the theme lives in dark, where a light accent is
+what legibility needs anyway. The ground is tinted; the accent is the only
+saturated colour.
+
+| Token | Light | Dark |
+|---|---|---|
+| `color.bg` | `hsl(250 60% 98%)` | `hsl(250 22% 11%)` |
+| `color.surface` | `hsl(0 0% 100%)` | `hsl(250 20% 15%)` |
+| `color.surface-alt` | `hsl(248 50% 94%)` | `hsl(250 18% 20%)` |
+| `color.text` | `hsl(250 30% 16%)` | `hsl(250 40% 96%)` |
+| `color.muted` | `hsl(248 12% 40%)` | `hsl(250 16% 74%)` |
+| `color.accent` | `hsl(258 60% 50%)` | `hsl(258 85% 78%)` |
+| `color.accent-hover` | `hsl(258 60% 42%)` | `hsl(258 90% 86%)` |
+| `color.accent-contrast` | `hsl(0 0% 100%)` | `hsl(258 40% 14%)` |
+| `color.border` | `hsl(248 35% 89%)` | `hsl(250 16% 26%)` |
+| `color.border-strong` | `hsl(248 14% 54%)` | `hsl(250 12% 52%)` |
+| `color.focus` | `hsl(258 60% 50%)` | `hsl(258 85% 80%)` |
+| `color.scrim` | `hsl(250 30% 12%)` | `hsl(250 30% 6%)` |
+| `color.on-scrim` | `hsl(250 60% 98%)` | `hsl(250 40% 96%)` |
+| `color.overlay` | `hsl(250 30% 16%)` | `hsl(250 30% 6%)` |
+| `color.danger` | `hsl(350 65% 42%)` | `hsl(350 85% 74%)` |
+| `color.danger-contrast` | `hsl(0 0% 100%)` | `hsl(350 50% 12%)` |
+
+`radius` 10 / 16 / 28 / 999px. `shadow` light `0 1px 3px` / `0 6px 16px` /
+`0 16px 40px` in `rgb(80 60 160)` at .08 / .10 / .14; dark as `midnight`'s.
+`size.container` 1280px, `nav` 64px, `glass-blur` 20px (the frostiest glass in
+the set). `type.display` and `type.body` `FONT_STACKS.rounded`, leading
+1.02 / 1.25 / 1.6, weights 650 / 400 / 600.
+
+#### `volt` — loud and graphic, for the launch, the event, the campaign
+
+The poster: pure ink on pure white (21:1, the ceiling), every border and the
+focus ring drawn in ink, hard offset shadows with zero blur, square corners —
+and, unlike `signal`, pills: `radius.full` is 999, so a tag or a chip is
+the one round thing on the page, which is the theme's joke. `surface-alt` is
+a pale yellow, so a banded section or the highlighted plan reads as a
+printed highlight. The accent is a hot magenta that appears only on actions.
+Type is the sans stack at the heaviest weights in the set (display 700, body
+500, bold 800) and the tightest leading. Its dark scheme is pure black with
+white ink, white hairlines and a white offset shadow, and the accent lifts to
+a hot pink. It is distinct from `signal` (also white and loud) in four
+ways: pure black rather than near-black ink, ink-black rather than grey
+borders, a yellow band, and pills.
+
+| Token | Light | Dark |
+|---|---|---|
+| `color.bg` | `hsl(0 0% 100%)` | `hsl(0 0% 0%)` |
+| `color.surface` | `hsl(0 0% 97%)` | `hsl(0 0% 7%)` |
+| `color.surface-alt` | `hsl(52 100% 88%)` | `hsl(0 0% 13%)` |
+| `color.text` | `hsl(0 0% 0%)` | `hsl(0 0% 100%)` |
+| `color.muted` | `hsl(0 0% 28%)` | `hsl(0 0% 78%)` |
+| `color.accent` | `hsl(340 95% 40%)` | `hsl(340 100% 70%)` |
+| `color.accent-hover` | `hsl(340 95% 30%)` | `hsl(340 100% 80%)` |
+| `color.accent-contrast` | `hsl(0 0% 100%)` | `hsl(0 0% 0%)` |
+| `color.border` | `hsl(0 0% 0%)` | `hsl(0 0% 85%)` |
+| `color.border-strong` | `hsl(0 0% 0%)` | `hsl(0 0% 100%)` |
+| `color.focus` | `hsl(0 0% 0%)` | `hsl(0 0% 100%)` |
+| `color.scrim` | `hsl(0 0% 0%)` | `hsl(0 0% 0%)` |
+| `color.on-scrim` | `hsl(0 0% 100%)` | `hsl(0 0% 100%)` |
+| `color.overlay` | `hsl(0 0% 0%)` | `hsl(0 0% 0%)` |
+| `color.danger` | `hsl(0 90% 36%)` | `hsl(0 100% 70%)` |
+| `color.danger-contrast` | `hsl(0 0% 100%)` | `hsl(0 0% 0%)` |
+
+`color.focus` is ink, not accent: with `size.ring-offset` the ring sits on
+the ground (§6.1), where ink holds at least 16.10:1 on every ground in both
+schemes, and it is never mistaken for a magenta button. `radius` 0 / 0 / 0 / 999px.
+`shadow` `2px 2px 0 0` / `4px 4px 0 0` / `8px 8px 0 0` in `rgb(0 0 0)` (light)
+and `rgb(255 255 255)` (dark). `size.container` 1440px, `gutter-lg` 48px,
+`nav` 64px, `nav-shrink` 52px, `measure-display` 20ch, `measure-body` 58ch,
+`glass-blur` 8px. `type` `FONT_STACKS.sans` throughout, leading 0.95 / 1.15 /
+1.5.
+
 ---
 
 ## 6. Contrast proof
 
-**132 pairs: 3 themes × 2 schemes × 22 pairs. All pass.**
+**264 pairs: 6 themes × 2 schemes × 22 pairs. All pass.**
 
 Floors from hero-spec §9: **4.5:1** body text, **3:1** large text. The 3:1 rows
 below are not large text — they are non-text UI (focus rings, input borders)
@@ -848,13 +989,176 @@ reintroduces the failure. The validator asserts it is ≥ `1px`.
 | `color.accent` | `color.surface-alt` | **5.99:1** | 3 | PASS |
 | `color.border` | `color.bg` | 1.90:1 | — | decorative |
 
-### 6.8 What this table does not prove
+### 6.8 `clay` / light
+
+| fg | bg | ratio | floor | |
+|---|---|---|---|---|
+| `color.text` | `color.bg` | **14.84:1** | 4.5 | PASS |
+| `color.text` | `color.surface` | **16.08:1** | 4.5 | PASS |
+| `color.text` | `color.surface-alt` | **12.97:1** | 4.5 | PASS |
+| `color.on-scrim` | `color.scrim` | **17.33:1** | 4.5 | PASS |
+| `color.muted` | `color.bg` | **6.49:1** | 4.5 | PASS |
+| `color.muted` | `color.surface` | **7.04:1** | 4.5 | PASS |
+| `color.muted` | `color.surface-alt` | **5.67:1** | 4.5 | PASS |
+| `color.accent` | `color.bg` | **5.81:1** | 4.5 | PASS |
+| `color.accent` | `color.surface` | **6.30:1** | 4.5 | PASS |
+| `color.accent-hover` | `color.bg` | **7.96:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent` | **6.30:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent-hover` | **8.63:1** | 4.5 | PASS |
+| `color.danger` | `color.bg` | **7.29:1** | 4.5 | PASS |
+| `color.danger` | `color.surface` | **7.90:1** | 4.5 | PASS |
+| `color.danger-contrast` | `color.danger` | **7.90:1** | 4.5 | PASS |
+| `color.focus` | `color.bg` | **6.30:1** | 3 | PASS |
+| `color.focus` | `color.surface` | **6.82:1** | 3 | PASS |
+| `color.focus` | `color.surface-alt` | **5.50:1** | 3 | PASS |
+| `color.border-strong` | `color.bg` | **4.06:1** | 3 | PASS |
+| `color.border-strong` | `color.surface` | **4.40:1** | 3 | PASS |
+| `color.accent` | `color.surface-alt` | **5.08:1** | 3 | PASS |
+| `color.border` | `color.bg` | 1.40:1 | — | decorative |
+
+### 6.9 `clay` / dark
+
+| fg | bg | ratio | floor | |
+|---|---|---|---|---|
+| `color.text` | `color.bg` | **14.96:1** | 4.5 | PASS |
+| `color.text` | `color.surface` | **13.34:1** | 4.5 | PASS |
+| `color.text` | `color.surface-alt` | **11.17:1** | 4.5 | PASS |
+| `color.on-scrim` | `color.scrim` | **17.34:1** | 4.5 | PASS |
+| `color.muted` | `color.bg` | **8.53:1** | 4.5 | PASS |
+| `color.muted` | `color.surface` | **7.61:1** | 4.5 | PASS |
+| `color.muted` | `color.surface-alt` | **6.37:1** | 4.5 | PASS |
+| `color.accent` | `color.bg` | **6.51:1** | 4.5 | PASS |
+| `color.accent` | `color.surface` | **5.81:1** | 4.5 | PASS |
+| `color.accent-hover` | `color.bg` | **8.92:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent` | **6.51:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent-hover` | **8.92:1** | 4.5 | PASS |
+| `color.danger` | `color.bg` | **6.49:1** | 4.5 | PASS |
+| `color.danger` | `color.surface` | **5.79:1** | 4.5 | PASS |
+| `color.danger-contrast` | `color.danger` | **6.50:1** | 4.5 | PASS |
+| `color.focus` | `color.bg` | **8.02:1** | 3 | PASS |
+| `color.focus` | `color.surface` | **7.15:1** | 3 | PASS |
+| `color.focus` | `color.surface-alt` | **5.98:1** | 3 | PASS |
+| `color.border-strong` | `color.bg` | **4.46:1** | 3 | PASS |
+| `color.border-strong` | `color.surface` | **3.98:1** | 3 | PASS |
+| `color.accent` | `color.surface-alt` | **4.86:1** | 3 | PASS |
+| `color.border` | `color.bg` | 1.68:1 | — | decorative |
+
+### 6.10 `petal` / light
+
+| fg | bg | ratio | floor | |
+|---|---|---|---|---|
+| `color.text` | `color.bg` | **15.26:1** | 4.5 | PASS |
+| `color.text` | `color.surface` | **16.25:1** | 4.5 | PASS |
+| `color.text` | `color.surface-alt` | **13.45:1** | 4.5 | PASS |
+| `color.on-scrim` | `color.scrim` | **16.75:1** | 4.5 | PASS |
+| `color.muted` | `color.bg` | **6.21:1** | 4.5 | PASS |
+| `color.muted` | `color.surface` | **6.62:1** | 4.5 | PASS |
+| `color.muted` | `color.surface-alt` | **5.48:1** | 4.5 | PASS |
+| `color.accent` | `color.bg` | **6.90:1** | 4.5 | PASS |
+| `color.accent` | `color.surface` | **7.35:1** | 4.5 | PASS |
+| `color.accent-hover` | `color.bg` | **8.63:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent` | **7.35:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent-hover` | **9.19:1** | 4.5 | PASS |
+| `color.danger` | `color.bg` | **6.15:1** | 4.5 | PASS |
+| `color.danger` | `color.surface` | **6.55:1** | 4.5 | PASS |
+| `color.danger-contrast` | `color.danger` | **6.55:1** | 4.5 | PASS |
+| `color.focus` | `color.bg` | **6.90:1** | 3 | PASS |
+| `color.focus` | `color.surface` | **7.35:1** | 3 | PASS |
+| `color.focus` | `color.surface-alt` | **6.09:1** | 3 | PASS |
+| `color.border-strong` | `color.bg` | **3.87:1** | 3 | PASS |
+| `color.border-strong` | `color.surface` | **4.12:1** | 3 | PASS |
+| `color.accent` | `color.surface-alt` | **6.09:1** | 3 | PASS |
+| `color.border` | `color.bg` | 1.29:1 | — | decorative |
+
+### 6.11 `petal` / dark
+
+| fg | bg | ratio | floor | |
+|---|---|---|---|---|
+| `color.text` | `color.bg` | **15.91:1** | 4.5 | PASS |
+| `color.text` | `color.surface` | **14.40:1** | 4.5 | PASS |
+| `color.text` | `color.surface-alt` | **12.41:1** | 4.5 | PASS |
+| `color.on-scrim` | `color.scrim` | **17.44:1** | 4.5 | PASS |
+| `color.muted` | `color.bg` | **8.65:1** | 4.5 | PASS |
+| `color.muted` | `color.surface` | **7.83:1** | 4.5 | PASS |
+| `color.muted` | `color.surface-alt` | **6.75:1** | 4.5 | PASS |
+| `color.accent` | `color.bg` | **7.40:1** | 4.5 | PASS |
+| `color.accent` | `color.surface` | **6.69:1** | 4.5 | PASS |
+| `color.accent-hover` | `color.bg` | **10.30:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent` | **7.20:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent-hover` | **10.03:1** | 4.5 | PASS |
+| `color.danger` | `color.bg` | **7.33:1** | 4.5 | PASS |
+| `color.danger` | `color.surface` | **6.63:1** | 4.5 | PASS |
+| `color.danger-contrast` | `color.danger` | **7.22:1** | 4.5 | PASS |
+| `color.focus` | `color.bg` | **8.11:1** | 3 | PASS |
+| `color.focus` | `color.surface` | **7.34:1** | 3 | PASS |
+| `color.focus` | `color.surface-alt` | **6.33:1** | 3 | PASS |
+| `color.border-strong` | `color.bg` | **4.12:1** | 3 | PASS |
+| `color.border-strong` | `color.surface` | **3.73:1** | 3 | PASS |
+| `color.accent` | `color.surface-alt` | **5.77:1** | 3 | PASS |
+| `color.border` | `color.bg` | 1.57:1 | — | decorative |
+
+### 6.12 `volt` / light
+
+| fg | bg | ratio | floor | |
+|---|---|---|---|---|
+| `color.text` | `color.bg` | **21.00:1** | 4.5 | PASS |
+| `color.text` | `color.surface` | **19.60:1** | 4.5 | PASS |
+| `color.text` | `color.surface-alt` | **19.33:1** | 4.5 | PASS |
+| `color.on-scrim` | `color.scrim` | **21.00:1** | 4.5 | PASS |
+| `color.muted` | `color.bg` | **9.29:1** | 4.5 | PASS |
+| `color.muted` | `color.surface` | **8.67:1** | 4.5 | PASS |
+| `color.muted` | `color.surface-alt` | **8.55:1** | 4.5 | PASS |
+| `color.accent` | `color.bg` | **5.93:1** | 4.5 | PASS |
+| `color.accent` | `color.surface` | **5.53:1** | 4.5 | PASS |
+| `color.accent-hover` | `color.bg` | **8.95:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent` | **5.93:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent-hover` | **8.95:1** | 4.5 | PASS |
+| `color.danger` | `color.bg` | **7.38:1** | 4.5 | PASS |
+| `color.danger` | `color.surface` | **6.89:1** | 4.5 | PASS |
+| `color.danger-contrast` | `color.danger` | **7.38:1** | 4.5 | PASS |
+| `color.focus` | `color.bg` | **21.00:1** | 3 | PASS |
+| `color.focus` | `color.surface` | **19.60:1** | 3 | PASS |
+| `color.focus` | `color.surface-alt` | **19.33:1** | 3 | PASS |
+| `color.border-strong` | `color.bg` | **21.00:1** | 3 | PASS |
+| `color.border-strong` | `color.surface` | **19.60:1** | 3 | PASS |
+| `color.accent` | `color.surface-alt` | **5.46:1** | 3 | PASS |
+| `color.border` | `color.bg` | 21.00:1 | — | decorative |
+
+### 6.13 `volt` / dark
+
+| fg | bg | ratio | floor | |
+|---|---|---|---|---|
+| `color.text` | `color.bg` | **21.00:1** | 4.5 | PASS |
+| `color.text` | `color.surface` | **18.73:1** | 4.5 | PASS |
+| `color.text` | `color.surface-alt` | **16.10:1** | 4.5 | PASS |
+| `color.on-scrim` | `color.scrim` | **21.00:1** | 4.5 | PASS |
+| `color.muted` | `color.bg` | **12.42:1** | 4.5 | PASS |
+| `color.muted` | `color.surface` | **11.08:1** | 4.5 | PASS |
+| `color.muted` | `color.surface-alt` | **9.52:1** | 4.5 | PASS |
+| `color.accent` | `color.bg` | **7.61:1** | 4.5 | PASS |
+| `color.accent` | `color.surface` | **6.79:1** | 4.5 | PASS |
+| `color.accent-hover` | `color.bg` | **10.52:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent` | **7.61:1** | 4.5 | PASS |
+| `color.accent-contrast` | `color.accent-hover` | **10.52:1** | 4.5 | PASS |
+| `color.danger` | `color.bg` | **7.34:1** | 4.5 | PASS |
+| `color.danger` | `color.surface` | **6.55:1** | 4.5 | PASS |
+| `color.danger-contrast` | `color.danger` | **7.34:1** | 4.5 | PASS |
+| `color.focus` | `color.bg` | **21.00:1** | 3 | PASS |
+| `color.focus` | `color.surface` | **18.73:1** | 3 | PASS |
+| `color.focus` | `color.surface-alt` | **16.10:1** | 3 | PASS |
+| `color.border-strong` | `color.bg` | **21.00:1** | 3 | PASS |
+| `color.border-strong` | `color.surface` | **18.73:1** | 3 | PASS |
+| `color.accent` | `color.surface-alt` | **5.83:1** | 3 | PASS |
+| `color.border` | `color.bg` | 14.87:1 | — | decorative |
+
+### 6.14 What this table does not prove
 
 Stated so nobody reads more into it than is there (VERIFICATION §8):
 
 - **`color.border` has no floor.** It is a decorative hairline and WCAG exempts
-  it. The values run 1.32–1.90:1; `midnight` light is the faintest and is a
-  deliberate choice, not an oversight. Anything a user must *see to operate*
+  it. The values run 1.29–1.90:1, except `volt`, which draws its hairlines in
+  ink (21:1 light, 14.87:1 dark); `petal` light is the faintest and, like
+  `midnight` light at 1.32:1, a deliberate choice, not an oversight. Anything a user must *see to operate*
   uses `color.border-strong`, which is checked.
 - **Text over media is not provable from tokens.** A `full` hero puts text over
   an arbitrary image. The scrim (hero-spec §9) is what makes it provable, and
@@ -938,6 +1242,9 @@ only place a `font-family` name may appear (§4).
 | `midnight` | `<display-family>, system-ui, sans-serif` | `<body-family>, system-ui, sans-serif` | `<mono-family>, ui-monospace, monospace` |
 | `paper` | `"Newsreader", Georgia, serif` | `"Source Serif 4", Georgia, serif` | `"Spline Sans Mono", ui-monospace, monospace` |
 | `signal` | `"Archivo", system-ui, sans-serif` | `"Archivo", system-ui, sans-serif` | `"Space Mono", ui-monospace, monospace` |
+| `clay` | `FONT_STACKS.serif` | `FONT_STACKS.serif` | `FONT_STACKS.mono` |
+| `petal` | `FONT_STACKS.rounded` | `FONT_STACKS.rounded` | `FONT_STACKS.mono` |
+| `volt` | `FONT_STACKS.sans` | `FONT_STACKS.sans` | `FONT_STACKS.mono` |
 
 All six faces are open-licence and self-hosted as `woff2` — the compiler never
 calls a network (PRD §5, principle 1), and that includes the *generated site*
@@ -945,8 +1252,9 @@ reaching a font CDN. The theme package declares its faces so the emitter can
 `preload` the display face and set `font-display: swap`. Those declarations are
 package metadata, **not `ctx.theme` tokens** — no word ever reads them.
 
-*Status, 2026-10-05.* The table above is the design; **the code ships system
-stacks for all three themes** (`system-ui, sans-serif` /
+*Status, 2026-10-05.* The table above is the design for the first three
+themes (`clay`, `petal` and `volt` were designed on the system stacks and ship
+as their rows say); **the code ships system stacks for all three** (`system-ui, sans-serif` /
 `ui-monospace, monospace`) and no face files yet — adding the six faces needs
 licence-vetted `woff2` files (CONVENTIONS check 9). What is built:
 
@@ -998,11 +1306,11 @@ and the display sizes is a display size — use `type.size.display` with a small
 hero-spec §4 gives the bands; each theme picks inside them (§5), and both rules
 are the ones the spec calls the tells of an amateur site:
 
-| | Band (hero-spec §4) | `midnight` | `paper` | `signal` |
-|---|---|---|---|---|
-| `type.leading.display` | 0.95–1.05 | 0.98 | 1.05 | 0.95 |
-| `type.leading.tight` | — | 1.25 | 1.3 | 1.2 |
-| `type.leading.body` | 1.5–1.7 | 1.6 | 1.7 | 1.5 |
+| | Band (hero-spec §4) | `midnight` | `paper` | `signal` | `clay` | `petal` | `volt` |
+|---|---|---|---|---|---|---|---|
+| `type.leading.display` | 0.95–1.05 | 0.98 | 1.05 | 0.95 | 1.05 | 1.02 | 0.95 |
+| `type.leading.tight` | — | 1.25 | 1.3 | 1.2 | 1.3 | 1.25 | 1.15 |
+| `type.leading.body` | 1.5–1.7 | 1.6 | 1.7 | 1.5 | 1.7 | 1.6 | 1.5 |
 
 **Tracking is a function of the size step, never a fixed value** — hero-spec §4:
 *"Tie tracking to the size step, not a fixed value."* So `type.tracking` is
@@ -1178,8 +1486,9 @@ stronger than a lint rule and needs no error message.
 
 Check 10 is the expensive one and the reason ROADMAP M2 budgets themes
 alongside words rather than after them: *"3 themes, all words rendering
-correctly in each, light and dark."* Adding a fourth theme multiplies the visual
-snapshot count by 4/3 — a real, and acceptable, cost.
+correctly in each, light and dark."* Each theme adds one more run of every
+preview in light and dark; six themes double the snapshot count of the first
+three — a real, and acceptable, cost.
 
 Check 3 must be a **test that recomputes**, never a stored table. A stored table
 is a comment, and comments lie (this document's §6 is generated output, and
@@ -1196,7 +1505,7 @@ theme midnight
 Unknown theme, per CONVENTIONS §5's message format:
 
 ```
-theme: 'midnite' is not a theme — try: midnight, paper, signal   (AZ2110)
+theme: 'midnite' is not a theme — use midnight, paper, signal, clay, petal, volt   (AZ1417)
 ```
 
 ---
@@ -1230,8 +1539,11 @@ everyone.
 
 ## 12. Open questions
 
-1. **Is three enough?** PRD §7.3 says 3–4. Three cover dark-product, editorial
-   and industrial. The missing archetype is *warm/organic* — hospitality,
+1. **Is three enough?** *Decided 2026-10-10 (owner): no — six.* Colour is the
+   first step of every site, so §5.4 adds `clay` (the warm/organic archetype
+   below), `petal` (soft product) and `volt` (loud graphic). The original
+   question, kept for its reasoning: PRD §7.3 says 3–4. Three cover
+   dark-product, editorial and industrial. The missing archetype is *warm/organic* — hospitality,
    wellness, food. Recommend deciding after M5: a fourth theme costs a third
    more visual snapshots (§10.2 check 10) and the dogfood site will say whether
    the gap is real.
@@ -1316,9 +1628,9 @@ An OKLCH point outside sRGB is sampled both channel-clipped and
 chroma-reduced, since engines differ. Ratios are truncated as in §6.
 
 A failure in any scheme refuses the pair on that theme. The table is per
-theme because the grounds differ: `signal` refuses `green amber` (its light
-hover gradient keeps 0.79 of its chroma) while `midnight` and `paper` allow
-it.
+theme because the grounds differ: `signal` and `volt` refuse `green amber`
+(their light hover gradient keeps 0.79 of its chroma) while `midnight`,
+`paper`, `clay` and `petal` allow it.
 
 ### 13.3 The allowed pairs
 
@@ -1329,21 +1641,26 @@ pair without importing the theme — ARCHITECTURE §2).
 then re-proves every listed pair from the tokens it ships. Pairs are symmetric:
 `violet blue` and `blue violet` are the same pair, drawn the other way.
 
-| Hue | midnight | paper | signal |
-|---|---|---|---|
-| violet | blue, teal, orange, rose | blue, teal, orange, rose | blue, teal, orange, rose |
-| indigo | teal, rose | teal, rose | teal, rose |
-| blue | violet, teal | violet, teal | violet, teal |
-| teal | violet, indigo, blue, green, lime, amber | violet, indigo, blue, green, lime, amber | violet, indigo, blue, green, lime, amber |
-| green | teal, amber | teal, amber | teal |
-| lime | teal, amber, orange, rose | teal, amber, orange, rose | teal, amber, orange, rose |
-| amber | teal, green, lime, rose | teal, green, lime, rose | teal, lime, rose |
-| orange | violet, lime, rose | violet, lime, rose | violet, lime, rose |
-| rose | violet, indigo, lime, amber, orange | violet, indigo, lime, amber, orange | violet, indigo, lime, amber, orange |
+| Hue | midnight, paper, clay, petal | signal, volt |
+|---|---|---|
+| violet | blue, teal, orange, rose | blue, teal, orange, rose |
+| indigo | teal, rose | teal, rose |
+| blue | violet, teal | violet, teal |
+| teal | violet, indigo, blue, green, lime, amber | violet, indigo, blue, green, lime, amber |
+| green | teal, amber | teal |
+| lime | teal, amber, orange, rose | teal, amber, orange, rose |
+| amber | teal, green, lime, rose | teal, lime, rose |
+| orange | violet, lime, rose | violet, lime, rose |
+| rose | violet, indigo, lime, amber, orange | violet, indigo, lime, amber, orange |
 
-18 pairs on midnight and paper, 17 on signal. Refused inside the hue window:
+Each column is the table of every theme it names; the generator writes one
+table per theme, and themes whose grounds give the same verdicts give the
+same table. Of the 18 pairs inside the hue window, 16 are allowed on midnight,
+paper, clay and petal, and 15 on signal and volt. Refused inside the window:
 `blue green` (its middle keeps 0.55–0.59 of its chroma) and `green orange`
-(0.67–0.72) on every theme, and `green amber` on signal.
+(0.67–0.72) on every theme, and `green amber` on signal and volt (on their
+pure-white light ground amber stops at its lighter 600 step, and the hover
+gradient keeps 0.79 of its chroma).
 
 **A new theme joins** by being added to `THEMES` and running the generator;
 nothing else changes. If its grounds refuse a pair the others allow, the

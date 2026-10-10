@@ -35,6 +35,7 @@ import { startServer } from './visual/serve.mjs';
 import { watchCsp, cspResult } from './visual/csp.mjs';
 import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
 import { startTags } from '../packages/target-web/src/html-scan.ts';
+import { DEFAULT_THEME, THEMES } from '../packages/theme/src/themes.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 /** PRD §9: "Bundle, non-3D pages < 150KB gz". */
@@ -970,6 +971,50 @@ try {
   check('CONTROL: a one-hue site declares no pair token and no gradient',
     !/accent2|on-gradient|--az-gradient/.test(readFileSync(join(tunedProj, 'src/theme.css'), 'utf8')
       + readFileSync(join(tunedProj, 'src/az.css'), 'utf8')));
+
+  /* ---- theme-spec §5: every theme ships through the real build ---- */
+  // One source, built once per theme. Each theme's shipped CSS defines both
+  // schemes with its own colours, and its pages carry exactly the policy
+  // the default theme's do: a theme is data, so it can never widen the CSP.
+  {
+    const themeSource = (theme) =>
+      `az 1\nsite themed\n  theme ${theme}\n\n` +
+      'page /\n  hero center\n    title "Themed"\n    sub "One source, every theme."\n    cta "Start" /start\n' +
+      '  pricing cards\n    title "Pricing"\n    plan "Solo"\n      monthly 9\n      cta "Pick" /start\n' +
+      '    plan "Team"\n      highlight on\n      monthly 29\n      cta "Pick" /start\n\npage /start\n';
+    const themeRoutes = ['/', '/start'];
+    const shipped = {};
+    for (const theme of Object.keys(THEMES)) {
+      const src = join(work, `theme-${theme}.az`);
+      writeFileSync(src, themeSource(theme));
+      const out = join(work, `theme-${theme}`);
+      node(CLI, ['build', src, '--out', out], work);
+      cpSync(join(proj, 'node_modules'), join(out, 'node_modules'), { recursive: true });
+      shippedBuild(out);
+      const f = readdirSync(join(out, 'dist/assets')).find((n) => n.endsWith('.css'));
+      shipped[theme] = {
+        css: f ? readFileSync(join(out, 'dist/assets', f), 'utf8') : '',
+        pages: themeRoutes.map((r) => readFileSync(join(out, 'dist', r === '/' ? '' : r.slice(1), 'index.html'), 'utf8')),
+      };
+    }
+    const policyOf = (html) => /<meta http-equiv="Content-Security-Policy" content="([^"]*)" \/>/.exec(html)?.[1] ?? null;
+    const grounds = (css) => [...css.matchAll(/--az-color-bg:\s*([^;}]+)/g)].map((m) => m[1].trim());
+    const reference = shipped[DEFAULT_THEME];
+    for (const [theme, { css, pages }] of Object.entries(shipped)) {
+      // The scheme a theme does not start in is the one added on request (§3.2).
+      const other = (THEMES[theme].defaultScheme ?? 'light') === 'light' ? 'dark' : 'light';
+      check(`theme ${theme}: the built CSS defines both colour schemes`,
+        grounds(css).length === 3 && new Set(grounds(css)).size === 2
+        && new RegExp(`prefers-color-scheme:\\s*${other}`).test(css) && new RegExp(`\\[data-scheme="?${other}"?\\]`).test(css),
+        grounds(css).join(' | '));
+      if (theme === DEFAULT_THEME) continue;
+      check(`theme ${theme}: its own grounds ship, not the default theme's`,
+        grounds(css).every((g) => !grounds(reference.css).includes(g)), `${grounds(css).join(' | ')} vs ${grounds(reference.css).join(' | ')}`);
+      check(`theme ${theme}: every page carries the default theme's policy, unchanged`,
+        pages.every((p, i) => policyOf(p) !== null && policyOf(p) === policyOf(reference.pages[i])),
+        themeRoutes.filter((_, i) => policyOf(pages[i]) !== policyOf(reference.pages[i])).join(' '));
+    }
+  }
 
   /* ---- GRAMMAR §4.4: `description` and `icon`, as the pages ship them ---- */
   // The fixture writes neither (it must stay byte-identical to GRAMMAR §8),

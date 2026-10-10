@@ -197,6 +197,9 @@ export const THEME_NAMES: Readonly<Record<string, string>> = {
   midnight: 'Dark-native, near-black ground, one electric accent',
   paper: 'Light editorial: warm paper, ink type, oxblood accent',
   signal: 'High-contrast industrial: square edges, orange accent',
+  clay: 'Warm and crafted: cream ground, serif type, terracotta',
+  petal: 'Soft and friendly: lavender ground, rounded type, violet',
+  volt: 'Loud and graphic: black on white, heavy type, hot magenta',
 };
 
 /** `theme accent` hues — PRD §6.1a; equal to the theme package's ACCENT_RAMPS. */
