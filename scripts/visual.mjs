@@ -686,8 +686,12 @@ async function checkSite(s, browsers, server) {
       for (const scheme of SCHEMES) {
         for (const width of GRADIENT_WIDTHS) {
           const where = `${s.label}/${engine}/${scheme}/${width}`;
+          // Not watched for policy violations: the pixel probe's screenshot
+          // (animations disabled) makes WebKit inject a <style> of
+          // Playwright's own, which the page's policy rightly refuses. The
+          // page itself is watched in every engine by the loads above.
           const gsf = await surface(browsers[engine], server, s.path,
-            { viewport: { width, height: 900 }, colorScheme: scheme, reducedMotion: 'reduce' }, csp[engine]);
+            { viewport: { width, height: 900 }, colorScheme: scheme, reducedMotion: 'reduce' });
           const r = await guarded(gsf, engine, 'gradient', where, async (page) => {
             await open(page, s.path, server);
             return gradientLabel(page, PRIMARY);
