@@ -17,7 +17,7 @@ import { migrate, openSqlite } from '../src/server/db.ts';
 import { migrateData } from '../src/server/data-migrate.ts';
 import { ownedRowDeletes } from '../src/server/data-values.ts';
 import { createStore } from '../src/server/store.ts';
-import { clientIp, createBackendServer, createLimiter, rateKey, requestListener, SECURITY_HEADERS } from '../src/server/http.ts';
+import { clientIp, createBackendServer, createLimiter, rateKey, readCookies, requestListener, SECURITY_HEADERS } from '../src/server/http.ts';
 import { isEmail, isSitePath } from '../src/server/app.ts';
 import { loadConfig } from '../src/server/env.ts';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -204,6 +204,17 @@ test('SECURITY crash: request targets the URL parser rejects are answered 400, a
 });
 
 /* ---- 3. a path on the site, and only that ----------------------------- */
+
+test('SECURITY cookies: a name that is not sent reads as absent, even one Object.prototype carries', () => {
+  const sent = (cookie?: string) => readCookies({ headers: cookie === undefined ? {} : { cookie } } as IncomingMessage);
+  for (const name of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+    assert.equal(sent('az_s=1')[name], undefined, name);
+    assert.equal(sent()[name], undefined, `${name}, no cookie header`);
+  }
+  assert.equal(sent('__proto__=planted; az_s=1')['__proto__'], 'planted', 'a cookie with that name is read like any other');
+  assert.equal(sent('a=1; b=x=y')['b'], 'x=y', 'CONTROL: the value runs to the end, = and all');
+  assert.equal(sent('a=1; b=2')['a'], '1', 'CONTROL: an ordinary cookie');
+});
 
 test('SECURITY redirect: dot segments and encoded dots cannot turn a path into //host', () => {
   for (const bad of ['/.//evil.com', '/..//evil.com', '/%2e//evil.com', '/%2E%2E//evil.com', '//evil.com', '/\\evil.com']) {
