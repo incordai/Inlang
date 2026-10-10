@@ -1016,6 +1016,40 @@ The parser recovers at **line granularity**. Six rules, applied in order:
 
 IDs are permanent once shipped. A retired ID is never reused.
 
+An ID below AZ2000 names a **class** of problem and is raised by the compiler
+(`packages/core/src`) wherever that class occurs — AZ1205 is every "has no
+value", AZ1203 every "repeated". An ID from AZ2000 up names **one row** of one
+word's validation table: it is declared once, in that word's `word.json`
+`checks`, and nowhere else — core never raises one, and no two rows share one.
+
+### 7.5 Per-word ID blocks
+
+Each word owns a block of twenty IDs, AZ2000 + 20·*n* to AZ2000 + 20·*n* + 19,
+and every row in its `checks` takes an ID from its own block. The blocks were
+handed out in name order when the validation tables moved into the manifests
+(the eleven Phase 1 words). A new word takes the **next free block** — the
+first one after the last row of this table — and adds its row here in the
+same commit; blocks are never re-sorted, because that would renumber shipped
+IDs.
+
+| Word | Block |
+|---|---|
+| auth | AZ2000–AZ2019 |
+| cta | AZ2020–AZ2039 |
+| faq | AZ2040–AZ2059 |
+| feature | AZ2060–AZ2079 |
+| footer | AZ2080–AZ2099 |
+| gallery | AZ2100–AZ2119 |
+| hero | AZ2120–AZ2139 |
+| nav | AZ2140–AZ2159 |
+| pricing | AZ2160–AZ2179 |
+| scene | AZ2180–AZ2199 |
+| text | AZ2200–AZ2219 |
+
+The next free block is **AZ2220–AZ2239**.
+`packages/core/test/diagnostic-codes.test.ts` holds the manifests and the
+compiler to this section and to §7.4.
+
 ---
 
 ## 8. Worked example
