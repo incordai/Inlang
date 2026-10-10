@@ -62,11 +62,27 @@ function look(t: ThemeLike, hierarchy: Hierarchy, tone: ActionOptions['tone']): 
   const ink = inkOf(t, tone);
   switch (hierarchy) {
     case 'primary':
-      return inverted
-        ? { base: { background: t.color['accent-contrast'], color: t.color.accent, border: `1px solid ${t.color['accent-contrast']}` },
-            hover: { textDecoration: 'underline' } }
-        : { base: { background: t.color.accent, color: t.color['accent-contrast'], border: `1px solid ${t.color.accent}` },
-            hover: { background: t.color['accent-hover'], borderColor: t.color['accent-hover'] } };
+      if (inverted) {
+        return { base: { background: t.color['accent-contrast'], color: t.color.accent, border: `1px solid ${t.color['accent-contrast']}` },
+                 hover: { textDecoration: 'underline' } };
+      }
+      // theme-spec §13: an accent pair fills the primary with its gradient,
+      // over the solid accent, labelled in `on-gradient` (proven 4.5:1 at
+      // every point of both gradients). The border is transparent so the
+      // gradient runs to the edge — and forced colours, which drop the
+      // gradient, paint that border in a system colour, so the button keeps
+      // its outline. `disabled` resets the whole background to flat.
+      if (t.gradient) {
+        return {
+          base: {
+            background: t.color.accent, backgroundImage: t.gradient.accent, backgroundOrigin: 'border-box',
+            color: t.color['on-gradient'], border: '1px solid transparent',
+          },
+          hover: { backgroundColor: t.color['accent-hover'], backgroundImage: t.gradient['accent-hover'] },
+        };
+      }
+      return { base: { background: t.color.accent, color: t.color['accent-contrast'], border: `1px solid ${t.color.accent}` },
+               hover: { background: t.color['accent-hover'], borderColor: t.color['accent-hover'] } };
     case 'secondary':
       return { base: { background: 'transparent', color: ink, border: `1px solid ${offPage ? ink : t.color['border-strong']}` },
                hover: offPage ? { textDecoration: 'underline' } : { background: t.color['surface-alt'] } };

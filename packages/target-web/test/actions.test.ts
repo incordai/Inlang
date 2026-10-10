@@ -150,3 +150,44 @@ test('SECURITY: a video file outside the project is refused by the sandbox', () 
 test('no resolver means no silent bypass: a video action without one throws', () => {
   assert.throws(() => actionsFor(T).action(fill('cta', 'X', { kind: 'pair', value: 'video:./f.mp4' })), /no asset resolver/);
 });
+
+/* ---- theme-spec §13: an accent pair fills the primary with its gradient ---- */
+
+const P: ThemeLike = {
+  ...T,
+  color: { ...T.color, accent2: 'var(--a2)', 'accent2-hover': 'var(--a2h)', 'on-gradient': 'var(--og)' },
+  gradient: { accent: 'var(--g)', 'accent-hover': 'var(--gh)' },
+};
+const go = fill('cta', 'Go', { kind: 'route', value: '/go' });
+
+test('a pair: the primary is the gradient over the solid accent, labelled on-gradient, with a transparent edge', () => {
+  const a = actionsFor(P).action(go, { hierarchy: 'primary' });
+  assert.equal(a.style?.background, T.color.accent, 'the solid accent stays under the gradient');
+  assert.equal(a.style?.backgroundImage, 'var(--g)');
+  assert.equal(a.style?.backgroundOrigin, 'border-box');
+  assert.equal(a.style?.color, 'var(--og)');
+  // Forced colours drop background images and paint a transparent border in
+  // a system colour: the outline is what keeps the button visible there.
+  assert.equal(a.style?.border, '1px solid transparent');
+  assert.deepEqual(a.states?.hover, { backgroundColor: T.color['accent-hover'], backgroundImage: 'var(--gh)' });
+  assert.deepEqual(a.states?.active, a.states?.hover);
+  assert.match(String(a.states?.focusVisible?.outline), new RegExp(T.color.focus.replace(/[()]/g, '\\$&')), 'the ring is the theme focus, offset onto the ground');
+  assert.equal(a.states?.disabled?.background, T.color['surface-alt'], 'disabled resets the whole background — no gradient');
+  assert.doesNotMatch(JSON.stringify(a), /transform|animation|transition/, 'nothing moves');
+});
+
+test('a pair leaves every other weight, the accent band and the submit weight rules alone', () => {
+  const pair = actionsFor(P), one = actionsFor(T);
+  for (const h of ['secondary', 'ghost', 'link'] as const) {
+    assert.deepEqual(pair.action(go, { hierarchy: h }), one.action(go, { hierarchy: h }), h);
+  }
+  assert.deepEqual(pair.action(go, { tone: 'inverted' }), one.action(go, { tone: 'inverted' }), 'the band inverts as before');
+  assert.equal(pair.submit('Send').style?.backgroundImage, 'var(--g)', 'a primary submit is a primary');
+});
+
+test('CONTROL: without a pair the primary is exactly the solid accent button', () => {
+  const a = action(go, { hierarchy: 'primary' });
+  assert.equal(a.style?.backgroundImage, undefined);
+  assert.equal(a.style?.border, `1px solid ${T.color.accent}`);
+  assert.equal(a.style?.color, T.color['accent-contrast']);
+});

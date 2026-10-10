@@ -940,6 +940,37 @@ try {
   check('CONTROL: a site without pattern ships no pattern declaration',
     !readFileSync(join(evilProj, 'src/theme.css'), 'utf8').includes('--az-pattern-image'));
 
+  /* ---- theme-spec §13: an accent pair ships its gradient, through the real build ---- */
+  const pairSrc = join(work, 'pair.az');
+  writeFileSync(pairSrc,
+    'az 1\nsite pair\n  theme midnight\n    accent violet blue\n    pattern spotlight top\n\n' +
+    'page /\n  hero center\n    title "Paired"\n    sub "Two hues, one gradient."\n    cta "Start" /start\n' +
+    '  pricing cards\n    title "Pricing"\n    plan "Solo"\n      monthly 9\n      cta "Pick" /start\n' +
+    '    plan "Team"\n      highlight on\n      monthly 29\n      cta "Pick" /start\n\npage /start\n');
+  const pairProj = join(work, 'pair');
+  node(CLI, ['build', pairSrc, '--out', pairProj], work);
+  cpSync(join(proj, 'node_modules'), join(pairProj, 'node_modules'), { recursive: true });
+  shippedBuild(pairProj);
+  {
+    const f = readdirSync(join(pairProj, 'dist/assets')).find((n) => n.endsWith('.css'));
+    const css = f ? readFileSync(join(pairProj, 'dist/assets', f), 'utf8') : '';
+    // The minifier may write `to right` as 90deg; the stops are what matter.
+    const dir = '(?:to right|90deg)';
+    check('accent pair: the shipped CSS declares the OKLCH gradient under @supports',
+      /@supports\s*\(background-image:\s*linear-gradient\(in oklch,[^)]*\)\)\s*\{[^@]*--az-gradient-accent:\s*linear-gradient\((?:to right |90deg )?in oklch,\s*var\(--az-color-accent\),\s*var\(--az-color-accent2\)\)/.test(css));
+    check('accent pair: …and the sRGB fallback stop list, plain and color-mix',
+      new RegExp(`--az-gradient-accent:\\s*linear-gradient\\(${dir},\\s*var\\(--az-color-accent\\),\\s*var\\(--az-color-accent2\\)\\)`).test(css)
+      && /--az-gradient-accent:\s*linear-gradient\([^;]*color-mix\(in oklch,\s*var\(--az-color-accent\) 50%,\s*var\(--az-color-accent2\)\)/.test(css));
+    check('accent pair: the primary action and the highlighted plan paint it from the stylesheet',
+      /background-image:\s*var\(--az-gradient-accent\)/.test(css) && /var\(--az-gradient-accent\) border-box/.test(css));
+    const pairHtml = readFileSync(join(pairProj, 'dist/index.html'), 'utf8');
+    check('accent pair: no page carries the gradient inline — the CSP stays as strict',
+      !/style="[^"]*gradient/i.test(pairHtml) && !/'unsafe-inline'/.test(pairHtml));
+  }
+  check('CONTROL: a one-hue site declares no pair token and no gradient',
+    !/accent2|on-gradient|--az-gradient/.test(readFileSync(join(tunedProj, 'src/theme.css'), 'utf8')
+      + readFileSync(join(tunedProj, 'src/az.css'), 'utf8')));
+
   /* ---- GRAMMAR §4.4: `description` and `icon`, as the pages ship them ---- */
   // The fixture writes neither (it must stay byte-identical to GRAMMAR §8),
   // so a small site does: a site description with characters HTML must

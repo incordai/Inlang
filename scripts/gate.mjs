@@ -13,7 +13,9 @@
  *                                     Content-Security-Policy violation on
  *                                     any page in any engine (§2 B)
  *    4  axe, zero violations          test:visual — and text over media at
- *                                     4.5:1 (over-media, hero-spec §10)
+ *                                     4.5:1 (over-media, hero-spec §10), and
+ *                                     an accent pair's gradient label and its
+ *                                     forced-colours edge (theme-spec §13)
  *    5  keyboard and visible focus    test:visual — keyboard walk, skip link
  *    6  reduced motion                test:visual
  *    7  light and dark                test:visual
@@ -47,7 +49,7 @@ const RAN = /^(chromium|firefox|webkit)-\d+(\.\d+)?$/;
 /** Items 3–7: which test:visual checks each gate item is made of. */
 const VISUAL = {
   3: ['compile', 'deadline', 'overflow', 'no-js', 'hydration', 'image-shift', 'restack', 'column', 'centred', 'frame', 'font', 'theme-settings', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'firefox', 'webkit', 'csp', 'scan'],
-  4: ['axe', 'over-media', 'copy'],
+  4: ['axe', 'over-media', 'copy', 'gradient', 'forced-colors'],
   5: ['keyboard', 'skip-link', 'drawer', 'sheet-drag', 'dropdown', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'play', 'billing'],
   6: ['reduced-motion', 'overlay-motion', 'nav-motion', 'reveal', 'reveal-reduced'],
   7: ['schemes'],

@@ -493,7 +493,7 @@ value           = STRING | PAIR | BARE ;
 | `site <name>` | file | 1 | PRD §6.1 |
 | `width <preset>` | `site` | 1 | PRD §6.1a — the frame |
 | `theme <name>` | file, `site` | 1 | PRD §6.1 |
-| `accent <hue>` | `theme` | 1 | PRD §6.1a — shade ramp |
+| `accent <hue> [<hue2>]` | `theme` | 1 | PRD §6.1a — shade ramp; two hues a gradient pair (theme-spec §13) |
 | `pattern <shape> [origin]` | `theme` | 1 | PRD §6.1a — background |
 | `font` + indented roles | file, `site` | 1 | PRD §6.1 |
 | `display` / `body` / `mono` `<family>` | `font` | 1 | PRD §6.1 |
@@ -697,12 +697,17 @@ indented settings are `accent` and `pattern`; any other is
 `teal`, `green`, `lime`, `amber`, `orange`, `rose` — whose ramp step is chosen
 per scheme to hold the theme-spec §6 floors; any other is
 `theme: accent 'magenta' is not a hue — …` (AZ1418). Without `accent` the
-theme keeps its own. `pattern <shape> [origin]` takes a shape — `none`,
+theme keeps its own. A second hue from the same set makes a gradient pair,
+`accent violet blue` (theme-spec §13); the pair must be one the site's theme
+allows — a generated, contrast-proven table — or it is
+`theme: accent 'violet indigo' is not a pair on midnight — violet pairs with blue, teal, orange, rose`
+(AZ1423, at the second hue; a hue never pairs with itself). An unknown second
+hue is AZ1418, and a third value AZ1406. `pattern <shape> [origin]` takes a shape — `none`,
 `glow`, `spotlight`, `ramp`, `grid`, `hatch`, `dots` — and an origin — `top`
 (the default), `bottom`, `left`, `right`, `center`; an unknown shape or origin
 is AZ1419. Without `pattern` there is none. A setting with no value is AZ1205,
 an extra value AZ1406, and a repeated setting warns (AZ1203) and the first is
-kept. `az explain theme accent` lists the hues.
+kept. `az explain theme accent` lists every hue with the hues it pairs with.
 
 **Site and page settings: `description` and `icon`.** Both are one value on
 one line, like `width`.

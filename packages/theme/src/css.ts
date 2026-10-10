@@ -2,8 +2,9 @@
  * @az module theme-css
  * Purpose: colour schemes as CSS custom properties: default scheme, OS preference, data-scheme.
  * Spec: docs/theme-spec.md §3
- * Exports: schemeCss, schemeReferences, patternCss, PATTERN_REFERENCES
+ * Exports: schemeCss, schemeReferences, patternCss, PATTERN_REFERENCES, gradientCss, GRADIENT_REFERENCES
  * Edit guide: words read var(--az-color-*) references; declarations are generated here only.
+ *   Gradients are declared here too (theme-spec §13) — in the stylesheet, never inline.
  * Tests: packages/theme/test/css.test.ts
  */
 
@@ -23,6 +24,8 @@
 
 import { VEIL_PERCENT, type ColorTokens, type Scheme, type ShadowTokens, type Theme } from './tokens.ts';
 import type { PatternLayers } from './pattern.ts';
+import { GRADIENT_FALLBACK_STOPS } from './gradient.ts';
+import { GRADIENT_DIRECTION } from './tokens.ts';
 
 /** The per-scheme token groups — the only ones that change with the scheme. */
 const SCHEMED = ['color', 'shadow'] as const;
@@ -106,5 +109,56 @@ export function patternCss(layers: PatternLayers | null): string {
     `  ${PATTERN_PROPERTY.position}: ${layers.position};`,
     `  ${PATTERN_PROPERTY.size}: ${layers.size};`,
     '}',
+  ].join('\n') + '\n';
+}
+
+/** The accent-pair gradients (theme-spec §13): what each runs between, by colour token. */
+const GRADIENTS = {
+  accent: ['accent', 'accent2'],
+  'accent-hover': ['accent-hover', 'accent2-hover'],
+} as const;
+type GradientName = keyof typeof GRADIENTS;
+
+const gradientProperty = (name: GradientName) => `--az-gradient-${name}`;
+
+/** What a word reads to paint a pair's gradient — references, present only on a pair site. */
+export const GRADIENT_REFERENCES: Readonly<Record<GradientName, string>> = {
+  accent: `var(${gradientProperty('accent')})`,
+  'accent-hover': `var(${gradientProperty('accent-hover')})`,
+};
+
+/** One `:root` block declaring every gradient, each built by `build` from its two colour properties. */
+function gradientBlock(indent: string, build: (from: string, to: string) => string): string {
+  const lines = (Object.keys(GRADIENTS) as GradientName[]).map((name) => {
+    const [from, to] = GRADIENTS[name];
+    return `${indent}  ${gradientProperty(name)}: ${build(`var(${property('color', from)})`, `var(${property('color', to)})`)};`;
+  });
+  return `${indent}:root {\n${lines.join('\n')}\n${indent}}`;
+}
+
+/**
+ * The declarations behind GRADIENT_REFERENCES, or nothing on a one-hue site
+ * — then no word paints a gradient and the site is byte-identical to before.
+ *
+ * Three tiers, each always valid where it applies, so a var() never turns a
+ * background invalid: plain sRGB between the two ends for any engine; a stop
+ * list of `color-mix(in oklch, …)` points where color-mix exists; and
+ * `linear-gradient(in oklch, …)` where gradients interpolate in OKLCH.
+ * gradient.ts proves every floor along all three (theme-spec §13).
+ */
+export function gradientCss(paired: boolean): string {
+  if (!paired) return '';
+  const stops = (from: string, to: string) => GRADIENT_FALLBACK_STOPS.map((t) => {
+    if (t === 0) return from;
+    if (t === 1) return to;
+    return `color-mix(in oklch, ${from} ${Math.round((1 - t) * 100)}%, ${to})`;
+  }).join(', ');
+  return [
+    '/* theme accent pair — theme-spec §13; OKLCH, else OKLCH stops, else sRGB */',
+    gradientBlock('', (from, to) => `linear-gradient(${GRADIENT_DIRECTION}, ${from}, ${to})`),
+    `@supports (color: color-mix(in oklch, transparent, transparent)) {\n${
+      gradientBlock('  ', (from, to) => `linear-gradient(${GRADIENT_DIRECTION}, ${stops(from, to)})`)}\n}`,
+    `@supports (background-image: linear-gradient(in oklch, transparent, transparent)) {\n${
+      gradientBlock('  ', (from, to) => `linear-gradient(${GRADIENT_DIRECTION} in oklch, ${from}, ${to})`)}\n}`,
   ].join('\n') + '\n';
 }

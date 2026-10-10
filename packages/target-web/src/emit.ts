@@ -24,7 +24,7 @@ import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
 import {
   ACCENT_RAMPS, FONT_STACKS, PATTERN_ORIGINS, PATTERN_REFERENCES, PATTERN_SHAPES, patternCss, patternLayers,
-  resolve, schemeCss, schemeReferences, THEMES, withAccent,
+  resolve, schemeCss, schemeReferences, THEMES, withAccentPair, gradientCss, GRADIENT_REFERENCES,
   type AccentName, type PatternOrigin, type PatternShape, type Theme,
 } from '../../theme/src/index.ts';
 import { generated, generatedJson } from './generated.ts';
@@ -626,24 +626,32 @@ function sideLayoutCss(spec: Spec, theme: ThemeLike): string {
 `;
 }
 
+/** A hue the theme package has a ramp for, or null. */
+const hueOf = (hue: string | null | undefined): AccentName | null =>
+  hue !== null && hue !== undefined && Object.hasOwn(ACCENT_RAMPS, hue) ? hue as AccentName : null;
+
 /**
  * The theme the site asked for, falling back to the default, with its accent
- * regenerated when `theme accent` names a hue (PRD §6.1a). The compiler has
- * already refused an unknown hue (AZ1418); withAccent throws rather than ship
- * a step under its contrast floor.
+ * regenerated when `theme accent` names a hue (PRD §6.1a), and the pair
+ * tokens added when it names two (theme-spec §13). The compiler has already
+ * refused an unknown hue (AZ1418) and a refused pair (AZ1423); the theme
+ * package throws rather than ship a step or a gradient under its floor.
  */
 function namedTheme(spec: Spec, override?: Theme): Theme {
   const base = override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
-  const hue = spec.site.accent;
-  return withAccent(base, hue !== null && Object.hasOwn(ACCENT_RAMPS, hue) ? hue as AccentName : null);
+  return withAccentPair(base, hueOf(spec.site.accent), hueOf(spec.site.accent2));
 }
 
-/** The site's pattern as CSS, or null for `none` — ink is the accent token. */
+/** Whether the site's theme carries an accent pair — then words get the gradients. */
+const isPaired = (named: Theme): boolean => named.color.light.accent2 !== undefined;
+
+/** The site's pattern as CSS, or null for `none` — ink is the accent token (and the second hue's, for a pair). */
 function sitePattern(spec: Spec, named: Theme) {
   const shape = (PATTERN_SHAPES as readonly string[]).includes(spec.site.pattern) ? spec.site.pattern as PatternShape : 'none';
   const origin = (PATTERN_ORIGINS as readonly string[]).includes(spec.site.patternOrigin)
     ? spec.site.patternOrigin as PatternOrigin : 'top';
-  return patternLayers(shape, origin, schemeReferences(named).color.accent);
+  const color = schemeReferences(named).color;
+  return patternLayers(shape, origin, color.accent, isPaired(named) ? color.accent2 ?? null : null);
 }
 
 /**
@@ -682,6 +690,8 @@ function themeFor(named: Theme, fonts: Readonly<Record<string, string>> = {}, pa
     typeSize: t.typeSize as unknown as Record<string, string>,
     // Only a site with a pattern hands words one, so a site without is unchanged.
     ...(patterned ? { pattern: PATTERN_REFERENCES } : {}),
+    // Likewise the gradients: only a site whose accent is a pair (theme-spec §13).
+    ...(isPaired(named) ? { gradient: GRADIENT_REFERENCES } : {}),
   };
 }
 
@@ -1136,7 +1146,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${frameCss(theme)}${schemeCss(named)}${patternCss(pattern)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${admin.length > 0 ? adminCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
+${frameCss(theme)}${schemeCss(named)}${gradientCss(isPaired(named))}${patternCss(pattern)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${admin.length > 0 ? adminCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
     },
     {
       /**
@@ -1218,6 +1228,7 @@ export default defineConfig({
         site: spec.site.name,
         theme: named.name,
         accent: spec.site.accent,
+        ...(spec.site.accent2 ? { accent2: spec.site.accent2 } : {}),
         pattern: pattern ? `${spec.site.pattern} ${spec.site.patternOrigin}` : null,
         fonts: spec.site.fonts,
         pages: pages.map((p) => ({ route: p.route, file: htmlFileFor(p.route), nodes: p.nodes })),

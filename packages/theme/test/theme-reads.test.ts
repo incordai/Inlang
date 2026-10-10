@@ -85,3 +85,11 @@ test("CONTROL: the repository's words read tokens at all, so the lint run is not
     assert.ok(themeReadsIn('emit.web.ts', readFileSync(join(WORDS, w, 'emit.web.ts'), 'utf8')).length >= 5, w);
   }
 });
+
+test('theme-spec §13: optional chaining reads a group only some sites have', () => {
+  assert.deepEqual(paths('const t = ctx.theme; const edge = t.gradient?.accent;'), ['gradient.accent']);
+  assert.deepEqual(paths("const t = ctx.theme; const h = t.gradient?.['accent-hover'];"), ['gradient.accent-hover']);
+  assert.deepEqual(paths('const g = ctx.theme?.color.bg;'), ['color.bg']);
+  // CONTROL: a bare presence test reads the whole group, as any computed read does.
+  assert.deepEqual(paths('const t = ctx.theme; const on = t.gradient ? 1 : 0;'), ['gradient.*']);
+});

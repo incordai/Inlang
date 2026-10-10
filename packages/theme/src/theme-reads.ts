@@ -16,7 +16,9 @@
  *
  * What counts as a read, and what does not:
  *   - `ctx.theme.<group>.<key>`, `ctx.theme.<group>['<key>']` and
- *     `ctx.theme.<group>[<number>]`, and the same through a local alias
+ *     `ctx.theme.<group>[<number>]`, each also with optional chaining
+ *     (`t.gradient?.accent` — a group only some sites have, theme-spec §13),
+ *     and the same through a local alias
  *     (`const t = ctx.theme`) or a parameter typed `ThemeLike`.
  *   - `typeSize.<key>` is the token `type.size.<key>`, as theme-spec names it.
  *   - A group read whole or by a computed key (`t.space`, `t.space[n]`)
@@ -41,9 +43,12 @@ export interface TokenRead {
 }
 
 /** The token groups of `ThemeLike` (core/src/emit-contract.ts); `typeSize` is mapped to `type.size`. */
-const GROUPS = ['color', 'size', 'typeSize', 'type', 'radius', 'shadow', 'space', 'motion', 'layer', 'breakpoint'];
+const GROUPS = ['color', 'size', 'typeSize', 'type', 'radius', 'shadow', 'space', 'motion', 'layer', 'breakpoint', 'gradient'];
 
 const IDENT = '[A-Za-z_$][\\w$]*';
+
+/** Before an element access: optional chaining's `?.` may come first. */
+const OPT = '\\s*(?:\\?\\.\\s*)?';
 
 /** Blank comments, keeping every newline and column, so positions survive. */
 function blankComments(source: string): string {
@@ -65,8 +70,8 @@ function themeHolders(code: string): string[] {
 export function themeReadsIn(file: string, source: string): TokenRead[] {
   const code = blankComments(source);
   const access = new RegExp(
-    `(?<![\\w$.])(?:${themeHolders(code).join('|')})\\s*\\.\\s*(${GROUPS.join('|')})\\b` +
-    `(?:\\s*\\.\\s*(${IDENT})|\\s*\\[\\s*'([^']+)'\\s*\\]|\\s*\\[\\s*"([^"]+)"\\s*\\]|\\s*\\[\\s*(\\d+)\\s*\\])?`,
+    `(?<![\\w$.])(?:${themeHolders(code).join('|')})\\s*\\??\\.\\s*(${GROUPS.join('|')})\\b` +
+    `(?:\\s*\\??\\.\\s*(${IDENT})|${OPT}\\[\\s*'([^']+)'\\s*\\]|${OPT}\\[\\s*"([^"]+)"\\s*\\]|${OPT}\\[\\s*(\\d+)\\s*\\])?`,
     'g');
   const first = new Map<string, TokenRead>();
   for (const m of code.matchAll(access)) {

@@ -20,6 +20,8 @@ export interface MapInput {
   readonly theme: string;
   /** `theme accent` hue, or null for the theme's own (PRD §6.1a). */
   readonly accent: string | null;
+  /** The second hue of an accent pair (theme-spec §13); absent for one hue. */
+  readonly accent2?: string;
   /** `theme pattern` as "shape origin", or null when the site has none. */
   readonly pattern: string | null;
   /** `font` roles the site set: role → family (theme-spec §8.1). */
@@ -71,7 +73,9 @@ export function azMd(m: MapInput): string {
   out.push(`Theme \`${m.theme}\` — colours, space and type come from its tokens. Fonts: ${set.length
     ? `${set.join(' · ')}; any role not set keeps the theme's family`
     : "the theme's own families"} (change with \`font\` in the .az; \`az explain font\`).`, '');
-  out.push(`Accent: ${m.accent ? `\`${m.accent}\` — regenerated from its hue ramp, every step contrast-checked`
+  out.push(`Accent: ${m.accent && m.accent2
+    ? `\`${m.accent} ${m.accent2}\` — a gradient pair from two hue ramps, every point contrast-checked`
+    : m.accent ? `\`${m.accent}\` — regenerated from its hue ramp, every step contrast-checked`
     : "the theme's own"}. Pattern: ${m.pattern ? `\`${m.pattern}\`, painted on the hero in the accent` : 'none'}`
     + ' (change under `theme` in the .az; `az explain theme accent`).', '');
 

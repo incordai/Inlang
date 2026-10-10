@@ -14,7 +14,10 @@
  * released move nothing on the page (`image-shift`, CLS 0); from the hero
  * spec (§10), that text over a poster keeps 4.5:1 at 375, 768 and 1440px
  * (`over-media`), and (§2) that a centred column centres on one axis
- * (`centred`).
+ * (`centred`). From theme-spec §13, an accent-pair site's gradient primary
+ * keeps its label at 4.5:1 over every pixel in every engine and both
+ * schemes (`gradient`, with axe in Firefox and WebKit too), and keeps a
+ * visible edge under forced colours (`forced-colors`, Chromium).
  * Chromium runs everything; Firefox and WebKit run a smaller pass (overflow
  * and page errors at one width each), so browser claims rest on real runs.
  *
@@ -41,7 +44,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer, textOverPoster, centredUnder, PHONE_WIDTH } from './visual/checks.mjs';
+import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer, textOverPoster, centredUnder, PHONE_WIDTH, gradientLabel, forcedEdge } from './visual/checks.mjs';
 import { FONT_STACKS, THEMES as THEME_TOKENS } from '../packages/theme/src/index.ts';
 import { startServer } from './visual/serve.mjs';
 import {
@@ -123,6 +126,7 @@ const CHECKS = ['compile', 'deadline', 'overflow', 'axe', 'keyboard', 'reduced-m
   'no-js', 'hydration', 'image-shift', 'over-media', 'centred',
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
+  'gradient', 'forced-colors',
   'firefox', 'webkit', 'csp', 'scan'];
 
 /**
@@ -276,7 +280,18 @@ function expectedFonts(theme, roles = {}) {
 const THEME_SETTINGS = [
   { accent: 'teal', pattern: 'glow top' },
   { accent: 'rose', pattern: 'dots center' },
+  // theme-spec §13: an accent pair — a gradient primary and a two-hue pattern.
+  { accent: 'violet blue', pattern: 'spotlight top' },
 ];
+
+/** A settings site whose accent names two hues: the gradient checks run on it. */
+const isPair = (s) => Boolean(s.settings?.accent.includes(' '));
+
+/** The action an accent pair fills with its gradient (target-web actions.ts). */
+const PRIMARY = '.az-action--primary';
+
+/** Widths the gradient label is measured at: a phone (the primary fills the row) and a desktop. */
+const GRADIENT_WIDTHS = [390, 1440];
 
 /** preview.az with `theme <name>` plus its settings as the site's first child. */
 function withSettings(source, theme, settings) {
@@ -340,11 +355,11 @@ async function buildAll(words, work, everyVariant) {
     }
     THEME_SETTINGS.forEach((settings, i) => {
       sites.push({ word: FONT_WORD, theme: VARIANT_THEME, variant: null, file: `preview.az + theme settings ${i + 1}`,
-        source: withSettings(preview, VARIANT_THEME, settings), label: `${VARIANT_THEME}:${settings.accent}`, settings });
+        source: withSettings(preview, VARIANT_THEME, settings), label: `${VARIANT_THEME}:${settings.accent.replace(/ /g, '+')}`, settings });
     });
   }
   for (const s of sites) {
-    s.dir = join(work, `${s.word}-${s.variant ?? 'default'}-${s.theme}${s.roles ? '-font' : ''}${s.settings ? `-${s.settings.accent}` : ''}`);
+    s.dir = join(work, `${s.word}-${s.variant ?? 'default'}-${s.theme}${s.roles ? '-font' : ''}${s.settings ? `-${s.settings.accent.replace(/ /g, '-')}` : ''}`);
     mkdirSync(s.dir, { recursive: true });
     const src = join(WORDS, s.word);
     const preview = s.source ?? readFileSync(join(src, s.file), 'utf8');
@@ -662,6 +677,43 @@ async function checkSite(s, browsers, server) {
     await osf.close();
   }
 
+  // theme-spec §13: the pair's gradient primary, in every engine and both
+  // schemes — its label over every pixel of the gradient, and axe in the two
+  // engines the Chromium pass above does not cover. Then its edge under
+  // forced colours, which Chromium emulates.
+  if (isPair(s)) {
+    for (const engine of ['chromium', 'firefox', 'webkit']) {
+      for (const scheme of SCHEMES) {
+        for (const width of GRADIENT_WIDTHS) {
+          const where = `${s.label}/${engine}/${scheme}/${width}`;
+          const gsf = await surface(browsers[engine], server, s.path,
+            { viewport: { width, height: 900 }, colorScheme: scheme, reducedMotion: 'reduce' }, csp[engine]);
+          const r = await guarded(gsf, engine, 'gradient', where, async (page) => {
+            await open(page, s.path, server);
+            return gradientLabel(page, PRIMARY);
+          });
+          if (r) record(s.word, 'gradient', where, r);
+          if (engine !== 'chromium' && width === 1440) {
+            const a = await guarded(gsf, engine, 'axe', where, axe);
+            if (a) record(s.word, 'axe', where, a);
+          }
+          await gsf.close();
+        }
+      }
+    }
+    for (const scheme of SCHEMES) {
+      const where = `${s.label}/chromium/${scheme}/forced`;
+      const fsf = await surface(browsers.chromium, server, s.path,
+        { viewport: { width: 1440, height: 900 }, colorScheme: scheme, forcedColors: 'active' }, csp.chromium);
+      const r = await guarded(fsf, 'chromium', 'forced-colors', where, async (page) => {
+        await open(page, s.path, server);
+        return forcedEdge(page, PRIMARY);
+      });
+      if (r) record(s.word, 'forced-colors', where, r);
+      await fsf.close();
+    }
+  }
+
   // §2 B: the checks above load the word's page; every other page the site
   // ships is loaded once per engine too, so no page goes unwatched. Then
   // each engine's violations, from every load, are the `csp` result.
@@ -814,6 +866,18 @@ const CENTRE = (centred) => `<!doctype html><html lang="en"><head><title>centred
   <p class="s" style="max-width:40ch">Handmade.</p>
   <ul class="a" style="display:flex;gap:16px;list-style:none;padding:0"><li><a href="/x">Reserve</a></li><li><a href="/y">See</a></li></ul>
   </header></main></body></html>`;
+
+/**
+ * theme-spec §13: a gradient-filled action. `legible` labels it in white on
+ * a dark gradient; otherwise the gradient runs into the label's own colour.
+ * `edged` gives it the transparent border forced colours paint; otherwise it
+ * has none, and vanishes there.
+ */
+const GRADIENT = ({ legible, edged }) => `<!doctype html><html lang="en"><head><title>gradient</title></head><body><main>
+  <h1>Gradient</h1><p><a class="az-action--primary" href="/x" style="display:inline-block;padding:12px 24px;color:#fff;
+  ${edged ? 'border:1px solid transparent' : 'border:none'};background-origin:border-box;
+  background-image:linear-gradient(to right in oklch, ${legible ? '#3b2a8f, #0b4f8a' : '#3b2a8f, #f4f4f4'})">Reserve a pair</a></p>
+  </main></body></html>`;
 
 /** A real PNG of one grey (`value`, 0–255), made here so no binary is checked in. */
 function solidPng(width, height, value = 0x80) {
@@ -1016,6 +1080,24 @@ async function selfTest() {
     expect(`hero §10 text over media holds 4.5:1 (${scrimmed ? 'scrimmed' : 'bare'} page)`,
       await within(CHECK_MS, 'over-media self-test', () => textOverPoster(page, { poster: '.p', text: ['h1', 'p'] }, posters)), scrimmed);
     await closeWithin(ctx, CLOSE_MS, 'context.close');
+  }
+  // theme-spec §13: a gradient action's label over every pixel, and its edge under forced colours.
+  for (const [name, good] of [['gradient-bad', false], ['gradient-good', true]]) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'), GRADIENT({ legible: good, edged: good }));
+    server.serve(join(dir, name));
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto(server.url);
+    expect(`theme-spec §13 gradient label holds 4.5:1 (${good ? 'legible' : 'washed-out'} page)`,
+      await within(CHECK_MS, 'gradient self-test', () => gradientLabel(page, '.az-action--primary')), good);
+    await closeWithin(ctx, CLOSE_MS, 'context.close');
+    const forced = await browser.newContext({ viewport: { width: 1440, height: 900 }, forcedColors: 'active' });
+    const fpage = await forced.newPage();
+    await fpage.goto(server.url);
+    expect(`theme-spec §13 a visible edge in forced colours (${good ? 'edged' : 'borderless'} page)`,
+      await within(CHECK_MS, 'forced-colors self-test', () => forcedEdge(fpage, '.az-action--primary')), good);
+    await closeWithin(forced, CLOSE_MS, 'context.close');
   }
   // hero-spec §2: the start-edge boxes and the centred column, at both widths the real run uses.
   for (const [name, centred] of [['centre-start', false], ['centre-axis', true]]) {

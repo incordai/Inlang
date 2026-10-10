@@ -30,6 +30,7 @@ import type { Arg, Statement, AzFile } from './parse.ts';
 import { routePath, runBlockChecks, type Check, type CheckChild } from './checks.ts';
 import { fromWords, type FromManifest } from './from.ts';
 import { ICON_FORMATS } from './icon.ts';
+import { ACCENT_PAIRS } from './accent-pairs.ts';
 
 export interface PropSpec {
   readonly type: string;
@@ -671,9 +672,27 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
         err('AZ1205', `theme: '${c.word}' has no value — write: ${c.word} ${Object.keys(choices).join('|')}`, c.pos);
         continue;
       }
-      if (c.word === 'accent' && !Object.hasOwn(ACCENT_HUES, value.value)) {
-        err('AZ1418', `theme: accent '${shown(value.value)}' is not a hue — use ${Object.keys(ACCENT_HUES).join(', ')}`, value.pos);
-        continue;
+      if (c.word === 'accent') {
+        const bad = c.args.slice(0, 2).find((a) => !Object.hasOwn(ACCENT_HUES, a.value));
+        if (bad) {
+          err('AZ1418', `theme: accent '${shown(bad.value)}' is not a hue — use ${Object.keys(ACCENT_HUES).join(', ')}`, bad.pos);
+          continue;
+        }
+        if (c.args.length > 2) {
+          err('AZ1406', `theme: 'accent' takes a hue and an optional second hue — remove '${shown(c.args[2].value)}'`, c.args[2].pos);
+          continue;
+        }
+        // theme-spec §13: a pair is offered only where the theme's proof
+        // holds along the whole gradient, so the allowed set is per theme.
+        // An unknown theme is already AZ1417; its pairs cannot be judged.
+        const second = c.args[1];
+        const theme = name && Object.hasOwn(ACCENT_PAIRS, name.value) ? name.value : null;
+        const partners = theme === null ? null : ACCENT_PAIRS[theme][value.value];
+        if (second && partners && !partners.includes(second.value)) {
+          err('AZ1423', `theme: accent '${value.value} ${second.value}' is not a pair on ${theme} — `
+            + `${value.value} pairs with ${partners.length ? partners.join(', ') : 'no hue'}`, second.pos);
+          continue;
+        }
       }
       if (c.word === 'pattern') {
         if (!Object.hasOwn(PATTERN_SHAPE_NAMES, value.value)) {
@@ -689,9 +708,6 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
           err('AZ1406', `theme: 'pattern' takes a shape and an origin — remove '${shown(c.args[2].value)}'`, c.args[2].pos);
           continue;
         }
-      } else if (c.args.length > 1) {
-        err('AZ1406', `theme: 'accent' takes one value — remove '${shown(c.args[1].value)}'`, c.args[1].pos);
-        continue;
       }
       if (seen.has(c.word)) {
         warn('AZ1203', `theme: '${c.word}' repeated — once is enough`, c.pos);

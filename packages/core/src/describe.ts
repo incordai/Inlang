@@ -16,6 +16,7 @@ import {
   ACTION_DESCRIPTIONS, MODIFIER_DESCRIPTIONS, TYPE_DESCRIPTIONS, WHO_DESCRIPTIONS,
 } from './data.ts';
 import { FROM_SETTINGS } from './from.ts';
+import { ACCENT_PAIRS } from './accent-pairs.ts';
 import { closest } from './suggest.ts';
 
 /** The owner's limit: short enough for an AI to read every one cheaply. */
@@ -27,6 +28,27 @@ interface TermInfo {
   readonly settings?: Readonly<Record<string, string>>;
   /** Closed choices per setting, where the compiler knows them. */
   readonly values?: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /** Lines explaining a setting also prints, one per entry: `theme accent` lists its pairs. */
+  readonly lists?: Readonly<Record<string, { readonly kind: string; readonly lines: Readonly<Record<string, string>> }>>;
+}
+
+/**
+ * One line per hue naming the hues it pairs with (theme-spec §13). The table
+ * is per theme: a partner every theme allows is named plainly, one only some
+ * allow is named with the themes that refuse it.
+ */
+function pairLines(): Record<string, string> {
+  const themes = Object.keys(ACCENT_PAIRS);
+  const out: Record<string, string> = {};
+  for (const hue of Object.keys(ACCENT_HUES)) {
+    const named = Object.keys(ACCENT_HUES).filter((h) => themes.some((t) => ACCENT_PAIRS[t][hue]?.includes(h)));
+    const parts = named.map((h) => {
+      const refusing = themes.filter((t) => !ACCENT_PAIRS[t][hue]?.includes(h));
+      return refusing.length ? `${h} (not ${refusing.join('/')})` : h;
+    });
+    out[hue] = parts.length ? `Pairs with ${parts.join(', ')}` : 'Pairs with no hue';
+  }
+  return out;
 }
 
 /**
@@ -49,11 +71,12 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
   theme: {
     description: 'Theme choice and its tuning (under site)',
     settings: {
-      accent: 'Hue ramp the theme draws its accent from',
+      accent: 'Hue ramp for the accent; a second hue makes a gradient',
       pattern: 'Background pattern and its origin',
     },
     // A pattern line is `pattern <shape> [origin]`: both are its values.
     values: { accent: ACCENT_HUES, pattern: { ...PATTERN_SHAPE_NAMES, ...PATTERN_ORIGIN_NAMES } },
+    lists: { accent: { kind: 'pairs', lines: pairLines() } },
   },
   font: {
     description: 'Font role assignments (under site)',
@@ -175,6 +198,12 @@ export function explain(terms: readonly string[], manifests: ReadonlyMap<string,
       const found = resolve(s, term);
       if (found) {
         lines.push(found.line);
+        const list = s.keyword && found.line.kind === 'setting' ? own(s.keyword.lists, term) : undefined;
+        if (list) {
+          for (const [entry, text] of Object.entries(list.lines)) {
+            lines.push({ term: entry, kind: list.kind, of: `${s.name}.${term}`, text });
+          }
+        }
         if (found.next) scope = found.next;
         continue;
       }

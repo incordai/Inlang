@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import { THEMES, type ThemeName } from '../src/themes.ts';
 import { type Scheme, type Theme, VEIL_PERCENT } from '../src/tokens.ts';
 import { ACCENT_NAMES, withAccent } from '../src/accent.ts';
+import type { PAIR_TOKENS } from '../src/gradient.ts';
 
 /* ---------------- colour maths ---------------- */
 
@@ -63,9 +64,10 @@ function ratio(a: string, b: string): number {
 const BODY = 4.5;   // hero-spec §9
 const LARGE = 3;    // 24px+, or a non-text edge
 
-const PAIRS: Array<[fg: keyof typeof THEMES.midnight.color.light,
-                    bg: keyof typeof THEMES.midnight.color.light,
-                    floor: number]> = [
+/** The role tokens every theme defines; a pair's own tokens are proven in gradient.test.ts. */
+type Role = Exclude<keyof typeof THEMES.midnight.color.light, (typeof PAIR_TOKENS)[number]>;
+
+const PAIRS: Array<[fg: Role, bg: Role, floor: number]> = [
   ['text', 'bg', BODY],
   ['text', 'surface', BODY],
   ['text', 'surface-alt', BODY],

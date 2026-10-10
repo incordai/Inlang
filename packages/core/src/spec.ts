@@ -59,6 +59,12 @@ export interface SpecSite {
   readonly theme: string;
   /** `theme accent` (PRD §6.1a): a hue; null keeps the theme's own designed accent. */
   readonly accent: string | null;
+  /**
+   * `theme accent <hue> <hue2>`'s second hue (theme-spec §13), present only
+   * when the site names a pair the linker allowed — absent, the Spec of a
+   * one-hue site is exactly what it was.
+   */
+  readonly accent2?: string;
   /** `theme pattern` shape and where its light sits; `none` paints nothing. */
   readonly pattern: string;
   readonly patternOrigin: string;
@@ -446,6 +452,7 @@ export function buildSpec(
       width: valueOf(widthWord, SITE_DEFAULTS.width),
       theme: valueOf(themeWord, SITE_DEFAULTS.theme),
       accent: accentWord?.args[0]?.value ?? null,
+      ...(accentWord?.args[1] ? { accent2: accentWord.args[1].value } : {}),
       pattern: valueOf(patternWord, SITE_DEFAULTS.pattern),
       patternOrigin: patternWord?.args[1]?.value ?? SITE_DEFAULTS.patternOrigin,
       fonts,

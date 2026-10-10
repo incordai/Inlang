@@ -8,6 +8,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { DESCRIPTION_MAX, STRUCTURE_DESCRIPTIONS, explain, type Manifest } from '../src/index.ts';
 import { STRUCTURE, STRUCTURE_PROPS } from '../src/link.ts';
 import { BACKEND_SETTINGS } from '../src/backend.ts';
+import { ACCENT_PAIRS } from '../src/accent-pairs.ts';
 
 const wordsDir = new URL('../../words/', import.meta.url);
 const manifests = new Map<string, Manifest>();
@@ -65,4 +66,20 @@ test('explain: an unknown term suggests only a plausible typo', () => {
 
 test('CONTROL: an inherited object key is not a term', () => {
   assert.deepEqual(explain(['constructor'], manifests).lines, []);
+});
+
+test('explain theme accent lists every hue with its pair partners (theme-spec §13), each line within the limit', () => {
+  const r = explain(['theme', 'accent'], manifests);
+  const pairs = r.lines.filter((l) => l.kind === 'pairs');
+  assert.deepEqual(pairs.map((l) => l.term), Object.keys(ACCENT_PAIRS.midnight));
+  for (const l of pairs) {
+    assert.equal(l.of, 'theme.accent');
+    assert.ok(within(l.text), `${l.term}: '${l.text}' (${l.text.length} chars)`);
+  }
+  // Every theme allows violet with blue; signal alone refuses green with amber.
+  assert.match(pairs.find((l) => l.term === 'violet')!.text, /^Pairs with blue, teal, orange, rose$/);
+  assert.match(pairs.find((l) => l.term === 'green')!.text, /amber \(not signal\)/);
+  // The hue after `accent` is still a value, and lists nothing more.
+  const v = explain(['theme', 'accent', 'violet'], manifests).lines.at(-1);
+  assert.deepEqual([v?.kind, v?.term], ['value', 'violet']);
 });

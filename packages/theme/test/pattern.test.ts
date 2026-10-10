@@ -10,7 +10,10 @@ import assert from 'node:assert/strict';
 import { THEMES } from '../src/themes.ts';
 import { ACCENT_NAMES, withAccent } from '../src/accent.ts';
 import { PATTERN, PATTERN_MAX_ALPHA, PATTERN_ORIGINS, PATTERN_SHAPES } from '../src/tokens.ts';
-import { composite, contrastRatio, rgbOf } from '../src/color.ts';
+import { composite, contrastRatio, rgbOf, srgbMix } from '../src/color.ts';
+import { withAccentPair } from '../src/gradient.ts';
+import type { AccentName } from '../src/ramps.ts';
+import { ACCENT_PAIRS } from '../../core/src/accent-pairs.ts';
 import { patternLayers } from '../src/pattern.ts';
 import { lintSource } from '../src/lint.ts';
 
@@ -77,4 +80,55 @@ test('the origin moves the light for focal shapes', () => {
   const positions = PATTERN_ORIGINS.map((o) => patternLayers('glow', o, 'var(--ink)')!.image);
   assert.equal(new Set(positions).size, PATTERN_ORIGINS.length);
   assert.notEqual(patternLayers('ramp', 'top', 'x')!.image, patternLayers('ramp', 'left', 'x')!.image);
+});
+
+/* ---- theme-spec §13: an accent pair's two-hue pattern ---------------- */
+
+test('with a second ink, glow, spotlight and ramp pass from one hue to the other; lattices stay one ink', () => {
+  for (const shape of ['glow', 'spotlight', 'ramp'] as const) {
+    const image = patternLayers(shape, 'top', 'var(--ink)', 'var(--ink2)')!.image;
+    const first = image.indexOf('var(--ink)'), second = image.indexOf('var(--ink2)');
+    assert.ok(first >= 0 && second > first, `${shape}: the first hue leads — ${image}`);
+    assert.deepEqual(lintSource('pattern.css', image).filter((f) => f.rule === 'no-colour-function' || f.rule === 'no-hex'), [], shape);
+  }
+  for (const shape of ['grid', 'hatch', 'dots'] as const) {
+    assert.deepEqual(patternLayers(shape, 'top', 'var(--ink)', 'var(--ink2)'), patternLayers(shape, 'top', 'var(--ink)'), shape);
+  }
+});
+
+test('without a second ink every shape is byte-identical to the one-hue CSS', () => {
+  for (const shape of PATTERN_SHAPES) {
+    for (const origin of PATTERN_ORIGINS) {
+      assert.deepEqual(patternLayers(shape, origin, 'var(--ink)', null), patternLayers(shape, origin, 'var(--ink)'));
+    }
+  }
+  assert.equal(patternLayers('ramp', 'top', 'x')!.image, 'linear-gradient(to bottom, color-mix(in oklab, x 10%, transparent) 0%, transparent 68%)');
+});
+
+test('reading pairs hold over the two-hue ink at the cap, for every offered pair × theme × scheme', () => {
+  let n = 0;
+  for (const [name, table] of Object.entries(ACCENT_PAIRS)) {
+    const base = THEMES[name as keyof typeof THEMES];
+    const hues = Object.keys(table);
+    for (const [first, partners] of Object.entries(table)) {
+      // Each pair once: the reverse paints the same inks.
+      for (const second of partners.filter((p) => hues.indexOf(p) > hues.indexOf(first))) {
+        const theme = withAccentPair(base, first as AccentName, second as AccentName);
+        for (const scheme of ['light', 'dark'] as const) {
+          const c = theme.color[scheme] as unknown as Record<string, string>;
+          for (let i = 0; i <= 64; i++) {
+            // The two tints at one alpha interpolate (premultiplied) as the inks do.
+            const ink = srgbMix(rgbOf(c.accent), rgbOf(c.accent2), i / 64);
+            const ground = composite(ink, rgbOf(c.bg), PATTERN_MAX_ALPHA);
+            for (const [fg, floor] of [...READING, ['accent2', 4.5] as [string, number]]) {
+              const r = contrastRatio(rgbOf(c[fg]), ground);
+              assert.ok(r >= floor, `${name} ${first} ${second} ${scheme}: ${fg} ${r}:1 < ${floor}`);
+              n++;
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.ok(n > 0);
 });

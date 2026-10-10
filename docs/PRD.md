@@ -268,6 +268,25 @@ that holds every reading pair is 12%, and the spike's 55% glow fails
 (`packages/theme/test/pattern.test.ts`). Without `pattern` there is none.
 Unknown theme AZ1417, setting AZ1405, hue AZ1418, shape or origin AZ1419.
 
+*Built (2026-10-10): accent pairs — colour combinations without a palette
+generator.* `accent <hue> [<hue2>]`: a second hue from the same closed set
+makes a gradient pair (theme-spec §13). Not every pair is allowed. A pair is
+offered only when its hues sit 30°–120° apart in OKLCH, its gradient keeps
+0.8 of its chroma at the weakest point (no grey middle), and every sampled
+point — of the OKLCH gradient, its `color-mix` stop-list fallback and its
+plain sRGB fallback, rest and hover, in both schemes — holds the theme-spec §6
+floors, with one label (`color.on-gradient`) at 4.5:1 against all of it. The
+allowed pairs are a generated table per theme (`scripts/gen-pairs.mjs` →
+`packages/core/src/accent-pairs.ts`; 18 pairs on midnight and paper, 17 on
+signal); any other pair is AZ1423, naming the partners that work, and
+`az explain theme accent` lists them. With a pair, the primary action, the
+pricing highlighted plan's edge and the `glow`/`spotlight`/`ramp` patterns
+paint the gradient (`gradient.accent`, from `theme.css`, never inline); with
+one hue every emitted file is byte-identical to before. This keeps §7.3's
+rule: the set is closed, named and proven, so nothing is generated from an
+author's colour. A headline highlight is not built — the grammar has no
+emphasis form inside a title.
+
 **Why the hero needs nothing new.** Site width and hero width are independent —
 a narrow site with a full-bleed hero is a normal pairing — but `hero` already
 carries that axis in its variants: `full` is full-bleed, `center`/`split`/

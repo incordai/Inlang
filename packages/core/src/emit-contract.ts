@@ -232,6 +232,14 @@ export interface ThemeLike {
    * when the site sets one. A word paints it as background-image/size/position.
    */
   readonly pattern?: Readonly<{ image: string; size: string; position: string }>;
+  /**
+   * The site's accent-pair gradients (theme-spec §13) as var() references —
+   * `accent` and `accent-hover` — present only when `theme accent` names two
+   * hues; `color.accent2`, `color.accent2-hover` and `color.on-gradient` exist
+   * then too. A word paints one only when it is present, so a one-hue site
+   * is unchanged.
+   */
+  readonly gradient?: Readonly<Record<string, string>>;
 }
 
 /** What every `emit.web.ts` exports. */

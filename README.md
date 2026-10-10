@@ -75,6 +75,28 @@ broken.az:6:3 error AZ1201  nonsense: unknown word — see the word list
 The generated project carries `AZ.md`, its own map for people and AI tools:
 which file each route and block went to, and where to change things.
 
+## Colour
+
+Colour is the first decision, and it is made from closed sets so the contrast
+can be proven, never from a hex code. `theme` picks one of `midnight`,
+`paper`, `signal`; `accent` picks a hue (`violet` `indigo` `blue` `teal`
+`green` `lime` `amber` `orange` `rose`), and the compiler chooses the step of
+its ramp that holds every contrast floor in light and dark. Two hues make a
+gradient pair:
+
+```az
+  theme midnight
+    accent violet blue
+```
+
+The primary button, the highlighted pricing plan's edge and the `glow`,
+`spotlight` and `ramp` patterns then draw from violet to blue in OKLCH, with
+a label proven at 4.5:1 against every point of the gradient. Only pairs that
+hold every floor along the whole gradient, without a grey middle, are
+offered; any other is error AZ1423, naming the partners that work.
+`az explain theme accent` lists them; the rule and the table are in
+[theme-spec §13](docs/theme-spec.md).
+
 ## Commands
 
 | Command | Purpose |
@@ -219,7 +241,7 @@ CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `verify`,
 | Path | What |
 |---|---|
 | `packages/core` | grammar, parser, linker, Spec, validation, `az explain` text — no filesystem, no network |
-| `packages/theme` | token schema, the three themes, accent ramps, scheme CSS |
+| `packages/theme` | token schema, the three themes, accent ramps and pairs, scheme CSS |
 | `packages/target-web` | the web target: React + Vite project, stylesheet, CSP, `AZ.md` |
 | `packages/words` | the eleven words, one folder each, and their shared tests |
 | `packages/overlay` | behaviour runtime shipped to the browser: dialogs, menus, disclosures, carousel |

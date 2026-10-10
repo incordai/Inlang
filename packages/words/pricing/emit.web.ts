@@ -14,7 +14,8 @@
  * Props: title → h2 · sub → p · currency / locale → formatPrice() · billing → which price shows first ·
  *   period → p.az-plan-period · plan monthly/annual → data prices · highlight → accent border ·
  *   badge → p.az-plan-badge · feature children → the feature rows · cta → div.az-plan-action.
- * Styling: theme tokens only; highlight uses color.accent at size.edge-emphasis; below.sm restacks.
+ * Styling: theme tokens only; highlight uses color.accent (an accent pair: gradient.accent) at size.edge-emphasis;
+ *   below.sm restacks.
  * Behaviour: packages/overlay runtime (wireBilling) swaps prices and keeps ?billing= current.
  * Edit guide: one plan → plan(); prices → formatPrice(); shared rows → sharedRows()/everyPlan().
  *   Keep: both DOM forms for table (one hidden per width); radio names unique per block.
@@ -195,18 +196,26 @@ function plan(p: SpecBlock, ctx: EmitContext, opts: {
     return { tag: 'td', attrs: { class: 'az-plan' }, children: body };
   }
 
+  // theme-spec §13: on an accent-pair site the highlight edge is the pair's
+  // gradient, drawn as a border-box layer under a padding-box fill of the
+  // plan's own surface, so the corners keep their radius. Proven 3:1 against
+  // surface-alt at every point, as the solid edge is.
+  const edge = t.gradient?.accent;
   return {
     // §9: each cards plan is an <article> labelled by its name.
     tag: 'article',
     attrs: { class: `az-plan${highlighted ? ' az-plan--highlight' : ''}`, 'aria-label': name },
     style: {
       padding: px(t.space[24]),
-      background: highlighted ? t.color['surface-alt'] : t.color.surface,
+      background: highlighted
+        ? edge ? `linear-gradient(${t.color['surface-alt']}, ${t.color['surface-alt']}) padding-box, ${edge} border-box` : t.color['surface-alt']
+        : t.color.surface,
       // §7.3: the highlight edge is `color.accent`, never `color.border` (a
       // decorative hairline with no contrast floor). Weight AND badge text
-      // carry it too, so it survives without colour.
+      // carry it too, so it survives without colour. A transparent edge is
+      // painted in a system colour under forced colours.
       border: highlighted
-        ? `${px(t.size['edge-emphasis'])} solid ${t.color.accent}`
+        ? `${px(t.size['edge-emphasis'])} solid ${edge ? 'transparent' : t.color.accent}`
         : `1px solid ${t.color.border}`,
       borderRadius: px(t.radius.md),
     },

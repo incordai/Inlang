@@ -2,7 +2,7 @@
  * @az module tokens
  * Purpose: the closed token schema: space, motion, layer, breakpoints, type sizes; resolve().
  * Spec: docs/theme-spec.md §1
- * Exports: resolve, tokenPaths, SPACE, MOTION, LAYER, BREAKPOINT, TYPE_SIZE, Theme
+ * Exports: resolve, tokenPaths, SPACE, MOTION, LAYER, BREAKPOINT, TYPE_SIZE, Theme, GRADIENT_DIRECTION
  * Edit guide: raw values are legal here and in themes.ts only; a new token needs the spec row first.
  * Tests: packages/theme/test/contrast.test.ts
  */
@@ -93,6 +93,13 @@ export const VEIL_PERCENT = 92;
  */
 export const PATTERN_MAX_ALPHA = 0.1;
 
+/**
+ * Which way an accent pair's gradient runs (theme-spec §13): the first hue
+ * at the start, the second at the end. One direction for every surface, so
+ * a button and a highlighted plan read as the same pair.
+ */
+export const GRADIENT_DIRECTION = 'to right';
+
 export const PATTERN_SHAPES = ['none', 'glow', 'spotlight', 'ramp', 'grid', 'hatch', 'dots'] as const;
 export type PatternShape = (typeof PATTERN_SHAPES)[number];
 
@@ -118,6 +125,13 @@ export const PATTERN = {
   spotEllipse: '60% 55%',
   spotEnd: '72%',
   rampEnd: '68%',
+  /**
+   * Where the second hue of an accent pair (theme-spec §13) takes over in the
+   * focal shapes: halfway along each fade, so the two hues share the ink.
+   */
+  glowMid: '69%',
+  spotMid: '36%',
+  rampMid: '34%',
 } as const;
 
 /** CONVENTIONS §4 bans raw z-index; overlays-spec §1 needs a layer manager. */
@@ -182,6 +196,15 @@ export interface ColorTokens {
   readonly 'on-scrim': string;
   /** The modal backdrop. Distinct from `scrim`, which sits over media. */
   readonly overlay: string;
+  /**
+   * Present only when `theme accent <hue> <hue2>` names a pair (theme-spec
+   * §13): the second hue's accent and hover, chosen by the same floors as
+   * `accent`, and the label drawn on the gradient between the two. No theme
+   * defines them, so a one-hue site declares exactly what it did before.
+   */
+  readonly accent2?: string;
+  readonly 'accent2-hover'?: string;
+  readonly 'on-gradient'?: string;
 }
 
 export interface SizeTokens {

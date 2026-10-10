@@ -533,6 +533,58 @@ export async function textOverPoster(page, sel, fixtures) {
   };
 }
 
+/**
+ * theme-spec §13: an accent pair fills `sel` (the primary action) with its
+ * gradient, and the label keeps 4.5:1 over every pixel of it. axe cannot
+ * judge text over a background image (it reports "incomplete"), so the
+ * pixels are measured, as textOverPoster does.
+ */
+export async function gradientLabel(page, sel) {
+  const image = await page.evaluate((q) => {
+    const el = document.querySelector(q);
+    return el ? getComputedStyle(el).backgroundImage : null;
+  }, sel);
+  if (image === null) return { pass: false, detail: `no ${sel} on the page` };
+  if (!/gradient/.test(image)) return { pass: false, detail: `${sel} paints no gradient (${image})` };
+  const measured = await textContrast(page, [sel]);
+  return {
+    pass: measured.problems.length === 0,
+    detail: measured.problems.length ? `under ${TEXT_CONTRAST}:1 — ${measured.problems.join('; ')}` : `worst ${measured.worst}:1`,
+  };
+}
+
+/** The alpha of a computed colour: `rgba(…, a)` / `rgb(… / a)`, 1 when none is written. */
+const alphaOf = (colour) => {
+  if (colour === 'transparent') return 0;
+  const n = (colour.match(/[\d.]+/g) ?? []).map(Number);
+  return n.length === 4 ? n[3] : 1;
+};
+
+/**
+ * theme-spec §13: under forced colours the gradient is dropped, and `sel`
+ * must still show an edge — a border at least 1px wide, opaque, and a
+ * different colour from its own background. The page must already be
+ * emulating `forced-colors: active`.
+ */
+export async function forcedEdge(page, sel) {
+  const r = await page.evaluate((q) => {
+    const el = document.querySelector(q);
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    return {
+      forced: matchMedia('(forced-colors: active)').matches,
+      width: parseFloat(cs.borderTopWidth), border: cs.borderTopColor, fill: cs.backgroundColor, image: cs.backgroundImage,
+    };
+  }, sel);
+  if (r === null) return { pass: false, detail: `no ${sel} on the page` };
+  const problems = [];
+  if (!r.forced) problems.push('the page is not in forced colours');
+  if (r.width < 1) problems.push(`border ${r.width}px`);
+  if (alphaOf(r.border) === 0) problems.push(`border colour ${r.border} is transparent`);
+  if (r.border === r.fill) problems.push(`border and fill are both ${r.fill}`);
+  return { pass: problems.length === 0, detail: problems.length ? problems.join('; ') : `edge ${r.border} on ${r.fill}, image ${r.image}` };
+}
+
 /** An image request: held back by imageShift until the page has settled. */
 const IMAGE_URL = /\.(?:webp|png|jpe?g|avif|gif|svg)(?:[?#]|$)/i;
 /** How long the released images get to arrive; they come from a local server. */
