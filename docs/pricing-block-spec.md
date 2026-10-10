@@ -276,7 +276,7 @@ Format per CONVENTIONS §5. Errors block the build; taste warnings never do.
   // Exactly the tokens this word's own code reads; az lint (pnpm lint) fails on a missing or extra entry.
   "themeReads": [
     "color.accent", "color.bg", "color.border", "color.muted", "color.surface",
-    "color.surface-alt", "color.text", "radius.md", "size.edge-emphasis",
+    "color.surface-alt", "color.text", "gradient.accent", "radius.md", "size.edge-emphasis",
     "size.gutter-sm", "size.measure-body", "size.measure-display", "size.tap",
     "space.4", "space.8", "space.12", "space.16", "space.24", "space.32",
     "space.48", "space.96", "type.display", "type.leading-body",
