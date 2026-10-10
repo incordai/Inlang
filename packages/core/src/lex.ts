@@ -88,6 +88,17 @@ function classifyBare(raw: string): TokenKind {
   return 'word';
 }
 
+/**
+ * The line without its trailing spaces and tabs. A scan back from the end:
+ * the pattern `[ \t]+$` retried a run of blanks from each of its starts when
+ * a word followed it, so one long line of tabs held the compiler for seconds.
+ */
+function withoutTrailingBlanks(line: string): string {
+  let end = line.length;
+  while (end > 0 && (line[end - 1] === ' ' || line[end - 1] === '\t')) end--;
+  return line.slice(0, end);
+}
+
 export function lex(source: string): LexResult {
   const tokens: Token[] = [];
   const diagnostics: Diagnostic[] = [];
@@ -107,7 +118,7 @@ export function lex(source: string): LexResult {
   for (let i = 0; i < lines.length; i++) {
     // §1.2 step 3 — trailing whitespace (spaces AND tabs) is stripped first,
     // so a trailing tab can never become part of a word.
-    const raw = lines[i].replace(/[ \t]+$/, '');
+    const raw = withoutTrailingBlanks(lines[i]);
     const lineNo = i + 1;
 
     // §1.1 — a control byte anywhere on the line (outside tab) is refused.

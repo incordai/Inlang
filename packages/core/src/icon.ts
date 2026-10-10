@@ -34,11 +34,15 @@ function isPng(b: Uint8Array): boolean {
  * An SVG document: after a BOM and the prolog — XML declaration, processing
  * instructions, comments, a doctype with its internal subset — the root
  * element is `<svg`. Text that merely mentions svg, or HTML, is not one.
+ *
+ * The doctype's blanks before `>` belong to `[^[>]*` alone: a separate `\s*`
+ * there split one run of spaces two ways at every length, so an unclosed
+ * `<!doctype` followed by spaces took seconds to refuse.
  */
 function isSvg(b: Uint8Array): boolean {
   const head = new TextDecoder('utf-8', { fatal: false }).decode(b.subarray(0, ICON_HEAD_BYTES));
   const rest = head.replace(/^﻿/, '')
-    .replace(/^(?:\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE[^[>]*(?:\[[\s\S]*?\])?\s*>)*/i, '');
+    .replace(/^(?:\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE[^[>]*(?:\[[\s\S]*?\]\s*)?>)*/i, '');
   return /^<svg[\s>/]/.test(rest);
 }
 

@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compile, serialiseSpec, type Manifest } from '../src/index.ts';
-import { iconFormat, pngSize, TOUCH_ICON_SIZE } from '../src/icon.ts';
+import { ICON_HEAD_BYTES, iconFormat, pngSize, TOUCH_ICON_SIZE } from '../src/icon.ts';
 
 const manifests = new Map<string, Manifest>();
 const ascii = (s: string) => new TextEncoder().encode(s);
@@ -209,6 +209,19 @@ test('iconFormat: PNG by signature and IHDR; SVG by its root element past BOM, p
   assert.equal(iconFormat(SVG), 'svg');
   assert.equal(iconFormat(ascii('﻿<!DOCTYPE svg [ <!ENTITY a "b"> ]>\n<svg/>')), 'svg');
   assert.equal(iconFormat(ascii('<svg>')), 'svg');
+});
+
+test('iconFormat refuses an unclosed doctype followed by blanks in linear time', () => {
+  // A whole head of spaces after `<!doctype` took seconds: the blanks before
+  // `>` could be split between two patterns at every length; the scan now
+  // takes milliseconds, so a one-second budget fails only the old shape.
+  const budgetMs = 1_000;
+  const start = performance.now();
+  assert.equal(iconFormat(ascii(`<!doctype${' '.repeat(ICON_HEAD_BYTES)}`)), null);
+  const ms = performance.now() - start;
+  assert.ok(ms < budgetMs, `${ms.toFixed(0)}ms`);
+  assert.equal(iconFormat(ascii('<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x.dtd"   >\n<svg/>')), 'svg', 'CONTROL: blanks before > still close it');
+  assert.equal(iconFormat(ascii('<!DOCTYPE svg [ <!ENTITY a "b"> ]   >\n<svg/>')), 'svg', 'CONTROL: and after a subset');
 });
 
 test('CONTROL: iconFormat refuses what is only near the shape', () => {

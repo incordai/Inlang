@@ -78,6 +78,39 @@ test('§1.2: trailing tabs are stripped, and a tab after a word separates tokens
   assert.deepEqual(run('az 1\nsite aurora\t\npage /\n  hero\tcenter\n    title "t"\t\n').diagnostics, []);
 });
 
+/*
+ * Input size is the author's, so the compiler's time must grow with it, not
+ * with its square. 40 000 characters took over two seconds through the
+ * trailing-blank and trailing-slash patterns these replaced; the linear scans
+ * take milliseconds, so a one-second budget fails only the old shape.
+ */
+const LONG_RUN = 80_000;
+const LINEAR_BUDGET_MS = 1_000;
+const timed = <T>(f: () => T): { result: T; ms: number } => {
+  const start = performance.now();
+  const result = f();
+  return { result, ms: performance.now() - start };
+};
+
+test('§1.2: a long run of tabs inside a line is lexed in linear time', () => {
+  const { result, ms } = timed(() => lex(`az 1\nsite aurora\npage /\n  hero center\n    title "t"${'\t'.repeat(LONG_RUN)}x\n`));
+  assert.ok(ms < LINEAR_BUDGET_MS, `${ms.toFixed(0)}ms`);
+  assert.ok(result.tokens.some((t) => t.value === 'x'), 'CONTROL: the word after the tabs is still a token');
+});
+
+test('AZ1413: a route with a long run of slashes before its last is reported in linear time', () => {
+  const route = `/a${'/'.repeat(LONG_RUN)}b/`;
+  const { result, ms } = timed(() => run(`az 1\nsite aurora\npage ${route}\n`));
+  assert.ok(ms < LINEAR_BUDGET_MS, `${ms.toFixed(0)}ms`);
+  const d = result.diagnostics.find((x) => x.code === 'AZ1413');
+  assert.ok(d?.message.endsWith(`write: page ${route.slice(0, -1)}`), 'CONTROL: the fix it suggests drops only the trailing slash');
+});
+
+test('CONTROL AZ1413: every trailing slash is dropped from the suggestion', () => {
+  const d = run('az 1\nsite aurora\npage /\npage /work///\n').diagnostics.find((x) => x.code === 'AZ1413');
+  assert.equal(d?.message, "page: '/work///' ends with '/' — write: page /work");
+});
+
 test('§1.1 AZ1022: a control byte is refused', () => {
   assert.ok(codes('az 1\nsite aurora\npage /\n  hero center\n    title "a\u000bb"\n').includes('AZ1022'));
 });

@@ -225,6 +225,17 @@ function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteS
 const ROUTE = /^\/(?:[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*)?$/;
 
 /**
+ * The route without its trailing slashes. A scan back from the end: the
+ * pattern `\/+$` retried every earlier run of slashes from each of its
+ * starts, so `/a////…x/` held the compiler for seconds.
+ */
+function withoutTrailingSlashes(route: string): string {
+  let end = route.length;
+  while (end > 0 && route[end - 1] === '/') end--;
+  return route.slice(0, end);
+}
+
+/**
  * Why a `page` argument cannot be served at the address it names, or null.
  * The runtime matches the visitor's path exactly; a route it can never equal
  * (a trailing slash, a space, an accent, no leading slash) was a page that
@@ -234,7 +245,7 @@ function routeProblem(arg: { readonly kind: string; readonly value: string } | u
   if (!arg) return 'page: no route — write: page /';
   const v = arg.value;
   if (!v.startsWith('/')) return `page: '${v}' is not a route — write: page /${v.replace(/^\/*/, '')}`;
-  if (v.length > 1 && v.endsWith('/')) return `page: '${v}' ends with '/' — write: page ${v.replace(/\/+$/, '')}`;
+  if (v.length > 1 && v.endsWith('/')) return `page: '${v}' ends with '/' — write: page ${withoutTrailingSlashes(v)}`;
   if (!ROUTE.test(v)) {
     return `page: '${v}' has characters an address would change — use letters, digits and - . _ ~ between slashes`;
   }
