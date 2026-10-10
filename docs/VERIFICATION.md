@@ -27,6 +27,12 @@ pnpm test:visual --self-test # proves each browser check can fail
 pnpm thumbnails              # one PNG per word × variant, .thumbnails/
 pnpm thumbnails --verify     # render twice; every variant, identical bytes
 pnpm coverage                # variants and props each emitter implements
+
+pnpm scan:secrets            # secret scan, every commit and the working tree
+pnpm scan:deps               # known vulnerabilities in both lockfiles
+pnpm scan:actions            # workflow lint (with shellcheck on run: blocks)
+                             #   the tools and their versions:
+                             #   docs/security-scanning.md
 ```
 
 Every check must be runnable locally with the same command CI uses. **A check
@@ -178,7 +184,10 @@ Ubuntu — each step a command from §1, so CI and a local run cannot differ:
   the browser checks itself), `pnpm thumbnails --verify`
 
 Nightly: the verify job across macOS, Windows and Ubuntu on Node 22 and 24.
-`npm audit` is **not yet configured** in CI.
+
+`.github/workflows/security.yml`, on every push, PR and weekly: CodeQL
+(security-extended), dependency review on PRs, and `pnpm scan:secrets`,
+`pnpm scan:deps`, `pnpm scan:actions` — see docs/security-scanning.md.
 
 **Windows is in the nightly matrix for a reason** — it is the primary
 development platform for this project, and path length, line endings and

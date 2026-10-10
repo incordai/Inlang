@@ -19,7 +19,10 @@
     "thumbnails": "node scripts/thumbnails.mjs",
     "lint": "node packages/cli/bin/az.js lint packages/words",
     "test:backend-db": "node scripts/backend-db.mjs",
-    "test:data": "node scripts/data-e2e.mjs"
+    "test:data": "node scripts/data-e2e.mjs",
+    "scan:secrets": "gitleaks git --redact --no-banner . && gitleaks dir --redact --no-banner .",
+    "scan:deps": "osv-scanner scan source -L pnpm-lock.yaml -L spike-m0/pnpm-lock.yaml",
+    "scan:actions": "actionlint"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

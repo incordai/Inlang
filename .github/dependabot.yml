@@ -1,0 +1,29 @@
+# Version updates for the npm lockfiles and the pinned actions
+# (docs/security-scanning.md). Security updates come from the repository's
+# alert settings; these keep pinned versions from going stale.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /spike-m0
+    schedule:
+      interval: weekly
+    # The same seven days pnpm-workspace.yaml waits before taking a new version.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']
