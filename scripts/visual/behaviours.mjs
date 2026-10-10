@@ -674,6 +674,65 @@ export async function faqDeepLink(page) {
 }
 
 /**
+ * The carousel's waits, counted in the frames the page renders. A glide
+ * moves only when a frame is rendered, and a browser starved by a loaded
+ * machine can go seconds without one — a wait in time outruns it, or a sleep
+ * presses again mid-glide. In frames:
+ *   agree  the controls say what the track's position says (`agree` frames)
+ *   glide  the track left `from` (within `start` frames) and is now at `to`
+ *          for two frames running — or, where a snap chose another stop,
+ *          has held one position for `rest` frames; a glide's slow tail can
+ *          sit on one pixel for a few frames, so arriving is the test
+ *   still  the track has not left `from` for `still` frames
+ *   end    "next" says it is unavailable (`agree` frames)
+ * and never more than `most` frames. FRAME_CAP_MS bounds every wait in
+ * time as well, generously: frames that never come are reported as such.
+ */
+const CAROUSEL_FRAMES = { agree: 120, start: 120, rest: 30, still: 30, most: 900 };
+const FRAME_CAP_MS = 30_000;
+const onFrames = (page, wrap, kind, from = 0, to = 0) => page.evaluate(([w, k, start, target, f, capMs]) => new Promise((done) => {
+  const t = document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`);
+  const said = (s) => document.querySelector(`${w} button[data-az-step="${s}"]`).getAttribute('aria-disabled');
+  const began = performance.now();
+  let frames = 0;
+  let held = 0;
+  let at = 0;
+  let last = t.scrollLeft;
+  let moved = false;
+  let over = false;
+  const finish = (ok, why) => {
+    over = true;
+    clearTimeout(cap);
+    done({ ok, why, left: t.scrollLeft, frames, ms: Math.round(performance.now() - began) });
+  };
+  const cap = setTimeout(() => finish(false, `${frames} frames rendered in ${capMs}ms`), capMs);
+  const tick = () => {
+    if (over) return;
+    frames++;
+    const left = t.scrollLeft;
+    held = left === last ? held + 1 : 0;
+    last = left;
+    if (Math.abs(left - start) > 0.5) moved = true;
+    at = Math.abs(left - target) <= 0.5 ? at + 1 : 0;
+    if (k === 'agree' && said('-1') === String(left <= 1) && said('1') === String(left + t.clientWidth >= t.scrollWidth - 1)) return finish(true, 'agreed');
+    if (k === 'end' && said('1') === 'true') return finish(true, 'at the end');
+    if ((k === 'agree' || k === 'end') && frames >= f.agree) return finish(false, `not after ${frames} frames`);
+    if (k === 'glide') {
+      if (moved && at >= 2) return finish(true, 'arrived');
+      if (moved && held >= f.rest) return finish(true, 'at rest');
+      if (!moved && frames >= f.start) return finish(false, 'never moved');
+    }
+    if (k === 'still') {
+      if (moved) return finish(false, 'moved');
+      if (frames >= f.still) return finish(true, 'held');
+    }
+    if (frames >= f.most) return finish(false, `still moving after ${frames} frames`);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}), [wrap, kind, from, to, CAROUSEL_FRAMES, FRAME_CAP_MS]);
+
+/**
  * gallery §6/§10: a carousel's previous/next buttons — at the start
  * "previous" says it cannot go (aria-disabled), "next" scrolls the track by
  * a slide, and at the end "next" says so and does nothing. Reached by
@@ -690,8 +749,11 @@ export async function carousel(page) {
     const track = document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`);
     const b = (s) => document.querySelector(`${w} button[data-az-step="${s}"]`);
     const r = b('1').getBoundingClientRect();
+    // One step's distance, as the runtime measures it: a slide and the gap.
+    const slide = track.querySelector('li');
+    const by = (slide?.getBoundingClientRect().width ?? track.clientWidth) + (parseFloat(getComputedStyle(track).columnGap) || 0);
     return {
-      left: track.scrollLeft, room: track.scrollWidth - track.clientWidth,
+      left: track.scrollLeft, room: track.scrollWidth - track.clientWidth, by,
       prev: b('-1').getAttribute('aria-disabled'), next: b('1').getAttribute('aria-disabled'),
       nextBox: { w: r.width, h: r.height, onScreen: r.right > 0 && r.left < innerWidth },
     };
@@ -699,14 +761,10 @@ export async function carousel(page) {
   const problems = [];
   // The ends follow the layout, and a size change is reported at the next
   // rendering frame: at `load` a stylesheet may have applied that no frame
-  // has rendered yet. So the controls are given until WAIT_MS to agree with
+  // has rendered yet. So the controls are given some frames to agree with
   // the track's position; a runtime that never re-reads its ends still
   // disagrees then, and is caught below.
-  await until(page, (w) => {
-    const t = document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`);
-    const said = (s) => document.querySelector(`${w} button[data-az-step="${s}"]`).getAttribute('aria-disabled');
-    return said('-1') === String(t.scrollLeft <= 1) && said('1') === String(t.scrollLeft + t.clientWidth >= t.scrollWidth - 1);
-  }, wrap);
+  await onFrames(page, wrap, 'agree');
   const start = await read();
   // Everything fits: nothing to step through, so neither control may offer to.
   if (start.room <= 0) {
@@ -720,25 +778,35 @@ export async function carousel(page) {
   if (focused.nextBox.w < 44 || focused.nextBox.h < 44 || !focused.nextBox.onScreen) {
     problems.push(`the focused "next" is not a visible 44px control (${Math.round(focused.nextBox.w)}x${Math.round(focused.nextBox.h)})`);
   }
-  await page.keyboard.press('Enter');
-  const moved = await until(page, (w) => (document.querySelector(`${w} [data-az-track]`) ?? document.querySelector(`${w} ul`)).scrollLeft > 0, wrap);
-  if (!moved) problems.push('"next" did not scroll the track');
-  // Step to the end, bounded by the number of slides.
+  // Step to the end, bounded by the number of slides. Each press waits for
+  // its glide to be over — at the slide it was sent to, or held at one stop
+  // — before the next: a press mid-glide cuts the glide short.
+  const step = async (from) => {
+    await page.keyboard.press('Enter');
+    return onFrames(page, wrap, 'glide', from.left, Math.min(from.left + from.by, from.room));
+  };
+  const said = (g) => `${g.why}: at ${Math.round(g.left)} after ${g.frames} frames, ${g.ms}ms`;
+  const first = await step(focused);
+  if (!first.ok) problems.push(`"next" did not scroll the track (${said(first)})`);
   const slides = await page.$$eval(`${wrap} li`, (l) => l.length);
-  for (let i = 0; i < slides + 1; i++) {
+  for (let i = 0; first.ok && i < slides + 1; i++) {
     const now = await read();
     if (now.next === 'true') break;
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(250);
+    const g = await step(now);
+    if (!g.ok) {
+      problems.push(`a step from ${Math.round(now.left)} did not come to rest (${said(g)})`);
+      break;
+    }
   }
-  await page.waitForTimeout(400);
+  // At the end, "next" says so once the last scroll has been read.
+  await onFrames(page, wrap, 'end');
   const end = await read();
   if (end.next !== 'true') problems.push('at the end "next" is not marked unavailable');
   if (end.left < end.room - 1) problems.push(`"next" stopped short of the end (${Math.round(end.left)} of ${end.room})`);
   if (end.prev !== 'false') problems.push('past the start "previous" stayed unavailable');
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(300);
-  if ((await read()).left !== end.left) problems.push('an unavailable "next" still moved the track');
+  const held = await onFrames(page, wrap, 'still', end.left);
+  if (!held.ok) problems.push(`an unavailable "next" still moved the track (${said(held)})`);
   return { pass: problems.length === 0, detail: problems.join('; ') };
 }
 
