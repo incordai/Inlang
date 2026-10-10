@@ -98,11 +98,20 @@
     ]
   },
   "themeReads": [
-    "color.surface",
-    "color.border",
-    "space.*",
-    "type.caption",
-    "radius.md"
+    "color.bg",
+    "color.focus",
+    "color.muted",
+    "color.surface-alt",
+    "color.text",
+    "layer.behind",
+    "radius.md",
+    "size.gutter-sm",
+    "size.measure-body",
+    "size.ring",
+    "size.ring-offset",
+    "space.12",
+    "space.64",
+    "type.size.xs"
   ],
   "deps": {
     "three": "0.186.0"

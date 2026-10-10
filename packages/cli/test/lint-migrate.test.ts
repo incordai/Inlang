@@ -18,14 +18,15 @@ const BIN = join(ROOT, 'packages/cli/bin/az.js');
 const az = (...args: string[]) =>
   spawnSync(process.execPath, [...process.execArgv, BIN, ...args], { encoding: 'utf8' });
 
-const MANIFEST = JSON.stringify({ name: 'badge', variants: ['plain'] });
+const manifest = (themeReads: string[]) => JSON.stringify({ name: 'badge', variants: ['plain'], themeReads }, null, 2);
 const BAD = "export const emit = () => ({ tag: 'span', style: { color: '#ff0066', padding: '13px' } });\n";
 const GOOD = "export const emit = (b, ctx) => ({ tag: 'span', style: { color: ctx.theme.color.accent, padding: '12px' } });\n";
 
-function wordsWith(source: string) {
+/** A words directory with one pack, `badge`; its themeReads default to what the source reads. */
+function wordsWith(source: string, themeReads: string[] = source === GOOD ? ['color.accent'] : []) {
   const dir = mkdtempSync(join(tmpdir(), 'az-lint-'));
   mkdirSync(join(dir, 'badge'));
-  writeFileSync(join(dir, 'badge/word.json'), MANIFEST, 'utf8');
+  writeFileSync(join(dir, 'badge/word.json'), manifest(themeReads), 'utf8');
   writeFileSync(join(dir, 'badge/emit.web.ts'), source, 'utf8');
   return dir;
 }
@@ -44,6 +45,22 @@ test('A7 CONTROL: the same word written with tokens passes', () => {
   const r = az('lint', wordsWith(GOOD));
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /1 word, no theme violations/);
+});
+
+test('az lint fails a word whose themeReads is not what its source reads', () => {
+  const r = az('lint', wordsWith(GOOD, ['color.text']));
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /badge\/emit\.web\.ts:1:\d+ error theme-reads {2}'color\.accent' is read here but missing/);
+  assert.match(r.stderr, /badge\/word\.json:\d+:\d+ error theme-reads {2}'color\.text' is in themeReads but the word's source never reads it/);
+  assert.match(r.stderr, /2 theme violations in 1 word$/m);
+});
+
+test('az lint reports a word.json that is not JSON instead of crashing', () => {
+  const dir = wordsWith(GOOD);
+  writeFileSync(join(dir, 'badge/word.json'), '{ "name": ', 'utf8');
+  const r = az('lint', dir);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /badge\/word\.json:1:1 error theme-reads {2}word\.json is not valid JSON/);
 });
 
 test('a folder without word.json is not a word pack and is not linted', () => {

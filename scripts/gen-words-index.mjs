@@ -165,7 +165,7 @@ function wordSection(w) {
   out.push('### Where to edit', '', ...table(['Concern', 'Edit'], [
     ['Copy', `the site's \`.az\` file (the keys above); worked examples: ${previews.map(code).join(', ')}`],
     ['Info lines, keys, values, bounds', `${code(`${WORDS_DIR}/${w.dir}/word.json`)} — \`description\`, \`descriptions\`, each key's \`description\``],
-    ['Style tokens', `values: ${code('packages/theme/src/themes.ts')} (per theme), ${code('packages/theme/src/tokens.ts')} (scales); this word reads ${(m.themeReads ?? []).map(code).join(', ')}`],
+    ['Style tokens', `values: ${code('packages/theme/src/themes.ts')} (per theme), ${code('packages/theme/src/tokens.ts')} (scales); its own code reads ${(m.themeReads ?? []).map(code).join(', ')} (${code('themeReads')}, held to the code by ${code('pnpm lint')}; shared helpers and ${code('ctx.actions')} read their own)`],
     ['Style and layout', `${code(`${WORDS_DIR}/${w.dir}/emit.web.ts`)} — ${h.Styling ?? ''}`],
     ['Markup', `${code(`${WORDS_DIR}/${w.dir}/emit.web.ts`)} — ${h['Edit guide'] ?? ''}`],
     ['Behaviour', h.Behaviour ?? ''],
