@@ -517,11 +517,20 @@ function wireCarousels(ctx: Ctx, root: ParentNode): void {
     }
     on(track, 'scroll', update, { passive: true });
     on(win, 'resize', update, { passive: true });
-    if (typeof win.ResizeObserver === 'function') {
-      const sizes = new win.ResizeObserver(update);
-      for (const el of [track, ...track.children]) sizes.observe(el);
-      ctx.undo.push(() => sizes.disconnect());
-    }
+    const sizes = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(update) : null;
+    for (const el of [track, ...track.children]) sizes?.observe(el);
+    // A slide added later is watched as the first ones are, and changes the
+    // ends itself: the track keeps its own size as it fills, so no size
+    // change of the track would report it.
+    const slides = new win.MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) if (n.nodeType === 1) sizes?.observe(n as Element);
+        for (const n of r.removedNodes) if (n.nodeType === 1) sizes?.unobserve(n as Element);
+      }
+      update();
+    });
+    slides.observe(track, { childList: true });
+    ctx.undo.push(() => { slides.disconnect(); sizes?.disconnect(); });
     update();
   }
 }
@@ -670,8 +679,10 @@ function wireHideShrink(ctx: Ctx, root: ParentNode): void {
     // The logos shrink with the bar, so they carry its state too.
     const marked = [nav, ...nav.querySelectorAll<HTMLElement>('[data-az-logo]')];
     // Where the bar sits at rest: hiding it any earlier would open a page
-    // with the nav missing.
-    const barHeight = nav.getBoundingClientRect().height;
+    // with the nav missing. Read again on every scroll, not once at attach:
+    // the runtime can attach before the page's styles apply, and a late font
+    // changes the bar too. Not while shrunk — that is not the bar at rest.
+    let barHeight = nav.getBoundingClientRect().height;
     let shrunk = false;
     let retracted = false;
     let lastY = win.scrollY;
@@ -690,6 +701,7 @@ function wireHideShrink(ctx: Ctx, root: ParentNode): void {
         if (next !== shrunk || !nav.hasAttribute('data-shrunk')) { shrunk = next; mark('data-shrunk', shrunk); }
       }
       if (hides) {
+        if (!shrunk) barHeight = nav.getBoundingClientRect().height;
         // Never retract while something inside the bar is open or focused:
         // a keyboard user must not tab into an invisible nav.
         const busy = nav.contains(doc.activeElement) || nav.querySelector('[aria-expanded="true"]') !== null;
@@ -839,10 +851,10 @@ function wireReveal(ctx: Ctx, root: ParentNode): void {
   if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   for (const block of find<HTMLElement>(root, '[data-az-reveal]')) {
     if (!ctx.fresh(block, 'reveal')) continue;
-    if (!revealsLater(block.getBoundingClientRect(), win.innerHeight)) continue;
     const items = [...block.querySelectorAll<HTMLElement>('[data-az-reveal-item]')];
     const targets = items.length > 0 ? items : [block];
     const distance = Number(block.dataset.azReveal) || 0;
+    let hidden = false;
     const show = () => {
       for (const el of targets) {
         // Back to the word's own transition, so the rise animates.
@@ -854,23 +866,57 @@ function wireReveal(ctx: Ctx, root: ParentNode): void {
     // Hidden at once: the word's transition would otherwise play the hide
     // itself as a fade-out. The layout read flushes the instant style before
     // the transition returns.
-    targets.forEach((el, i) => {
-      el.style.transition = 'none';
-      el.style.opacity = '0';
-      el.style.transform = `translateY(${distance}px)`;
-      el.style.transitionDelay = `${revealDelay(i)}ms`;
-    });
-    void block.offsetHeight;
-    block.setAttribute('data-az-revealed', 'false');
+    const hide = () => {
+      targets.forEach((el, i) => {
+        el.style.transition = 'none';
+        el.style.opacity = '0';
+        el.style.transform = `translateY(${distance}px)`;
+        el.style.transitionDelay = `${revealDelay(i)}ms`;
+      });
+      void block.offsetHeight;
+      block.setAttribute('data-az-revealed', 'false');
+      hidden = true;
+    };
+    // Inside the first viewport after all: visible at once, unanimated, as
+    // if it had never been hidden.
+    const unhide = () => {
+      for (const el of targets) {
+        el.style.transition = 'none';
+        el.style.opacity = '';
+        el.style.transform = '';
+        el.style.transitionDelay = '';
+      }
+      void block.offsetHeight;
+      for (const el of targets) el.style.transition = '';
+      block.removeAttribute('data-az-revealed');
+      hidden = false;
+    };
+    // Whether the block starts below the first viewport is a reading of the
+    // layout, taken at attach and again whenever the page changes size until
+    // the block is first seen: the runtime can attach before the page's
+    // styles apply, and a late font or image moves the block too.
+    const place = () => {
+      const later = revealsLater(block.getBoundingClientRect(), win.innerHeight);
+      if (later && !hidden) hide();
+      else if (!later && hidden) unhide();
+    };
+    const layout = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(place) : null;
+    // Seen once — risen into view, or on screen from the start — it is never
+    // hidden again, and its place is no longer read.
     const io = new win.IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return;
       io.disconnect();
+      layout?.disconnect();
+      if (!hidden) return;
       show();
       block.setAttribute('data-az-revealed', 'true');
     });
+    place();
+    layout?.observe(ctx.doc.documentElement);
     io.observe(block);
     ctx.undo.push(() => {
       io.disconnect();
+      layout?.disconnect();
       show();
       for (const el of targets) el.style.transitionDelay = '';
       block.removeAttribute('data-az-revealed');

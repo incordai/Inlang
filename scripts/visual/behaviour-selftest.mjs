@@ -37,22 +37,46 @@ const LATER = `<script>setTimeout(() => document.querySelector('main').insertAdj
 const TRACK_CSS = `.track { display: flex; overflow-x: auto; width: 400px; margin: 0; padding: 0; list-style: none; }
 .track li { flex: 0 0 300px; }
 .track img { display: block; width: 300px; height: 100px; }`;
-/** How long the late stylesheet is held back: well past the runtime's attach, well inside a check's wait. */
-const TRACK_CSS_DELAY_MS = 300;
 /**
- * The track's stylesheet linked once the runtime has attached — as WebKit
- * runs a site's module script ahead of the stylesheet linked after it. Held
- * back on its way to the page (TRACK_CSS_DELAY_MS), it still delays `load`,
- * so a check meets the styled track; the runtime first met it unstyled.
+ * The parts of the page's layout a late stylesheet can carry — each one
+ * inline unless the form names it, and then the page is different until the
+ * stylesheet applies:
+ *   track   the carousel track is a plain list, with nothing to scroll;
+ *   nav     the bar is as tall as a 1500px image in it, not 72px;
+ *   reveal  a 1200px image pushes the first reveal block below the first
+ *           viewport; styled, it is gone, and the block is on screen (with
+ *           a long transition, so a block that rises there shows mid-rise).
  */
-const LATE_TRACK = '<script type="module">const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "./track.css"; document.head.append(l);</script>';
+const LATE_CSS = {
+  track: TRACK_CSS,
+  nav: 'nav { height: 72px; } .navpad { display: none; }',
+  reveal: '.pushdown { display: none; } #reveal-top { transition: opacity 600ms, transform 600ms; }',
+};
+/** How long a late file is held back: well past the runtime's attach, well inside a check's wait. */
+const LATE_DELAY_MS = 300;
+/**
+ * The late stylesheet linked once the runtime has attached — as one engine
+ * runs a site's module script ahead of the stylesheet linked after it. Held
+ * back on its way to the page (LATE_DELAY_MS), it still delays `load`, so a
+ * check meets the styled page; the runtime first met it unstyled.
+ */
+const LATE_LINK = '<script type="module">const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "./late.css"; document.head.append(l);</script>';
+/**
+ * Slides added to the carousel once the runtime has attached and frames have
+ * rendered: a module script held back on its way (LATE_DELAY_MS), which
+ * `load` waits for. The page starts with one slide, which fits.
+ */
+const MORE_SLIDES = '<script type="module" src="./more.js"></script>';
+const slide = (c, i) => `<li><button type="button" data-az-index="${i}" aria-haspopup="dialog" aria-label="Photo ${i + 1}"><img alt="Photo ${i + 1}" src="${LOGO(c)}"></button></li>`;
+const SLIDE_COLOURS = ['#a33', '#3a3', '#33a', '#aa3'];
+const MORE_JS = `document.querySelector('[data-az-track]').insertAdjacentHTML('beforeend', ${JSON.stringify(SLIDE_COLOURS.slice(1).map((c, i) => slide(c, i + 1)).join(''))});`;
 
-const page = ({ runtime, net, lateTrack = false }) => `<!doctype html><html lang="en"><head><title>behaviours</title><style>
+const page = ({ runtime, net, late = [], more = false }) => `<!doctype html><html lang="en"><head><title>behaviours</title><style>
 [hidden]:not([hidden="until-found"]) { display: none !important; }
 dialog[data-az-overlay="drawer"] { margin: 0; height: 100%; max-height: 100%; transform: translateX(-100%); transition: transform 120ms; }
 dialog[data-az-overlay="drawer"][data-state="open"] { transform: none; transition: transform 240ms; }
 .frame { position: sticky; top: 0; min-height: 72px; pointer-events: none; }
-nav { position: static; height: 72px; display: flex; align-items: center; gap: 8px; pointer-events: auto; background: transparent; transition: transform 160ms, height 120ms; }
+nav { position: static;${late.includes('nav') ? '' : ' height: 72px;'} display: flex; align-items: center; gap: 8px; pointer-events: auto; background: transparent; transition: transform 160ms, height 120ms; }
 nav > ul { margin: 0; padding: 0; list-style: none; }
 nav[data-shrunk="true"] { height: 56px; }
 nav[data-retracted="true"] { transform: translateY(-100%); }
@@ -66,11 +90,11 @@ nav[data-scrolled="true"] { background: rgb(250, 250, 250); }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 .target { margin-top: 1200px; }
 button { min-width: 44px; min-height: 44px; }
-${lateTrack ? '' : TRACK_CSS}
+${late.includes('track') ? '' : TRACK_CSS}
 ${net ? NET : ''}
 </style></head><body>
 <div class="frame"><nav data-az-behaviour="solid" data-az-hide data-az-shrink aria-label="Main">
-  <a href="/">Home</a><img data-az-logo="top" alt="" src="${LOGO('#eee')}"><img data-az-logo="solid" alt="" src="${LOGO('#111')}">
+  <a href="/">Home</a>${late.includes('nav') ? `<img class="navpad" alt="" width="10" height="1500" src="${LOGO('#ccc')}">` : ''}<img data-az-logo="top" alt="" src="${LOGO('#eee')}"><img data-az-logo="solid" alt="" src="${LOGO('#111')}">
   <ul><li class="group" data-az-behaviour="dropdown"><button type="button" aria-expanded="false" aria-controls="g1">Products</button>
     <ul id="g1" class="dd" hidden><li><a href="#a">Shoes</a></li><li><a href="#b">Bags</a></li></ul></li></ul>
   <button type="button" class="az-nav-toggle" aria-controls="az-nav-panel" aria-expanded="false" aria-label="Menu">Menu</button>
@@ -80,7 +104,7 @@ ${net ? NET : ''}
   </dialog>
 </nav></div>
 <main>
-  <section data-az-reveal="8" id="reveal-top"><p>On screen from the start.</p></section>
+  ${late.includes('reveal') ? `<div class="pushdown"><img alt="" width="10" height="1200" src="${LOGO('#ccc')}"></div>` : ''}<section data-az-reveal="8" id="reveal-top"><p>On screen from the start.</p></section>
   <button type="button" aria-controls="sheet-1" aria-expanded="false">Open the sheet</button>
   <dialog id="sheet-1" data-az-behaviour="dialog" data-az-overlay="sheet" aria-label="Sheet" style="position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: 100%; height: 300px; border: 0">
     <div data-az-drag aria-hidden="true" style="height: 44px; touch-action: none">grip</div><button type="button" data-az-close>Close</button>
@@ -94,7 +118,7 @@ ${net ? NET : ''}
   <section data-az-behaviour="lightbox" aria-label="Gallery">
     <div data-az-behaviour="carousel">
       <ul class="track" data-az-track>
-        ${['#a33', '#3a3', '#33a', '#aa3'].map((c, i) => `<li><button type="button" data-az-index="${i}" aria-haspopup="dialog" aria-label="Photo ${i + 1}"><img alt="Photo ${i + 1}" src="${LOGO(c)}"></button></li>`).join('')}
+        ${(more ? SLIDE_COLOURS.slice(0, 1) : SLIDE_COLOURS).map(slide).join('')}
       </ul>
       <div class="az-gallery-controls"><button type="button" data-az-step="-1" aria-disabled="true">Previous image</button><button type="button" data-az-step="1" aria-disabled="false">Next image</button></div>
     </div>
@@ -120,11 +144,15 @@ ${net ? NET : ''}
 <footer><p>© <span data-year="dynamic">2019</span> Aurora</p></footer>
 ${LATER}
 ${runtime ? SCRIPT : ''}
-${lateTrack ? LATE_TRACK : ''}
+${late.length > 0 ? LATE_LINK : ''}
+${more ? MORE_SLIDES : ''}
 </body></html>`;
 
 /** The runtime's modules as browser JavaScript, imports pointed at .js. */
-function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = false, withoutDrag = false, withoutSizeWatch = false } = {}) {
+function writeRuntime(dir, {
+  withoutBeforematch = false, withoutReducedGuard = false, withoutDrag = false, withoutSizeWatch = false,
+  withoutSlideWatch = false, withoutRestRead = false, withoutPlaceWatch = false,
+} = {}) {
   mkdirSync(join(dir, 'az'), { recursive: true });
   for (const f of readdirSync(RUNTIME).filter((n) => n.endsWith('.ts'))) {
     const js = stripTypeScriptTypes(readFileSync(join(RUNTIME, f), 'utf8'))
@@ -136,7 +164,13 @@ function writeRuntime(dir, { withoutBeforematch = false, withoutReducedGuard = f
       // The regression sheetDrag guards against: the sheet's drag unwired.
       .replace(withoutDrag ? /^.*wireSheetDrag\(ctx, dialog, close\);.*$/m : /(?!)/, '')
       // The regression the late-track carousel guards against: the ends read only on scroll and resize.
-      .replace(withoutSizeWatch ? /^.*sizes\.observe\(el\);.*$/m : /(?!)/, '');
+      .replace(withoutSizeWatch ? /^.*sizes\?\.observe\(el\);.*$/m : /(?!)/, '')
+      // The regression the late-slides carousel guards against: only the slides there at attach watched.
+      .replace(withoutSlideWatch ? /^.*slides\.observe\(track, \{ childList: true \}\);.*$/m : /(?!)/, '')
+      // The regression the late-nav hide guards against: the bar's height read once, at attach.
+      .replace(withoutRestRead ? /^.*if \(!shrunk\) barHeight = .*$/m : /(?!)/, '')
+      // The regression the late-reveal guards against: a block's place read once, at attach.
+      .replace(withoutPlaceWatch ? /^.*layout\?\.observe\(ctx\.doc\.documentElement\);.*$/m : /(?!)/, '');
     writeFileSync(join(dir, 'az', f.replace(/\.ts$/, '.js')), js);
   }
 }
@@ -147,22 +181,29 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
     nomatch: { runtime: true, net: true, withoutBeforematch: true },
     noguard: { runtime: true, net: true, withoutReducedGuard: true },
     nodrag: { runtime: true, net: true, withoutDrag: true },
-    latetrack: { runtime: true, net: true, lateTrack: true },
-    latenowatch: { runtime: true, net: true, lateTrack: true, withoutSizeWatch: true },
+    latetrack: { runtime: true, net: true, late: ['track'] },
+    latenowatch: { runtime: true, net: true, late: ['track'], withoutSizeWatch: true },
+    moreslides: { runtime: true, net: true, more: true },
+    morenowatch: { runtime: true, net: true, more: true, withoutSlideWatch: true },
+    latenav: { runtime: true, net: true, late: ['nav'] },
+    latenavonce: { runtime: true, net: true, late: ['nav'], withoutRestRead: true },
+    latereveal: { runtime: true, net: true, late: ['reveal'] },
+    laterevealonce: { runtime: true, net: true, late: ['reveal'], withoutPlaceWatch: true },
   };
   for (const [name, form] of Object.entries(forms)) {
     mkdirSync(join(dir, `b-${name}`), { recursive: true });
     writeFileSync(join(dir, `b-${name}`, 'index.html'), page(form));
     writeRuntime(join(dir, `b-${name}`), form);
-    if (form.lateTrack) writeFileSync(join(dir, `b-${name}`, 'track.css'), TRACK_CSS);
+    if (form.late) writeFileSync(join(dir, `b-${name}`, 'late.css'), form.late.map((part) => LATE_CSS[part]).join('\n'));
+    if (form.more) writeFileSync(join(dir, `b-${name}`, 'more.js'), MORE_JS);
   }
   const run = async (name, width, check, reducedMotion = 'no-preference') => {
     server.serve(join(dir, `b-${name}`));
     const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion });
     const p = await ctx.newPage();
-    if (forms[name].lateTrack) {
-      await p.route('**/track.css', (route) => new Promise((done) => setTimeout(done, TRACK_CSS_DELAY_MS)).then(() => route.continue()));
-    }
+    const held = (route) => new Promise((done) => setTimeout(done, LATE_DELAY_MS)).then(() => route.continue());
+    if (forms[name].late) await p.route('**/late.css', held);
+    if (forms[name].more) await p.route('**/more.js', held);
     await p.goto(server.url, { waitUntil: 'load' });
     const r = await check(p);
     await ctx.close();
@@ -190,6 +231,12 @@ export async function behaviourSelfTest(browser, server, dir, expect) {
   expect('behaviour: sheet drag with the drag unwired', await run('nodrag', 390, sheetDrag), false);
   expect('behaviour: carousel styled after attach, ends read only on scroll and resize', await run('latenowatch', 1440, carousel), false);
   expect('behaviour: carousel styled after attach', await run('latetrack', 1440, carousel), true);
+  expect('behaviour: carousel filled after attach, only the first slides watched', await run('morenowatch', 1440, carousel), false);
+  expect('behaviour: carousel filled after attach', await run('moreslides', 1440, carousel), true);
+  expect('behaviour: hide with the bar styled after attach, its height read once', await run('latenavonce', 1440, hideShrink), false);
+  expect('behaviour: hide with the bar styled after attach', await run('latenav', 1440, hideShrink), true);
+  expect('behaviour: reveal styled after attach, each place read once', await run('laterevealonce', 1440, reveal), false);
+  expect('behaviour: reveal styled after attach', await run('latereveal', 1440, reveal), true);
   expect('behaviour: reveal ignoring reduced motion', await run('noguard', 1440, revealReduced, 'reduce'), false);
   expect('behaviour: reveal under reduced motion', await run('good', 1440, revealReduced, 'reduce'), true);
 }
