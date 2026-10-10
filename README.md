@@ -60,6 +60,9 @@ A site is written in three steps, in this order:
    [Colour](#colour):
 
    ```sh
+   az palette               # a gallery page: every theme, hue, pair and pattern
+                            # in light and dark, each with its .az lines to copy
+   az palette --list        # the same choices in the terminal (--json for tools)
    az explain theme         # one line per theme
    az explain theme accent  # each hue and the hues it makes a gradient with
    ```
@@ -117,6 +120,15 @@ offered; any other is error AZ1423, naming the partners that work.
 `az explain theme accent` lists them; the rule and the table are in
 [theme-spec §13](docs/theme-spec.md).
 
+To choose by eye, `az palette` writes one static page (default
+`.az-build/.palette/index.html`) showing, for each theme in light and dark
+side by side, its swatches, every hue as a button and a link, every allowed
+pair as a gradient button over its glow, and every pattern — each with the
+exact lines to paste and a copy button. `--theme clay` and `--accent violet`
+narrow it; `--list` prints the choices for a terminal and `--json` for tools.
+The page carries the same Content-Security-Policy a build gives its pages
+([theme-spec §14](docs/theme-spec.md)).
+
 ## Commands
 
 | Command | Purpose |
@@ -134,6 +146,8 @@ offered; any other is error AZ1423, naming the partners that work.
 | `az backend images <server-dir> [--confirm]` | count stored images without width copies; with `--confirm`, make them |
 | `az mcp [--root dir]` | serve the compiler's tools to an AI agent (MCP over stdio) |
 | `az explain <term...>` | one line per term, e.g. `az explain hero center` |
+| `az palette [--theme t] [--accent h] [--out dir]` | write the colour gallery: every theme, hue, pair and pattern in light and dark, with its `.az` lines |
+| `az palette --list \| --json [--theme t] [--accent h]` | print every colour choice, for a terminal or a tool |
 | `az doctor [file.az] [--out dir] [--json]` | check this machine and project; changes nothing |
 | `az audit [--out dir] [--online] [--json]` | check a build's output; changes nothing (`--online` adds the advisory lookup) |
 
@@ -240,6 +254,7 @@ Details: [word-quality-gate §2–§5](docs/word-quality-gate.md),
 | `pnpm verify:build` | builds the GRAMMAR §8 fixture with the real toolchain and checks the shipped HTML, security and bundle budget | network (installs) |
 | `pnpm test:visual` | every preview in three themes, light and dark: overflow, axe, keyboard, reduced motion, behaviours | browsers |
 | `pnpm gate [words/<word>]` | the 12-point word gate ([VERIFICATION §3](docs/VERIFICATION.md)); `--every-variant` adds every variant without its own preview | browsers |
+| `pnpm test:palette` | the `az palette` gallery in three engines: zero CSP violations (served and opened from the file), axe, phone width, keyboard, copy; a screenshot per theme in a light and a dark browser, rendered twice and identical, in `.palette-shots/` | browsers |
 | `pnpm thumbnails [--verify]` | one PNG per word × variant in `.thumbnails/`; `--verify` renders twice and requires identical bytes | browsers |
 | `pnpm test:auth` | auth forms, protected pages and reset against a local mock provider and the generated server | browsers |
 | `pnpm test:dev` | `az dev` end to end: backend, dev mailbox, reload on save, clean Ctrl-C | browsers |
@@ -302,6 +317,9 @@ Start with [AGENTS.md](docs/AGENTS.md) (reading order and the rules), then
   `az_word_docs`, `az_grammar`, `az_check`, `az_spec`, `az_build` and more —
   with read-only tools that never run project code. Setup and the safety
   model: [docs/mcp.md](docs/mcp.md).
+- **`az palette`** (and the MCP tool `az_palette`) gives every colour
+  choice with its `.az` line — as a gallery page to pick from by eye, or as
+  `--list` / `--json`.
 - **`az explain <term...>`** gives a ≤60-character line for any word,
   variant, key or value — the cheapest lookup.
 - **[docs/WORDS.md](docs/WORDS.md)** lists every word, variant and key with

@@ -94,7 +94,7 @@ test('tools/list offers every tool with a schema, and marks the ones that write'
   const [, r] = await session(project(), [INIT, { jsonrpc: '2.0', id: 1, method: 'tools/list' }]);
   const tools = r.result.tools as { name: string; inputSchema: { type: string }; annotations: { readOnlyHint: boolean } }[];
   assert.deepEqual(tools.map((t) => t.name).sort(), ['az_audit', 'az_backend_init', 'az_build', 'az_check', 'az_doctor', 'az_eject',
-    'az_explain', 'az_grammar', 'az_lint', 'az_migrate', 'az_spec', 'az_word_docs', 'az_words']);
+    'az_explain', 'az_grammar', 'az_lint', 'az_migrate', 'az_palette', 'az_spec', 'az_word_docs', 'az_words']);
   for (const t of tools) assert.equal(t.inputSchema.type, 'object');
   const writers = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
   assert.deepEqual(writers, ['az_backend_init', 'az_build', 'az_eject', 'az_migrate']);

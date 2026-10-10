@@ -48,6 +48,7 @@ server offers no MCP prompts.
 
 | Tool | Writes? | What it does |
 |---|---|---|
+| `az_palette {theme?, accent?}` | no | `az palette --json`: every theme with its character, the hues and the allowed gradient pairs per theme, the pattern shapes and origins — each choice with the `.az` line that makes it, and an example block per theme; filtered by theme and hue |
 | `az_explain {terms}` | no | the cheapest lookup: one ≤60-character line per term, in context — `"hero center"`, `"hero height peek"`, `"backend database postgres"`; unknown terms get a did-you-mean |
 | `az_words` | no | the catalogue: every word's variants, modifiers, properties (type, values, default, required) and slots, each with its ≤60-character description |
 | `az_word_docs {word}` | no | one word's README |

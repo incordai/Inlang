@@ -1,6 +1,6 @@
 /**
  * @az module az
- * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, doctor, audit.
+ * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, palette, doctor, audit.
  * Spec: docs/PRD.md §6.7 · docs/ARCHITECTURE.md §1a
  * Exports: main, build, specOf, wordsFor, parseDotenv, DOTENV_FILES, EXIT
  * Edit guide: filesystem work lives here, never in core; a new command needs USAGE, COMMANDS and a test.
@@ -57,6 +57,9 @@ import { runMcp } from './mcp.ts';
 import { doctor } from './doctor-checks.ts';
 import { formatReport, systemProbe } from './doctor.ts';
 import { formatFindings } from '../../theme/src/lint.ts';
+import {
+  colourChoices, colourChoicesJson, filterColourChoices, formatColourChoices,
+} from '../../core/src/colour.ts';
 
 const MB = 1024 * 1024;
 /** A8 and the hero/scene manifests' `maxBytes`: a 3D model's budget. */
@@ -455,13 +458,17 @@ const USAGE = `az — words to a website
                                    with --confirm, make them
   az mcp   [--root dir]            serve these tools to an AI agent (MCP, stdio)
   az explain <term...>             one line per term: az explain hero center
+  az palette [--theme t] [--accent h] [--out dir]
+                                   write the colour gallery
+  az palette --list | --json [--theme t] [--accent h]
+                                   print every colour choice
   az doctor [file.az] [--out dir] [--json]
                                    check this machine and project; changes nothing
   az audit [--out dir] [--online] [--json]
                                    check a build's output; changes nothing
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'doctor', 'audit']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'palette', 'doctor', 'audit']);
 
 /**
  * `az backend init <server-dir>` — write `.env` beside a generated server's
@@ -544,6 +551,79 @@ function runExplain(terms: string[]): number {
   const result = explain(terms, words.manifests);
   process.stdout.write(formatExplained(result) + '\n');
   return result.unknown.length > 0 ? EXIT.missing : EXIT.ok;
+}
+
+const PALETTE_USAGE = `az palette — colour comes first: every theme, accent, pair and pattern
+
+  az palette [--theme t] [--accent h] [--out dir]
+      write the gallery page (default .az-build/.palette)
+  az palette --list [--theme t] [--accent h]
+      print the choices for a terminal
+  az palette --json [--theme t] [--accent h]
+      print the choices as JSON, each with its .az line
+`;
+
+/**
+ * `az palette` — PRD §6.1a, theme-spec §14: every colour choice, by eye
+ * (a static page with its .az lines) or as text. Changes nothing but the
+ * page it writes. Exit 0 done, 1 the page could not be written, 2 usage.
+ * The choices are core's colour.ts, the one list az_palette serves too.
+ */
+function runPalette(args: string[]): number {
+  let mode: 'page' | 'list' | 'json' = 'page';
+  let out: string | null = null;
+  const filter: { theme?: string; accent?: string } = {};
+  const usage = (why: string) => {
+    process.stderr.write(`az: palette: ${why}\n\n${PALETTE_USAGE}`);
+    return EXIT.config;
+  };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const value = args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[i + 1] : undefined;
+    if (a === '--help' || a === '-h') {
+      process.stdout.write(PALETTE_USAGE);
+      return EXIT.ok;
+    }
+    if (a === '--list' || a === '--json') {
+      const next = a === '--list' ? 'list' : 'json';
+      if (mode !== 'page' && mode !== next) return usage('--list and --json are two ways to print — pick one');
+      mode = next;
+    } else if ((a === '--theme' || a === '--accent' || a === '--out') && value !== undefined) {
+      if (a === '--out') out = value;
+      else filter[a === '--theme' ? 'theme' : 'accent'] = value;
+      i++;
+    } else if (a === '--theme' || a === '--accent' || a === '--out') {
+      return usage(`${a} needs a value`);
+    } else {
+      return usage(`unexpected '${a}'`);
+    }
+  }
+  if (mode !== 'page' && out !== null) return usage('--out writes the page; --list and --json print instead');
+  const chosen = filterColourChoices(colourChoices(), filter);
+  if (!chosen.ok) return usage(chosen.message);
+  if (mode === 'list') {
+    process.stdout.write(formatColourChoices(chosen.choices));
+    return EXIT.ok;
+  }
+  if (mode === 'json') {
+    process.stdout.write(`${JSON.stringify(colourChoicesJson(chosen.choices), null, 2)}\n`);
+    return EXIT.ok;
+  }
+  // The page proves every pair it paints; loaded only for it, as audit is.
+  void import('./palette-page.ts').then((page) => {
+    const dir = out ?? page.PALETTE_DIR;
+    const written = writeOutput(dir, [{ path: page.PALETTE_FILE, content: page.palettePage(chosen.choices, filter.accent ?? null) }]);
+    if (!written.ok) {
+      process.stderr.write(`${written.problems.join('\n')}\n`);
+      process.exitCode = EXIT.missing;
+      return;
+    }
+    process.stdout.write(`az: wrote ${join(dir, page.PALETTE_FILE)} — open it in a browser\n`);
+  }, (e: unknown) => {
+    process.stderr.write(`az: palette: ${(e as Error).message}\n`);
+    process.exitCode = EXIT.config;
+  });
+  return EXIT.ok;
 }
 
 /**
@@ -761,6 +841,7 @@ export function main(argv: string[]): number {
   }
   if (cmd === 'lint') return runLint(file ?? process.env.AZ_WORDS ?? 'words');
   if (cmd === 'explain') return runExplain(argv.slice(1));
+  if (cmd === 'palette') return runPalette(argv.slice(1));
   if (cmd === 'doctor') return runDoctor(argv.slice(1));
   if (cmd === 'audit') return runAudit(argv.slice(1));
   if (cmd === 'mcp') {

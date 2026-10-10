@@ -2,9 +2,10 @@
  * @az module theme-css
  * Purpose: colour schemes as CSS custom properties: default scheme, OS preference, data-scheme.
  * Spec: docs/theme-spec.md §3
- * Exports: schemeCss, schemeReferences, patternCss, PATTERN_REFERENCES, gradientCss, GRADIENT_REFERENCES
+ * Exports: schemeCss, scopedSchemeCss, schemeReferences, patternCss, PATTERN_REFERENCES, gradientCss, GRADIENT_REFERENCES
  * Edit guide: words read var(--az-color-*) references; declarations are generated here only.
  *   Gradients are declared here too (theme-spec §13) — in the stylesheet, never inline.
+ *   A scope other than `:root` is for a page that shows several themes at once (az palette).
  * Tests: packages/theme/test/css.test.ts
  */
 
@@ -44,6 +45,8 @@ function references<T extends object>(group: Schemed, tokens: T): Record<keyof T
 
 /** The one derived colour: see VEIL_PERCENT. Defined once, after the schemes. */
 const VEIL = property('color', 'veil');
+/** Its value: built on var(), so it follows whichever scheme declares the ground. */
+const VEIL_VALUE = `color-mix(in srgb, var(${property('color', 'bg')}) ${VEIL_PERCENT}%, transparent)`;
 
 /** What a word reads for the scheme-dependent groups — the role tokens plus `veil`. */
 export function schemeReferences(theme: Theme): { color: ColorTokens & { veil: string }; shadow: ShadowTokens } {
@@ -53,12 +56,17 @@ export function schemeReferences(theme: Theme): { color: ColorTokens & { veil: s
   };
 }
 
-/** Every custom property for one scheme, one declaration per line, sorted. */
-function declarations(theme: Theme, scheme: Scheme, indent: string): string {
+/**
+ * Every custom property for one scheme, one declaration per line, sorted —
+ * or, with `only`, just those colour tokens (and no shadow).
+ */
+function declarations(theme: Theme, scheme: Scheme, indent: string, only?: ReadonlySet<string>): string {
   const lines: string[] = [];
   for (const group of SCHEMED) {
+    if (only && group !== 'color') continue;
     const tokens = theme[group][scheme] as unknown as Record<string, string>;
     for (const key of Object.keys(tokens).sort()) {
+      if (only && !only.has(key)) continue;
       lines.push(`${indent}${property(group, key)}: ${tokens[key]};`);
     }
   }
@@ -78,8 +86,19 @@ export function schemeCss(theme: Theme): string {
     `body { background: var(${property('color', 'bg')}); color: var(${property('color', 'text')}); }`,
     // scene-spec §6.5: a block over a live backdrop resolves its own surface.
     // Built on var(), so it follows the scheme without a copy per scheme.
-    `:root { ${VEIL}: color-mix(in srgb, var(${property('color', 'bg')}) ${VEIL_PERCENT}%, transparent); }`,
+    `:root { ${VEIL}: ${VEIL_VALUE}; }`,
   ].join('\n\n') + '\n';
+}
+
+/**
+ * One scheme of `theme`, declared on `selector` instead of `:root`, so a
+ * page can show several themes and both schemes side by side (az palette).
+ * The same declarations schemeCss writes, plus the veil; with `only`, just
+ * those colour tokens — what an accent or a pair changes over the theme.
+ */
+export function scopedSchemeCss(theme: Theme, scheme: Scheme, selector: string, only?: readonly (keyof ColorTokens)[]): string {
+  if (only) return `${selector} {\n${declarations(theme, scheme, '  ', new Set<string>(only))}\n}\n`;
+  return `${selector} {\n${declarations(theme, scheme, '  ')}\n  ${VEIL}: ${VEIL_VALUE};\n}\n`;
 }
 
 /** The pattern's three properties (PRD §6.1a), set once per site. */
@@ -100,11 +119,11 @@ export const PATTERN_REFERENCES: PatternLayers = {
  * The declarations behind PATTERN_REFERENCES, or nothing when the site has no
  * pattern — then no word paints one, so a site without `pattern` is unchanged.
  */
-export function patternCss(layers: PatternLayers | null): string {
+export function patternCss(layers: PatternLayers | null, scope = ':root'): string {
   if (layers === null) return '';
   return [
     '/* theme pattern — PRD §6.1a; ink is the accent token */',
-    ':root {',
+    `${scope} {`,
     `  ${PATTERN_PROPERTY.image}: ${layers.image};`,
     `  ${PATTERN_PROPERTY.position}: ${layers.position};`,
     `  ${PATTERN_PROPERTY.size}: ${layers.size};`,
@@ -127,13 +146,13 @@ export const GRADIENT_REFERENCES: Readonly<Record<GradientName, string>> = {
   'accent-hover': `var(${gradientProperty('accent-hover')})`,
 };
 
-/** One `:root` block declaring every gradient, each built by `build` from its two colour properties. */
-function gradientBlock(indent: string, build: (from: string, to: string) => string): string {
+/** One `scope` block declaring every gradient, each built by `build` from its two colour properties. */
+function gradientBlock(scope: string, indent: string, build: (from: string, to: string) => string): string {
   const lines = (Object.keys(GRADIENTS) as GradientName[]).map((name) => {
     const [from, to] = GRADIENTS[name];
     return `${indent}  ${gradientProperty(name)}: ${build(`var(${property('color', from)})`, `var(${property('color', to)})`)};`;
   });
-  return `${indent}:root {\n${lines.join('\n')}\n${indent}}`;
+  return `${indent}${scope} {\n${lines.join('\n')}\n${indent}}`;
 }
 
 /**
@@ -146,7 +165,7 @@ function gradientBlock(indent: string, build: (from: string, to: string) => stri
  * `linear-gradient(in oklch, …)` where gradients interpolate in OKLCH.
  * gradient.ts proves every floor along all three (theme-spec §13).
  */
-export function gradientCss(paired: boolean): string {
+export function gradientCss(paired: boolean, scope = ':root'): string {
   if (!paired) return '';
   const stops = (from: string, to: string) => GRADIENT_FALLBACK_STOPS.map((t) => {
     if (t === 0) return from;
@@ -155,10 +174,10 @@ export function gradientCss(paired: boolean): string {
   }).join(', ');
   return [
     '/* theme accent pair — theme-spec §13; OKLCH, else OKLCH stops, else sRGB */',
-    gradientBlock('', (from, to) => `linear-gradient(${GRADIENT_DIRECTION}, ${from}, ${to})`),
+    gradientBlock(scope, '', (from, to) => `linear-gradient(${GRADIENT_DIRECTION}, ${from}, ${to})`),
     `@supports (color: color-mix(in oklch, transparent, transparent)) {\n${
-      gradientBlock('  ', (from, to) => `linear-gradient(${GRADIENT_DIRECTION}, ${stops(from, to)})`)}\n}`,
+      gradientBlock(scope, '  ', (from, to) => `linear-gradient(${GRADIENT_DIRECTION}, ${stops(from, to)})`)}\n}`,
     `@supports (background-image: linear-gradient(in oklch, transparent, transparent)) {\n${
-      gradientBlock('  ', (from, to) => `linear-gradient(${GRADIENT_DIRECTION} in oklch, ${from}, ${to})`)}\n}`,
+      gradientBlock(scope, '  ', (from, to) => `linear-gradient(${GRADIENT_DIRECTION} in oklch, ${from}, ${to})`)}\n}`,
   ].join('\n') + '\n';
 }

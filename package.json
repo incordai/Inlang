@@ -17,6 +17,7 @@
     "test:lighthouse": "node scripts/lighthouse.mjs",
     "gate": "node scripts/gate.mjs",
     "thumbnails": "node scripts/thumbnails.mjs",
+    "test:palette": "node scripts/palette.mjs",
     "lint": "node packages/cli/bin/az.js lint packages/words",
     "test:backend-db": "node scripts/backend-db.mjs",
     "test:data": "node scripts/data-e2e.mjs",

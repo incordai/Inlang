@@ -1737,3 +1737,58 @@ decision first.
 - **Content-Security-Policy** — gradients are declarations in `theme.css`
   and generated classes in `az.css`. No page carries an inline `style`
   for them, so the policy (PRD §6.1a) is unchanged.
+
+## 14. Choosing by eye: `az palette`
+
+Colour is the first step of every site (PRD §6.1a), and a colour is judged by
+looking at it. `az palette` shows every choice this spec allows; the MCP tool
+`az_palette` returns the same choices as data.
+
+**One list.** The choices — themes with their one-line character, hues, the
+allowed pairs per theme, pattern shapes and origins — are read from the
+compiler's own tables by `packages/core/src/colour.ts` (`colourChoices`),
+which also writes AZ.md's and docs/WORDS.md's colour step. Nothing is
+listed by hand: a theme added to `THEMES` (with its `THEME_NAMES` line and
+a rerun of `scripts/gen-pairs.mjs`) or a pair the generator newly allows
+appears in the page, `--list`, `--json` and `az_palette` by itself. A theme
+the generator has not seen is refused, never shown without pairs.
+`packages/cli/test/palette.test.ts` holds the list equal to `THEMES`,
+`ACCENT_NAMES`, `PATTERN_SHAPES`, `PATTERN_ORIGINS` and `pairTable` (the
+proof itself), and compiles every line it offers.
+
+**The page** (`az palette`, default `.az-build/.palette/index.html` — a
+hidden folder, so no page route of a build can collide with it; `--out` for
+another) is one static HTML file. Per theme, each choice is a card with the
+`.az` lines that make it, a copy button, and the choice painted in the light
+and the dark scheme side by side:
+
+| Card | Shows |
+|---|---|
+| Colours (`theme <name>`) | the `bg`, `surface`, `surface-alt`, `text`, `muted` and `accent` swatches, each with its token name, and a heading in the theme's display face |
+| Accent (`accent <hue>`) | the primary button and a link in that hue |
+| Pair (`accent <hue> <hue2>` with `pattern glow top`) | the gradient button (`on-gradient` label) over the two-hue glow |
+| Pattern (`pattern <shape> top`) | the shape in the theme's accent, or the `--accent` hue |
+
+Every colour on the page is a declaration from this package's generators —
+`scopedSchemeCss` (one theme and scheme on a class, or only the tokens an
+accent or a pair changes), `gradientCss` and `patternCss` with a scope —
+so a card shows exactly the tokens a build would ship. A gradient or a
+pattern is declared on the element that paints it, so its `var()`s resolve to
+that panel's hues. `--theme <name>` and `--accent <hue>` narrow the page; an
+unknown name is a usage error with a did-you-mean (exit 2). The same input
+writes the same bytes.
+
+**Policy and access.** The page carries the build's own policy (`csp.ts`
+`pagePolicy`): its one stylesheet and its one script are allowed by hash, it
+has no `style` attribute, and nothing is `unsafe-*`. The script only shows
+the copy buttons where the clipboard can be written; without it the lines are
+on the page to select. Each swatch is labelled by name, not by colour alone;
+the copy buttons and the theme links are reachable by keyboard.
+`pnpm test:palette` opens it in Chromium, Firefox and WebKit, served and from
+the file: zero policy violations, axe clean in a light and a dark browser, no
+sideways scroll at phone width, the keyboard walk and the copy; and one
+screenshot per theme in a light and a dark browser, rendered twice with
+identical bytes, written to `.palette-shots/`.
+
+**Text.** `az palette --list` prints the choices for a terminal; `--json` gives
+each choice with its `.az` line (the shape `az_palette` returns).

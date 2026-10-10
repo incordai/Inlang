@@ -10,3 +10,4 @@ dist-shots/
 .env.*
 .visual-out/
 .thumbnails/
+.palette-shots/

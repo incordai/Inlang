@@ -89,6 +89,9 @@ jobs:
       # time from here is device evidence.
       - run: pnpm test:3d
       - run: pnpm thumbnails --verify
+      # The az palette gallery: policy, axe, keyboard and copy in three
+      # engines, and a screenshot per theme rendered twice (theme-spec §14).
+      - run: pnpm test:palette
 
   backend-db:
     name: built-in backend on PostgreSQL and MySQL

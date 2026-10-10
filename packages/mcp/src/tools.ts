@@ -4,7 +4,7 @@
  * Spec: docs/mcp.md
  * Exports: TOOLS, validate, ToolFailure, Toolbox
  * Edit guide: mark any tool that writes or runs project code; arguments are validated against own keys only.
- * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/hardening.test.ts, packages/mcp/test/explain.test.ts
+ * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/hardening.test.ts, packages/mcp/test/explain.test.ts, packages/mcp/test/palette.test.ts
  */
 
 /**
@@ -91,6 +91,14 @@ export interface Toolbox {
    * never by value; the network only when `online`.
    */
   readonly audit: (outDir: string, online: boolean) => ReturnType<Toolbox['doctor']>;
+  /**
+   * az palette --json (theme-spec §14; core's colour.ts): every colour
+   * choice — themes, hues, pairs, patterns, origins — each with the `.az`
+   * line that makes it; filtered by theme and hue. A filter naming no theme
+   * or hue is `{ ok: false }`.
+   */
+  readonly palette: (filter: { theme?: string; accent?: string }) =>
+    { ok: true; palette: unknown } | { ok: false; message: string };
   /** One line per term (`hero center` → hero, center); unknown terms get a suggestion. */
   readonly explain: (terms: string[]) => {
     lines: { term: string; kind: string; of: string; text: string }[];
@@ -195,6 +203,17 @@ export const TOOLS: ToolDef[] = [
       const list = terms.split(/\s+/).filter(Boolean);
       if (list.length === 0) throw new ToolFailure('terms is empty — e.g. "hero center"');
       return box.explain(list);
+    },
+  },
+  {
+    name: 'az_palette',
+    description: 'Colour comes first: every theme (with its character), the accent hues each allows, the gradient pairs each allows, the pattern shapes and origins — each choice with the exact .az line that makes it, and an example block to paste under site. Optional filters: theme, accent. The same choices `az palette` shows as a gallery page. Writes nothing.',
+    inputSchema: obj({ theme: 'Optional theme name, e.g. clay: only that theme.', accent: 'Optional hue, e.g. violet: only that hue and the pairs it is in.' }, []),
+    annotations: READ,
+    run: ({ theme, accent }, box) => {
+      const r = box.palette({ ...(theme !== undefined ? { theme } : {}), ...(accent !== undefined ? { accent } : {}) });
+      if (!r.ok) throw new ToolFailure(r.message);
+      return r.palette;
     },
   },
   {

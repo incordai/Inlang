@@ -4,7 +4,7 @@
  * Spec: docs/mcp.md
  * Exports: toolbox, runMcp
  * Edit guide: each tool calls the same function its CLI command does, so they cannot drift.
- * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/explain.test.ts
+ * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/explain.test.ts, packages/mcp/test/palette.test.ts
  */
 
 /**
@@ -20,6 +20,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile, explain, serialiseSpec, STRUCTURE_DESCRIPTIONS, type Diagnostic } from '../../core/src/index.ts';
+import { colourChoices, colourChoicesJson, filterColourChoices } from '../../core/src/colour.ts';
 import { serve } from '../../mcp/src/server.ts';
 import type { KeywordEntry, Toolbox, ToolDiagnostic, WordEntry } from '../../mcp/src/tools.ts';
 import { build, compileReader, wordsFor } from './az.ts';
@@ -153,6 +154,12 @@ export function toolbox(root: string): Toolbox {
     // The build's output, read only; the advisory query only when asked.
     // Loaded on the first call, so az's start-up does not carry it.
     audit: async (outDir, online) => (await import('./audit.ts')).audit({ outDir, cwd: realpathSync(root), probe: systemProbe(findNpmCli), online }),
+
+    // core's colour tables only: the same choices `az palette --json` prints.
+    palette: (filter) => {
+      const r = filterColourChoices(colourChoices(), filter);
+      return r.ok ? { ok: true, palette: colourChoicesJson(r.choices) } : r;
+    },
 
     // Manifests only (no project code runs), like every read-only tool.
     explain: (terms) => explain(terms, loadWords(wordsDir(), projectWords, { code: false }).manifests),
