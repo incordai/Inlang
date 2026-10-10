@@ -1,4 +1,13 @@
 /**
+ * @az module countries
+ * Purpose: the country and territory names the sign-up form's location field offers as type-ahead suggestions.
+ * Spec: docs/backend-spec.md §2 · docs/auth-block-spec.md
+ * Exports: COUNTRIES
+ * Edit guide: data, not logic — regenerate the whole list from a newer CLDR release rather than hand-editing names; keep it sorted and de-duplicated.
+ * Tests: scripts/auth-e2e.mjs
+ */
+
+/**
  * Country and territory names for the sign-up location field's suggestions
  * (backend-spec §2: "location using search" — a native <datalist>, no service).
  *

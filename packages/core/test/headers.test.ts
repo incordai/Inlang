@@ -23,7 +23,7 @@ const SCOPE: [string, boolean][] = [
   ['packages/theme/src', false], ['packages/target-web/src', false],
   ['packages/overlay/src', true], ['packages/scene-runtime/src', true],
   ['packages/auth-runtime/src', true], ['packages/backend/src', true],
-  // The words folder's own modules (registry.ts); each word's emitter is added below.
+  // The words folder's own modules (registry.ts); each word folder's modules are added below.
   ['packages/words', false],
 ];
 
@@ -41,9 +41,10 @@ function files(): string[] {
     }
   };
   for (const [d, deep] of SCOPE) walk(d, deep);
+  // Each word folder's modules: the emitter and any data module it imports.
   for (const w of readdirSync(join(ROOT, 'packages/words'))) {
-    const f = join('packages/words', w, 'emit.web.ts');
-    if (existsSync(join(ROOT, f))) out.push(f);
+    const dir = join('packages/words', w);
+    if (existsSync(join(ROOT, dir, 'word.json'))) walk(dir, false);
   }
   return out.sort();
 }
@@ -129,6 +130,7 @@ test('CONTROL: the scope covers every package and every word', () => {
     assert.ok(all.some((f) => f.startsWith(`packages/${d}/`)), d);
   }
   assert.ok(all.includes('packages/words/registry.ts'), 'the emitter registry is in scope');
+  assert.ok(all.includes('packages/words/auth/countries.ts'), "a word folder's data module is in scope");
 });
 
 for (const file of files()) {
