@@ -95,6 +95,8 @@ export class Stage {
   private readonly views: View[] = [];
   private readonly probe: TierProbe | null;
   private readonly observer: IntersectionObserver;
+  /** Wakes the loop when the page or a view changes size (see the constructor). */
+  private readonly sizes: ResizeObserver;
   private readonly cleanups: (() => void)[] = [];
   /** Views whose content failed to load: they keep their poster. */
   private readonly failed = new Set<HTMLElement>();
@@ -168,6 +170,14 @@ export class Stage {
       this.enforceBudget();
       this.wake();
     }, { rootMargin: WARM_MARGIN });
+    // A change of layout that moves or sizes a view — a stylesheet applied
+    // late, a font or an image above it — is neither a scroll nor a resize,
+    // and the observer above reports only a crossing of the warm margin: a
+    // loop that stopped with no view on screen would leave a view that is on
+    // screen now undrawn. The page's size and each view's are watched, and
+    // every change wakes the loop to draw the views where they now are.
+    this.sizes = new win.ResizeObserver(() => this.wake());
+    this.sizes.observe(doc.documentElement);
 
     this.listen(this.canvas, 'webglcontextlost', (e) => {
       e.preventDefault();
@@ -244,6 +254,7 @@ export class Stage {
     if (motion === 'orbit') this.orbitInput(view);
     this.views.push(view);
     this.observer.observe(el);
+    this.sizes.observe(el);
   }
 
   /** A view's content failed to load: it keeps its poster, and so do the heroes it would draw. */
@@ -493,6 +504,7 @@ export class Stage {
     this.publish();
     if (this.frame) this.win.cancelAnimationFrame(this.frame);
     this.observer.disconnect();
+    this.sizes.disconnect();
     for (const c of this.cleanups) c();
     for (const v of this.views) {
       v.content?.dispose();

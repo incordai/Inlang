@@ -676,6 +676,41 @@ await checkTextured(browser, `chromium ${browser.version()}`);
   await context.close();
 }
 
+/* ---- §7: a change of layout wakes the stopped loop ------------------------- */
+{
+  // The view waits warm below the fold, the loop stopped. Then the block
+  // above it leaves the layout — as when a late stylesheet, font or image
+  // lands — and the view is on screen with no scroll, no resize and no
+  // crossing of the warm margin. It must be drawn. Through the CSSOM, which
+  // the page's policy allows (an inline <style> it refuses). Scroll anchoring
+  // is off, as in an engine without it: with it, the page would move with
+  // the block and the view stay where it was.
+  const { page, context } = await open(below, '/?az-probe=off');
+  const placed = await page.evaluate(() => {
+    document.documentElement.style.overflowAnchor = 'none';
+    const el = document.querySelector('.az-scene-view');
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: Math.max(0, top - innerHeight - 120), behavior: 'instant' });
+    let block = el;
+    while (block.parentElement && !block.previousElementSibling) block = block.parentElement;
+    window.__azAbove = block.previousElementSibling;
+    const r = el.getBoundingClientRect();
+    return window.__azAbove !== null && r.top > innerHeight && r.top < innerHeight * 2;
+  });
+  await page.waitForTimeout(SETTLE_MS * 2);
+  const idle = await page.evaluate(() => document.querySelector('.az-scene-view').getAttribute('data-live') !== 'true');
+  const onScreen = await page.evaluate(() => {
+    window.__azAbove.style.display = 'none';
+    const r = document.querySelector('.az-scene-view').getBoundingClientRect();
+    return r.top < innerHeight && r.bottom > 0;
+  });
+  const live = await waitFor(page, () => document.querySelector('.az-scene-view[data-live="true"]'));
+  check('§7: a view brought on screen by a change of layout, not a scroll, is drawn',
+    placed && idle && onScreen && live,
+    `${placed ? '' : 'view not placed below the fold; '}${idle ? '' : 'view live before the change; '}${onScreen ? '' : 'the change left the view off screen; '}${live ? '' : 'never drawn'}`);
+  await context.close();
+}
+
 /* ---- §3.3: a hidden tab is reported to the probe --------------------------- */
 {
   const { page, context } = await open(below, '/?az-probe-trace');
