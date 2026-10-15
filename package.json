@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.2",
+  "imports": {
+    "#tokenizer/*": "gpt-tokenizer/encoding/*"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/overlay/tsconfig.json && tsc --noEmit -p packages/auth-runtime/tsconfig.json && tsc --noEmit -p packages/scene-runtime/tsconfig.json",
     "test": "node --experimental-strip-types --test packages/core/test/*.test.ts packages/theme/test/*.test.ts packages/words/test/*.test.ts packages/target-web/test/*.test.ts packages/cli/test/*.test.ts packages/overlay/test/*.test.ts packages/auth-runtime/test/*.test.ts packages/scene-runtime/test/*.test.ts packages/backend/test/*.test.ts packages/mcp/test/*.test.ts scripts/lib/*.test.mjs",
@@ -21,6 +24,7 @@
     "lint": "node packages/cli/bin/az.js lint packages/words",
     "test:backend-db": "node scripts/backend-db.mjs",
     "test:data": "node scripts/data-e2e.mjs",
+    "bench:tokens": "node scripts/token-benchmark.mjs",
     "scan:secrets": "gitleaks git --redact --no-banner . && gitleaks dir --redact --no-banner .",
     "scan:deps": "osv-scanner scan source -L pnpm-lock.yaml -L spike-m0/pnpm-lock.yaml",
     "scan:actions": "actionlint"
@@ -29,6 +33,7 @@
     "@axe-core/playwright": "4.13.0",
     "@types/node": "26.2.0",
     "@types/three": "0.186.0",
+    "gpt-tokenizer": "4.0.0",
     "lighthouse": "13.5.0",
     "mysql2": "3.24.4",
     "nodemailer": "10.0.10",

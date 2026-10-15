@@ -1,0 +1,118 @@
+az 1
+
+# Ledger — a product site for a small invoicing tool. Written for the token benchmark.
+
+site ledger
+  theme midnight
+    accent teal
+  description "Invoices that send themselves, for studios of one to twenty."
+
+  nav bar sticky
+    link "Features" /#features
+    link "Pricing"  /pricing
+    link "Help"     /help
+    cta  "Start free" /signup
+
+  footer columns
+    tagline "Invoices that send themselves."
+    group "Product"
+      link "Features" /#features
+      link "Pricing"  /pricing
+    group "Company"
+      link "About" /about
+      link "Help"  /help
+    legal "Privacy" /privacy
+    copyright "Ledger"
+
+page /
+  hero center
+    eyebrow "For studios of one to twenty"
+    title   "Invoices that send themselves"
+    sub     "Track the hours, send the invoice, chase the late ones. Ledger does the last two for you."
+    cta     "Start free" /signup
+    alt     "See pricing" /pricing
+
+  feature grid
+    title   "Everything after the work is done"
+    columns 3
+    item "Time to invoice"
+      text "Tracked hours become a draft invoice the moment a project closes."
+    item "Gentle reminders"
+      text "Late invoices get a polite note at seven, fourteen and thirty days."
+    item "Paid, then filed"
+      text "A paid invoice is matched, receipted and filed for the year's accounts."
+    item "Every currency"
+      text "Bill each client in their own currency; the totals stay in yours."
+    item "Your branding"
+      text "Your logo, your colours and your terms on every page you send."
+    item "Exports that add up"
+      text "One file per quarter that your accountant can open without a call."
+
+  text prose
+    title "Built by people who hated invoicing"
+    body  "We ran a design studio for nine years and spent one afternoon a week chasing money. Ledger is the tool we wanted then: it does the dull part and stays out of the way."
+
+  cta band
+    title "Send your first invoice today"
+    cta   "Start free" /signup
+
+page /pricing
+  pricing cards
+    title    "Simple pricing"
+    sub      "Every plan includes unlimited clients."
+    currency usd
+    period   "per month"
+    plan "Solo"
+      monthly 12
+      annual  120
+      feature "Seats" "1"
+      feature "Invoices" "Unlimited"
+      cta     "Start with Solo" /signup
+    plan "Studio"
+      highlight on
+      badge   "Most popular"
+      monthly 39
+      annual  390
+      feature "Seats" "Up to 5"
+      feature "Invoices" "Unlimited"
+      cta     "Start with Studio" /signup
+    plan "Agency"
+      monthly 99
+      annual  990
+      feature "Seats" "Up to 20"
+      feature "Invoices" "Unlimited"
+      cta     "Start with Agency" /signup
+
+  faq list
+    title "Pricing questions"
+    item "Is there a free trial?"
+      text "Every plan is free for thirty days, and no card is needed to start."
+    item "Can I change plans later?"
+      text "Yes. A change takes effect on your next bill, prorated to the day."
+    item "Do you take a cut of payments?"
+      text "No. Ledger charges the plan price and nothing on the money you are paid."
+
+page /help
+  faq columns
+    title "Help"
+    sub   "The questions people ask in their first week."
+    item "How do I import my clients?"
+      text "Upload a spreadsheet of names and emails; Ledger matches the columns for you."
+    item "Can clients pay by card?"
+      text "Yes. Connect a payment account once and every invoice carries a pay link."
+    item "What happens to a late invoice?"
+      text "It gets a reminder at seven, fourteen and thirty days, unless you turn them off."
+    item "Can I export my data?"
+      text "Every invoice, client and payment exports as one spreadsheet at any time."
+
+page /about
+  text
+    title "About Ledger"
+    body  "Ledger is made by a team of four, funded by the people who pay for it."
+
+page /privacy
+  text
+    title "Privacy"
+    body  "We keep your account, your clients and your invoices, and nothing else."
+
+page /signup

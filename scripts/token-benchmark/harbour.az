@@ -1,0 +1,83 @@
+az 1
+
+# Harbour — a small restaurant's site. Written for the token benchmark.
+
+site harbour
+  theme midnight
+    accent amber
+  description "A twelve-table restaurant on the harbour wall, open Wednesday to Sunday."
+
+  nav split sticky
+    link "Menu"     /menu
+    link "Visit"    /visit
+    link "Private"  /private
+    cta  "Book a table" /book
+
+  footer
+    link "Menu"    /menu
+    link "Visit"   /visit
+    link "Email"   mailto:tables@harbour.example
+
+page /
+  hero split
+    eyebrow "On the harbour wall"
+    title   "Fish from the morning boats"
+    sub     "Twelve tables, one menu, written every afternoon from what came in."
+    cta     "Book a table" /book
+    alt     "See the menu" /menu
+
+  feature grid
+    title   "How we cook"
+    columns 3
+    item "One menu a day"
+      text "Written at three, from what the boats brought in that morning."
+    item "Fire and salt"
+      text "Most of it goes over charcoal. Some of it does not need to."
+    item "Nothing frozen"
+      text "When the fish runs out, the menu says so and we cook something else."
+
+  text prose
+    title "Twelve tables, on purpose"
+    body  "We opened with twelve tables because that is what two cooks can do well. We still have twelve, and we still turn people away on Saturdays."
+
+  cta band
+    title "Tables open four weeks ahead"
+    cta   "Book a table" /book
+
+page /menu
+  text prose
+    title "Tonight's menu"
+    body  "The menu changes every day. Expect three starters, three mains and one pudding, and a fish for two that is priced by weight."
+
+  faq list
+    title "About the menu"
+    item "Do you cook for allergies?"
+      text "Yes. Tell us when you book and the kitchen will plan your courses."
+    item "Is there a vegetarian main?"
+      text "Every night, built from the same market the fish comes from."
+    item "Can we see the menu before we come?"
+      text "It goes up here by four each afternoon, once the kitchen has written it."
+
+page /visit
+  text
+    title "Visit"
+    body  "Open Wednesday to Sunday, six until late. The door is at the end of the harbour wall."
+
+  faq columns
+    title "Before you come"
+    item "Can we bring children?"
+      text "Yes, until eight. There is one high chair, so tell us when you book."
+    item "Is there parking?"
+      text "The harbour car park is a minute away and free after six."
+    item "Do you take walk-ins?"
+      text "Two tables are kept for walk-ins every night, first come first served."
+    item "Is the room accessible?"
+      text "The room is on one level, and the door and the washroom are step-free."
+
+page /private
+  text prose
+    title "Private dining"
+    body  "The whole room seats twenty-four. Book it for a weekday evening and we will write a menu with you."
+    cta   "Ask about a date" /book
+
+page /book

@@ -329,3 +329,6 @@ Start with [AGENTS.md](docs/AGENTS.md) (reading order and the rules), then
   docs page; each emitter opens with an `@az` header naming what it renders
   and how to edit it.
 - **`AZ.md`** in every generated project maps routes and blocks to files.
+- **Tokens:** on the median of the repository's 33 sites, the same site
+  takes 1.5× the `.az` file's tokens as a component-tree JSON and 8.2× as
+  pre-rendered HTML ([token benchmark](docs/token-benchmark.md), `pnpm bench:tokens`).
