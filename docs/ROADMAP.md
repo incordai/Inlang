@@ -463,6 +463,16 @@ data-spec §18.8; measured in `pnpm test`, `pnpm test:backend-db` and
 Open: gate snapshots of the `from` states; gallery `carousel`, `orbit` and
 `lightbox` with `from` (AZ1214 today).
 
+**Chat (chat-spec) — proposed 2026-10-15, awaiting owner approval; nothing
+built.** A 12th block, `chat` (`panel`, `float`), approved in principle: a
+visitor asks, the generated server asks the model the operator chose in
+`server/.env` (`backend` gains `model default`; no provider in the file), and
+the answer streams back as text plus the site's own `pricing` (quoted), `faq`,
+`cta` and `feature` — the model writes a small `.az` subset, the server parses
+it into typed events, and the page only fills build-made templates with text.
+Phases C1 (text chat) … C4 (operations), about five weeks; it needs the PRD
+§6.2 cap exception first (chat-spec §17 Q1). Open questions: chat-spec §17.
+
 **M5 — not started.**
 
 Still outstanding and not answerable by writing code — PRD §11: open-source
