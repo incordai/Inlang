@@ -1,14 +1,14 @@
 /**
  * @az server chat
  * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer streamed to the page as server-sent events.
- * Spec: docs/backend-spec.md §5 (the chat block spec §4.2, §6.5, §6.7)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §6.5, §6.7)
  * Exports: createChat, parseChatContext, systemText, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, PROSE_MAX
  * Edit guide: every limit is the server's, never the request's; abort upstream whenever the answer stops; logs carry codes and counts, never text.
  * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts
  */
 
 /**
- * The chat route (chat-spec §4). The edge — Origin, CORS, the CSRF header —
+ * The chat route (chat-block-spec §4). The edge — Origin, CORS, the CSRF header —
  * is app.ts's, as for /data. From there:
  *
  *   kill switch → body → who may chat → conversation length → address and
@@ -39,7 +39,7 @@ import type { Db } from './db.ts';
 import type { ChatConfig } from './env.ts';
 import { BodyError, send, SECURITY_HEADERS } from './http.ts';
 
-/** The most prose one answer may hold (chat-spec §5.3); past it the answer ends. */
+/** The most prose one answer may hold (chat-block-spec §5.3); past it the answer ends. */
 export const PROSE_MAX = 4_000;
 /** Characters per token when a provider reports no usage — a conservative estimate (§6.5, INFERENCE). */
 const CHARS_PER_TOKEN = 3;
@@ -83,7 +83,7 @@ export function parseChatContext(text: string): ChatContext | string {
 }
 
 /**
- * What the model is told (chat-spec §8.3): the fixed prompt, then the
+ * What the model is told (chat-block-spec §8.3): the fixed prompt, then the
  * site's public content in a section marked as data, then the page the
  * visitor is on. Nothing about the visitor — no cookie, address or account.
  */

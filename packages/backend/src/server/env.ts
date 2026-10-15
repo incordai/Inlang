@@ -1,7 +1,7 @@
 /**
  * @az server env
  * Purpose: the configuration: every key, validation, refuse to start naming bad keys.
- * Spec: docs/backend-spec.md §4 (chat keys: the chat block spec §11.1)
+ * Spec: docs/backend-spec.md §4 (chat keys: docs/chat-block-spec.md §11.1)
  * Exports: loadConfig, KEYS, urlProblem, CHAT_LIMITS, parseRate, ChatConfig, ChatRate
  * Edit guide: server keys are never AZ_PUBLIC_; defaults are safe.
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/chat-route.test.ts
@@ -30,7 +30,7 @@ export interface Setup {
   readonly data?: boolean;
   /** A data table has an image field (data-spec §8): the upload keys are listed too. */
   readonly images?: boolean;
-  /** A page shows a chat (chat-spec): the model keys are listed too. */
+  /** A page shows a chat (chat-block-spec): the model keys are listed too. */
   readonly chat?: boolean;
 }
 
@@ -122,7 +122,7 @@ const MIN_SECRET_BYTES = 32;
 const MAX_PROXY_HOPS = 10;
 const MINUTE_MS = 60 * 1000;
 
-/** chat-spec §6.5: each chat setting's default and bounds. */
+/** chat-block-spec §6.5: each chat setting's default and bounds. */
 export const CHAT_LIMITS = {
   dailyTokens: { default: 300_000, min: 1_000, max: 100_000_000 },
   maxOutputTokens: { default: 600, min: 100, max: 2_000 },
@@ -150,7 +150,7 @@ export function parseRate(value: string): ChatRate | null {
   return out;
 }
 
-/** The chat settings (chat-spec §11.1); present only for a site with chat. */
+/** The chat settings (chat-block-spec §11.1); present only for a site with chat. */
 export interface ChatConfig {
   readonly api: 'completions' | 'fake';
   readonly url: string;
@@ -417,7 +417,7 @@ function onLoopback(value: string): boolean {
   }
 }
 
-/** The chat keys (chat-spec §11.1), every problem named. */
+/** The chat keys (chat-block-spec §11.1), every problem named. */
 function chatConfig(get: (k: string) => string, publicUrl: string, problems: string[]): ChatConfig {
   const api = get('AZ_CHAT_API').toLowerCase();
   if (api && api !== 'completions' && api !== 'fake') problems.push('AZ_CHAT_API must be completions or fake');

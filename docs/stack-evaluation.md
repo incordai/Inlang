@@ -1018,7 +1018,7 @@ repository's Node.
 
 ## 18. The chat's model client — **no dependency: Node's `fetch`, `AbortSignal`, `TextDecoder`, `crypto`**
 
-The generated server's `POST /chat` (chat block spec §4.3) calls a model
+The generated server's `POST /chat` (chat-block-spec.md §4.3) calls a model
 over HTTP and reads its streamed answer. Evaluated 2026-10-15 for C1:
 
 | Option | Verdict | Why |

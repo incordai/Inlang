@@ -1086,3 +1086,63 @@ described and must be re-read before C1 relies on it.
 | R4 | `log` is a live-region role (fetched excerpt truncated; its implicit `aria-live` value `polite` to re-verify); `aria-busy` marks content being updated | WAI-ARIA 1.2, https://www.w3.org/TR/wai-aria-1.2/#log |
 | R5 | Chat-completions streaming: `stream: true`, `data:` JSON chunks with `choices[].delta.content`, terminated by `data: [DONE]`; optional usage in the final chunk — **not fetched (403)** | OpenAI API reference, https://platform.openai.com/docs/api-reference/chat/create |
 | R6 | A second streaming shape with a top-level `system` field, typed content blocks and named stream events — **not fetched**; to be read before C4 | Anthropic Messages API streaming, https://docs.anthropic.com/en/api/messages-streaming |
+
+---
+
+## 19. C0 and C1 as built — deviations and findings (2026-10-15)
+
+### 19.1 Against §14's C1 list
+
+| Item | State |
+|---|---|
+| `chat panel`, `model default` | built. `model` is the third `backend` setting, optional (`BACKEND_REQUIRED` is database and email); any other value is AZ1412 with the `.env` hint |
+| AZ1250–AZ1256 | AZ1250, AZ1251, AZ1254, AZ1256 raised (`packages/core/src/chat.ts`). AZ1252, AZ1253, AZ1255 belong to `show`/`knows`, which C1 refuses, so they are **reserved**, not raised; AZ1257 is raised by `az build` as a warning when the context cap leaves a page out (§8.1); AZ1258 waits for `knows` (C3) |
+| `show` refused until C2 | `show pricing\|faq\|cta\|feature` is AZ1214 "not available yet"; any other word is AZ1254 with its reason. `show` is a free list in the manifest so the reasoned refusal can be given |
+| a site-level `chat` | AZ1214 (it is C3's `float`) — before this a non-inheritable block under `site` was silently dropped, which is still true of the other words (reported, not changed) |
+| per-word rows | AZ2220–AZ2228 (§3.4's table). `limit` range is the generic AZ1408 |
+| cap tests → 12 | `docs.test.ts`, `words.test.ts`, `mcp.test.ts` and a fourth, `packages/core/test/link.test.ts` ("all N manifests load") |
+| `/chat` route, CSRF/CORS, `allow`, limits, budget table, queue, timeouts, kill switch, HMAC history | built (`packages/backend/src/server/chat*.ts`), as §4.2 and §6.5. The request also carries `conversation` (§4.2 implied it; the server makes one on the first turn and returns it in `done`); the tag's turn index is the answer's position in `messages` |
+| `completions` and `fake` adapters | built, `fetch` only. `fake` is allowed only with `AZ_CHAT_FAKE_FILE` and a loopback `AZ_BACKEND_PUBLIC_URL` — that is the generated server's "development profile" |
+| prose-only answers | built; the page writes `textContent` into copies of the shell's templates |
+| `prompt.txt` / `context.json` from pages | built (`packages/backend/src/chat-context.ts`). A `text` body given as a file is not read into the context in C1 |
+| `CHAT` in the secret guard | built (`secrets.ts` `PRIVATE_NAME`); `AZ_PUBLIC_CHAT_KEY/_URL/_MODEL` fail the build, `AZ_PUBLIC_AUTH_KEY` still passes |
+| env keys, `.env.example`, `az backend init`, `loadConfig` | built; moderation keys are C4 |
+| `az dev` with `fake` | built: `.az-dev/chat-demo.json`, unless `.az-dev/backend.env` sets `AZ_CHAT_API` |
+| `az doctor` chat checks | **not built** — §11.2/§14 put them in C4 |
+| `az explain chat`, MCP words, `az prompt` | from the manifest, no code |
+| `test:chat` | built: `scripts/chat-e2e.mjs`, the real generated server with `fake`, three engines |
+
+### 19.2 Where the build differs from the text above
+
+- **The `usage` columns** are `input_tokens`, `output_tokens`, `messages`,
+  `dropped` (not `input`/`output`, which are reserved or near-reserved words
+  on some engines). The table is created only for chat sites, in its own
+  tracking table (`az_chat_migrations`) through the same claim machinery.
+- **One shared outbound reader.** The adapters read the provider's stream
+  through `server/outbound.ts` (`cappedChunks`, moved there from `oidc.ts`'s
+  `readCapped`), with a 2 MB total and a 64 KB line cap.
+- **A signed-in-only panel reads the session through the auth adapter**
+  (`adapter.ready()`, the one `GET /auth/session` the site already makes);
+  the shell is `aria-busy` until it knows. The form ships hidden, so with
+  JavaScript off only the greeting and the `<noscript>` line show.
+- **A new question after a failure** replaces Try again: the failed exchange
+  stays on screen, unsent. A stopped answer stays on screen too, without a
+  tag, so it is never sent again.
+- **Preview builds of backend sites** (gate, `test:visual`, thumbnails) use
+  `https://backend.invalid` as the backend and answer its session read in
+  the browser as "nobody signed in" (`scripts/visual/pipeline.mjs`) — a
+  preview never reaches a real server.
+- **§9 polish left for C3:** "Jump to latest", scroll following, the
+  transcript as focusable regions.
+
+### 19.3 What was measured
+
+`pnpm verify`, `pnpm test:chat` (82 checks, Chromium 153, Firefox 155,
+WebKit 26.6: signed-out refusal, streaming text, tagged follow-ups, the
+limit, Stop, Try again, literal text for hostile markup, only the site and
+the backend contacted, axe in each state, no CSP violation, no visitor or
+model words in the server log; a 400-token answer reached the status region
+in 4 updates), `pnpm test:backend-db` (the usage table on PostgreSQL 18.6
+and MySQL 8.4.11), `pnpm verify:build` (no chat key, URL or model id in any
+shipped file; a public-named chat key fails the build; the chat page's
+policy equals the plain page's, hashes aside).

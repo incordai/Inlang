@@ -177,7 +177,7 @@ async function suite(engine) {
     // The data tables on this engine (data-spec §14).
     await dataSuite(engine, db, () => (engine === 'postgres' ? openPostgres(c.url, false) : openMysql(c.url, false)), check, info);
 
-    // The chat's usage table on this engine (the chat block spec §12).
+    // The chat's usage table on this engine (docs/chat-block-spec.md §12).
     await chatSuite(engine, db, () => (engine === 'postgres' ? openPostgres(c.url, false) : openMysql(c.url, false)), check, c.url);
   } finally {
     // Closed whether the checks passed or threw: a server left listening

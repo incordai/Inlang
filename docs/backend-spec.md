@@ -32,7 +32,7 @@ site studio
   backend
     database sqlite          # sqlite | postgres | mysql
     email    smtp            # smtp | api
-    model    default         # optional: this server talks to a chat model (chat block spec)
+    model    default         # optional: this server talks to a chat model (chat-block-spec.md)
 ```
 
 `model default` is the third setting, optional, and `default` is its only

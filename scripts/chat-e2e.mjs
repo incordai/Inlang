@@ -97,7 +97,13 @@ page /open
 
 page /signup
   auth signup
-    alt "Sign in instead" /login
+    terms /terms
+    alt   "Sign in instead" /login
+
+page /terms
+  text
+    title "Terms"
+    body  "Plain terms."
 
 page /login
   auth login
@@ -267,6 +273,7 @@ async function signUp(page, name) {
   await form.locator('input[name="email"]').fill(`${name.toLowerCase()}-${randomBytes(3).toString('hex')}@lantern.test`);
   await form.locator('input[name="password"]').fill(PASSWORD);
   await form.locator('input[name="passwordConfirm"]').fill(PASSWORD);
+  await form.locator('input[name="terms"]').check();
   await form.getByRole('button', { name: 'Create account' }).click();
   await page.waitForURL((u) => !u.pathname.startsWith('/signup'), { timeout: STATE_MS });
 }
@@ -275,18 +282,30 @@ const panel = (page) => page.locator('[data-az-chat]');
 /** Wait until the panel's runtime has decided who may ask. */
 const ready = (page, state = 'idle') => page.waitForFunction((s) => document.querySelector('[data-az-chat]')?.getAttribute('data-az-chat-state') === s
   && document.documentElement.hasAttribute('data-az-ready'), state, { timeout: STATE_MS });
-/** The last answer's text, once it is no longer busy. */
-async function lastAnswer(page) {
-  await page.waitForFunction(() => {
+/** How many site messages the transcript holds (the greeting is one). */
+const answerCount = (page) => page.evaluate(() => document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site').length);
+/** The answer after the `before`-th, once it is no longer busy: its paragraphs, and how many elements in it are not one. */
+async function nextAnswer(page, before) {
+  await page.waitForFunction((n) => {
     const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
-    const last = items[items.length - 1];
-    return items.length > 1 && last.getAttribute('aria-busy') === 'false';
-  }, null, { timeout: STATE_MS });
+    return items.length > n && items[items.length - 1].getAttribute('aria-busy') === 'false';
+  }, before, { timeout: STATE_MS });
   return page.evaluate(() => {
     const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
     const last = items[items.length - 1];
-    return { paragraphs: [...last.querySelectorAll('p')].map((p) => p.textContent), elements: last.querySelectorAll('*').length };
+    return {
+      paragraphs: [...last.querySelectorAll(':scope > p')].map((p) => p.textContent),
+      elements: [...last.querySelectorAll('*')].filter((e) => !(e.tagName === 'P' && e.parentElement === last)).length,
+    };
   });
+}
+/** Send `text` from the input with Enter, and its answer. */
+async function ask(page, text) {
+  const before = await answerCount(page);
+  const input = panel(page).locator('[data-az-chat-input]');
+  await input.fill(text);
+  await input.press('Enter');
+  return nextAnswer(page, before);
 }
 /** axe on the page as it is: zero violations. */
 async function axe(page, label) {
@@ -345,11 +364,12 @@ async function anonymousFlow(b, name, origins) {
     await page.keyboard.press('Shift+Enter');
     await page.keyboard.type('second line');
     check(`${name}: Shift+Enter is a new line, not a send`, (await input.inputValue()) === `First line ${VISITOR_MARK}\nsecond line`);
+    const before = await answerCount(page);
     const said = await announcements(page, async () => {
       await page.keyboard.press('Enter');
       const busy = await page.waitForFunction(() => document.querySelector('.az-chat-transcript > .az-chat-message--site:last-child')?.getAttribute('aria-busy') === 'true', null, { timeout: STATE_MS }).then(() => true, () => false);
       check(`${name}: the answer is aria-busy while it streams`, busy);
-      const answer = await lastAnswer(page);
+      const answer = await nextAnswer(page, before);
       check(`${name}: the answer streams in as text, in paragraphs`,
         JSON.stringify(answer.paragraphs) === JSON.stringify([`Planted ${ANSWER_MARK}. Second sentence.`, 'A new paragraph.']),
         JSON.stringify(answer.paragraphs));
@@ -359,18 +379,14 @@ async function anonymousFlow(b, name, origins) {
     await axe(page, `${name} answered`);
 
     // A follow-up sends the tagged history; the server accepts it (no `tampered`).
-    await input.fill('And hostile?');
-    await input.press('Enter');
-    const hostile = await lastAnswer(page);
+    const hostile = await ask(page, 'And hostile?');
     check(`${name}: markup, images and links in an answer stay literal text — no element made`,
       hostile.paragraphs.join('') === HOSTILE && hostile.elements === 0, JSON.stringify(hostile));
     check(`${name}: nothing in the transcript is an image, script or link`,
       await page.locator('[data-az-chat-transcript] :is(img, script, a, iframe)').count() === 0);
 
     // The third question of three; after it the chat is full.
-    await input.fill('One more?');
-    await input.press('Enter');
-    await lastAnswer(page);
+    await ask(page, 'One more?');
     await page.waitForFunction(() => document.querySelector('[data-az-chat]')?.getAttribute('data-az-chat-state') === 'full', null, { timeout: STATE_MS });
     check(`${name}: past limit the panel says the chat is full and offers New chat`,
       await panel(page).getByText('This chat is full').isVisible() && await panel(page).locator('[data-az-chat-reset]').isVisible()
@@ -394,17 +410,11 @@ async function anonymousFlow(b, name, origins) {
     await input.press('Enter');
     await panel(page).locator('[data-az-chat-retry]').waitFor({ state: 'visible', timeout: STATE_MS });
     check(`${name}: a failed answer says so in fixed copy, with Try again`,
-      await panel(page).getByText('The answer could not be finished — try again.').isVisible());
+      (await panel(page).locator('[data-az-chat-error]').textContent()) === 'The answer could not be finished — try again.');
     await axe(page, `${name} error`);
 
-    // A long answer: few status updates, not one per token.
-    await panel(page).locator('[data-az-chat-reset]').click().catch(() => {});
-    await ready(page);
-    const long = await announcements(page, async () => {
-      await input.fill('a long answer please');
-      await input.press('Enter');
-      await lastAnswer(page);
-    });
+    // A long answer, asked instead of trying again: few status updates, not one per token.
+    const long = await announcements(page, () => ask(page, 'a long answer please'));
     check(`${name}: a 400-token answer reaches the status region in a few updates, not 400`, long.length >= 1 && long.length <= 12, `${long.length} updates`);
   } finally {
     closed = (await closeWithin(ctx, CLOSE_MS, `${name} anonymous context close`)) && closed;
@@ -421,8 +431,9 @@ async function signedInFlow(b, name, origins) {
     await ready(page);
     check(`${name}: signed in, the default panel shows its form and suggestions`,
       await panel(page).locator('[data-az-chat-form]').isVisible() && await panel(page).locator('[data-az-chat-asks]').isVisible());
+    const before = await answerCount(page);
     await panel(page).getByRole('button', { name: 'How bright is it?' }).click();
-    const answer = await lastAnswer(page);
+    const answer = await nextAnswer(page, before);
     check(`${name}: a suggested question asks itself and is answered`,
       answer.paragraphs.join('') === 'It is bright: 800 lumens. Dimmable too.', JSON.stringify(answer.paragraphs));
     check(`${name}: the suggestions are gone once a question is asked`, !(await panel(page).locator('[data-az-chat-asks]').isVisible()));

@@ -463,15 +463,19 @@ data-spec §18.8; measured in `pnpm test`, `pnpm test:backend-db` and
 Open: gate snapshots of the `from` states; gallery `carousel`, `orbit` and
 `lightbox` with `from` (AZ1214 today).
 
-**Chat (chat-spec) — proposed 2026-10-15, awaiting owner approval; nothing
-built.** A 12th block, `chat` (`panel`, `float`), approved in principle: a
-visitor asks, the generated server asks the model the operator chose in
-`server/.env` (`backend` gains `model default`; no provider in the file), and
-the answer streams back as text plus the site's own `pricing` (quoted), `faq`,
-`cta` and `feature` — the model writes a small `.az` subset, the server parses
-it into typed events, and the page only fills build-made templates with text.
-Phases C1 (text chat) … C4 (operations), about five weeks; it needs the PRD
-§6.2 cap exception first (chat-spec §17 Q1). Open questions: chat-spec §17.
+**Chat (chat-block-spec) — approved 2026-10-15 with every recommendation;
+C0 and C1 built 2026-10-15.** `chat` is the 12th block, the one dated
+exception to the cap (PRD §6.2, §6.8). C1 ships `chat panel` with prose
+answers: `backend … model default`, the `/chat` route (the /data edge, a
+`fetch`-stream SSE answer, per-address and per-account limits, a per-answer
+token cap, a daily budget in `az_chat_usage`, the kill switch, a 4/16 queue,
+timeouts, abort on disconnect, HMAC-tagged history), the `completions` and
+`fake` adapters (fetch only), the secret guard refusing `AZ_PUBLIC_CHAT_*`,
+and `az dev` on `fake`. Measured in `pnpm verify`, `pnpm test:chat` (three
+engines), `pnpm test:backend-db` and `pnpm verify:build` — chat-block-spec
+§19. Open: C2 (components in answers, `az backend probe`), C3 (`float`,
+`knows`, §9's scroll polish), C4 (doctor/audit checks, moderation, a second
+adapter if wanted).
 
 **M5 — not started.**
 

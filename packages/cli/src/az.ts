@@ -42,6 +42,7 @@ import { MarkdownError } from '../../target-web/src/markdown.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
 import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
+import { CONTEXT_MAX, chatBackend } from '../../backend/src/chat-context.ts';
 import type { Served } from './serve.ts';
 import { BUNDLED_WORDS, eject, loadWords, wordExamples } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
@@ -317,6 +318,8 @@ export function build(options: BuildOptions): BuildOutcome {
   }
   const { assets, modules } = project;
   const tables = result.spec.site.data;
+  // What the chat server is told (chat-block-spec §8.1), only for a site with a chat panel and a backend.
+  const chat = project.chat && result.spec.site.backend ? chatBackend(result.spec) : undefined;
   // The behaviour runtime ships with every site, copied verbatim from the
   // overlay package into RUNTIME_DIR — part of the output, so it is written
   // and checked like any emitted file. The build guard's scanner and the
@@ -340,11 +343,12 @@ export function build(options: BuildOptions): BuildOutcome {
     // The built-in backend only with a site that declares one (backend-spec §8);
     // its data modules only with a site that declares tables (data-spec §6),
     // whose lock compile() has already checked against the file.
+    // Its chat modules, prompt and context only with a chat panel (chat-block-spec §4.4).
     ...(result.spec.site.backend
       ? [...backendFiles(result.spec.site.name, result.spec.site.backend,
-          tables ? { tables, steps: readLockSteps(options.source) } : undefined),
+          tables ? { tables, steps: readLockSteps(options.source) } : undefined, chat),
          ...copied('../../backend/src/server/', `${SERVER_DIR}/src`, (f) => (tables !== undefined || !f.startsWith('data-'))
-           && (project.chat || !f.startsWith('chat')))]
+           && (chat !== undefined || !f.startsWith('chat')))]
       : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
   // A preview says so on every page, with the whole file's problems.
@@ -402,7 +406,9 @@ export function build(options: BuildOptions): BuildOutcome {
   const heavy = located.sources
     .filter((source) => source.toLowerCase().endsWith('.glb') && statSync(source).size > MODEL_BUDGET_BYTES)
     .map((source) => `warning: model '${basename(source)}' is ${(statSync(source).size / MB).toFixed(1)}MB — Draco-compress it or the page will stall on mobile (budget ${MODEL_BUDGET_BYTES / MB}MB)`);
-  const read = [...project.warnings, ...(resizer?.warnings ?? []), ...galleryOverBudget(spec, projectDir)]
+  // chat-block-spec §8.1: a page that would push the site context past its cap is left out whole, and said (AZ1257).
+  const leftOut = (chat?.omitted ?? []).map((route) => `AZ1257 chat: the site context is over ${CONTEXT_MAX} characters — ${route} is left out; shorten pages or move chat to fewer`);
+  const read = [...project.warnings, ...(resizer?.warnings ?? []), ...galleryOverBudget(spec, projectDir), ...leftOut]
     .map((w) => `warning: ${w}`);
   const full = [report, ...read, ...heavy].filter(Boolean).join('\n');
   if (preview) {
@@ -914,7 +920,7 @@ async function runDev(file: string, outDir: string, wordsDir: string, rest: stri
       if (started) return;
       dataAtStart = dataJson;
       const config = outcome.files.find((f) => f.path === 'server/az.config.json');
-      // A chat's prompt and context, as the build wrote them (the chat block spec §8.1).
+      // A chat's prompt and context, as the build wrote them (docs/chat-block-spec.md §8.1).
       const prompt = outcome.files.find((f) => f.path === 'server/chat/prompt.txt')?.content;
       const context = outcome.files.find((f) => f.path === 'server/chat/context.json')?.content;
       const backend = config

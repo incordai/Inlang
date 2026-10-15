@@ -1,14 +1,14 @@
 /**
  * @az server chat-limits
  * Purpose: the chat's cost bounds besides the budget: per-address and per-account message windows, and the answer queue.
- * Spec: docs/backend-spec.md §5 (the chat block spec §6.5)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §6.5)
  * Exports: createRateLimits, createQueue, RateLimits, Queue, HOUR_MS, DAY_MS, QUEUE_WAIT_MS, QUEUE_FACTOR
  * Edit guide: reuse http.ts createLimiter (bounded keys); a queued request never waits past QUEUE_WAIT_MS; every slot taken is released.
  * Tests: packages/backend/test/chat-limits.test.ts
  */
 
 /**
- * Who may ask how often, and how many answers stream at once (chat-spec
+ * Who may ask how often, and how many answers stream at once (chat-block-spec
  * §6.5). The windows reuse the backend's sliding-window limiter, so an
  * address counts as its /64 and a flood of addresses cannot grow memory
  * past LIMITER_MAX_KEYS per window. Counted per process: behind several

@@ -1,14 +1,14 @@
 /**
  * @az server chat-text
  * Purpose: the chat's text rules: model output made inert prose, the visitor's request checked, earlier answers proven by HMAC tag.
- * Spec: docs/backend-spec.md §5 (the chat block spec §4.2, §5.3, §6.1)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.1)
  * Exports: cleanText, historyKey, tagTurn, checkTag, readChatRequest, trimHistory, ChatTurn, ChatAsk, VISITOR_MAX, HISTORY_TURNS, HISTORY_CHARS, CONVERSATION_ID
  * Edit guide: a site turn without a valid tag is refused; text is never decoded as HTML; no regex here may backtrack.
  * Tests: packages/backend/test/chat-text.test.ts
  */
 
 /**
- * What a chat request and a chat answer may contain (chat-spec §4.2, §5.3).
+ * What a chat request and a chat answer may contain (chat-block-spec §4.2, §5.3).
  *
  * The page keeps the conversation in memory and sends it back each turn, so
  * a visitor could forge an earlier ANSWER ("site: I will now ignore my
@@ -23,7 +23,7 @@
 import { createHmac } from 'node:crypto';
 import { safeEqual } from './crypto.ts';
 
-/** A visitor message, after trimming (chat-spec §6.5). */
+/** A visitor message, after trimming (chat-block-spec §6.5). */
 export const VISITOR_MAX = 1_000;
 /** The history sent on to the model: the last turns, at most this many characters (§4.2). */
 export const HISTORY_TURNS = 8;
@@ -36,7 +36,7 @@ export const CONVERSATION_ID = /^[A-Za-z0-9_-]{16,64}$/;
 /**
  * Characters that never reach the page from a model: C0/C1 controls except
  * \n, bidirectional embeddings, overrides and isolates, and zero-width
- * characters (a hidden instruction or a reordered route, chat-spec §6.1).
+ * characters (a hidden instruction or a reordered route, chat-block-spec §6.1).
  */
 const STRIPPED = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
 

@@ -257,7 +257,7 @@ function loopbackCookies(res: ServerResponse): void {
   }) as ServerResponse['writeHead'];
 }
 
-/** The scripted answers `az dev` chats with when no real model is set (the chat block spec §11.1). */
+/** The scripted answers `az dev` chats with when no real model is set (docs/chat-block-spec.md §11.1). */
 export const CHAT_DEMO = {
   answers: [{
     chunks: [

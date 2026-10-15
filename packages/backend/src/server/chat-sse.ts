@@ -1,14 +1,14 @@
 /**
  * @az server chat-sse
  * Purpose: server-sent-event framing both ways: a bounded line reader for a model's stream, and the writer for the page's.
- * Spec: docs/backend-spec.md §5 (the chat block spec §4.2, §4.3)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §4.3)
  * Exports: createSseReader, sseEvent, SseEvent, SseLimitError, SSE_LINE_MAX
  * Edit guide: linear in the bytes read; a line past the cap throws, never grows; one JSON object per data line written.
  * Tests: packages/backend/test/chat-sse.test.ts
  */
 
 /**
- * Server-sent events, by hand (chat-spec §4.3: the format is a few dozen
+ * Server-sent events, by hand (chat-block-spec §4.3: the format is a few dozen
  * lines and no package is worth its supply chain). The READER takes a
  * model's response body as byte chunks split anywhere — inside a line,
  * inside a UTF-8 sequence — and hands out whole events; the WRITER frames

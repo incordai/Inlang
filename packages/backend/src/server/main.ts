@@ -164,7 +164,7 @@ if (existsSync(dataFile)) {
   }
 }
 // The chat route, only when a page shows a chat: its modules, prompt and
-// context are part of the build only then (the chat block spec §10).
+// context are part of the build only then (docs/chat-block-spec.md §10).
 let chat: ChatRoutes | undefined;
 if (config.chat) {
   const { migrateChat } = await import('./chat-usage.ts');

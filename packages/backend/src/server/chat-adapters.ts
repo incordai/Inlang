@@ -1,14 +1,14 @@
 /**
  * @az server chat-adapters
  * Purpose: the model behind the chat, as thin adapters named by wire shape: `completions` over fetch, and `fake` from a scripted file.
- * Spec: docs/backend-spec.md §5 (the chat block spec §4.3)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.3)
  * Exports: ChatAdapter, ChatChunk, ChatStreamRequest, AdapterError, createCompletionsAdapter, createFakeAdapter, parseFakeScript, createAdapter, FakeScript, RESPONSE_MAX
  * Edit guide: no vendor names, no SDK; the body is read through outbound.ts cappedChunks against RESPONSE_MAX; an error's log form is its class and HTTP status only.
  * Tests: packages/backend/test/chat-adapters.test.ts
  */
 
 /**
- * Provider adapters (chat-spec §4.3). One interface, and each adapter a
+ * Provider adapters (chat-block-spec §4.3). One interface, and each adapter a
  * thin proxy that only moves text: the endpoint, key and model id come from
  * the server's .env, never from code, and no provider is named here.
  *
@@ -39,7 +39,7 @@ export interface ChatChunk {
 }
 
 export interface ChatStreamRequest {
-  /** The prompt and the site context (chat-spec §8.3). */
+  /** The prompt and the site context (chat-block-spec §8.3). */
   readonly system: string;
   readonly turns: readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
   readonly maxOutputTokens: number;

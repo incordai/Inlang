@@ -1,14 +1,14 @@
 /**
  * @az module chat-context
  * Purpose: what a chat's model is told, built from the Spec: server/chat/prompt.txt and server/chat/context.json.
- * Spec: docs/backend-spec.md §8 (the chat block spec §8.1)
+ * Spec: docs/backend-spec.md §8 (docs/chat-block-spec.md §8.1)
  * Exports: chatBackend, BackendChat, CONTEXT_MAX, CHAT_PROMPT
  * Edit guide: deterministic (a function of the Spec only, keys sorted); public content only — never a protected page, never .env.
  * Tests: packages/backend/test/chat-context.test.ts
  */
 
 /**
- * The site context a chat answers from (chat-spec §8.1), written by
+ * The site context a chat answers from (chat-block-spec §8.1), written by
  * `az build` beside the server. It is public content by construction —
  * everything in it is already on a page any visitor can open — and it is a
  * readable file, so "what does the model see" always has a literal answer.

@@ -319,12 +319,14 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   };
 
   const ask = (raw: string) => {
-    if (mode !== 'ready' || streaming || pending !== null) return;
+    if (mode !== 'ready' || streaming) return;
     const text = visitorText(raw);
     if (text === null) {
       if (raw.trim() !== '') showError(CHAT_TEXT.tooLong);
       return;
     }
+    // A new question instead of Try again: the failed one stays on screen, unsent.
+    if (pending !== null) showError('');
     pending = text;
     addMessage('visitor', text);
     p.input.value = '';

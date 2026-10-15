@@ -1,14 +1,14 @@
 /**
  * @az server chat-usage
  * Purpose: the chat's daily counters — the az_chat_usage table, its migrations, one upsert per answer, the 400-day sweep.
- * Spec: docs/backend-spec.md §3, §5 (the chat block spec §6.5, §6.7)
+ * Spec: docs/backend-spec.md §3, §5 (docs/chat-block-spec.md §6.5, §6.7)
  * Exports: CHAT_MIGRATIONS, migrateChat, createUsage, utcDay, Usage, USAGE_KEEP_DAYS
  * Edit guide: counts only, never text or a person; one statement per answer (pooler-safe); append a step, never edit a shipped one.
  * Tests: packages/backend/test/chat-usage.test.ts
  */
 
 /**
- * The budget must survive a restart (chat-spec §6.5), so what chat has
+ * The budget must survive a restart (chat-block-spec §6.5), so what chat has
  * spent is a table: one row per UTC day with token and message counts. It
  * holds nothing about anyone — no address, no account, no text — so there
  * is nothing in it to erase for a person (§6.7).

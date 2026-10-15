@@ -27,15 +27,16 @@ function project(source: string) {
 const env = { ...process.env, AZ_PUBLIC_BACKEND_URL: 'http://127.0.0.1:8787' };
 const az = (...args: string[]) => spawnSync(process.execPath, [...process.execArgv, BIN, ...args], { encoding: 'utf8', env: { ...env, AZ_WORDS: WORDS } });
 
-test('a site that declares a backend gets server/ with every source file copied verbatim — the data modules only with tables', () => {
+test('a site that declares a backend gets server/ with every source file copied verbatim — the data modules only with tables, the chat modules only with a chat panel', () => {
   process.env.AZ_PUBLIC_BACKEND_URL = 'http://127.0.0.1:8787';
   const p = project(SITE(BACKEND));
   const r = build({ source: p.file, outDir: p.out, wordsDir: WORDS });
   assert.equal(r.ok, true, r.report);
   const src = join(ROOT, 'packages/backend/src/server');
+  assert.ok(readdirSync(src).some((f) => f.startsWith('chat')), 'CONTROL: the server has chat modules to leave out');
   for (const f of readdirSync(src)) {
-    if (f.startsWith('data-')) {
-      assert.ok(!existsSync(join(p.out, 'server/src', f)), `${f}: no tables, no data module`);
+    if (f.startsWith('data-') || f.startsWith('chat')) {
+      assert.ok(!existsSync(join(p.out, 'server/src', f)), `${f}: no tables or chat, no such module`);
       continue;
     }
     assert.equal(readFileSync(join(p.out, 'server/src', f), 'utf8'), readFileSync(join(src, f), 'utf8'), f);
@@ -50,10 +51,21 @@ test('a site that declares a backend gets server/ with every source file copied 
   assert.equal(az('backend', 'schema', d.file).status, 0);
   const withData = build({ source: d.file, outDir: d.out, wordsDir: WORDS });
   assert.equal(withData.ok, true, withData.report);
-  for (const f of readdirSync(src)) {
+  for (const f of readdirSync(src).filter((x) => !x.startsWith('chat'))) {
     assert.equal(readFileSync(join(d.out, 'server/src', f), 'utf8'), readFileSync(join(src, f), 'utf8'), `with tables: ${f}`);
   }
   for (const f of ['data.json', 'openapi.json']) assert.ok(existsSync(join(d.out, 'server', f)), `with tables: ${f}`);
+
+  // A chat panel brings the chat modules, its prompt and context — and no data modules.
+  const c = project(SITE(`${BACKEND}    model default\n`).replace('    title "Hi"\n', '    title "Hi"\n  chat panel\n'));
+  const withChat = build({ source: c.file, outDir: c.out, wordsDir: WORDS });
+  assert.equal(withChat.ok, true, withChat.report);
+  for (const f of readdirSync(src)) {
+    if (f.startsWith('data-')) { assert.ok(!existsSync(join(c.out, 'server/src', f)), `chat, no tables: ${f}`); continue; }
+    assert.equal(readFileSync(join(c.out, 'server/src', f), 'utf8'), readFileSync(join(src, f), 'utf8'), `with chat: ${f}`);
+  }
+  for (const f of ['chat/prompt.txt', 'chat/context.json']) assert.ok(existsSync(join(c.out, 'server', f)), `with chat: ${f}`);
+  assert.ok(!existsSync(join(p.out, 'server/chat')), 'CONTROL: without chat, no server/chat/');
 });
 
 test('CONTROL: a site without one gets no server/ at all', () => {

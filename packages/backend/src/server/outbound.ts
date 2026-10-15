@@ -1,7 +1,7 @@
 /**
  * @az server outbound
  * Purpose: reading what another server answered, bounded: a body's chunks under a byte cap, cancelled the moment it is passed.
- * Spec: docs/backend-spec.md §6, §7 (and the chat block spec §4.3)
+ * Spec: docs/backend-spec.md §6, §7 (and docs/chat-block-spec.md §4.3)
  * Exports: cappedChunks, readCapped, BodyTooLarge
  * Edit guide: every byte read counts; past the cap the reader is cancelled (the connection drops) before the error; no message quotes the body.
  * Tests: packages/backend/test/outbound.test.ts, packages/backend/test/security.test.ts, packages/backend/test/chat-adapters.test.ts

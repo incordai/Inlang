@@ -135,7 +135,7 @@ export interface AppDeps {
   readonly oidc: Oidc;
   /** The /data routes (data-spec §5); absent, /data is 404 like any unknown path. */
   readonly data?: DataRoutes;
-  /** POST /chat (the chat block spec §4.2); absent, /chat is 404 like any unknown path. */
+  /** POST /chat (docs/chat-block-spec.md §4.2); absent, /chat is 404 like any unknown path. */
   readonly chat?: ChatRoutes;
   readonly now?: () => number;
   /** Operational log. Never passed a password, token, secret or address. */
@@ -550,7 +550,7 @@ export function createApp(deps: AppDeps) {
     }
 
     if (deps.chat && url.pathname === '/chat') {
-      // The /data edge (chat-spec §4.2): an allowed origin always, exact
+      // The /data edge (chat-block-spec §4.2): an allowed origin always, exact
       // CORS, and the CSRF header on the one method that does anything.
       const origin = req.headers.origin ?? '';
       if (!allowed.has(origin)) return send(res, 403, { error: 'unknown' });
