@@ -9,14 +9,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  CHAT_TEXT, EVENT_LINE_MAX, createEventReader, finishedSentences, leftCopy, parseChatConfig, problemCopy, visitorText, type ChatEvent,
+  BLOCK_LIMITS, CHAT_TEXT, EVENT_LINE_MAX, allowedDestination, blockCopy, createEventReader, finishedSentences, leftCopy, linkKind,
+  parseChatConfig, problemCopy, visitorText, type ChatEvent,
 } from '../src/runtime/chat-logic.ts';
 
 const CONFIG = { page: '/pricing', allow: 'signedin', limit: 20, signin: '/login' };
+/** A prose-only shell's config, as parsed: nothing to show, nowhere to link. */
+const PARSED = { ...CONFIG, show: [], to: [] };
 
 test('the config the chat word writes parses; anything else is refused, not guessed at', () => {
-  assert.deepEqual(parseChatConfig(JSON.stringify(CONFIG)), CONFIG);
-  assert.deepEqual(parseChatConfig(JSON.stringify({ ...CONFIG, allow: 'anyone', signin: null })), { ...CONFIG, allow: 'anyone', signin: null });
+  assert.deepEqual(parseChatConfig(JSON.stringify(CONFIG)), PARSED);
+  assert.deepEqual(parseChatConfig(JSON.stringify({ ...CONFIG, allow: 'anyone', signin: null })), { ...PARSED, allow: 'anyone', signin: null });
   for (const bad of [
     null, '', '{', '[]', '1',
     JSON.stringify({ ...CONFIG, page: 'https://elsewhere.example/' }),
@@ -34,11 +37,11 @@ test('the config the chat word writes parses; anything else is refused, not gues
 const STREAM = 'event: text\ndata: {"s":"Héllo — 🌍 "}\n\n'
   + ': a comment line\n'
   + 'event: text\r\ndata: {"s":"world.\\n\\nNext"}\r\n\r\n'
-  + 'event: done\rdata: {"tag":"AbCdEfGhIjKlMnOpQrStUv","left":19,"conversation":"c0nversation-id-01"}\r\r';
+  + 'event: done\rdata: {"tag":"AbCdEfGhIjKlMnOpQrStUv","left":19,"conversation":"c0nversation-id-01","text":"Héllo — 🌍 world.\\n\\nNext"}\r\r';
 const EXPECTED: ChatEvent[] = [
   { type: 'text', s: 'Héllo — 🌍 ' },
   { type: 'text', s: 'world.\n\nNext' },
-  { type: 'done', tag: 'AbCdEfGhIjKlMnOpQrStUv', left: 19, conversation: 'c0nversation-id-01' },
+  { type: 'done', tag: 'AbCdEfGhIjKlMnOpQrStUv', left: 19, conversation: 'c0nversation-id-01', text: 'Héllo — 🌍 world.\n\nNext' },
 ];
 
 const read = (pieces: readonly string[]) => {
@@ -58,7 +61,8 @@ test('the event reader gives the same events however the stream is split — at 
 
 test('CONTROL: an event the server never sends, or one of the wrong shape, is dropped — never guessed at', () => {
   const events = read([
-    'event: block\ndata: {"quote":"pricing"}\n\n',              // C2's event: unknown here
+    'event: block\ndata: {"quote":"pricing"}\n\n',              // a quote without its page
+    'event: done\ndata: {"tag":"AbCdEfGhIjKlMnOpQrStUv","left":1,"conversation":"c0nversation-id-01"}\n\n', // no record to send back
     'event: text\ndata: {"s":3}\n\n',                           // wrong type
     'event: text\ndata: not json\n\n',
     'data: {"s":"no event name"}\n\n',
@@ -68,6 +72,80 @@ test('CONTROL: an event the server never sends, or one of the wrong shape, is dr
     'event: error\ndata: {"code":"unavailable"}\n\n',
   ]);
   assert.deepEqual(events, [{ type: 'error', code: 'unavailable' }]);
+});
+
+/* ---- C2: components (chat-block-spec §4.2, §5.4, §6.2) ------------------ */
+
+const SHOWN = { ...CONFIG, show: ['pricing', 'faq', 'cta', 'feature'], to: ['/', '/contact', '/pricing#plans', 'https://docs.example.org/start', 'mailto:help@example.org', 'tel:+15550100'] };
+
+test('a shell that shows components lists them and its destinations; a word, scheme or address outside them refuses the config', () => {
+  assert.deepEqual(parseChatConfig(JSON.stringify(SHOWN)), SHOWN);
+  for (const bad of [
+    { ...SHOWN, show: ['auth'] },
+    { ...SHOWN, show: ['faq', 'faq'] },
+    { ...SHOWN, show: 'faq' },
+    { ...SHOWN, to: ['javascript:alert(1)'] },
+    { ...SHOWN, to: ['JAVASCRIPT:alert(1)'] },
+    { ...SHOWN, to: ['data:text/html,<b>x</b>'] },
+    { ...SHOWN, to: ['http://example.org/'] },
+    { ...SHOWN, to: ['//evil.example/'] },
+    { ...SHOWN, to: ['/\\evil.example'] },
+    { ...SHOWN, to: ['https://'] },
+    { ...SHOWN, to: ['/a b'] },
+    { ...SHOWN, to: [3] },
+  ]) {
+    assert.equal(parseChatConfig(JSON.stringify(bad)), null, JSON.stringify(bad.show) + JSON.stringify(bad.to));
+  }
+});
+
+test('a destination is followed as a route, https, mailto or tel — and allowed only when the shell lists it exactly', () => {
+  const config = parseChatConfig(JSON.stringify(SHOWN))!;
+  assert.deepEqual(['/contact', 'https://docs.example.org/start', 'mailto:help@example.org', 'tel:+15550100'].map(linkKind), ['route', 'https', 'mailto', 'tel']);
+  for (const to of ['javascript:alert(1)', 'vbscript:x', 'data:x', 'http://x.example', 'HTTPS://docs.example.org/start', '//x.example', 'popup:#x', 'copy:x', 'video:x', ' /contact', '/contact\n', '']) {
+    assert.equal(linkKind(to), null, to);
+  }
+  assert.ok(allowedDestination(config, '/contact'));
+  assert.ok(allowedDestination(config, 'https://docs.example.org/start'));
+  // Near is not on the list: another path, a query, a host that starts the same, a route with an anchor not written.
+  for (const to of ['/contact/', '/contact?x=1', '/Contact', 'https://docs.example.org/start?d=secret', 'https://docs.example.org.evil.example/start', '/pricing#other', 'mailto:attacker@evil.example']) {
+    assert.equal(allowedDestination(config, to), false, to);
+  }
+});
+
+const block = (data: unknown) => read([`event: block\ndata: ${JSON.stringify(data)}\n\n`]);
+
+test('each component event the server sends is read in its closed shape', () => {
+  assert.deepEqual(block({ quote: 'pricing', route: '/pricing', n: 0 }), [{ type: 'block', block: { kind: 'quote', route: '/pricing', n: 0 } }]);
+  assert.deepEqual(block({ faq: [{ q: 'Can I cancel?', a: 'Yes, any time.' }] }), [{ type: 'block', block: { kind: 'faq', items: [{ q: 'Can I cancel?', a: 'Yes, any time.' }] } }]);
+  assert.deepEqual(block({ cta: { label: 'Talk to us', to: '/contact' } }), [{ type: 'block', block: { kind: 'cta', label: 'Talk to us', to: '/contact' } }]);
+  assert.deepEqual(block({ feature: [{ title: 'Fast', text: '' }] }), [{ type: 'block', block: { kind: 'feature', items: [{ title: 'Fast', text: '' }] } }]);
+});
+
+test('CONTROL: a component event of any other shape is dropped — an extra key, a wrong type, past a cap, a script URL', () => {
+  const L = BLOCK_LIMITS;
+  const many = (n: number) => Array.from({ length: n }, (_, i) => ({ q: `Q${i}`, a: 'A' }));
+  for (const bad of [
+    { quote: 'faq', route: '/pricing', n: 0 },
+    { quote: 'pricing', route: 'https://evil.example/', n: 0 },
+    { quote: 'pricing', route: '/pricing', n: -1 },
+    { quote: 'pricing', route: '/pricing', n: 0, html: '<b>' },
+    { faq: [] }, { faq: many(L.items + 1) }, { faq: [{ q: 'x'.repeat(L.question + 1), a: 'A' }] }, { faq: [{ q: 'Q', a: '' }] },
+    { faq: [{ q: 'Q', a: 'A', img: 'https://evil.example/x.png' }] },
+    { cta: { label: 'Claim', to: 'javascript:alert(1)' } }, { cta: { label: 'Claim', to: 'https://evil.example/?d=1', target: '_blank' } },
+    { cta: { label: 'x'.repeat(L.label + 1), to: '/contact' } }, { cta: { label: '   ', to: '/contact' } },
+    { feature: [{ title: 'T' }] }, { feature: [{ title: 'T', text: 'x'.repeat(L.text + 1) }] },
+    { faq: [{ q: 'Q', a: 'A' }], cta: { label: 'L', to: '/' } },
+    { image: { src: 'https://evil.example/x.png' } }, { html: '<script>alert(1)</script>' }, { style: 'color:red' },
+  ]) {
+    assert.deepEqual(block(bad), [], JSON.stringify(bad));
+  }
+});
+
+test('the status region says what a component is, once (§9)', () => {
+  assert.equal(blockCopy({ kind: 'quote', route: '/pricing', n: 0 }, 2), 'Pricing table, 2 plans.');
+  assert.equal(blockCopy({ kind: 'faq', items: [{ q: 'a', a: 'b' }, { q: 'c', a: 'd' }, { q: 'e', a: 'f' }] }), '3 questions and answers.');
+  assert.equal(blockCopy({ kind: 'cta', label: 'Talk to us', to: '/contact' }), 'Link: Talk to us.');
+  assert.equal(blockCopy({ kind: 'feature', items: [{ title: 'a', text: '' }] }), 'A list of 1 item.');
 });
 
 test('a line longer than the cap breaks the stream: nothing after it is read', () => {
@@ -131,9 +209,20 @@ const SOURCES = ['chat.ts', 'chat-logic.ts'].map((f) => [f, readFileSync(new URL
 /** Every sink that would parse a string as HTML or run it, write a style, or keep the conversation. */
 const SINKS = [
   /\binnerHTML\b/, /\bouterHTML\b/, /\binsertAdjacentHTML\b/, /\bdocument\.write/, /\beval\s*\(/, /\bnew\s+Function\b/, /\bFunction\s*\(/,
-  /\bcreateContextualFragment\b/, /\bDOMParser\b/, /\bsetHTMLUnsafe\b/, /\.style\b/, /setAttribute\(\s*['"](?:style|href|src|on)/,
-  /\blocalStorage\b/, /\bsessionStorage\b/, /\bindexedDB\b/, /\bcreateElement\(\s*['"](?:img|script|iframe|a)['"]/,
+  /\bcreateContextualFragment\b/, /\bDOMParser\b/, /\bsetHTMLUnsafe\b/, /\.style\b/, /setAttribute\(\s*['"](?:style|src|srcset|on|formaction|action)/i,
+  /\blocalStorage\b/, /\bsessionStorage\b/, /\bindexedDB\b/, /\bcreateElement\(\s*['"](?:img|script|iframe|a)['"]/, /\.(?:href|src)\s*=/,
 ];
+
+test('a URL is written in exactly one place: setDestination, right after the allow-list check', () => {
+  const [, src] = SOURCES.find(([f]) => f === 'chat.ts')!;
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const writes = code.match(/setAttribute\(\s*['"]href['"]/g) ?? [];
+  assert.equal(writes.length, 1, 'one href write');
+  const fn = /function setDestination\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(code)?.[1] ?? '';
+  assert.match(fn, /allowedDestination\(config, to\)[\s\S]*return false;[\s\S]*setAttribute\('href', to\)/, 'the write follows the check');
+  // CONTROL: the other chat module writes none.
+  assert.equal(/setAttribute\(\s*['"]href/.test(SOURCES.find(([f]) => f === 'chat-logic.ts')![1]), false);
+});
 
 test('the chat runtime has no sink: no HTML parsing, no eval, no style or URL written, no storage', () => {
   for (const [file, src] of SOURCES) {
@@ -145,7 +234,7 @@ test('the chat runtime has no sink: no HTML parsing, no eval, no style or URL wr
 
 test('CONTROL: the scan finds a sink when one is there', () => {
   for (const line of ['el.innerHTML = s;', 'el.insertAdjacentHTML("beforeend", s);', 'eval(s);', 'new Function(s)', 'el.style.color = c;',
-    'el.setAttribute("href", u);', 'localStorage.setItem("chat", s);', 'document.createElement("img")']) {
+    'el.setAttribute("src", u);', 'el.setAttribute("onclick", u);', 'a.href = u;', 'img.src = u;', 'localStorage.setItem("chat", s);', 'document.createElement("img")']) {
     assert.ok(SINKS.some((s) => s.test(line)), line);
   }
 });

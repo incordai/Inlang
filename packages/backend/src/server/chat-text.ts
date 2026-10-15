@@ -1,8 +1,8 @@
 /**
  * @az server chat-text
- * Purpose: the chat's text rules: model output made inert prose, the visitor's request checked, earlier answers proven by HMAC tag.
+ * Purpose: the chat's request rules: the visitor's request checked, earlier answers proven by HMAC tag, the history trimmed.
  * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.1)
- * Exports: cleanText, historyKey, tagTurn, checkTag, readChatRequest, trimHistory, ChatTurn, ChatAsk, VISITOR_MAX, HISTORY_TURNS, HISTORY_CHARS, CONVERSATION_ID
+ * Exports: historyKey, tagTurn, checkTag, readChatRequest, trimHistory, ChatTurn, ChatAsk, VISITOR_MAX, HISTORY_TURNS, HISTORY_CHARS, CONVERSATION_ID
  * Edit guide: a site turn without a valid tag is refused; text is never decoded as HTML; no regex here may backtrack.
  * Tests: packages/backend/test/chat-text.test.ts
  */
@@ -21,6 +21,7 @@
  */
 
 import { createHmac } from 'node:crypto';
+import { ANSWER_LIMITS } from './chat-answer.ts';
 import { safeEqual } from './crypto.ts';
 
 /** A visitor message, after trimming (chat-block-spec §6.5). */
@@ -28,22 +29,10 @@ export const VISITOR_MAX = 1_000;
 /** The history sent on to the model: the last turns, at most this many characters (§4.2). */
 export const HISTORY_TURNS = 8;
 export const HISTORY_CHARS = 12_000;
-/** An answer as a `site` turn: the most prose one answer may hold, with room for nothing else. */
-const SITE_MAX = 4_000;
+/** An answer as a `site` turn: its record, as the answer parser caps it — prose and its components' lines. */
+const SITE_MAX = ANSWER_LIMITS.record;
 /** A conversation id: what randomToken makes, or a page's own of the same shape. */
 export const CONVERSATION_ID = /^[A-Za-z0-9_-]{16,64}$/;
-
-/**
- * Characters that never reach the page from a model: C0/C1 controls except
- * \n, bidirectional embeddings, overrides and isolates, and zero-width
- * characters (a hidden instruction or a reordered route, chat-block-spec §6.1).
- */
-const STRIPPED = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
-
-/** Model text as inert prose: stripped and NFC-normalised. Entities stay as written — nothing is decoded. */
-export function cleanText(text: string): string {
-  return text.replace(STRIPPED, '').normalize('NFC');
-}
 
 /** The history key: one HMAC step away from the session secret, so a tag is never a token digest. */
 export const historyKey = (secret: Buffer): Buffer => createHmac('sha256', secret).update('az-chat-history-v1').digest();

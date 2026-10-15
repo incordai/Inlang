@@ -42,6 +42,7 @@ import { ROOT, buildSites } from './visual/pipeline.mjs';
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 import { selfSignedCert } from './lib/self-signed.mjs';
+import { chunksOf, corpusCases, corpusRules } from '../packages/backend/test/chat-corpus.ts';
 
 /* Deadlines (lib/bounded.mjs): a normal run takes about a minute. */
 const RUN_MS = 10 * 60_000;
@@ -80,6 +81,8 @@ site lantern
 page /
   hero center
     title "Lantern"
+    cta   "Docs" https://docs.lantern.example/start
+    alt   "Mail us" mailto:help@lantern.example
   chat panel
     title    "Ask Lantern"
     greeting "Hi! Ask me about the lamps."
@@ -94,6 +97,34 @@ page /open
     greeting "Anyone may ask here."
     allow    anyone
     limit    3
+
+page /ask
+  hero center
+    title "Ask about Lantern"
+  chat panel
+    title    "Ask about plans"
+    greeting "Ask me anything about Lantern."
+    show     pricing faq cta feature
+    allow    anyone
+    limit    50
+
+page /pricing
+  pricing cards
+    title    "Plans"
+    currency usd
+    plan "Home"
+      monthly 9
+      annual  90
+      cta     "Start" /signup
+    plan "Studio"
+      monthly 29
+      annual  290
+      cta     "Start" /signup
+
+page /contact
+  text
+    title "Contact"
+    body  "Write to us."
 
 page /signup
   auth signup
@@ -111,9 +142,14 @@ page /login
     alt      "Create an account" /signup
 `;
 
-/** The fake model's script (AZ_CHAT_FAKE_FILE): the first entry whose `when` the question holds. */
+/** The injection corpus (packages/backend/test/fixtures/chat-attacks/): each hostile answer, and the rules it is judged on. */
+const CORPUS = corpusCases();
+const RULES = corpusRules();
+
+/** The fake model's script (AZ_CHAT_FAKE_FILE): the first entry whose `when` the question holds — the corpus first. */
 const FAKE = {
   answers: [
+    ...CORPUS.map((c) => ({ when: c.ask, chunks: chunksOf(c.answer), delayMs: 5 })),
     { when: 'bright', chunks: ['It is bright: ', '800 lumens. ', 'Dimmable too.'], delayMs: 20 },
     { when: VISITOR_MARK, chunks: [`Planted ${ANSWER_MARK}. `, 'Second sentence.', '\n\nA new paragraph.'], delayMs: 20 },
     { when: 'hostile', chunks: [HOSTILE] },
@@ -223,6 +259,13 @@ mkdirSync(join(serverDir, 'node_modules'), { recursive: true });
 symlinkSync(realpathSync(join(ROOT, 'node_modules/nodemailer')), join(serverDir, 'node_modules/nodemailer'), 'dir');
 const fakeFile = join(work, 'fake-model.json');
 writeFileSync(fakeFile, JSON.stringify(FAKE));
+// The corpus is judged on the rules this site's build wrote: they must be the fixtures' rules.json.
+{
+  const context = JSON.parse(await readFile(join(serverDir, 'chat/context.json'), 'utf8'));
+  const same = JSON.stringify(context.answer) === JSON.stringify({ destinations: RULES.destinations, quotes: RULES.quotes.map(({ n, route, word }) => ({ n, route, word })) })
+    && JSON.stringify(context.chats['/ask']?.show) === JSON.stringify(RULES.show);
+  check('the built server\'s chat context is the corpus\'s rules (show, quotes, destinations)', same, JSON.stringify({ answer: context.answer, show: context.chats['/ask']?.show }));
+}
 const child = spawn(process.execPath, ['src/main.ts'], {
   cwd: serverDir,
   env: {
@@ -232,6 +275,8 @@ const child = spawn(process.execPath, ['src/main.ts'], {
     AZ_SQLITE_PATH: join(serverDir, 'data/test.db'),
     AZ_EMAIL_FROM: 'Lantern <no-reply@lantern.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(smtp.port),
     AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: fakeFile,
+    // Three engines ask the whole corpus: room for it under the per-address limit and the day's budget.
+    AZ_CHAT_PER_ADDRESS: '500/hour', AZ_CHAT_DAILY_TOKENS: '100000000',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -443,6 +488,114 @@ async function signedInFlow(b, name, origins) {
   }
 }
 
+/* ---- C2: components and the injection corpus, through the real page ---- */
+
+/** The paragraphs the page draws from a piece of prose (overlay chat.ts paragraphsOf). */
+const paragraphsOf = (text) => text.split(/\n{2,}/).map((p) => p.replace(/^\n+|\n+$/g, '')).filter((p) => p !== '');
+
+/** What the last answer shows, in order: its paragraphs and its parts, each read back from the DOM as a visitor's browser has it. */
+const lastAnswer = (page) => page.evaluate(() => {
+  const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
+  const last = items[items.length - 1];
+  const parts = [...last.children].map((el) => {
+    if (el.tagName === 'P') return { kind: 'p', text: el.textContent };
+    if (!el.classList.contains('az-chat-part')) return { kind: `unexpected ${el.tagName}` };
+    if (el.querySelector('.az-pricing')) return { kind: 'quote', prices: [...el.querySelectorAll('[data-monthly]')].map((p) => p.textContent) };
+    if (el.querySelector('.az-faq-item')) return { kind: 'faq', items: [...el.querySelectorAll('.az-faq-item')].map((i) => [i.querySelector('.az-faq-toggle')?.textContent, i.querySelector('.az-faq-answer p')?.textContent]) };
+    if (el.querySelector('.az-feature-item')) {
+      return { kind: 'feature', items: [...el.querySelectorAll('.az-feature-item')].map((i) => [i.querySelector('.az-feature-item-title')?.textContent ?? '', i.querySelector('.az-feature-item-text')?.textContent ?? '']) };
+    }
+    const a = el.querySelector('a.az-action');
+    if (a) return { kind: 'cta', label: a.textContent, href: a.getAttribute('href') };
+    return { kind: 'unknown part' };
+  });
+  return { busy: last.getAttribute('aria-busy'), parts };
+});
+
+/** What a case's events must look like on the page: its prose as paragraphs, then each component (every corpus answer puts its prose first). */
+function expectedParts(expect) {
+  const out = paragraphsOf(expect.text).map((text) => ({ kind: 'p', text }));
+  for (const b of expect.blocks) {
+    if (b.quote) out.push({ kind: 'quote' });
+    else if (b.faq) out.push({ kind: 'faq', items: b.faq.map((i) => [i.q, i.a]) });
+    else if (b.cta) out.push({ kind: 'cta', label: b.cta.label, href: b.cta.to });
+    else if (b.feature) out.push({ kind: 'feature', items: b.feature.map((i) => [i.title, i.text]) });
+  }
+  return out;
+}
+
+/** The DOM of every answer: nothing that loads, runs or styles itself, and every link one of the file's own destinations. */
+const answerHazards = (page, allowed) => page.evaluate((allowed) => {
+  const root = document.querySelector('[data-az-chat-transcript]');
+  const bad = [];
+  for (const el of root.querySelectorAll('img, script, iframe, object, embed, style, link, meta, form, video, audio, source, picture, base')) bad.push(el.tagName);
+  for (const el of root.querySelectorAll('*')) {
+    for (const a of el.attributes) if (/^on/i.test(a.name) || a.name === 'style' || a.name === 'srcset' || a.name === 'src') bad.push(`${el.tagName}[${a.name}]`);
+  }
+  for (const a of root.querySelectorAll('[href]')) if (!allowed.includes(a.getAttribute('href'))) bad.push(`href ${a.getAttribute('href')}`);
+  return bad;
+}, allowed);
+
+async function componentsFlow(b, name, origins) {
+  const ctx = await watchedContext(b, csp, CONTEXT);
+  try {
+    const page = await ctx.newPage();
+    recordRequests(page, origins);
+    page.on('dialog', (d) => { check(`${name}: no dialog ever opens`, false, d.message()); void d.dismiss(); });
+    await page.goto(`${host.url}/ask`);
+    await ready(page);
+
+    // U1/U3: prose, the site's own pricing table, a composed FAQ, a call to action, a list.
+    const legal = CORPUS.find((c) => c.name === 'legal');
+    const legalAt = await answerCount(page);
+    const said = await announcements(page, () => ask(page, legal.ask));
+    const shown = await lastAnswer(page);
+    const kinds = shown.parts.map((p) => p.kind);
+    check(`${name}: an answer shows prose, then the quoted pricing, a composed FAQ, a call to action and a list, in order`,
+      JSON.stringify(kinds) === JSON.stringify(['p', 'quote', 'faq', 'cta', 'feature']) && shown.busy === 'false', JSON.stringify(shown.parts));
+    check(`${name}: the quoted pricing is the author's — their prices, never the model's`,
+      JSON.stringify(shown.parts[1]?.prices) === JSON.stringify(['$9.00', '$29.00']), JSON.stringify(shown.parts[1]));
+    check(`${name}: the components hold the answer's text exactly`,
+      JSON.stringify(shown.parts.slice(2)) === JSON.stringify(expectedParts(legal.expect).slice(2)), JSON.stringify(shown.parts.slice(2)));
+    check(`${name}: the status region names each component once`,
+      ['Pricing table, 2 plans.', '1 question and answer.', 'Link: Talk to us.', 'A list of 2 items.'].every((s) => said.join(' ').includes(s)), JSON.stringify(said));
+    // This answer, by its place: later answers come after it.
+    const answer = page.locator('[data-az-chat-transcript] > .az-chat-message--site').nth(legalAt);
+    // The quoted billing switch works: the behaviour runtime wired the copy.
+    await answer.getByLabel('Annual').check();
+    const annual = await answer.locator('[data-monthly]').allTextContents();
+    check(`${name}: the quoted pricing's billing switch works in the answer`, JSON.stringify(annual) === JSON.stringify(['$90.00', '$290.00']), JSON.stringify(annual));
+    // The composed FAQ opens.
+    const toggle = answer.locator('.az-faq-toggle').first();
+    const closed = await toggle.getAttribute('aria-expanded');
+    await toggle.click();
+    check(`${name}: the composed FAQ starts closed and opens`, closed === 'false' && await toggle.getAttribute('aria-expanded') === 'true'
+      && await answer.locator('.az-faq-answer').first().isVisible());
+    await axe(page, `${name} answered with components`);
+
+    // The corpus: each hostile answer becomes exactly its expected parts — nothing else is drawn.
+    for (const c of CORPUS.filter((x) => x.name !== 'legal')) {
+      await ask(page, c.ask);
+      const got = await lastAnswer(page);
+      const want = expectedParts(c.expect).map((p) => (p.kind === 'quote' ? { kind: 'quote' } : p));
+      const seen = got.parts.map((p) => (p.kind === 'quote' ? { kind: 'quote' } : p));
+      const same = JSON.stringify(seen) === JSON.stringify(want);
+      check(`${name}: corpus ${c.name} — rendered exactly as filtered (${c.expect.blocks.length} component(s), ${c.expect.dropped.length} refused)`,
+        same, same ? '' : `${JSON.stringify(seen).slice(0, 400)} ≠ ${JSON.stringify(want).slice(0, 400)}`);
+    }
+    const hazards = await answerHazards(page, RULES.destinations);
+    check(`${name}: across every answer, no image, script, frame, style or handler — and every link one the .az file declares`, hazards.length === 0, hazards.join(', '));
+    await axe(page, `${name} after the corpus`);
+
+    // The call to action goes where it says: a declared route of the site.
+    await answer.getByRole('link', { name: 'Talk to us' }).click();
+    await page.waitForURL((u) => u.pathname === '/contact', { timeout: STATE_MS });
+    check(`${name}: the answer's call to action opens the site's own /contact`, new URL(page.url()).pathname === '/contact');
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} components context close`)) && closed;
+  }
+}
+
 const errors = [];
 try {
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
@@ -453,6 +606,7 @@ try {
       const origins = new Set();
       await anonymousFlow(b, name, origins);
       await signedInFlow(b, name, origins);
+      await componentsFlow(b, name, origins);
       const others = [...origins].filter((o) => o !== host.url && o !== backendOrigin);
       check(`${name}: every request went to the site or its backend — nothing else`, others.length === 0 && origins.has(backendOrigin), [...origins].join(' '));
     } catch (e) {
@@ -468,7 +622,8 @@ try {
   }
   check('the server logged answers (so the log was read)', /chat/i.test(serverLog), serverLog.split('\n').filter((l) => /chat/i.test(l)).slice(0, 2).join(' / '));
   check("the server's log holds no visitor's words and no model's words", !serverLog.includes(VISITOR_MARK) && !serverLog.includes(ANSWER_MARK)
-    && !serverLog.includes('evil.example') && !serverLog.includes(PASSWORD));
+    && !serverLog.includes('evil.example') && !serverLog.includes(PASSWORD) && !serverLog.includes('lumens') && !serverLog.includes('attack '));
+  check('the server logged the corpus\'s drops as counts and reasons only', /dropped \d+ \([a-z_,]+\)/.test(serverLog));
 } finally {
   child.kill('SIGTERM');
   proxy.close();

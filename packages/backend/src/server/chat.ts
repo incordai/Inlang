@@ -1,10 +1,10 @@
 /**
  * @az server chat
- * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer streamed to the page as server-sent events.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §6.5, §6.7)
- * Exports: createChat, parseChatContext, systemText, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, PROSE_MAX
- * Edit guide: every limit is the server's, never the request's; abort upstream whenever the answer stops; logs carry codes and counts, never text.
- * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts
+ * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer parsed into typed events and streamed to the page.
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7)
+ * Exports: createChat, parseChatContext, rulesFor, systemText, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS
+ * Edit guide: every limit is the server's, never the request's; nothing the model wrote reaches the page but chat-answer.ts's events; abort upstream whenever the answer stops; logs carry codes and counts, never text.
+ * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts
  */
 
 /**
@@ -15,14 +15,16 @@
  *   account limits → the day's budget → a slot in the queue → the stream.
  *
  * Refusals before the stream are JSON `{ error }`. Once the stream starts
- * every event is one of `text`, `done`, `error`. In C1 an answer is prose
- * only: each piece of the model's text is cleaned (chat-text.ts) and sent as
- * `text`; nothing the model writes is ever markup to the page. The finished
- * answer is tagged so the page can send it back as history.
+ * every event is one of `text`, `block`, `done`, `error`: the model's text
+ * goes through the answer parser (chat-answer.ts), which sends prose as
+ * `text` and each component that passes every rule as one `block` — the
+ * page never receives a byte the parser did not produce. The finished
+ * answer's record (its prose and its components' canonical lines) is
+ * tagged, so the page can send it back as history.
  *
  * The upstream request is aborted the moment the answer stops for any
- * reason — the visitor left, a timeout, the prose cap — so an abandoned
- * answer stops costing tokens. Nothing is stored but the day's counts.
+ * reason — the visitor left, a timeout, a cap — so an abandoned answer
+ * stops costing tokens. Nothing is stored but the day's counts.
  *
  * Copied into a generated server; imports only its siblings and node built-ins.
  */
@@ -30,17 +32,16 @@
 import type { ServerResponse } from 'node:http';
 import type { ChatRequest, ChatRoutes } from './app.ts';
 import type { ChatAdapter } from './chat-adapters.ts';
+import { ANSWER_WORDS, createAnswerParser, type AnswerEvent, type AnswerQuote, type AnswerRules, type AnswerWord } from './chat-answer.ts';
 import { createQueue, createRateLimits } from './chat-limits.ts';
 import { sseEvent } from './chat-sse.ts';
-import { cleanText, historyKey, readChatRequest, tagTurn, trimHistory } from './chat-text.ts';
+import { historyKey, readChatRequest, tagTurn, trimHistory } from './chat-text.ts';
 import { createUsage, utcDay } from './chat-usage.ts';
 import { randomToken } from './crypto.ts';
 import type { Db } from './db.ts';
 import type { ChatConfig } from './env.ts';
 import { BodyError, send, SECURITY_HEADERS } from './http.ts';
 
-/** The most prose one answer may hold (chat-block-spec §5.3); past it the answer ends. */
-export const PROSE_MAX = 4_000;
 /** Characters per token when a provider reports no usage — a conservative estimate (§6.5, INFERENCE). */
 const CHARS_PER_TOKEN = 3;
 
@@ -55,11 +56,16 @@ export const CHAT_TIMING: ChatTiming = { firstMs: CHAT_FIRST_TOKEN_MS, betweenMs
 
 /** server/chat/context.json, as the route reads it. */
 export interface ChatContext {
-  /** Each page with a chat: who may send, and how many messages a conversation holds. */
-  readonly chats: Readonly<Record<string, { readonly allow: 'signedin' | 'anyone'; readonly limit: number }>>;
+  /** Each page with a chat: who may send, how many messages a conversation holds, what an answer may show. */
+  readonly chats: Readonly<Record<string, { readonly allow: 'signedin' | 'anyone'; readonly limit: number; readonly show: readonly AnswerWord[] }>>;
+  /** The blocks answers may quote, and every destination a cta may point at (chat-block-spec §5.3, §6.2). */
+  readonly quotes: readonly AnswerQuote[];
+  readonly destinations: readonly string[];
   /** Everything else in the file: the site's public content, sent to the model as data. */
   readonly content: unknown;
 }
+
+const isRoute = (v: unknown): v is string => typeof v === 'string' && v.startsWith('/') && !v.startsWith('//') && v.length <= 2048;
 
 /** context.json's text as a ChatContext, or the problem with it. */
 export function parseChatContext(text: string): ChatContext | string {
@@ -69,27 +75,64 @@ export function parseChatContext(text: string): ChatContext | string {
   } catch {
     return 'is not JSON';
   }
-  const r = raw as { chats?: unknown; site?: unknown; pages?: unknown } | null;
+  const r = raw as { chats?: unknown; site?: unknown; pages?: unknown; answer?: unknown } | null;
   if (!r || typeof r.chats !== 'object' || r.chats === null) return 'has no chats';
-  const chats: Record<string, { allow: 'signedin' | 'anyone'; limit: number }> = {};
+  const chats: Record<string, { allow: 'signedin' | 'anyone'; limit: number; show: AnswerWord[] }> = {};
   for (const [route, c] of Object.entries(r.chats as Record<string, unknown>)) {
-    const x = c as { allow?: unknown; limit?: unknown } | null;
+    const x = c as { allow?: unknown; limit?: unknown; show?: unknown } | null;
     if (!x || (x.allow !== 'signedin' && x.allow !== 'anyone') || !Number.isInteger(x.limit) || (x.limit as number) < 1 || (x.limit as number) > 50) {
       return `chats['${route}'] is not { allow, limit }`;
     }
-    chats[route] = { allow: x.allow, limit: x.limit as number };
+    const show = x.show ?? [];
+    if (!Array.isArray(show) || !show.every((w) => (ANSWER_WORDS as readonly unknown[]).includes(w))) {
+      return `chats['${route}'].show is not a list of ${ANSWER_WORDS.join(', ')}`;
+    }
+    chats[route] = { allow: x.allow, limit: x.limit as number, show: show as AnswerWord[] };
   }
-  return { chats, content: { site: r.site, pages: r.pages } };
+  // Present when a chat may show components; without it answers are prose only.
+  const answer = (r.answer ?? { quotes: [], destinations: [] }) as { quotes?: unknown; destinations?: unknown };
+  const quotes = answer.quotes;
+  if (!Array.isArray(quotes) || !quotes.every((q) => {
+    const x = q as Partial<AnswerQuote> | null;
+    return !!x && x.word === 'pricing' && isRoute(x.route) && Number.isInteger(x.n) && (x.n as number) >= 0;
+  })) return 'answer.quotes is not a list of { word, route, n }';
+  const destinations = answer.destinations;
+  if (!Array.isArray(destinations) || !destinations.every((d) => typeof d === 'string' && d.length > 0 && d.length <= 2048)) {
+    return 'answer.destinations is not a list of destinations';
+  }
+  return { chats, quotes: quotes as AnswerQuote[], destinations: destinations as string[], content: { site: r.site, pages: r.pages } };
 }
+
+/** What one chat page's answers may show: its own `show`, the site's quotes and destinations. */
+export function rulesFor(context: ChatContext, page: string): AnswerRules {
+  const show = Object.hasOwn(context.chats, page) ? context.chats[page].show : [];
+  return { show, quotes: context.quotes, destinations: context.destinations };
+}
+
+/** A quote as the model writes it: `show pricing /pricing`, `#2` for a page's second. */
+const quoteLine = (q: AnswerQuote) => `show ${q.word} ${q.route}${q.n > 0 ? `#${q.n + 1}` : ''}`;
 
 /**
  * What the model is told (chat-block-spec §8.3): the fixed prompt, then the
  * site's public content in a section marked as data, then the page the
- * visitor is on. Nothing about the visitor — no cookie, address or account.
+ * visitor is on and what an answer there may hold. Nothing about the
+ * visitor — no cookie, address or account.
  */
 export function systemText(prompt: string, context: ChatContext, page: string): string {
+  const rules = rulesFor(context, page);
+  const lines = [`The visitor is on the page ${JSON.stringify(page)}.`];
+  if (rules.show.length === 0) {
+    lines.push('On this page an answer is prose only: write no component.');
+  } else {
+    lines.push(`On this page an answer may hold these components and no other: ${rules.show.join(', ')}.`);
+    if (rules.show.includes('pricing')) {
+      const quotes = rules.quotes.filter((q) => q.word === 'pricing').map(quoteLine);
+      lines.push(quotes.length > 0 ? `The pricing blocks you may show: ${quotes.join(' · ')}.` : 'There is no pricing block to show.');
+    }
+    if (rules.show.includes('cta')) lines.push(`The destinations a cta may use, written exactly so: ${rules.destinations.join(' ')}.`);
+  }
   // prompt.txt opens with the generated-file line, which is for the operator, not the model.
-  return `${prompt.replace(/^# GENERATED BY AZ[^\n]*\n/, '').trimEnd()}\n\n<site-content>\n${JSON.stringify(context.content)}\n</site-content>\n\nThe visitor is on the page ${JSON.stringify(page)}.\n`;
+  return `${prompt.replace(/^# GENERATED BY AZ[^\n]*\n/, '').trimEnd()}\n\n<site-content>\n${JSON.stringify(context.content)}\n</site-content>\n\n${lines.join('\n')}\n`;
 }
 
 export interface ChatOptions {
@@ -108,14 +151,8 @@ export interface ChatOptions {
 /** A whole-number token estimate for `chars` characters. */
 const estimate = (chars: number) => Math.ceil(chars / CHARS_PER_TOKEN);
 
-/** `text` cut to `room` characters, never through a surrogate pair. */
-function cut(text: string, room: number): string {
-  if (text.length <= room) return text;
-  let end = Math.max(0, room);
-  const c = text.charCodeAt(end - 1);
-  if (end > 0 && c >= 0xd800 && c <= 0xdbff) end--;
-  return text.slice(0, end);
-}
+/** One parsed event as the page receives it. */
+const wire = (e: AnswerEvent): string => (e.type === 'text' ? sseEvent('text', { s: e.s }) : sseEvent('block', e.block));
 
 export function createChat(o: ChatOptions): ChatRoutes {
   const now = o.now ?? Date.now;
@@ -144,7 +181,9 @@ export function createChat(o: ChatOptions): ChatRoutes {
     });
     // The page learns at once that its answer is coming, before the first token.
     res.flushHeaders();
-    let text = '';
+    const parser = createAnswerParser(rulesFor(o.context, page));
+    // Nothing is written to a connection the visitor already closed.
+    const write = (events: readonly AnswerEvent[]) => { if (!res.destroyed) for (const e of events) res.write(wire(e)); };
     let reported: { input: number; output: number } | null = null;
     let outcome: 'done' | 'capped' | 'unavailable' | 'gone' | 'empty' = 'done';
     try {
@@ -153,13 +192,9 @@ export function createChat(o: ChatOptions): ChatRoutes {
         idle = setTimeout(stop, timing.betweenMs);
         if (chunk.usage) reported = chunk.usage;
         if (!chunk.text) continue;
-        const piece = cut(cleanText(chunk.text), PROSE_MAX - text.length);
-        if (piece) {
-          text += piece;
-          // Nothing is written to a connection the visitor already closed.
-          if (!res.destroyed) res.write(sseEvent('text', { s: piece }));
-        }
-        if (text.length >= PROSE_MAX) {
+        write(parser.push(chunk.text));
+        // A cap passed (prose, components): stop reading, and stop the model.
+        if (parser.ended) {
           outcome = 'capped';
           ac.abort();
           break;
@@ -175,19 +210,24 @@ export function createChat(o: ChatOptions): ChatRoutes {
       clearTimeout(whole);
       req.closed.removeEventListener('abort', stop);
     }
-    if ((outcome === 'done' || outcome === 'capped') && text.trim() === '') outcome = 'empty';
+    // The last line and any component still open, once the answer is whole.
+    if (outcome === 'done' || outcome === 'capped') write(parser.end());
+    const record = parser.record;
+    if ((outcome === 'done' || outcome === 'capped') && record.trim() === '') outcome = 'empty';
     // A connection the visitor closed has nobody left to tell.
     if (!res.destroyed) {
       const last = outcome === 'done' || outcome === 'capped'
-        ? sseEvent('done', { tag: tagTurn(key, conversation, index, text), left, conversation })
+        ? sseEvent('done', { tag: tagTurn(key, conversation, index, record), left, conversation, text: record })
         : outcome === 'gone' ? '' : sseEvent('error', { code: 'unavailable' });
       res.end(last);
     }
     // Spent whatever happened: the provider's count when it gave one, else an estimate.
     const input = reported?.input ?? estimate(system.length + sent.reduce((n, t) => n + t.text.length, 0));
-    const output = reported?.output ?? estimate(text.length);
-    await usage.add(utcDay(started), input, output, 0);
-    log(`chat: ${outcome} ${now() - started}ms tokens ${input}/${output}`);
+    const output = reported?.output ?? estimate(record.length);
+    const dropped = parser.dropped;
+    await usage.add(utcDay(started), input, output, dropped.length);
+    // Codes and counts only: why components were dropped, never what they said.
+    log(`chat: ${outcome} ${now() - started}ms tokens ${input}/${output}${dropped.length > 0 ? ` dropped ${dropped.length} (${[...new Set(dropped)].sort().join(',')})` : ''}`);
   }
 
   async function handle(req: ChatRequest, res: ServerResponse): Promise<void> {

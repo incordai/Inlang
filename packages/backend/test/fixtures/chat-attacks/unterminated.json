@@ -1,0 +1,13 @@
+{
+  "name": "unterminated",
+  "threat": "Parser abuse: an unterminated string makes a line prose, or breaks the component it is in",
+  "ask": "attack unterminated",
+  "answer": "Open.\ncta \"Click /contact\nfaq\n  item \"Q\n    text \"A\"",
+  "expect": {
+    "text": "Open.\ncta \"Click /contact\n",
+    "blocks": [],
+    "dropped": [
+      "shape"
+    ]
+  }
+}

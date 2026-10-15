@@ -294,7 +294,9 @@ const placeholder = (s: string): string => s.replace(/\{([a-z]+)\}/g, '<$1>');
 
 /** A key's value as an author writes it, compactly: `"text" ≤12 words`, `a|b|c`, `./file .glb`. */
 function valueShape(p: PropSpec): string {
-  const values = Array.isArray(p.values) ? p.values.join('|') : p.values ? `<${p.values} code>` : '';
+  // A list checked by a file-wide rule (chat's `show`) names its words in valueDescriptions, not values.
+  const values = Array.isArray(p.values) ? p.values.join('|') : p.values ? `<${p.values} code>`
+    : p.valueDescriptions ? Object.keys(p.valueDescriptions).join('|') : '';
   switch (p.type) {
     case 'string': return `"text"${p.maxWords !== undefined ? ` ≤${p.maxWords} words` : ''}`;
     case 'markdown': return `"text" or ./file${(p.ext ?? []).join('|')}`;

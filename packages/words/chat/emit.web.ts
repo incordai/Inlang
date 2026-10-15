@@ -5,6 +5,10 @@
  * Renders: section.az-chat.az-chat--{variant}[data-az-chat=<config>][data-az-chat-state] > h2.az-chat-title#az-chat-title ·
  *   div.az-chat-panel > ol.az-chat-transcript[data-az-chat-transcript] > li.az-chat-message.az-chat-message--site (the greeting) > p.az-chat-text ·
  *     ol.az-chat-templates[hidden][data-az-chat-templates] > li.az-chat-message--visitor + li.az-chat-message--site, each > p.az-chat-text ·
+ *     (with show) div.az-chat-parts[hidden][data-az-chat-parts] > div.az-chat-part[data-az-chat-part=quote|faq|feature|cta-<kind>] —
+ *       a quoted pricing block as its page renders it ([data-az-chat-quote=/route#n][data-az-chat-plans=n]; its behaviour
+ *       marks parked as [data-az-chat-behaviour]), an faq or feature item list as those
+ *       words render a `from` template (markers where the text goes), a call to action per kind of destination ·
  *     ul.az-chat-asks[hidden][data-az-chat-asks] > li.az-chat-ask-item > button.az-action[data-az-chat-ask] ·
  *     form.az-chat-form[hidden][data-az-chat-form] > label.az-chat-label + textarea.az-chat-input#az-chat-input ·
  *       div.az-chat-controls > Send [data-az-chat-send] (submit, primary) + Stop [data-az-chat-stop] (button, secondary, hidden) ·
@@ -16,14 +20,16 @@
  * Modifiers: none in this release.
  * Props: title → h2.az-chat-title (default "Ask a question") · greeting → the first site message, never sent to the model ·
  *   allow → config: signedin (default) shows Sign in to ask to a signed-out visitor, anyone lets everyone ask ·
- *   limit → config: visitor messages per conversation · show → refused until components ship (core chat.ts, AZ1214) ·
+ *   limit → config: visitor messages per conversation · show → config and the parts' templates (pricing quoted; faq, cta, feature composed) ·
  *   ask "question" → a suggested question button.
  * Styling: theme tokens only; visitor messages on color.surface-alt, answers on color.surface; the input's edge color.border-strong;
  *   focusVisible ring color.focus; errors color.danger; below sm the mobile gutter.
  * Behaviour: packages/overlay runtime chat.ts sends with fetch, reads the event stream and writes every answer as text
- *   (textContent) into copies of the hidden templates; the status region hears finished sentences. With JavaScript off
+ *   (textContent) into copies of the hidden templates — a component into a copy of its part, a destination only from the
+ *   config's allow-list; the status region hears finished sentences. Other words render the parts (ctx.embed). With JavaScript off
  *   the greeting and the noscript line show, and the form stays hidden.
- * Edit guide: one message → message(); the controls → form(); the hidden state lines → notes(); the config → config().
+ * Edit guide: one message → message(); the controls → form(); the hidden state lines → notes(); the config → config();
+ *   the components' templates → parts() (ids and behaviour marks parked by asTemplate()).
  *   Keep: no inline handler, no markup from the network, every control a real button or link, the label visible.
  * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/chat-shell.test.ts
  */
@@ -41,7 +47,8 @@
  */
 
 import type { SpecBlock } from '../../core/src/spec.ts';
-import { framed, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import type { SpecFrom } from '../../core/src/spec-block.ts';
+import { framed, fromMark, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
 
 /** The shell's fixed copy; the runtime's copy lives in overlay chat-logic.ts. */
 export const CHAT_COPY = {
@@ -54,6 +61,8 @@ export const CHAT_COPY = {
   transcript: 'Conversation',
   asks: 'Suggested questions',
   noscript: 'Turn on JavaScript to ask a question.',
+  /** The name a composed list's template is made under; never shown. */
+  answer: 'answer',
 } as const;
 
 /** chat-block-spec §4.2: a visitor message is at most this many characters. */
@@ -62,14 +71,135 @@ export const MESSAGE_MAX = 1000;
 /** The textarea's height in lines: room for a question, not an essay. */
 const INPUT_ROWS = 3;
 
-/** What the runtime reads from the shell: where the questions go and who may ask. Key order is fixed. */
+/**
+ * What the runtime reads from the shell: where the questions go, who may
+ * ask, and — when answers hold components — which ones, and the only
+ * destinations an answer's call to action may use. Key order is fixed.
+ */
 function config(block: SpecBlock): string {
+  const answer = block.chat?.answer;
   return JSON.stringify({
     page: block.chat?.route ?? '/',
     allow: block.props.allow === 'anyone' ? 'anyone' : 'signedin',
     limit: Number(block.props.limit ?? 20),
     signin: block.chat?.signin ?? null,
+    ...(answer ? { show: answer.show, to: answer.destinations } : {}),
   });
+}
+
+/* ---- the templates an answer's components fill (chat-block-spec §5.4) ---- */
+
+/** The most items an answer's faq or feature list holds (the server's answer parser caps it the same). */
+const ANSWER_ITEMS = 6;
+
+/** Attributes holding ONE id, then a list of ids (target-web ids.ts, the same lists). */
+const ID_ONE = ['for', 'list', 'form', 'aria-controls', 'aria-activedescendant', 'aria-details', 'aria-errormessage'];
+const ID_LIST = ['aria-labelledby', 'aria-describedby', 'aria-owns', 'aria-flowto', 'headers'];
+
+const walk = (n: EmittedNode | string): EmittedNode[] => (typeof n === 'string' ? [] : [n, ...(n.children ?? []).flatMap(walk)]);
+
+/**
+ * A rendered block made into a template: every id and radio group given
+ * `suffix` (a page may show the same block, and one panel several
+ * templates), every reference rewritten with it; behaviour marks parked as
+ * `data-az-chat-behaviour`, so the behaviour runtime wires each filled copy
+ * and never the template; and nothing that would animate it in.
+ */
+function asTemplate(node: EmittedNode, suffix: string): EmittedNode {
+  const ids = new Set(walk(node).map((n) => n.attrs?.id).filter((id): id is string => !!id));
+  const ren = (id: string) => (ids.has(id) ? `${id}-${suffix}` : id);
+  const rewrite = (n: EmittedNode | string): EmittedNode | string => {
+    if (typeof n === 'string') return n;
+    const attrs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(n.attrs ?? {})) {
+      if (k === 'data-az-behaviour' || k === 'data-az-from-behaviour') attrs['data-az-chat-behaviour'] = v;
+      else if (k === 'data-az-from-template' || k === 'data-az-reveal' || k === 'data-az-reveal-item') continue;
+      else if (k === 'id' || ID_ONE.includes(k)) attrs[k] = ren(v);
+      else if (ID_LIST.includes(k)) attrs[k] = v.split(/\s+/).map(ren).join(' ');
+      else if (k === 'href' && v.startsWith('#')) attrs[k] = `#${ren(v.slice(1))}`;
+      else if (k === 'name' && n.attrs?.type === 'radio') attrs[k] = `${v}-${suffix}`;
+      else attrs[k] = v;
+    }
+    return { ...n, ...(n.attrs ? { attrs } : {}), ...(n.children ? { children: n.children.map(rewrite) } : {}) };
+  };
+  return rewrite(node) as EmittedNode;
+}
+
+/** One part of an answer, as the runtime finds it: `data-az-chat-part` names what it is. */
+function part(key: string, node: EmittedNode, extra: Record<string, string> = {}): EmittedNode {
+  return {
+    tag: 'div',
+    attrs: { class: 'az-chat-part', 'data-az-chat-part': key, ...extra },
+    // The part's own block brings its own surface; the part only keeps it inside the answer.
+    style: { minWidth: 0, maxWidth: '100%' },
+    children: [node],
+  };
+}
+
+/** A `from` template for one composed list: the word's own item, with markers where the answer's text goes. */
+function composed(word: 'faq' | 'feature', ctx: EmitContext): EmittedNode | null {
+  const map: Record<string, string> = word === 'faq' ? { question: 'q', text: 'a' } : { text: 'text', title: 'title' };
+  const from: SpecFrom = {
+    table: CHAT_COPY.answer, slot: 'item', label: word === 'faq' ? 'question' : 'title', map,
+    types: Object.fromEntries(Object.keys(map).map((k) => [k, 'text'])),
+    sort: null, limit: ANSWER_ITEMS, filter: {}, mine: false, empty: '', signin: null,
+  };
+  // A title keeps the items one heading level under the panel's own h2; it is not drawn (only the template is kept).
+  const rendered = ctx.embed!({
+    word, variant: word === 'faq' ? 'list' : 'rows', modifiers: [], args: [], as: null, children: [], from,
+    props: { title: CHAT_COPY.answer, ...(word === 'faq' ? { schema: 'off' } : {}) },
+  });
+  const list = walk(rendered).find((n) => n.attrs?.['data-az-from-template'] !== undefined);
+  if (!list) return null;
+  // Shown once filled: the template's own `hidden` is the shell's, not the list's.
+  return { ...list, attrs: Object.fromEntries(Object.entries(list.attrs ?? {}).filter(([k]) => k !== 'hidden')) };
+}
+
+/** How a destination is followed — and so which action template it fills: a route, or its scheme. */
+const linkKind = (to: string) => (to.startsWith('/') ? 'route' : to.slice(0, to.indexOf(':')).toLowerCase());
+
+/**
+ * The hidden templates of every component this chat's answers may hold:
+ * each quotable pricing block exactly as its page renders it, and the faq,
+ * feature list and call to action rendered by their own words with markers
+ * for the text. Nothing here is new styling — every class is one those words
+ * made. Without `show`, or without emitters to hand, there are none.
+ */
+function parts(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
+  const answer = block.chat?.answer;
+  if (!answer || !ctx.embed) return null;
+  const out: EmittedNode[] = [];
+  if (answer.show.includes('pricing')) {
+    for (const q of answer.quotes) {
+      const key = `${q.route}#${q.n}`;
+      // The plan count is what the status region says of it ("Pricing table, 2 plans").
+      const plans = String(q.block.children.filter((c) => c.word === 'plan').length);
+      out.push(part('quote', asTemplate(ctx.embed(q.block), `chat-q${out.length}`), { 'data-az-chat-quote': key, 'data-az-chat-plans': plans }));
+    }
+  }
+  for (const word of ['faq', 'feature'] as const) {
+    if (!answer.show.includes(word)) continue;
+    const list = composed(word, ctx);
+    if (list) out.push(part(word, asTemplate(list, `chat-${word}`)));
+  }
+  if (answer.show.includes('cta')) {
+    // One button per way a destination is followed, made with a real one of
+    // that kind; the runtime sets the label and the checked destination.
+    const kinds = new Map<string, string>();
+    for (const to of answer.destinations) if (!kinds.has(linkKind(to))) kinds.set(linkKind(to), to);
+    for (const [kind, sample] of kinds) {
+      const action = ctx.action({
+        word: 'cta', variant: null, modifiers: [], props: {}, as: null, children: [],
+        args: [{ kind: 'string', value: fromMark('label') }, { kind: kind === 'route' ? 'route' : 'pair', value: sample }],
+      }, { hierarchy: 'primary' });
+      out.push(part(`cta-${kind}`, action));
+    }
+  }
+  return {
+    tag: 'div',
+    attrs: { class: 'az-chat-parts', hidden: 'hidden', 'data-az-chat-parts': '' },
+    children: out,
+  };
 }
 
 /** One message of the transcript: an item holding one paragraph of text. */
@@ -210,6 +340,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const variant = block.variant ?? 'panel';
   const greeting = block.props.greeting?.trim() ?? '';
   const suggested = asks(block, ctx);
+  const components = parts(block, ctx);
   return {
     tag: 'section',
     attrs: {
@@ -254,6 +385,7 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
             attrs: { class: 'az-chat-templates', hidden: 'hidden', 'data-az-chat-templates': '' },
             children: [message('visitor', '', ctx), message('site', '', ctx)],
           },
+          ...(components ? [components] : []),
           ...(suggested ? [suggested] : []),
           form(ctx),
           ...notes(block, ctx),

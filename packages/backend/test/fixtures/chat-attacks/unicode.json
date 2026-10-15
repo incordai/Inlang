@@ -1,0 +1,25 @@
+{
+  "name": "unicode",
+  "threat": "Unicode tricks: bidi overrides and zero-width characters are stripped; a homoglyph route is not the route",
+  "ask": "attack unicode",
+  "answer": "Pay‮ here​.⁦\ncta \"Pa‮y\" /cont‮act\nshow pricing /pri​cing\ncta \"Go\" /cоntact",
+  "expect": {
+    "text": "Pay here.\n",
+    "blocks": [
+      {
+        "cta": {
+          "label": "Pay",
+          "to": "/contact"
+        }
+      },
+      {
+        "quote": "pricing",
+        "route": "/pricing",
+        "n": 0
+      }
+    ],
+    "dropped": [
+      "destination"
+    ]
+  }
+}

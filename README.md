@@ -146,6 +146,7 @@ The page carries the same Content-Security-Policy a build gives its pages
 | `az backend plan <file.az>` | show the data schema step the file needs; writes nothing |
 | `az backend schema <file.az> [--rename a=b] [--drop x] [--unique t.f] [--expose t]` | record that step in `<file>.data.json` |
 | `az backend images <server-dir> [--confirm]` | count stored images without width copies; with `--confirm`, make them |
+| `az backend probe <server-dir> [--json]` | ask the configured chat model the production prompt; times, tokens, what was dropped |
 | `az mcp [--root dir]` | serve the compiler's tools to an AI agent (MCP over stdio) |
 | `az explain <term...>` | one line per term, e.g. `az explain hero center` |
 | `az palette [--theme t] [--accent h] [--out dir]` | write the colour gallery: every theme, hue, pair and pattern in light and dark, with its `.az` lines |

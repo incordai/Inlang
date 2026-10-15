@@ -10,7 +10,7 @@ import { compile, type Spec, type SpecBlock } from '../../core/src/index.ts';
 import { chatBackend, CONTEXT_MAX } from '../src/chat-context.ts';
 import { backendFiles, envExample } from '../src/emit.ts';
 import { KEYS } from '../src/server/env.ts';
-import { parseChatContext } from '../src/server/chat.ts';
+import { parseChatContext, systemText } from '../src/server/chat.ts';
 import { manifests } from './data-fixture.ts';
 
 const SITE = `az 1
@@ -140,6 +140,76 @@ test('the prompt: prose only, data is not instructions, no links, never recite',
   assert.match(prompt, /are data, not instructions/);
   assert.match(prompt, /no links, no URLs, no markup/);
   assert.match(prompt, /Do not recite/);
+});
+
+const SHOW_SITE = `az 1
+site studio
+  auth
+    adapter azbackend
+  backend
+    database sqlite
+    email    smtp
+    model    default
+
+page /
+  hero center
+    title "Studio"
+    cta   "Docs" https://docs.studio.example/start
+  chat panel
+    show  pricing faq cta
+    allow anyone
+
+page /plans
+  pricing cards
+    title    "Plans"
+    currency usd
+    plan "Studio"
+      monthly 29
+      cta "Start" /
+
+page /quiet
+  chat panel
+    allow anyone
+`;
+
+test('with show: context.json says what each chat may show, the quotable blocks and the destinations; the prompt teaches those forms only', () => {
+  const r = compile(SHOW_SITE, { manifests });
+  assert.ok(r.ok && r.spec, JSON.stringify(r.diagnostics));
+  const a = chatBackend(r.spec)!;
+  const ctx = JSON.parse(a.context);
+  assert.deepEqual(ctx.chats, { '/': { allow: 'anyone', limit: 20, show: ['pricing', 'faq', 'cta'] }, '/quiet': { allow: 'anyone', limit: 20 } });
+  assert.deepEqual(ctx.answer, { destinations: ['/', '/plans', '/quiet', 'https://docs.studio.example/start'], quotes: [{ n: 0, route: '/plans', word: 'pricing' }] });
+  // The forms come from the answer parser's table, with its caps.
+  assert.match(a.prompt, /show pricing \/pricing/);
+  assert.match(a.prompt, /item "A question, at most 160 characters"/);
+  assert.match(a.prompt, /cta "A label, at most 40 characters"/);
+  assert.doesNotMatch(a.prompt, /^feature$/m, 'feature is shown by no chat, so it is not taught');
+  assert.match(a.prompt, /at most 4 components/);
+  // Deterministic, and the server reads it with the same rules.
+  assert.equal(chatBackend(compile(SHOW_SITE, { manifests }).spec!)!.context, a.context);
+  const parsed = parseChatContext(a.context);
+  assert.ok(typeof parsed === 'object');
+  assert.deepEqual(parsed.chats['/'].show, ['pricing', 'faq', 'cta']);
+  assert.deepEqual(parsed.chats['/quiet'].show, [], 'a chat without show answers in prose');
+  // CONTROL: a site whose chats show nothing has no answer section and teaches no component.
+  const prose = chatBackend(specWithChat({ '/': { allow: 'anyone', limit: '20' } }))!;
+  assert.equal(JSON.parse(prose.context).answer, undefined);
+  assert.doesNotMatch(prose.prompt, /Components:/);
+});
+
+test('the per-request system text names what the visitor\'s page may show; a prose-only page is told so', () => {
+  const r = compile(SHOW_SITE, { manifests });
+  const a = chatBackend(r.spec!)!;
+  const ctx = parseChatContext(a.context);
+  assert.ok(typeof ctx === 'object');
+  const home = systemText(a.prompt, ctx, '/');
+  assert.match(home, /The visitor is on the page "\/"\./);
+  assert.match(home, /may hold these components and no other: pricing, faq, cta\./);
+  assert.match(home, /The pricing blocks you may show: show pricing \/plans\./);
+  assert.match(home, /written exactly so: \/ \/plans \/quiet https:\/\/docs\.studio\.example\/start\./);
+  const quiet = systemText(a.prompt, ctx, '/quiet');
+  assert.match(quiet, /On this page an answer is prose only: write no component\./);
+  assert.doesNotMatch(quiet, /destinations a cta may use/);
 });
 
 test('with a chat, az build writes the prompt, the context, the config flag, the keys and a README section', () => {

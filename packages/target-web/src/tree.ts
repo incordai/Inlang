@@ -174,7 +174,7 @@ function fallback(block: SpecBlock, ctx: EmitContext): EmittedNode {
 /** Build the context one block sees. */
 function contextFor(
   block: SpecBlock, theme: ThemeLike, asset: AssetResolver, site: SiteInfo, component: ComponentResolver,
-  inline?: InlineSvg, markdown?: MarkdownRender,
+  inline?: InlineSvg, markdown?: MarkdownRender, embed?: (b: SpecBlock) => EmittedNode,
 ): EmitContext {
   return {
     theme,
@@ -185,7 +185,7 @@ function contextFor(
     // `slot <name> <path>` component naming it, in source order, as a list
     // item like the fills around it.
     slot: (name) => block.children.flatMap((c): EmittedNode[] => {
-      if (c.word === name) return [defaultChild(c, contextFor(c, theme, asset, site, component, inline, markdown), fillLevel(block))];
+      if (c.word === name) return [defaultChild(c, contextFor(c, theme, asset, site, component, inline, markdown, embed), fillLevel(block))];
       if (c.word === 'slot' && c.args[0]?.value === name) {
         return [{
           tag: 'li',
@@ -199,6 +199,7 @@ function contextFor(
     asset,
     ...(inline ? { inlineSvg: inline } : {}),
     ...(markdown ? { markdown } : {}),
+    ...(embed ? { embed } : {}),
     ...actionsFor(theme, { asset, component: (c) => custom(c, component) }),
   };
 }
@@ -210,7 +211,9 @@ export function emitBlock(
 ): EmittedNode {
   // A page-level `raw` is a component in the page's flow.
   if (block.word === 'raw') return custom(block, component);
-  const ctx = contextFor(block, theme, asset, site, component, inline, markdown);
+  // Another block by its own word's emitter (chat-block-spec §5.4): the same emitters, theme and site.
+  const embed = (b: SpecBlock) => emitBlock(b, theme, emitters, asset, site, component, inline, markdown);
+  const ctx = contextFor(block, theme, asset, site, component, inline, markdown, embed);
   const word = emitters[block.word];
   const node = word ? word.emit(block, ctx) : fallback(block, ctx);
   // `raw` inside a block renders inside it, after the word's own content.

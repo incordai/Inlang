@@ -51,6 +51,21 @@ export interface SpecChat {
   readonly route: string;
   /** The site's sign-in page when only signed-in visitors may ask; null otherwise. */
   readonly signin: string | null;
+  /**
+   * What an answer may hold (chat-block-spec §5.3), when the block lists
+   * `show`; absent for a prose-only chat, so it serialises as before.
+   */
+  readonly answer?: SpecChatAnswer;
+}
+
+/** The components a chat's answers may hold, the blocks they may quote, where they may link (core/src/chat.ts). */
+export interface SpecChatAnswer {
+  /** The `show` words, in the closed list's order: pricing, faq, cta, feature. */
+  readonly show: readonly string[];
+  /** With `pricing`: every pricing block a signed-out visitor can see, by page and position — the blocks an answer quotes. */
+  readonly quotes: readonly { readonly route: string; readonly n: number; readonly block: SpecBlock }[];
+  /** With `cta`: the destinations the .az file declares (chat-block-spec §6.2), sorted. */
+  readonly destinations: readonly string[];
 }
 
 /**

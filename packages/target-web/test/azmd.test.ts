@@ -148,6 +148,49 @@ test("AZ.md's colour section changes when the theme, accent or pattern changes",
   assert.ok(signal.includes("Accent: the theme's own. Pattern: none."), signal);
 });
 
+const CHAT_SITE = `az 1
+site lantern
+  auth
+    adapter azbackend
+  backend
+    database sqlite
+    email    smtp
+    model    default
+page /
+  hero center
+    title "Lantern"
+  chat panel
+    show  pricing faq cta
+    allow anyone
+page /pricing
+  pricing cards
+    title    "Plans"
+    currency usd
+    plan "Home"
+      monthly 9
+      cta "Start" /
+page /help
+  chat panel
+page /login
+  auth login
+    alt "Back" /
+`;
+
+test('AZ.md describes a site\'s chats: each page\'s panel, what its answers show and quote, and the chat files', () => {
+  const md = map(CHAT_SITE);
+  const section = md.slice(md.indexOf('## Chat'));
+  assert.ok(md.includes('## Chat'), md);
+  assert.ok(section.includes('| `/` | anyone | 20 | pricing, faq, cta | `/pricing#0` |'), section);
+  assert.ok(section.includes('| `/help` | signed-in visitors | 20 | text only | — |'), section);
+  for (const f of ['src/az/chat.ts', 'server/chat/prompt.txt', 'server/chat/context.json', 'server/src/chat-answer.ts', 'az backend probe server']) {
+    assert.ok(section.includes(f), f);
+  }
+  // Nothing secret, and no provider: the keys are named, never valued.
+  assert.ok(!/sk-|Bearer /.test(section));
+  // CONTROL: a site without a chat has no chat section.
+  assert.ok(!map(PLAIN).includes('## Chat'));
+});
+
 test('AZ.md for a site without a theme line names the default and the line to add', () => {
   const c = colourSection(map(PLAIN));
   assert.ok(c.includes(`Now: theme \`${DEFAULT_THEME_NAME}\`.`), c);

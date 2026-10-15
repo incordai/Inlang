@@ -1255,6 +1255,10 @@ export default defineConfig({
         backend: spec.site.backend ?? null,
         data: spec.site.data ?? null,
         from: spec.pages.flatMap((p) => p.blocks.flatMap((b) => (b.from ? [{ route: p.route, word: b.word, from: b.from }] : []))),
+        chats: chat ? spec.pages.flatMap((p) => p.blocks.flatMap((b) => (b.word === 'chat' && b.chat ? [{
+          route: p.route, allow: b.props.allow ?? 'signedin', limit: b.props.limit ?? '20',
+          show: b.chat.answer?.show ?? [], quotes: (b.chat.answer?.quotes ?? []).map((q) => `${q.route}#${q.n}`),
+        }] : []))) : [],
       }),
     },
   ];

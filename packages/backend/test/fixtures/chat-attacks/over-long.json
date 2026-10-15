@@ -1,0 +1,15 @@
+{
+  "name": "over-long",
+  "threat": "Over-long values: one character past a cap drops the component",
+  "ask": "attack over-long",
+  "answer": "Long.\nfaq\n  item \"qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\"\n    text \"A\"\ncta \"lllllllllllllllllllllllllllllllllllllllll\" /contact\nfeature\n  item \"ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\"",
+  "expect": {
+    "text": "Long.\n",
+    "blocks": [],
+    "dropped": [
+      "too_long",
+      "too_long",
+      "too_long"
+    ]
+  }
+}

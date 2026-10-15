@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import {
   CHARS_PER_TOKEN, ENCODINGS, PRIMARY_ENCODING, REPRESENTATIONS, corpus, loadCounters, measure, summarise,
 } from './lib/token-bench.mjs';
+import { ANSWER_FORMS, measureAnswers, measureChatInput } from './lib/answer-bench.mjs';
 
 const DEFAULT_JSON = join(tmpdir(), 'az-token-benchmark.json');
 
@@ -60,6 +61,25 @@ function summaryLines(s) {
   return lines.join('\n');
 }
 
+/** The answer-format table: tokens per form, each as a multiple of the .az subset's; then what a chat model is sent besides the conversation. */
+function answerLines(answers, chatInput, encoding) {
+  const nameWidth = Math.max(...answers.map((a) => a.name.length));
+  const lines = [`\nchat answers, ${encoding} tokens (.az subset · JSON · markdown):`];
+  for (const a of answers) {
+    const az = a.forms.az.tokens[encoding];
+    const cell = (f) => `${a.forms[f].tokens[encoding]} (${(a.forms[f].tokens[encoding] / az).toFixed(2)}x)`;
+    lines.push(`  ${a.name.padEnd(nameWidth)}  ${String(az).padStart(5)}  ${cell('json').padStart(13)}  ${cell('markdown').padStart(13)}`);
+  }
+  const allowed = answers.filter((a) => a.quotable);
+  const total = (f) => allowed.reduce((n, a) => n + a.forms[f].tokens[encoding], 0);
+  const chars = (f) => allowed.reduce((n, a) => n + a.forms[f].chars, 0);
+  lines.push(`  answers an answer may hold, together: .az ${total('az')} · JSON ${total('json')} (${(total('json') / total('az')).toFixed(2)}x) · markdown ${total('markdown')} (${(total('markdown') / total('az')).toFixed(2)}x)`);
+  lines.push(`  characters per token: .az ${(chars('az') / total('az')).toFixed(2)} · JSON ${(chars('json') / total('json')).toFixed(2)} · markdown ${(chars('markdown') / total('markdown')).toFixed(2)} (the server estimates 3 when a provider reports none)`);
+  lines.push(`\nwhat the chat e2e site's model is sent besides the conversation, ${encoding} tokens:`);
+  for (const [name, c] of Object.entries(chatInput)) lines.push(`  ${name.padEnd(8)} ${String(c.tokens[encoding]).padStart(6)} tokens · ${c.chars} characters · ${(c.chars / c.tokens[encoding]).toFixed(2)} per token`);
+  return lines.join('\n');
+}
+
 async function main(argv) {
   const args = [...argv];
   let jsonOut = DEFAULT_JSON;
@@ -90,9 +110,20 @@ async function main(argv) {
   console.log(`tokenizer: ${provider}, encoding ${PRIMARY_ENCODING} (${ENCODINGS.slice(1).join(', ')} in the JSON)\n`);
   console.log(table(results, PRIMARY_ENCODING));
   console.log(summaryLines(summaries[PRIMARY_ENCODING]));
+  // Chat answers (docs/token-benchmark.md §7): the same answers in the .az subset, JSON and markdown.
+  let answers;
+  let chatInput;
+  try {
+    answers = measureAnswers(counters);
+    chatInput = measureChatInput(counters);
+  } catch (e) {
+    console.error(`token-benchmark: ${e.message}`);
+    return 1;
+  }
+  console.log(answerLines(answers, chatInput, PRIMARY_ENCODING));
   writeFileSync(jsonOut, `${JSON.stringify({
     tokenizer: provider, encodings: ENCODINGS, primary: PRIMARY_ENCODING, charsPerTokenApproximation: CHARS_PER_TOKEN,
-    representations: REPRESENTATIONS, summaries, sites: results,
+    representations: REPRESENTATIONS, summaries, sites: results, answerForms: ANSWER_FORMS, answers, chatInput,
   }, null, 2)}\n`);
   console.log(`\nwrote ${jsonOut}`);
   return 0;

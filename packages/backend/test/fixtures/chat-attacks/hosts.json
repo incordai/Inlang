@@ -1,0 +1,22 @@
+{
+  "name": "hosts",
+  "threat": "Exfiltration by link: off-list hosts, a query that carries data, look-alike routes",
+  "ask": "attack hosts",
+  "answer": "Try these.\ncta \"A\" https://evil.example/\ncta \"B\" https://docs.lantern.example/start?d=secret\ncta \"C\" https://docs.lantern.example.evil.example/start\ncta \"D\" /contact/\ncta \"E\" /Contact\ncta \"F\" /contact?x=1\ncta \"G\" /c%6Fntact\ncta \"H\" /contact#x\ncta \"I\" mailto:attacker@evil.example\ncta \"J\" /cоntact",
+  "expect": {
+    "text": "Try these.\n",
+    "blocks": [],
+    "dropped": [
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination"
+    ]
+  }
+}

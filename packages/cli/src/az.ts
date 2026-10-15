@@ -485,7 +485,10 @@ const USAGE = `az — words to a website
   az backend images <server-dir> [--confirm]
                                    count stored images without width copies;
                                    with --confirm, make them
-  az mcp   [--root dir]            serve these tools to an AI agent (MCP, stdio)
+  az backend probe <server-dir> [--json]
+                                   ask the configured chat model the production
+                                   prompt; times, tokens, what was dropped
+  az mcp  [--root dir]            serve these tools to an AI agent (MCP, stdio)
   az explain <term...>             one line per term: az explain hero center
   az palette [--theme t] [--accent h] [--out dir]
                                    write the colour gallery
@@ -539,8 +542,9 @@ function runBackend(sub: string, rest: string[]): number {
       : runDataSchema(rest[0], manifests, rest.slice(1), io);
   }
   if (sub === 'images' && rest[0]) return runBackendImages(resolve(rest[0]), rest.slice(1));
+  if (sub === 'probe' && rest[0]) return runBackendProbe(resolve(rest[0]), rest.slice(1));
   if (sub !== 'init' || !rest[0]) {
-    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az, az backend schema site.az or az backend images <server-dir>\n');
+    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az, az backend schema site.az, az backend images <server-dir> or az backend probe <server-dir>\n');
     return EXIT.config;
   }
   const r = initBackendEnv(resolve(rest[0]));
@@ -579,6 +583,39 @@ function runBackendImages(dir: string, flags: readonly string[]): number {
   });
   if (r.error || r.signal) {
     process.stderr.write(`az: the backfill stopped (${r.signal ?? r.error?.name}) — what it finished is kept; run it again to continue\n`);
+    return EXIT.missing;
+  }
+  return r.status === 0 ? EXIT.ok : EXIT.missing;
+}
+
+/**
+ * The probe is given this long: it asks no question after 10 minutes
+ * (server chat-probe.ts PROBE_MS) and each answer ends within the server's
+ * own AZ_CHAT_TIMEOUT_SECONDS (at most 300 s). Past it the child is killed.
+ */
+export const PROBE_CHILD_MS = 16 * 60 * 1000;
+
+/**
+ * `az backend probe <server-dir> [--json]` (chat-block-spec §11.3): the
+ * built server's own probe, run in its folder so it reads its `.env`, its
+ * prompt and its context — the only CLI step that calls a model, so it is
+ * never part of build, doctor or audit. It prints times, token counts and
+ * what the filter dropped; never the key, never the model's words.
+ */
+function runBackendProbe(dir: string, flags: readonly string[]): number {
+  if (flags.some((f) => f !== '--json')) {
+    process.stderr.write('az: try: az backend probe <server-dir> [--json]\n');
+    return EXIT.config;
+  }
+  if (!existsSync(join(dir, 'az.config.json')) || !existsSync(join(dir, 'src/chat-probe.ts'))) {
+    process.stderr.write(`az: no built server with a chat in ${dir} — point at the server/ folder az build wrote for a site that shows chat\n`);
+    return EXIT.missing;
+  }
+  const r = spawnSync(process.execPath, ['src/chat-probe.ts', ...flags], {
+    cwd: dir, stdio: 'inherit', timeout: PROBE_CHILD_MS, killSignal: 'SIGKILL',
+  });
+  if (r.error || r.signal) {
+    process.stderr.write(`az: the probe stopped (${r.signal ?? r.error?.name}) after ${PROBE_CHILD_MS / 60_000} minutes at most — check AZ_CHAT_URL is reachable\n`);
     return EXIT.missing;
   }
   return r.status === 0 ? EXIT.ok : EXIT.missing;

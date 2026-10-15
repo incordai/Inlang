@@ -105,7 +105,7 @@ export function createSseReader(lineMax: number = SSE_LINE_MAX) {
 }
 
 /** One event as the page receives it: a name from the closed set and one JSON object. */
-export function sseEvent(name: 'text' | 'done' | 'error', data: Record<string, unknown>): string {
+export function sseEvent(name: 'text' | 'block' | 'done' | 'error', data: Record<string, unknown>): string {
   // JSON.stringify writes no raw newline, so the object stays one data line.
   return `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 }

@@ -2,7 +2,7 @@
  * @az runtime chat-logic
  * Purpose: the chat runtime's pure rules: the shell's config, the event-stream reader, a visitor's text, finished sentences, fixed copy.
  * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
- * Exports: ChatConfig, ChatEvent, ChatTurn, parseChatConfig, createEventReader, visitorText, finishedSentences, problemCopy, leftCopy, RETRYABLE, CHAT_TEXT, EVENT_LINE_MAX, ANSWER_MAX
+ * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, parseChatConfig, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, RETRYABLE, CHAT_TEXT, CHAT_WORDS, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
  * Edit guide: no DOM here; every event is checked against its closed shape and an unknown one is dropped, never guessed at.
  * Tests: packages/overlay/test/chat.test.ts
  */
@@ -23,13 +23,36 @@ export interface ChatConfig {
   readonly allow: 'signedin' | 'anyone';
   readonly limit: number;
   readonly signin: string | null;
+  /** The components an answer may hold (`show`); empty, answers are prose only. */
+  readonly show: readonly ChatWord[];
+  /** The destinations an answer's call to action may use — the .az file's own (chat-block-spec §6.2). */
+  readonly to: readonly string[];
 }
+
+/** The closed list `show` takes. */
+export const CHAT_WORDS = ['pricing', 'faq', 'cta', 'feature'] as const;
+export type ChatWord = (typeof CHAT_WORDS)[number];
+
+/** One component of an answer, as the server validated it — and as this module validates it again. */
+export type ChatBlock =
+  | { readonly kind: 'quote'; readonly route: string; readonly n: number }
+  | { readonly kind: 'faq'; readonly items: readonly { readonly q: string; readonly a: string }[] }
+  | { readonly kind: 'cta'; readonly label: string; readonly to: string }
+  | { readonly kind: 'feature'; readonly items: readonly { readonly title: string; readonly text: string }[] };
 
 /** One event of the answer stream; anything else is dropped. */
 export type ChatEvent =
   | { readonly type: 'text'; readonly s: string }
-  | { readonly type: 'done'; readonly tag: string; readonly left: number; readonly conversation: string }
+  | { readonly type: 'block'; readonly block: ChatBlock }
+  | { readonly type: 'done'; readonly tag: string; readonly left: number; readonly conversation: string; readonly text: string }
   | { readonly type: 'error'; readonly code: string };
+
+/**
+ * The caps a component's values keep (the server's answer parser holds the
+ * same, chat-block-spec §5.3): one past them is not a component the server
+ * sends, so it is dropped.
+ */
+export const BLOCK_LIMITS = { items: 6, question: 160, answer: 600, title: 80, text: 300, label: 40, record: 12_000 } as const;
 
 /** One turn as the request carries it; a site turn carries its server tag. */
 export interface ChatTurn {
@@ -83,6 +106,28 @@ export function leftCopy(left: number): string {
 
 const isRoute = (v: unknown): v is string => typeof v === 'string' && v.startsWith('/') && !v.startsWith('//') && v.length <= 2048;
 
+/** Anything a browser would read past: space, controls, a backslash (which a URL parser turns into a slash). */
+const UNSAFE = /[\s\u0000-\u001F\u007F\\]/;
+
+/**
+ * How a destination is followed, which picks the call-to-action template it
+ * fills: `route`, `https`, `mailto` or `tel` — or null for anything else
+ * (another scheme, a protocol-relative `//host`, a stray character). The
+ * chat word groups its templates by the same rule.
+ */
+export function linkKind(to: string): 'route' | 'https' | 'mailto' | 'tel' | null {
+  if (to.length === 0 || to.length > 2048 || UNSAFE.test(to)) return null;
+  if (to.startsWith('/')) return to.startsWith('//') ? null : 'route';
+  const colon = to.indexOf(':');
+  const scheme = colon > 0 ? to.slice(0, colon) : '';
+  if (scheme === 'https') return to.startsWith('https://') && to.length > 'https://'.length ? 'https' : null;
+  if (scheme === 'mailto' || scheme === 'tel') return to.length > colon + 1 ? scheme : null;
+  return null;
+}
+
+/** Whether an answer may point at `to`: exactly one of the shell's own destinations, of a kind the page can follow. */
+export const allowedDestination = (config: ChatConfig, to: string): boolean => linkKind(to) !== null && config.to.includes(to);
+
 /** The shell's config, or null when it is not one the chat word wrote. */
 export function parseChatConfig(raw: string | null): ChatConfig | null {
   if (raw === null) return null;
@@ -98,7 +143,59 @@ export function parseChatConfig(raw: string | null): ChatConfig | null {
   if (c.allow !== 'signedin' && c.allow !== 'anyone') return null;
   if (typeof c.limit !== 'number' || !Number.isInteger(c.limit) || c.limit < 1 || c.limit > 50) return null;
   if (c.signin !== null && !isRoute(c.signin)) return null;
-  return { page: c.page, allow: c.allow, limit: c.limit, signin: c.signin };
+  // A prose-only chat writes neither; a listed one writes both.
+  const show = c.show ?? [];
+  const to = c.to ?? [];
+  if (!Array.isArray(show) || !show.every((w) => (CHAT_WORDS as readonly unknown[]).includes(w)) || new Set(show).size !== show.length) return null;
+  if (!Array.isArray(to) || !to.every((d) => typeof d === 'string' && linkKind(d) !== null)) return null;
+  return { page: c.page, allow: c.allow, limit: c.limit, signin: c.signin, show: show as ChatWord[], to: to as string[] };
+}
+
+/** A string within `max` characters (and at least one when required). */
+const text = (v: unknown, max: number, required = true): v is string =>
+  typeof v === 'string' && v.length <= max && (!required || v.trim().length > 0);
+
+/** An object with exactly these keys — a key the server never sends drops the component. */
+const exactly = (v: unknown, keys: readonly string[]): boolean =>
+  !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v as object, k));
+
+/** A list of 1–BLOCK_LIMITS.items objects of exactly `keys`. */
+const items = (v: unknown, keys: readonly string[]): v is Record<string, unknown>[] =>
+  Array.isArray(v) && v.length >= 1 && v.length <= BLOCK_LIMITS.items && v.every((x) => exactly(x, keys));
+
+/** A `block` event's data, checked against the closed shapes of chat-block-spec §4.2; anything else is null. */
+function toBlock(d: Record<string, unknown>): ChatBlock | null {
+  const L = BLOCK_LIMITS;
+  if (exactly(d, ['quote', 'route', 'n'])) {
+    const ok = d.quote === 'pricing' && isRoute(d.route) && typeof d.n === 'number' && Number.isInteger(d.n) && d.n >= 0 && d.n < 1000;
+    return ok ? { kind: 'quote', route: d.route as string, n: d.n as number } : null;
+  }
+  if (exactly(d, ['faq'])) {
+    const list = d.faq;
+    if (!items(list, ['q', 'a']) || !list.every((i) => text(i.q, L.question) && text(i.a, L.answer))) return null;
+    return { kind: 'faq', items: list.map((i) => ({ q: i.q as string, a: i.a as string })) };
+  }
+  if (exactly(d, ['cta'])) {
+    const c = d.cta as Record<string, unknown>;
+    if (!exactly(c, ['label', 'to']) || !text(c.label, L.label) || typeof c.to !== 'string' || linkKind(c.to) === null) return null;
+    return { kind: 'cta', label: c.label, to: c.to };
+  }
+  if (exactly(d, ['feature'])) {
+    const list = d.feature;
+    if (!items(list, ['title', 'text']) || !list.every((i) => text(i.title, L.title) && text(i.text, L.text, false))) return null;
+    return { kind: 'feature', items: list.map((i) => ({ title: i.title as string, text: i.text as string })) };
+  }
+  return null;
+}
+
+/** What the status region says for a component: once, as a summary (§9). */
+export function blockCopy(block: ChatBlock, plans = 0): string {
+  switch (block.kind) {
+    case 'quote': return plans > 0 ? `Pricing table, ${plans === 1 ? '1 plan' : `${plans} plans`}.` : 'Pricing table.';
+    case 'faq': return block.items.length === 1 ? '1 question and answer.' : `${block.items.length} questions and answers.`;
+    case 'cta': return `Link: ${block.label}.`;
+    case 'feature': return block.items.length === 1 ? 'A list of 1 item.' : `A list of ${block.items.length} items.`;
+  }
 }
 
 /** Control characters a visitor's text may not carry (a newline it may). */
@@ -122,11 +219,17 @@ function toEvent(name: string, data: string): ChatEvent | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   const d = v as Record<string, unknown>;
   if (name === 'text') return typeof d.s === 'string' ? { type: 'text', s: d.s } : null;
+  if (name === 'block') {
+    const block = toBlock(d);
+    return block ? { type: 'block', block } : null;
+  }
   if (name === 'done') {
     const ok = typeof d.tag === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(d.tag)
       && typeof d.conversation === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(d.conversation)
-      && typeof d.left === 'number' && Number.isInteger(d.left) && d.left >= 0;
-    return ok ? { type: 'done', tag: d.tag as string, left: d.left as number, conversation: d.conversation as string } : null;
+      && typeof d.left === 'number' && Number.isInteger(d.left) && d.left >= 0
+      // The answer as it is sent back as history: the server's record, tagged.
+      && typeof d.text === 'string' && d.text.length <= BLOCK_LIMITS.record;
+    return ok ? { type: 'done', tag: d.tag as string, left: d.left as number, conversation: d.conversation as string, text: d.text as string } : null;
   }
   if (name === 'error') return typeof d.code === 'string' && /^[a-z_]{1,40}$/.test(d.code) ? { type: 'error', code: d.code } : null;
   return null;

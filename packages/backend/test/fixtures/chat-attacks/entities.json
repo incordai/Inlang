@@ -1,0 +1,20 @@
+{
+  "name": "entities",
+  "threat": "HTML entities are never decoded: they stay the characters they are",
+  "ask": "attack entities",
+  "answer": "&lt;script&gt;alert(1)&lt;/script&gt; &#106;avascript: &amp;\nfaq\n  item \"&lt;b&gt;bold?&lt;/b&gt;\"\n    text \"&#x3C;img src=x&#x3E;\"",
+  "expect": {
+    "text": "&lt;script&gt;alert(1)&lt;/script&gt; &#106;avascript: &amp;\n",
+    "blocks": [
+      {
+        "faq": [
+          {
+            "q": "&lt;b&gt;bold?&lt;/b&gt;",
+            "a": "&#x3C;img src=x&#x3E;"
+          }
+        ]
+      }
+    ],
+    "dropped": []
+  }
+}

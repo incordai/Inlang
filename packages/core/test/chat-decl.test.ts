@@ -90,9 +90,8 @@ test('AZ1254: a word an answer can never show is refused with its reason', () =>
   assert.deepEqual(errors(site(chat('    show banana\n'))), ['AZ1254'], 'an unknown word too');
 });
 
-test('AZ1214: show and site-level chat are not available in C1', () => {
-  assert.deepEqual(errors(site(chat('    show pricing faq\n'))), ['AZ1214', 'AZ1214']);
-  assert.match(message(site(chat('    show cta\n')), 'AZ1214'), /show 'cta' is not available yet — answers are text for now/);
+test('C2: show faq cta feature compiles; site-level chat is still not available (AZ1214, C3)', () => {
+  assert.deepEqual(errors(site(chat('    show faq cta feature\n'))), []);
   const atSite = `az 1\nsite studio\n${BACKEND}${MODEL}  chat panel\npage /\n`;
   assert.ok(errors(atSite).includes('AZ1214'));
 });

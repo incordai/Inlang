@@ -1,0 +1,17 @@
+{
+  "name": "forbidden-words",
+  "threat": "Forbidden component: every word outside show, as a line and as a quote",
+  "ask": "attack forbidden-words",
+  "answer": "Here is the form.\nauth login\n  alt \"Back\" /\nhero center\ngallery grid\nnav\nfooter\nscene\nchat panel\ntext body \"x\"\nshow auth /login\nshow gallery /\nshow hero /\nshow faq /\nshow chat /ask",
+  "expect": {
+    "text": "Here is the form.\nauth login\n  alt \"Back\" /\nhero center\ngallery grid\nnav\nfooter\nscene\nchat panel\ntext body \"x\"\n",
+    "blocks": [],
+    "dropped": [
+      "not_shown",
+      "not_shown",
+      "not_shown",
+      "not_shown",
+      "not_shown"
+    ]
+  }
+}

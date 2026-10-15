@@ -31,7 +31,7 @@ import { LIST_SEPARATOR, type LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
 import { buildFrom, GALLERY_FROM_REFUSED, type FromContext } from './from.ts';
 import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
-import { CHAT_WORD, chatDiagnostics, chatOf } from './chat.ts';
+import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, withAnswer } from './chat.ts';
 
 /**
  * Where each block was written. A SpecBlock carries no position — it is the
@@ -471,7 +471,7 @@ export function buildSpec(
   const login = pageWords.find((p) => p.children.some((c) => c.word === 'auth'
     && (c.variant ?? manifests.get('auth')?.variants?.[0]) === 'login'))?.args[0]?.value ?? null;
   const data: FromContext = { tables, protect, login, report: (d) => diagnostics.push(d) };
-  const pages: SpecPage[] = pageWords.map((p) => {
+  const built: SpecPage[] = pageWords.map((p) => {
     const route = p.args[0]?.value ?? '/';
     const description = single('page', p.children, 'description');
     return {
@@ -481,13 +481,25 @@ export function buildSpec(
     };
   });
 
-  // ---- chat (chat-block-spec §3.4): its backend, what it may show, who asks
+  // ---- chat (chat-block-spec §3.4, §5.3, §6.2): its backend, what it may show and quote and link to, who asks
+  // A chat's answers can quote any page's pricing and link to any declared
+  // destination, so they are known only once every page is built.
+  const answers = chatAnswers(built, inherited, protect);
+  const pages: SpecPage[] = built.map((p) => ({
+    ...p,
+    blocks: p.blocks.map((b) => {
+      const next = withAnswer(b, answers);
+      if (next !== b) written.set(next, written.get(b) ?? { line: 1, col: 1 });
+      return next;
+    }),
+  }));
   diagnostics.push(...chatDiagnostics(
     [
       ...kids.filter((w) => w.word === CHAT_WORD).map((w) => ({ props: w.props, pos: w.pos, atSite: true })),
       ...pageWords.flatMap((p) => p.children.filter((w) => w.word === CHAT_WORD).map((w) => ({ props: w.props, pos: w.pos, atSite: false }))),
     ],
     declared?.props.model,
+    answers.quotes.length,
   ));
 
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');

@@ -125,3 +125,94 @@ test('CONTROL: nothing in the shell runs — no inline handler, no script, no st
     for (const a of Object.keys(n.attrs ?? {})) assert.ok(!/^on/i.test(a) && a !== 'style', `${n.tag} ${a}`);
   }
 });
+
+/* ---- C2: the components' templates (chat-block-spec §5.4) ---------------- */
+
+const SHOW_SITE = ['az 1', 'site aurora', '  auth', '    adapter azbackend', '  backend', '    database sqlite', '    email smtp', '    model default',
+  'page /', '  hero center', '    title "Aurora"', '    cta "Docs" https://docs.aurora.example/start', '    alt "Mail" mailto:hi@aurora.example',
+  '  pricing cards', '    title "Plans"', '    currency usd', '    plan "Team"', '      monthly 29', '      annual 290', '      cta "Start" /login',
+  '    plan "Pro"', '      monthly 49', '      annual 490', '      cta "Start" /login',
+  '  chat panel', '    show pricing faq cta feature', '    allow anyone',
+  'page /login', '  auth login', '    alt "Back" /', ''].join('\n');
+
+/** The site's first page: its pricing block and its chat, each emitted as a page emits them. */
+function showPage(): { pricing: EmittedNode; chat: EmittedNode } {
+  const r = compile(SHOW_SITE, { manifests });
+  assert.ok(r.ok && r.spec, formatDiagnostics(r.diagnostics, 'site.az'));
+  const blocks = blocksFor(r.spec, r.spec.pages[0]);
+  const emit = (word: string) => emitBlock(blocks.find((b) => b.word === word)!, T, WEB_EMITTERS, (p) => p, { name: 'aurora' });
+  return { pricing: emit('pricing'), chat: emit('chat') };
+}
+const partOf = (root: EmittedNode, key: string) => marked(root, 'data-az-chat-part').filter((n) => n.attrs?.['data-az-chat-part'] === key);
+const classes = (n: EmittedNode) => walk(n).map((x) => x.attrs?.class ?? '').join(' ');
+const MARK = (prop: string) => `${String.fromCharCode(0xe000)}${prop}${String.fromCharCode(0xe000)}`;
+const marks = (n: EmittedNode) => texts(n).filter((t) => t.includes(String.fromCharCode(0xe000)));
+
+test('with show, the config lists the words and the destinations the file declares', () => {
+  const { chat: root } = showPage();
+  assert.deepEqual(JSON.parse(root.attrs!['data-az-chat']), {
+    page: '/', allow: 'anyone', limit: 20, signin: null,
+    show: ['pricing', 'faq', 'cta', 'feature'], to: ['/', '/login', 'https://docs.aurora.example/start', 'mailto:hi@aurora.example'],
+  });
+  // CONTROL: a prose-only chat's config is as it was, and it ships no parts.
+  assert.equal(marked(chat(), 'data-az-chat-parts').length, 0);
+});
+
+test('a quoted pricing block is the page\'s own block — the same markup and classes — with ids, radio groups and behaviour parked', () => {
+  const { pricing, chat: root } = showPage();
+  const parts = one(root, 'data-az-chat-parts');
+  assert.equal(parts.attrs?.hidden, 'hidden');
+  const [quote] = partOf(root, 'quote');
+  assert.equal(quote.attrs?.['data-az-chat-quote'], '/#0');
+  assert.equal(quote.attrs?.['data-az-chat-plans'], '2');
+  const copy = (quote.children ?? [])[0] as EmittedNode;
+  assert.equal(classes(copy), classes(pricing), 'every class is one the pricing word made for its page');
+  assert.deepEqual(texts(copy), texts(pricing), 'the author\'s prices, word for word');
+  // The page's own block keeps its ids and its switch; the template's never collide with them or get wired.
+  const pageIds = new Set(walk(pricing).map((n) => n.attrs?.id).filter(Boolean));
+  for (const n of walk(copy)) {
+    if (n.attrs?.id) assert.ok(!pageIds.has(n.attrs.id), `id ${n.attrs.id} is suffixed`);
+    assert.equal(n.attrs?.['data-az-behaviour'], undefined, 'parked, not live');
+  }
+  assert.ok(walk(copy).some((n) => n.attrs?.['data-az-chat-behaviour'] === 'billing'), 'the billing switch, parked');
+  const radios = walk(copy).filter((n) => n.attrs?.type === 'radio');
+  assert.ok(radios.length === 2 && radios.every((r) => r.attrs?.name !== 'az-billing'), 'its own radio group');
+});
+
+test('the faq and feature templates are those words\' own items, with markers where the answer\'s text goes', () => {
+  const { chat: root } = showPage();
+  const [faq] = partOf(root, 'faq');
+  const list = (faq.children ?? [])[0] as EmittedNode;
+  assert.equal(list.tag, 'ul');
+  assert.equal(list.attrs?.hidden, undefined, 'the parts container is hidden; the list itself shows once filled');
+  assert.equal(list.attrs?.['data-az-chat-behaviour'], 'faq');
+  assert.equal((list.children ?? []).length, 1, 'one item to copy per question');
+  assert.ok(classes(list).includes('az-faq-item') && classes(list).includes('az-faq-toggle'));
+  assert.deepEqual(marks(list), [MARK('question'), MARK('text')]);
+  const [feature] = partOf(root, 'feature');
+  assert.deepEqual(marks(feature), [MARK('title'), MARK('text')]);
+  assert.ok(classes(feature).includes('az-feature'));
+});
+
+test('one call-to-action template per way a destination is followed, each the button primitive', () => {
+  const { chat: root } = showPage();
+  const keys = marked(root, 'data-az-chat-part').map((n) => n.attrs?.['data-az-chat-part'] ?? '').filter((k) => k.startsWith('cta-'));
+  assert.deepEqual(keys, ['cta-route', 'cta-https', 'cta-mailto']);
+  for (const key of keys) {
+    const a = (partOf(root, key)[0].children ?? [])[0] as EmittedNode;
+    assert.equal(a.tag, 'a');
+    assert.match(a.attrs?.class ?? '', /\baz-action\b/);
+    assert.ok(texts(a).includes(MARK('label')));
+  }
+  const external = (partOf(root, 'cta-https')[0].children ?? [])[0] as EmittedNode;
+  assert.equal(external.attrs?.rel, 'noopener noreferrer');
+});
+
+test('CONTROL: the parts run nothing either — no script, image, inline handler or style attribute', () => {
+  const nodes = walk(one(showPage().chat, 'data-az-chat-parts'));
+  assert.ok(nodes.length > 30);
+  for (const n of nodes) {
+    assert.ok(!['script', 'img', 'iframe', 'object', 'embed'].includes(n.tag), n.tag);
+    for (const a of Object.keys(n.attrs ?? {})) assert.ok(!/^on/i.test(a) && a !== 'style', `${n.tag} ${a}`);
+  }
+});

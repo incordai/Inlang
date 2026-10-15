@@ -1,0 +1,22 @@
+{
+  "name": "schemes",
+  "threat": "Exfiltration by link: every scheme that is not on the allow-list",
+  "ask": "attack schemes",
+  "answer": "Pick one.\ncta \"A\" javascript:alert(1)\ncta \"B\" JaVaScRiPt:alert(1)\ncta \"C\" data:text/html,<script>alert(1)</script>\ncta \"D\" vbscript:msgbox(1)\ncta \"E\" http://docs.lantern.example/start\ncta \"F\" //evil.example/\ncta \"G\" copy:secret\ncta \"H\" popup:#login\ncta \"I\" video:https://evil.example/v.mp4\ncta \"J\" HTTPS://docs.lantern.example/start",
+  "expect": {
+    "text": "Pick one.\n",
+    "blocks": [],
+    "dropped": [
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination",
+      "destination"
+    ]
+  }
+}

@@ -34,8 +34,8 @@
  */
 
 import {
-  ANSWER_MAX, CHAT_TEXT, RETRYABLE, createEventReader, finishedSentences, leftCopy, parseChatConfig, problemCopy, visitorText,
-  type ChatConfig, type ChatTurn,
+  ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, blockCopy, createEventReader, finishedSentences, leftCopy, linkKind,
+  parseChatConfig, problemCopy, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
 } from './chat-logic.ts';
 
 export interface ChatOptions {
@@ -74,6 +74,8 @@ interface Parts {
   readonly reset: HTMLButtonElement;
   readonly signin: HTMLElement | null;
   readonly status: HTMLElement;
+  /** The hidden templates of the components answers may hold; null for a prose-only chat. */
+  readonly components: HTMLElement | null;
 }
 
 function partsOf(host: HTMLElement): Parts | null {
@@ -98,14 +100,146 @@ function partsOf(host: HTMLElement): Parts | null {
     host, transcript, visitorTemplate, siteTemplate, form, input, send, stop, note, error, actions, retry, reset, status,
     asks: one<HTMLElement>('data-az-chat-asks'),
     signin: one<HTMLElement>('data-az-chat-signin'),
+    components: one<HTMLElement>('data-az-chat-parts'),
   };
 }
 
-/** The paragraphs of an answer's text: split at blank lines, an empty last one not drawn yet. */
+/** The paragraphs of a piece of an answer's text: split at blank lines; an empty one (a break at an edge) is not drawn. */
 function paragraphsOf(text: string): string[] {
-  const paras = text.split(/\n{2,}/).map((p) => p.replace(/^\n+|\n+$/g, ''));
-  if (paras.length > 1 && paras[paras.length - 1] === '') paras.pop();
-  return paras;
+  return text.split(/\n{2,}/).map((p) => p.replace(/^\n+|\n+$/g, '')).filter((p) => p !== '');
+}
+
+/** The marker the chat word's templates carry where a value goes (core emit-contract fromMark). */
+const mark = (prop: string) => `${prop}`;
+
+/** Attributes holding ONE id, then a list of ids (target-web ids.ts, the same lists). */
+const SINGLE = ['for', 'list', 'form', 'aria-controls', 'aria-activedescendant', 'aria-details', 'aria-errormessage'];
+const LIST = ['aria-labelledby', 'aria-describedby', 'aria-owns', 'aria-flowto', 'headers'];
+
+/**
+ * A filled copy made ready for the page: every id and radio group given
+ * `suffix`, every reference rewritten with it, and the behaviour marks the
+ * template parked put back — so the behaviour runtime's observer wires this
+ * copy (an FAQ's disclosures, a pricing switch), never the template.
+ */
+function ready(copy: Element, suffix: string): void {
+  suffixIds(copy, suffix);
+  restore(copy);
+}
+
+/** The behaviour marks a template parked, put back; the part's own marks taken off. */
+function restore(copy: Element): void {
+  for (const el of [copy, ...copy.querySelectorAll('[data-az-chat-behaviour]')]) {
+    const behaviour = el.getAttribute('data-az-chat-behaviour');
+    if (behaviour === null) continue;
+    el.removeAttribute('data-az-chat-behaviour');
+    el.setAttribute('data-az-behaviour', behaviour);
+  }
+  copy.removeAttribute('data-az-chat-part');
+  copy.removeAttribute('data-az-chat-quote');
+  copy.removeAttribute('data-az-chat-plans');
+}
+
+/** Every id inside `root` (and its radio groups) given `suffix`, and every reference to one rewritten. */
+function suffixIds(root: Element, suffix: string): void {
+  const all = [root, ...root.querySelectorAll('*')];
+  const ids = new Map<string, string>();
+  for (const el of all) if (el.id) ids.set(el.id, `${el.id}-${suffix}`);
+  for (const el of all) {
+    if (el.id) el.id = ids.get(el.id)!;
+    for (const a of SINGLE) {
+      const v = el.getAttribute(a);
+      if (v !== null && ids.has(v)) el.setAttribute(a, ids.get(v)!);
+    }
+    for (const a of LIST) {
+      const v = el.getAttribute(a);
+      if (v !== null) el.setAttribute(a, v.split(/\s+/).map((id) => ids.get(id) ?? id).join(' '));
+    }
+    if (el.getAttribute('type') === 'radio' && el.hasAttribute('name')) el.setAttribute('name', `${el.getAttribute('name')}-${suffix}`);
+  }
+}
+
+/**
+ * Each marker in `root` replaced by its value, as text. A marker with no
+ * value takes its element with it when it was all that element held (a
+ * list item's empty description). Values are only ever text nodes' data.
+ */
+function fillMarks(doc: Document, root: Element, values: Readonly<Record<string, string>>): void {
+  const walker = doc.createTreeWalker(root, 4 /* NodeFilter.SHOW_TEXT */);
+  const found: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if ((n as Text).data.includes('')) found.push(n as Text);
+  for (const node of found) {
+    const prop = Object.keys(values).find((k) => node.data === mark(k));
+    const value = prop === undefined ? '' : values[prop];
+    const parent = node.parentElement;
+    if (value === '' && parent && parent !== root && parent.childNodes.length === 1) parent.remove();
+    else node.data = value;
+  }
+}
+
+/** The one place a URL is written: a destination the shell's own allow-list holds, checked again right here. */
+function setDestination(anchor: Element, config: ChatConfig, to: string): boolean {
+  if (anchor.tagName !== 'A' || !allowedDestination(config, to)) return false;
+  anchor.setAttribute('href', to);
+  return true;
+}
+
+/** A template part by what it is (and, for a quote, which block) — compared as strings, never built into a selector. */
+function partFor(components: HTMLElement | null, key: string, quote: string | null = null): HTMLElement | null {
+  if (!components) return null;
+  for (const el of components.children) {
+    if (el.getAttribute('data-az-chat-part') === key && (quote === null || el.getAttribute('data-az-chat-quote') === quote)) return el as HTMLElement;
+  }
+  return null;
+}
+
+/**
+ * One component as a filled copy of its template, with what the status
+ * region says of it — or null when the shell has no template for it, the
+ * page does not show it, or (a call to action) its destination is not one
+ * of the shell's own. Nothing here is markup from the network: values are
+ * text, the one URL is a checked destination.
+ */
+function drawBlock(doc: Document, p: Parts, config: ChatConfig, block: ChatBlock, suffix: string): { el: HTMLElement; said: string } | null {
+  const shows = (w: string) => (config.show as readonly string[]).includes(w);
+  if (block.kind === 'quote') {
+    const template = shows('pricing') ? partFor(p.components, 'quote', `${block.route}#${block.n}`) : null;
+    if (!template) return null;
+    const plans = Number(template.getAttribute('data-az-chat-plans') ?? '0');
+    const copy = template.cloneNode(true) as HTMLElement;
+    ready(copy, suffix);
+    return { el: copy, said: blockCopy(block, Number.isInteger(plans) ? plans : 0) };
+  }
+  if (block.kind === 'cta') {
+    const kind = linkKind(block.to);
+    const template = shows('cta') && kind ? partFor(p.components, `cta-${kind}`) : null;
+    if (!template) return null;
+    const copy = template.cloneNode(true) as HTMLElement;
+    const anchor = copy.firstElementChild;
+    if (!anchor || !setDestination(anchor, config, block.to)) return null;
+    fillMarks(doc, copy, { label: block.label });
+    ready(copy, suffix);
+    return { el: copy, said: blockCopy(block) };
+  }
+  const template = shows(block.kind) ? partFor(p.components, block.kind) : null;
+  const list = template?.firstElementChild;
+  const item = list?.firstElementChild;
+  if (!template || !list || !item) return null;
+  const copy = template.cloneNode(false) as HTMLElement;
+  const filled = list.cloneNode(false) as HTMLElement;
+  const rows: Readonly<Record<string, string>>[] = block.kind === 'faq'
+    ? block.items.map((i) => ({ question: i.q, text: i.a }))
+    : block.items.map((i) => ({ title: i.title, text: i.text }));
+  rows.forEach((values, i) => {
+    const row = item.cloneNode(true) as HTMLElement;
+    fillMarks(doc, row, values);
+    // Each row its own ids: the template's item is one, an answer's rows are many.
+    suffixIds(row, `${suffix}-${i + 1}`);
+    filled.append(row);
+  });
+  copy.append(filled);
+  restore(copy);
+  return { el: copy, said: blockCopy(block) };
 }
 
 /** Run one shell. Returns its cleanup. */
@@ -130,6 +264,9 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   let live = true;
   /** Bumped by a new chat: a request from before it must not touch the panel after. */
   let generation = 0;
+  /** Components drawn so far: each copy's ids get their own suffix. */
+  let copies = 0;
+  const doc = p.host.ownerDocument;
 
   const setState = (state: string) => p.host.setAttribute('data-az-chat-state', state);
 
@@ -186,18 +323,36 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     return item;
   };
 
-  /** The answer's text as paragraphs: copies of the template's paragraph, each filled as text. */
-  const draw = (item: HTMLElement, text: string) => {
-    const paras = paragraphsOf(text);
-    let nodes = [...item.querySelectorAll(':scope > p')] as HTMLElement[];
-    const model = nodes[0];
-    if (!model) return;
-    while (nodes.length < paras.length) {
-      const copy = model.cloneNode(false) as HTMLElement;
-      item.append(copy);
-      nodes = [...nodes, copy];
-    }
-    paras.forEach((t, i) => { if (nodes[i].textContent !== t) nodes[i].textContent = t; });
+  /**
+   * An answer as it is drawn: prose and components in the order they came.
+   * The prose after the last component is the open piece; its paragraphs
+   * are copies of the template's paragraph, each filled as text, always at
+   * the end of the answer — a component closes the piece before it.
+   */
+  const answerOf = (item: HTMLElement) => {
+    const model = item.querySelector(':scope > p')?.cloneNode(false) as HTMLElement | undefined;
+    // The template's empty paragraph goes: an answer that opens with a component has no prose before it.
+    item.replaceChildren();
+    let piece = '';
+    let nodes: HTMLElement[] = [];
+    return {
+      text(s: string) {
+        piece += s;
+        if (!model) return;
+        const paras = paragraphsOf(piece);
+        while (nodes.length < paras.length) {
+          const copy = model.cloneNode(false) as HTMLElement;
+          item.append(copy);
+          nodes = [...nodes, copy];
+        }
+        paras.forEach((t, i) => { if (nodes[i].textContent !== t) nodes[i].textContent = t; });
+      },
+      part(el: HTMLElement) {
+        item.append(el);
+        piece = '';
+        nodes = [];
+      },
+    };
   };
 
   const settle = () => {
@@ -264,6 +419,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
       }
       answer = addMessage('site', '');
       answer.setAttribute('aria-busy', 'true');
+      const drawn = answerOf(answer);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       const events = createEventReader();
@@ -276,13 +432,23 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
           if (e.type === 'text') {
             text += e.s;
             if (text.length > ANSWER_MAX) { ac.abort(); break; }
-            draw(answer, text);
+            drawn.text(e.s);
             const s = finishedSentences(text, said);
             said = s.next;
             announce(s.said);
+          } else if (e.type === 'block') {
+            // A component the shell has no template for, or does not show, is not drawn.
+            const made = drawBlock(doc, p, config, e.block, `c${++copies}`);
+            if (!made) continue;
+            // The prose before it is finished: its last words are said first, then the component, once.
+            announce(finishedSentences(text, said, true).said);
+            said = text.length;
+            drawn.part(made.el);
+            announce(made.said);
           } else if (e.type === 'done') {
             finished = true;
-            history = [...history, { role: 'visitor', text: question }, { role: 'site', text, tag: e.tag }];
+            // What the server tagged — prose and the components' lines — is what goes back as history.
+            history = [...history, { role: 'visitor', text: question }, { role: 'site', text: e.text, tag: e.tag }];
             conversation = e.conversation;
             pending = null;
             answer.setAttribute('aria-busy', 'false');

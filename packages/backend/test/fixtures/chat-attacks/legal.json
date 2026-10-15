@@ -1,0 +1,43 @@
+{
+  "name": "legal",
+  "threat": "CONTROL: every legal form, so the filter is seen to let the right things through",
+  "ask": "attack legal",
+  "answer": "For five people, Team fits.\nshow pricing /pricing\nfaq\n  item \"Can I cancel any time?\"\n    text \"Yes, from your account page.\"\ncta \"Talk to us\" /contact\nfeature\n  item \"Bright\"\n    text \"800 lumens.\"\n  item \"Small\"",
+  "expect": {
+    "text": "For five people, Team fits.\n",
+    "blocks": [
+      {
+        "quote": "pricing",
+        "route": "/pricing",
+        "n": 0
+      },
+      {
+        "faq": [
+          {
+            "q": "Can I cancel any time?",
+            "a": "Yes, from your account page."
+          }
+        ]
+      },
+      {
+        "cta": {
+          "label": "Talk to us",
+          "to": "/contact"
+        }
+      },
+      {
+        "feature": [
+          {
+            "title": "Bright",
+            "text": "800 lumens."
+          },
+          {
+            "title": "Small",
+            "text": ""
+          }
+        ]
+      }
+    ],
+    "dropped": []
+  }
+}

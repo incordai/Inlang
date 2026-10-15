@@ -1,0 +1,326 @@
+/**
+ * The answer parser (server chat-answer.ts, chat-block-spec §5.3): every
+ * legal form, every cap at its edge and one past it, the same events
+ * however the stream is split — at every offset, inside a UTF-8 sequence,
+ * inside a string escape — and a cost linear in what it reads.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  ANSWER_LIMITS, createAnswerParser, lineTokens, type AnswerEvent, type AnswerRules,
+} from '../src/server/chat-answer.ts';
+import { createSseReader } from '../src/server/chat-sse.ts';
+
+const RULES: AnswerRules = {
+  show: ['pricing', 'faq', 'cta', 'feature'],
+  quotes: [{ word: 'pricing', route: '/pricing', n: 0 }, { word: 'pricing', route: '/plans', n: 0 }, { word: 'pricing', route: '/plans', n: 1 }],
+  destinations: ['/', '/contact', '/pricing', '/pricing#plans', 'https://docs.example.org/start', 'mailto:help@example.org', 'tel:+15550100'],
+};
+
+/** What a whole answer becomes: its prose (text events joined), its blocks in order, the drops and the record. */
+interface Outcome { text: string; blocks: unknown[]; order: string[]; dropped: string[]; record: string; ended: boolean }
+
+function run(pieces: readonly string[], rules: AnswerRules = RULES): Outcome {
+  const p = createAnswerParser(rules);
+  const events: AnswerEvent[] = [];
+  for (const piece of pieces) {
+    if (p.ended) break;
+    events.push(...p.push(piece));
+  }
+  events.push(...p.end());
+  return summarise(events, p);
+}
+
+function summarise(events: readonly AnswerEvent[], p: { dropped: readonly string[]; record: string; ended: boolean }): Outcome {
+  let text = '';
+  const blocks: unknown[] = [];
+  const order: string[] = [];
+  for (const e of events) {
+    if (e.type === 'text') {
+      text += e.s;
+      if (order.at(-1) !== 'text') order.push('text');
+    } else {
+      blocks.push(e.block);
+      order.push('block');
+    }
+  }
+  return { text, blocks, order, dropped: [...p.dropped], record: p.record, ended: p.ended };
+}
+
+const whole = (answer: string, rules?: AnswerRules) => run([answer], rules);
+
+/* ---- every legal form ----------------------------------------------------- */
+
+const LEGAL = [
+  'For five people, Team fits.',
+  'show pricing /pricing',
+  'faq',
+  '  item "Can I switch plans later?"',
+  '    text "Yes, from Settings, at any time."',
+  'cta "Talk to us" /contact',
+  'feature',
+  '  item "Fast"',
+  '    text "Pages are pre-rendered."',
+  '  item "Small"',
+  '',
+  'text "Anything \\"else\\"? Ask."',
+  'Thanks!',
+].join('\n');
+
+test('every legal form becomes its event, in order, prose around them', () => {
+  const r = whole(LEGAL);
+  assert.deepEqual(r.blocks, [
+    { quote: 'pricing', route: '/pricing', n: 0 },
+    { faq: [{ q: 'Can I switch plans later?', a: 'Yes, from Settings, at any time.' }] },
+    { cta: { label: 'Talk to us', to: '/contact' } },
+    { feature: [{ title: 'Fast', text: 'Pages are pre-rendered.' }, { title: 'Small', text: '' }] },
+  ]);
+  assert.equal(r.text, 'For five people, Team fits.\nAnything "else"? Ask.\nThanks!');
+  assert.deepEqual(r.order, ['text', 'block', 'block', 'block', 'block', 'text']);
+  assert.deepEqual(r.dropped, []);
+  // The record is what the page sends back: prose, and each component in its canonical lines.
+  assert.equal(r.record, [
+    'For five people, Team fits.', 'show pricing /pricing', 'faq', '  item "Can I switch plans later?"', '    text "Yes, from Settings, at any time."',
+    'cta "Talk to us" /contact', 'feature', '  item "Fast"', '    text "Pages are pre-rendered."', '  item "Small"',
+    'Anything "else"? Ask.', 'Thanks!',
+  ].join('\n'));
+  // …and the record parses back to the same components (a model that sees it as history learns the same forms).
+  assert.deepEqual(whole(r.record).blocks, r.blocks);
+});
+
+test('a quote names a page and, with #n, its n-th pricing block; every destination of the allow-list works exactly as written', () => {
+  assert.deepEqual(whole('show pricing /plans#2').blocks, [{ quote: 'pricing', route: '/plans', n: 1 }]);
+  assert.deepEqual(whole('show pricing /plans#1').blocks, [{ quote: 'pricing', route: '/plans', n: 0 }]);
+  for (const to of RULES.destinations) assert.deepEqual(whole(`cta "Go" ${to}`).blocks, [{ cta: { label: 'Go', to } }], to);
+  // A variant word after faq/feature is accepted and ignored: the page draws its own template.
+  assert.equal(whole('faq list\n  item "Q"\n    text "A"').blocks.length, 1);
+  assert.equal(whole('feature grid\n  item "T"').blocks.length, 1);
+});
+
+test('a line that does not have a component\'s shape is prose — shown as the text it is', () => {
+  for (const line of ['show me the plans', 'text me later', 'faq: see below', 'cta now', 'features are great', 'feature list soon please',
+    'cta "Unterminated /contact', 'show pricing', 'text "a" "b"', 'textual', 'pricing starts at nine', 'item "Q"', 'auth login', 'hero center']) {
+    const r = whole(line);
+    assert.equal(r.text, line, line);
+    assert.deepEqual(r.blocks, [], line);
+    assert.deepEqual(r.dropped, [], line);
+  }
+});
+
+test('a component that breaks a rule is dropped whole and leaves no text', () => {
+  const cases: [string, string][] = [
+    ['show auth /login', 'not_shown'],
+    ['show faq /help', 'not_shown'],
+    ['show pricing /nope', 'no_quote'],
+    ['show pricing /pricing#2', 'no_quote'],
+    ['show pricing /pricing#plans', 'no_quote'],
+    ['cta "Claim" https://evil.example/?d=1', 'destination'],
+    ['cta "Claim" javascript:alert(1)', 'destination'],
+    ['cta "Claim" /contact/', 'destination'],
+    ['cta "" /contact', 'empty'],
+    ['pricing cards\n  plan "Team"\n    monthly 0', 'composed_pricing'],
+    ['pricing', 'composed_pricing'],
+    ['faq', 'empty'],
+    ['faq\n  item "Q"', 'empty'],
+    ['faq\n  item "Q"\n    text "A"\n    text "B"', 'shape'],
+    ['faq\n  item "Q"\n      text "A"', 'shape'],
+    ['faq\n   item "Q"', 'shape'],
+    ['faq\n  item "Q"\n    text "A"\n  img "https://evil.example/x.png"', 'shape'],
+    ['cta "Go" /\n  item "x"', 'shape'],
+    ['show pricing /pricing\n  plan "Free"', 'shape'],
+    ['faq\n  item "Q" "R"', 'shape'],
+    ['faq\n  item "Q\n    text "A"', 'shape'],
+  ];
+  for (const [answer, reason] of cases) {
+    const r = whole(`Before.\n${answer}\nAfter.`);
+    assert.deepEqual(r.blocks, [], answer);
+    assert.equal(r.text, 'Before.\nAfter.', answer);
+    assert.deepEqual(r.dropped, [reason], answer);
+  }
+});
+
+test('a component the page does not show is dropped, even in a legal form', () => {
+  const faqOnly: AnswerRules = { ...RULES, show: ['faq'] };
+  const r = whole(LEGAL, faqOnly);
+  assert.deepEqual(r.blocks, [{ faq: [{ q: 'Can I switch plans later?', a: 'Yes, from Settings, at any time.' }] }]);
+  assert.deepEqual(r.dropped, ['not_shown', 'not_shown', 'not_shown']);
+  // CONTROL: a prose-only page shows none of them.
+  assert.deepEqual(whole(LEGAL, { show: [], quotes: [], destinations: [] }).blocks, []);
+});
+
+/* ---- every cap, at the edge and one past it ------------------------------- */
+
+const faqOf = (n: number, q = 'Q', a = 'A') => `faq\n${Array.from({ length: n }, () => `  item "${q}"\n    text "${a}"`).join('\n')}`;
+const featureOf = (n: number, title = 'T', text = 'x') => `feature\n${Array.from({ length: n }, () => `  item "${title}"\n    text "${text}"`).join('\n')}`;
+
+test('caps: items, question, answer, title, text, label — each at its limit shown, one past dropped', () => {
+  const L = ANSWER_LIMITS;
+  const edge: [string, string][] = [
+    [faqOf(L.items), faqOf(L.items + 1)],
+    [faqOf(1, 'q'.repeat(L.question)), faqOf(1, 'q'.repeat(L.question + 1))],
+    [faqOf(1, 'Q', 'a'.repeat(L.answer)), faqOf(1, 'Q', 'a'.repeat(L.answer + 1))],
+    [featureOf(L.items), featureOf(L.items + 1)],
+    [featureOf(1, 't'.repeat(L.title)), featureOf(1, 't'.repeat(L.title + 1))],
+    [featureOf(1, 'T', 'x'.repeat(L.text)), featureOf(1, 'T', 'x'.repeat(L.text + 1))],
+    [`cta "${'l'.repeat(L.label)}" /contact`, `cta "${'l'.repeat(L.label + 1)}" /contact`],
+  ];
+  for (const [at, past] of edge) {
+    assert.equal(whole(at).blocks.length, 1, at.slice(0, 40));
+    assert.equal(whole(past).blocks.length, 0, past.slice(0, 40));
+    assert.equal(whole(past).dropped.length, 1);
+  }
+});
+
+test(`caps: ${ANSWER_LIMITS.components} components; the next one ends the answer`, () => {
+  const four = Array.from({ length: ANSWER_LIMITS.components }, () => 'cta "Go" /contact').join('\n');
+  const atCap = whole(`${four}\nMore prose.`);
+  assert.equal(atCap.blocks.length, 4);
+  assert.equal(atCap.ended, false);
+  assert.equal(atCap.text, 'More prose.');
+  const past = whole(`${four}\ncta "Fifth" /contact\nMore prose.`);
+  assert.equal(past.blocks.length, 4);
+  assert.equal(past.ended, true, 'past the cap the parser stops reading');
+  assert.equal(past.text, '', 'nothing after it is read');
+  assert.deepEqual(past.dropped, ['components']);
+});
+
+test(`caps: ${ANSWER_LIMITS.prose} characters of prose, then the answer ends`, () => {
+  const at = whole('x'.repeat(ANSWER_LIMITS.prose - 1));
+  assert.equal(at.text.length, ANSWER_LIMITS.prose - 1);
+  assert.equal(at.ended, false);
+  const past = whole(`${'x'.repeat(ANSWER_LIMITS.prose)}y\ncta "Go" /contact`);
+  assert.equal(past.text.length, ANSWER_LIMITS.prose);
+  assert.equal(past.ended, true);
+  assert.deepEqual(past.blocks, []);
+});
+
+test(`caps: a held line is read to ${ANSWER_LIMITS.line} characters; a longer one is dropped, never shown`, () => {
+  const label = 'l'.repeat(ANSWER_LIMITS.line);
+  const r = whole(`Before.\ncta "${label}" /contact\nAfter.`);
+  assert.equal(r.text, 'Before.\nAfter.');
+  assert.deepEqual(r.dropped, ['too_long']);
+  // A line that starts like a component and never ends: one megabyte, held only to the cap.
+  const huge = whole(`faq "${'z'.repeat(1024 * 1024)}`);
+  assert.equal(huge.text, '');
+  assert.deepEqual(huge.dropped, ['too_long']);
+  // CONTROL: prose of any line length streams (the prose cap is what bounds it).
+  assert.equal(whole('w'.repeat(ANSWER_LIMITS.line + 10)).text.length, ANSWER_LIMITS.line + 10);
+});
+
+test('the record is capped: a component that would pass it is dropped, so a tagged answer always fits a history turn', () => {
+  const longFaq = faqOf(ANSWER_LIMITS.items, 'q'.repeat(ANSWER_LIMITS.question), 'a'.repeat(ANSWER_LIMITS.answer));
+  const r = whole(`${'p'.repeat(3_000)}\n${longFaq}\n${longFaq}\n${longFaq}\n${longFaq}`);
+  assert.ok(r.record.length <= ANSWER_LIMITS.record, `${r.record.length}`);
+  assert.equal(r.blocks.length, 1);
+  assert.deepEqual(r.dropped, ['record', 'record', 'record']);
+});
+
+/* ---- strings: what is stripped, normalised, and never decoded ------------- */
+
+test('strings: three escapes only; controls, bidi and zero-width characters go; NFC; entities stay as written', () => {
+  assert.deepEqual(lineTokens('cta "a \\"b\\" \\\\ c\\nd" /x'), [{ kind: 'bare', value: 'cta' }, { kind: 'string', value: 'a "b" \\ c\nd' }, { kind: 'bare', value: '/x' }]);
+  assert.equal(lineTokens('cta "\\t" /x'), null, 'another escape does not lex');
+  assert.equal(lineTokens('cta "a"b /x'), null);
+  assert.equal(lineTokens('cta a"b /x'), null);
+  const r = whole('cta "Pa‮y​ me\u0000" /cont‮act\nfaq\n  item "Café &lt;b&gt;"\n    text "<img src=x onerror=alert(1)>"');
+  assert.deepEqual(r.blocks, [
+    { cta: { label: 'Pay me', to: '/contact' } },
+    { faq: [{ q: 'Café &lt;b&gt;', a: '<img src=x onerror=alert(1)>' }] },
+  ]);
+  assert.equal(whole('a‮b\u0007c\r\nd').text, 'abc\nd', 'prose too; a CRLF is a line end');
+});
+
+/* ---- streaming ------------------------------------------------------------ */
+
+test('prose streams before its line ends, once its first word cannot start a component', () => {
+  const p = createAnswerParser(RULES);
+  const first = p.push('Hello wor');
+  assert.equal(first.length, 1);
+  assert.equal(first[0].type, 'text');
+  // All but the last character, which waits in case a combining mark follows it.
+  assert.equal((first[0] as { s: string }).s, 'Hello wo');
+  // A line that starts like a component waits for its end.
+  assert.deepEqual(p.push('ld.\nfa'), [{ type: 'text', s: 'rld.\n' }]);
+  assert.deepEqual(p.push('q\n  item "Q"\n    text "A"\n'), []);
+  assert.deepEqual(p.push('Next'), [{ type: 'block', block: { faq: [{ q: 'Q', a: 'A' }] } }, { type: 'text', s: 'Nex' }]);
+});
+
+/** Adjacent text events joined: how the page reads a stream, whatever its pieces. */
+const canonical = (o: Outcome) => ({ text: o.text, blocks: o.blocks, order: o.order, dropped: o.dropped, record: o.record });
+
+const SPLIT = `${LEGAL}\nÉmoji 🌍 and Café.\ncta "Tal\\"k" /contact\n${'faq\n  item "Q \\\\ 🌍"\n    text "A\\nB"'}\nshow pricing /plans#2\nEnd`;
+
+test('the same events however the answer is split: at every offset, inside a surrogate pair and inside an escape', () => {
+  const expected = canonical(whole(SPLIT));
+  assert.equal(expected.blocks.length, 4, 'the cap holds for the expected run too');
+  for (let i = 0; i <= SPLIT.length; i++) {
+    assert.deepEqual(canonical(run([SPLIT.slice(0, i), SPLIT.slice(i)])), expected, `split at ${i}`);
+  }
+  // One character (UTF-16 unit) at a time.
+  assert.deepEqual(canonical(run(SPLIT.split(''))), expected);
+});
+
+test('the same events however the model\'s bytes arrive: an SSE stream split at every byte, inside UTF-8 sequences', () => {
+  const answer = 'Café 🌍 ok.\nfaq\n  item "Ünïcødé 🌍?"\n    text "Yes."\nDone.';
+  // Two deltas, as a completions stream sends them; the adapter path is SSE reader → JSON → parser.
+  const deltas = [answer.slice(0, 9), answer.slice(9)];
+  const bytes = new TextEncoder().encode(deltas.map((d) => `data: ${JSON.stringify({ choices: [{ delta: { content: d } }] })}\n\n`).join('') + 'data: [DONE]\n\n');
+  const viaSse = (cuts: number[]) => {
+    const sse = createSseReader();
+    const p = createAnswerParser(RULES);
+    const events: AnswerEvent[] = [];
+    const take = (data: string) => {
+      if (data === '[DONE]') return;
+      events.push(...p.push((JSON.parse(data) as { choices: { delta: { content: string } }[] }).choices[0].delta.content));
+    };
+    let at = 0;
+    for (const cut of [...cuts, bytes.length]) {
+      for (const e of sse.push(bytes.slice(at, cut))) take(e.data);
+      at = cut;
+    }
+    for (const e of sse.end()) take(e.data);
+    events.push(...p.end());
+    return canonical(summarise(events, p));
+  };
+  const expected = canonical(whole(answer));
+  assert.equal(expected.blocks.length, 1);
+  for (let i = 0; i <= bytes.length; i++) assert.deepEqual(viaSse([i]), expected, `byte split at ${i}`);
+});
+
+/* ---- cost: linear on adversarial input ------------------------------------ */
+
+/** CPU milliseconds `f` takes: the least of `runs`. */
+function cpuMs(f: () => unknown, runs = 3): number {
+  let best = Infinity;
+  for (let i = 0; i < runs; i++) {
+    const start = process.cpuUsage();
+    f();
+    const used = process.cpuUsage(start);
+    best = Math.min(best, (used.user + used.system) / 1000);
+  }
+  return best;
+}
+
+/** Shapes a parser could restart on, none of which reaches a cap that ends the read early. */
+const ADVERSARIAL: Readonly<Record<string, string>> = {
+  'unterminated strings in a held line': 'faq "',
+  'deep indents inside a component': 'faq\n' + `${' '.repeat(64)}x\n`,
+  'escapes in a held line': 'cta "\\\\\\"',
+  'keyword prefixes': 'fe',
+  'items past the cap': 'feature\n  item "x"\n',
+};
+
+const MB = 1024 * 1024;
+for (const [name, unit] of Object.entries(ADVERSARIAL)) {
+  test(`LINEAR: ${name}, 4MB — about eight times the cost for eight times the input`, () => {
+    const fill = (chars: number) => unit.repeat(Math.ceil(chars / unit.length));
+    const big = fill(4 * MB);
+    const small = fill((4 * MB) / 8);
+    const parse = (s: string) => { const p = createAnswerParser(RULES); for (let i = 0; i < s.length; i += 4096) p.push(s.slice(i, i + 4096)); p.end(); };
+    const tBig = cpuMs(() => parse(big), 1);
+    const tSmall = cpuMs(() => parse(small));
+    assert.ok(tBig <= (big.length * 1_000) / 1e6, `${tBig.toFixed(1)}ms CPU for ${big.length} characters`);
+    assert.ok(tBig <= 24 * Math.max(tSmall, 1), `8× the input took ${(tBig / tSmall).toFixed(1)}× (${tSmall.toFixed(1)} → ${tBig.toFixed(1)}ms)`);
+  });
+}

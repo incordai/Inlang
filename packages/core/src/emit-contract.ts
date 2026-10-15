@@ -207,6 +207,15 @@ export interface EmitContext {
   readonly actions: (block: SpecBlock, slots: readonly string[], options?: ActionOptions) => EmittedNode[];
   /** A form submit button styled as an action of the given hierarchy. */
   readonly submit: (label: string, options?: SubmitOptions) => EmittedNode;
+  /**
+   * Another block rendered by ITS OWN word's emitter, exactly as a page
+   * would render it — so its markup and classes are that word's, already in
+   * the generated stylesheet. `chat` uses it for the templates its answers
+   * fill (chat-block-spec §5.4); words never import each other, the target
+   * injects every emitter. Absent when the caller has no emitters to hand
+   * (a word run alone); a word then renders without the embedded block.
+   */
+  readonly embed?: (block: SpecBlock) => EmittedNode;
 }
 
 /**

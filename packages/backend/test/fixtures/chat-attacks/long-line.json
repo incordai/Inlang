@@ -1,0 +1,19 @@
+{
+  "name": "long-line",
+  "threat": "Parser abuse: a 200 KB line that starts like a component is held only to the line cap, then dropped",
+  "ask": "attack long-line",
+  "answer": "Short.\nfaq \"@@LONG@@\nAfter.",
+  "expand": {
+    "@@LONG@@": {
+      "repeat": "z",
+      "count": 200000
+    }
+  },
+  "expect": {
+    "text": "Short.\nAfter.",
+    "blocks": [],
+    "dropped": [
+      "too_long"
+    ]
+  }
+}

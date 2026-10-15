@@ -131,9 +131,11 @@ test('an answer streams as text events, then done with a tag that proves it; it 
     assert.equal(r.headers.get('access-control-allow-origin'), SITE);
     assert.equal(r.headers.get('x-accel-buffering'), 'no');
     const ev = await events(r);
-    assert.deepEqual(ev.slice(0, 2), [{ event: 'text', data: { s: 'Hello ' } }, { event: 'text', data: { s: 'there.' } }]);
-    const done = ev[2];
+    // Through the answer parser: each piece as it comes, but its last character, held until the next arrives.
+    assert.deepEqual(ev.slice(0, 3), [{ event: 'text', data: { s: 'Hello' } }, { event: 'text', data: { s: ' there' } }, { event: 'text', data: { s: '.' } }]);
+    const done = ev[3];
     assert.equal(done.event, 'done');
+    assert.equal(done.data.text, 'Hello there.', 'the record the page sends back');
     assert.equal(done.data.left, 2);
     const conversation = done.data.conversation as string;
     assert.match(conversation, /^[A-Za-z0-9_-]{16,64}$/);

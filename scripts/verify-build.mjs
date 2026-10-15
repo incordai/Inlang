@@ -684,8 +684,10 @@ try {
   // panel talks only to the backend origin connect-src already allows.
   {
     const CHAT_SITE = 'az 1\n\nsite chatcheck\n  auth\n    adapter azbackend\n  backend\n    database sqlite\n    email    smtp\n'
-      + '    model    default\n\npage /\n  hero center\n    title "Chat check"\n  chat panel\n    title    "Ask us"\n'
-      + '    greeting "Ask about anything on this site."\n    allow    anyone\n';
+      + '    model    default\n\npage /\n  hero center\n    title "Chat check"\n'
+      + '  pricing cards\n    title    "Plans"\n    currency usd\n    plan "Home"\n      monthly 9\n      annual  90\n      cta     "Start" /\n'
+      + '  chat panel\n    title    "Ask us"\n'
+      + '    greeting "Ask about anything on this site."\n    show     pricing faq cta feature\n    allow    anyone\n';
     const PLAIN_SITE = CHAT_SITE.replace('    model    default\n', '').replace(/ {2}chat panel\n(?: {4}.*\n)*/, '');
     const buildSite = (name, source) => {
       const file = join(work, `${name}.az`);
@@ -730,6 +732,16 @@ try {
         && /<form[^>]*\shidden=""[^>]*data-az-chat-form|<form[^>]*data-az-chat-form[^>]*\shidden=""/.test(chatPage)
         && /<noscript><p[^>]*>Turn on JavaScript to ask a question\.<\/p><\/noscript>/.test(chatPage),
       chatPage.slice(chatPage.indexOf('data-az-chat='), chatPage.indexOf('data-az-chat=') + 160));
+    // C2 §5.4: the components an answer may hold ship as hidden templates the words rendered — nothing in them live.
+    const partsAt = chatPage.indexOf('data-az-chat-parts');
+    const partsEnd = chatPage.indexOf('data-az-chat-status');
+    const parts = partsAt >= 0 && partsEnd > partsAt ? chatPage.slice(partsAt, partsEnd) : '';
+    check('chat §5.4: the page ships each component\'s template hidden — the quoted pricing, the faq, feature and cta the words made — nothing in them wired',
+      /<div[^>]*class="az-chat-parts"[^>]*hidden=""|<div[^>]*hidden=""[^>]*class="az-chat-parts"/.test(chatPage)
+        && ['data-az-chat-part="quote"', 'data-az-chat-part="faq"', 'data-az-chat-part="feature"', 'data-az-chat-part="cta-route"'].every((p) => parts.includes(p))
+        && parts.includes('class="az-pricing') && parts.includes('data-az-chat-behaviour="billing"') && !/data-az-behaviour=/.test(parts)
+        && !/<(script|img|iframe)\b|\son[a-z]+=|\sstyle=/.test(parts),
+      parts.slice(0, 200) || 'no parts');
     const publicKey = failing(process.execPath, [join(chatProj, 'node_modules/vite/bin/vite.js'), 'build'], chatProj,
       { ...serverKeys, AZ_PUBLIC_CHAT_KEY: chatKey });
     check('chat §6.4: a chat key given a public name (AZ_PUBLIC_CHAT_KEY) fails the build, its value never printed',

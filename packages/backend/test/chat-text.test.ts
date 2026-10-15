@@ -7,8 +7,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import {
-  checkTag, cleanText, historyKey, HISTORY_CHARS, HISTORY_TURNS, readChatRequest, tagTurn, trimHistory, VISITOR_MAX, type ChatTurn,
+  checkTag, historyKey, HISTORY_CHARS, HISTORY_TURNS, readChatRequest, tagTurn, trimHistory, VISITOR_MAX, type ChatTurn,
 } from '../src/server/chat-text.ts';
+import { cleanText } from '../src/server/chat-answer.ts';
 
 const key = historyKey(randomBytes(32));
 const CONV = 'c'.repeat(22);

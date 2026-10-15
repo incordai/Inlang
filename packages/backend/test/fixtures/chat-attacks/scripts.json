@@ -1,0 +1,26 @@
+{
+  "name": "scripts",
+  "threat": "Script: script tags, event handlers and javascript: inside prose and component strings",
+  "ask": "attack scripts",
+  "answer": "<script>alert(1)</script><img src=x onerror=alert(2)>\nfaq\n  item \"<script>alert(3)</script>\"\n    text \"<img src=x onerror=alert(4)> <a href=javascript:alert(5)>x</a>\"\ncta \"<b onmouseover=alert(6)>Go</b>\" /contact",
+  "expect": {
+    "text": "<script>alert(1)</script><img src=x onerror=alert(2)>\n",
+    "blocks": [
+      {
+        "faq": [
+          {
+            "q": "<script>alert(3)</script>",
+            "a": "<img src=x onerror=alert(4)> <a href=javascript:alert(5)>x</a>"
+          }
+        ]
+      },
+      {
+        "cta": {
+          "label": "<b onmouseover=alert(6)>Go</b>",
+          "to": "/contact"
+        }
+      }
+    ],
+    "dropped": []
+  }
+}

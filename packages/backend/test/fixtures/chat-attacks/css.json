@@ -1,0 +1,11 @@
+{
+  "name": "css",
+  "threat": "CSS: style elements and attributes are text; a component line with a style attribute does not parse",
+  "ask": "attack css",
+  "answer": "<style>body{display:none}</style> <div style=\"position:fixed;inset:0\">x</div>\ntext \"x\" style=\"color:red\"\ncta \"Go\" /contact style=\"color:red\"",
+  "expect": {
+    "text": "<style>body{display:none}</style> <div style=\"position:fixed;inset:0\">x</div>\ntext \"x\" style=\"color:red\"\ncta \"Go\" /contact style=\"color:red\"",
+    "blocks": [],
+    "dropped": []
+  }
+}

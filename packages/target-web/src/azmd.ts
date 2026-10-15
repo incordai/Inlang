@@ -41,6 +41,11 @@ export interface MapInput {
   readonly data: readonly SpecTable[] | null;
   /** Blocks with `from <table>` (data-spec §10), in page order; empty without any. */
   readonly from: readonly { readonly route: string; readonly word: string; readonly from: SpecFrom }[];
+  /** Chat panels (chat-block-spec), in page order: who may ask, how long, what answers show, which blocks they quote; empty without any. */
+  readonly chats?: readonly {
+    readonly route: string; readonly allow: string; readonly limit: string;
+    readonly show: readonly string[]; readonly quotes: readonly string[];
+  }[];
 }
 
 /** `header.az-hero.az-hero--center.az-s-1a2b` — how a root element looks in the DOM. */
@@ -204,6 +209,32 @@ export function azMd(m: MapInput): string {
     out.push(`  attributes only, never HTML (a URL must be http(s)); \`${m.dirs.runtime}/rows-logic.ts\` — its pure rules`);
     out.push('- State: `data-az-from-state` is loading, rows, empty, signin or error; `aria-busy` while loading; the status line');
     out.push('  (`role=status`) says the `empty` copy or the error, politely. Copy and limits change in the .az source; rebuild.');
+  }
+  const chats = m.chats ?? [];
+  if (chats.length > 0) {
+    out.push('', '## Chat', '');
+    out.push('`chat panel` blocks (chat-block-spec): a visitor asks, the site\'s own backend asks the model the operator chose in');
+    out.push('`server/.env` (`AZ_CHAT_API`, `AZ_CHAT_URL`, `AZ_CHAT_MODEL`, `AZ_CHAT_KEY`), and the answer streams back. The .az file never');
+    out.push('names a provider or a model. The page ships a shell — greeting, hidden form, hidden templates — and fills copies of the');
+    out.push('templates with text only; nothing the model writes is ever markup.', '');
+    out.push('| Page | Who may ask | Messages | Answers may show | Quotes |', '|---|---|---|---|---|');
+    for (const c of chats) {
+      out.push(`| \`${c.route}\` | ${c.allow === 'anyone' ? 'anyone' : 'signed-in visitors'} | ${c.limit} | ${c.show.length > 0 ? c.show.join(', ') : 'text only'} | ${c.quotes.length > 0 ? c.quotes.map((q) => `\`${q}\``).join(', ') : '—'} |`);
+    }
+    out.push('');
+    out.push('- `show pricing faq cta feature` lists what an answer may hold besides text. `pricing` is quoted — the site\'s own block,');
+    out.push('  as its page renders it, never prices the model wrote; `faq`, `feature` and `cta` are filled with the model\'s text. A call');
+    out.push('  to action may point only at a destination this file declares. Anything else the model writes is text, or dropped.');
+    out.push(`- \`${m.dirs.runtime}/chat.ts\` — sends the question, reads the event stream, fills the templates; \`${m.dirs.runtime}/chat-logic.ts\` —`);
+    out.push('  the closed event shapes and the destination check; `src/chat/runtime.tsx` hands it the backend URL and the session');
+    out.push('- `server/chat/prompt.txt` — what the model is told (generated, readable); `server/chat/context.json` — the public page');
+    out.push('  content it answers from, the quotable blocks and the destination allow-list');
+    out.push('- `server/src/chat.ts` — `POST /chat`: limits, budget, queue, timeouts; `server/src/chat-answer.ts` — the answer parser:');
+    out.push('  the model\'s text becomes typed events; `server/src/chat-adapters.ts` — the wire shapes (no provider SDK)');
+    out.push('- Before going live: `az backend probe server` asks the configured model the real prompt and reports times, tokens and');
+    out.push('  anything the parser dropped. Costs and limits are `AZ_CHAT_…` keys in `server/.env` (see `server/.env.example`).');
+    out.push('- State: `data-az-chat-state` is idle, checking, signin, streaming or full; the answer is `aria-busy` while it streams;');
+    out.push('  one polite status region hears finished sentences and one line per component.');
   }
   return out.join('\n') + '\n';
 }

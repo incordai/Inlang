@@ -1,0 +1,38 @@
+{
+  "name": "too-many",
+  "threat": "Unbounded output: four components at most; the fifth ends the answer and nothing after it is read",
+  "ask": "attack too-many",
+  "answer": "Links.\ncta \"One\" /\ncta \"Two\" /contact\ncta \"Three\" /pricing\ncta \"Four\" /open\ncta \"Five\" /terms\ncta \"Six\" /signup\nNever read.",
+  "expect": {
+    "text": "Links.\n",
+    "blocks": [
+      {
+        "cta": {
+          "label": "One",
+          "to": "/"
+        }
+      },
+      {
+        "cta": {
+          "label": "Two",
+          "to": "/contact"
+        }
+      },
+      {
+        "cta": {
+          "label": "Three",
+          "to": "/pricing"
+        }
+      },
+      {
+        "cta": {
+          "label": "Four",
+          "to": "/open"
+        }
+      }
+    ],
+    "dropped": [
+      "components"
+    ]
+  }
+}
