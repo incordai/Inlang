@@ -1113,7 +1113,7 @@ described and must be re-read before C1 relies on it.
 | `chat panel`, `model default` | built. `model` is the third `backend` setting, optional (`BACKEND_REQUIRED` is database and email); any other value is AZ1412 with the `.env` hint |
 | AZ1250–AZ1256 | AZ1250, AZ1251, AZ1254, AZ1256 raised (`packages/core/src/chat.ts`). AZ1252, AZ1253, AZ1255 belong to `show`/`knows`, which C1 refuses, so they are **reserved**, not raised; AZ1257 is raised by `az build` as a warning when the context cap leaves a page out (§8.1); AZ1258 waits for `knows` (C3) |
 | `show` refused until C2 | `show pricing\|faq\|cta\|feature` is AZ1214 "not available yet"; any other word is AZ1254 with its reason. `show` is a free list in the manifest so the reasoned refusal can be given |
-| a site-level `chat` | AZ1214 (it is C3's `float`) — before this a non-inheritable block under `site` was silently dropped, which is still true of the other words (reported, not changed) |
+| a site-level `chat` | AZ1214 (it is C3's `float`) — before this a non-inheritable block under `site` was silently dropped; every other word's is now AZ1202 (GRAMMAR §5.2) |
 | per-word rows | AZ2220–AZ2228 (§3.4's table). `limit` range is the generic AZ1408 |
 | cap tests → 12 | `docs.test.ts`, `words.test.ts`, `mcp.test.ts` and a fourth, `packages/core/test/link.test.ts` ("all N manifests load") |
 | `/chat` route, CSRF/CORS, `allow`, limits, budget table, queue, timeouts, kill switch, HMAC history | built (`packages/backend/src/server/chat*.ts`), as §4.2 and §6.5. The request also carries `conversation` (§4.2 implied it; the server makes one on the first turn and returns it in `done`); the tag's turn index is the answer's position in `messages` |

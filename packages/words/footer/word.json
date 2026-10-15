@@ -66,25 +66,44 @@
   "slots": {
     "group": {
       "max": 5,
+      "line": [
+        "label"
+      ],
       "slots": {
         "link": {
           "max": 12,
-          "description": "Link inside a group"
+          "description": "Link inside a group",
+          "line": [
+            "label",
+            "destination"
+          ]
         }
       },
       "description": "Titled group of links (a column)"
     },
     "link": {
       "max": 24,
-      "description": "Link outside any group"
+      "description": "Link outside any group",
+      "line": [
+        "label",
+        "destination"
+      ]
     },
     "social": {
       "max": 6,
-      "description": "Social profile link; external ones open a new tab"
+      "description": "Social profile link; external ones open a new tab",
+      "line": [
+        "label",
+        "destination"
+      ]
     },
     "legal": {
       "max": 4,
-      "description": "Legal link in the copyright row"
+      "description": "Legal link in the copyright row",
+      "line": [
+        "label",
+        "destination"
+      ]
     }
   },
   "requires": {

@@ -2,9 +2,9 @@
  * @az module link
  * Purpose: statements → resolved words against manifests: props, slots, requires, values, routes.
  * Spec: docs/GRAMMAR.md §4–§5 · docs/ARCHITECTURE.md §4.1
- * Exports: link, LinkOptions, Manifest, PropSpec, STRUCTURE, STRUCTURE_PROPS
+ * Exports: link, LinkOptions, Manifest, PropSpec, FillLine, LineValue, ChildLine, STRUCTURE, STRUCTURE_PROPS
  * Edit guide: never name a specific word here — per-word rules are manifest data (checks.ts); lookups use Object.hasOwn.
- * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts, packages/core/test/head-settings.test.ts, packages/core/test/strict-values.test.ts
+ * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts, packages/core/test/head-settings.test.ts, packages/core/test/strict-values.test.ts, packages/core/test/strict-fills.test.ts, packages/words/test/fill-lines.test.ts
  */
 
 /**
@@ -79,6 +79,25 @@ export interface PropSpec {
   readonly min?: number;
 }
 
+/**
+ * One value a fill's own line takes, in order (GRAMMAR §4.5): copy that
+ * names it, where it goes, a value beside the label, a project file, or a
+ * flag of the fill written bare (`item "Sewn" lead`). The roles name what
+ * the word's emitter reads at that position; only the count, and a flag's
+ * spelling, are enforced — a value past the last is AZ1406.
+ */
+export type LineValue = 'label' | 'destination' | 'value' | 'file' | { readonly flag: string };
+
+/** A fill's `line` in word.json: the values its line takes, in order. */
+export type FillLine = readonly LineValue[];
+
+/** A `children` word's declaration (Manifest.childLines). */
+export interface ChildLine {
+  readonly line: FillLine;
+  /** The `children` words that may be indented under this one; none when absent. */
+  readonly holds?: readonly string[];
+}
+
 export interface Manifest {
   readonly name: string;
   readonly kind?: string;
@@ -119,7 +138,14 @@ export interface Manifest {
    * string and the prop name is checked like any other key.
    */
   readonly requiresWhen?: Record<string, Record<string, string[]>>;
+  /** Each slot's definition: bounds, its own props and slots, and its `line` (FillLine). */
   readonly slots?: Record<string, unknown>;
+  /**
+   * The line of each `children` word (nav's `link`, `group`, `cta`): the
+   * values it takes, and the children words that may be indented under it.
+   * A slot's line sits in its slot definition instead.
+   */
+  readonly childLines?: Readonly<Record<string, ChildLine>>;
   /**
    * The rows of the word's spec validation table, as data (checks.ts).
    * A `count` check with no `when` on exactly one slot takes over that slot's
@@ -285,6 +311,18 @@ export interface LinkResult {
 function slotManifest(name: string, def: unknown): Manifest {
   const d = (def ?? {}) as { props?: Record<string, PropSpec>; slots?: Record<string, unknown> };
   return { name, props: d.props, slots: d.slots };
+}
+
+/** A slot's declared line, or undefined when its manifest declares none. */
+function slotLine(def: unknown): FillLine | undefined {
+  const d = (def ?? {}) as { line?: unknown };
+  return Array.isArray(d.line) ? d.line as FillLine : undefined;
+}
+
+/** What a fill's line takes, in words: "a label and a destination". */
+function describeLine(line: FillLine): string {
+  const parts = line.map((v) => typeof v === 'string' ? `a ${v}` : `'${v.flag}'`);
+  return parts.length <= 1 ? parts[0] ?? 'no value' : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
 }
 
 /** A slot's declared bounds. */
@@ -526,6 +564,23 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
   }
 
   /**
+   * GRAMMAR §4.5: a fill's own line takes the values its manifest declares
+   * (`line`), and an emitter reads those and nothing after them — `link
+   * "Shoes" /shoes extra` compiled to a link and dropped `extra` without a
+   * word. A value past the last is AZ1406 at that value; so is a word in a
+   * flag's position that is not the flag. A fill with no declared line is
+   * not checked here (the manifest tests require one on every fill).
+   */
+  function checkLine(s: Statement, line: FillLine | undefined): void {
+    if (!line) return;
+    const extra = s.args.find((a, i) => {
+      const at = line[i];
+      return at === undefined || (typeof at !== 'string' && !(a.kind === 'word' && a.value === at.flag));
+    });
+    if (extra) err('AZ1406', `${s.word}: takes ${describeLine(line)} — remove '${shown(extra.value)}'`, extra.pos);
+  }
+
+  /**
    * One `key value` line of a block or a fill (GRAMMAR §4.4–§4.5, §5.4): the
    * value it carries, or null when the line is refused.
    *
@@ -569,6 +624,14 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       err('AZ1406', copy
         ? `${owner}: '${c.word}' takes one value — quote the copy: ${c.word} "${shown(c.args.map((a) => a.value).join(' '))}"`
         : `${owner}: '${c.word}' takes one value — remove '${shown(extra.value)}'`, extra.pos);
+      return null;
+    }
+    // GRAMMAR §4.1: a `string` key takes quoted text. One bare word was
+    // taken as the copy anyway, so `title made` compiled while `title made
+    // by hand` did not — the same mistake, one word shorter. A bare number
+    // stays a value (`monthly 29` is a price, pricing-spec §7.2).
+    if (spec.type === 'string' && c.args[0].kind === 'word') {
+      err('AZ1406', `${owner}: '${c.word}' is copy and takes quotes — write: ${c.word} "${shown(c.args[0].value)}"`, c.args[0].pos);
       return null;
     }
     return c.args[0];
@@ -889,12 +952,6 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     if (s.word === 'backend') return backendDecl(s, parentWord);
     if (s.word === 'data') return dataDecl(s, parentWord);
 
-    // A property of the enclosing word.
-    if (isProp(s, parent)) {
-      return { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as,
-               children: [], pos: s.pos };
-    }
-
     // A structure keyword's property, e.g. `width` under `site`.
     if (parentWord && STRUCTURE_PROPS[parentWord]?.has(s.word)) {
       if ((parentWord === 'site' || parentWord === 'page') && (s.word === 'description' || s.word === 'icon')) {
@@ -951,6 +1008,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
         const linked = resolve(c, def, s.word);
         if (linked) children.push(linked);
       }
+      checkLine(s, slotLine(parent.slots[s.word]));
       checkRoutes(s, parent);
       // A fill is checked like a block: pricing's `plan` must have exactly
       // one `cta` (pricing-spec §11), and nothing enforced it.
@@ -968,10 +1026,27 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     // different things by position, and the enclosing word's `children` list
     // is that position.
     if (parent?.children?.includes(s.word)) {
+      const decl = parent.childLines && Object.hasOwn(parent.childLines, s.word) ? parent.childLines[s.word] : undefined;
+      checkLine(s, decl?.line);
       checkRoutes(s, parent);
+      // GRAMMAR §3.3: under a nested child only the words it holds — nav's
+      // `group` holds links. The rest were linked and then rendered as links
+      // or not at all: `mobile drawer` under a group set nothing.
+      const children: LinkedWord[] = [];
+      for (const c of s.children) {
+        if (decl?.holds?.includes(c.word)) {
+          const linked = resolve(c, parent, s.word);
+          if (linked) children.push(linked);
+        } else if (isProp(c, parent)) {
+          err('AZ1202', `${c.word}: not allowed inside '${s.word}' — it is a ${parent.name} key; move it under ${parent.name}`, c.pos);
+        } else if (decl?.holds?.length) {
+          err('AZ1202', `${c.word}: not allowed inside '${s.word}' — ${s.word} holds ${decl.holds.join(', ')}`, c.pos);
+        } else {
+          err('AZ1219', `${s.word}: takes no indented lines — write it on one line`, c.pos);
+        }
+      }
       return { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as,
-               children: s.children.map((c) => resolve(c, parent, s.word)).filter(Boolean) as LinkedWord[],
-               pos: s.pos };
+               children, pos: s.pos };
     }
 
     if (s.word === 'raw' || s.word === 'slot') return escapeHatch(s, parent, parentWord);
@@ -1015,6 +1090,16 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
 
     if (!m && !structural) {
       err('AZ1201', `${s.word}: unknown word — see the word list`, s.pos);
+      return null;
+    }
+
+    // GRAMMAR §3.3: a block sits under a page, or under `site` when it is
+    // inherited (spec.ts decides which); at column 0, inside another block
+    // or inside a fill it was linked, checked and rendered by nothing.
+    if (m && parentWord !== 'page' && parentWord !== 'site') {
+      err('AZ1202', parentWord === null
+        ? `${s.word}: not allowed at column 0 — indent it under the page it belongs to`
+        : `${s.word}: not allowed inside '${parentWord}' — move it to the page`, s.pos);
       return null;
     }
 
@@ -1290,11 +1375,8 @@ function checkActions(
     let ctaIndex = 0;
     const primaries: LinkedWord[] = [];
     for (const f of fills) {
-      // buttons §1.1: a button is a label and a destination; a target reads
-      // those two and nothing after them.
-      if (f.args.length > 2) {
-        err('AZ1406', `${f.word}: takes a label and a destination — remove '${shown(f.args[2].value)}'`, f.args[2].pos);
-      }
+      // A button's values (buttons §1.1: a label and a destination) are its
+      // manifest `line`, checked with every fill's (checkLine).
       if (f.as !== null && !isHierarchy(f.as)) {
         err('AZ1220', `${f.word}: 'as ${f.as}' is not a button weight — use: ${HIERARCHIES.join(', ')}`, f.pos);
       }

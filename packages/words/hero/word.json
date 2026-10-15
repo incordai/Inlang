@@ -110,11 +110,19 @@
   "slots": {
     "cta": {
       "max": 2,
-      "description": "Primary button, up to two"
+      "description": "Primary button, up to two",
+      "line": [
+        "label",
+        "destination"
+      ]
     },
     "alt": {
       "max": 1,
-      "description": "Secondary action; a text link on small phones"
+      "description": "Secondary action; a text link on small phones",
+      "line": [
+        "label",
+        "destination"
+      ]
     }
   },
   "requires": {

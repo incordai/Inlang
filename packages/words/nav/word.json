@@ -82,6 +82,28 @@
     "group",
     "cta"
   ],
+  "childLines": {
+    "link": {
+      "line": [
+        "label",
+        "destination"
+      ]
+    },
+    "group": {
+      "line": [
+        "label"
+      ],
+      "holds": [
+        "link"
+      ]
+    },
+    "cta": {
+      "line": [
+        "label",
+        "destination"
+      ]
+    }
+  },
   "limits": {
     "link": {
       "max": 7

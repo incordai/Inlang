@@ -128,8 +128,9 @@ owner decision: log it in the ROADMAP backlog first. When it is approved:
      `az explain`, the MCP catalogue and docs/WORDS.md show;
    - `variants` (first is the default), `modifiers`, `props` (type, bounds,
      `required`, `default`, `scope: "site"` for site-level settings), `slots`
-     (`min`/`max`, nested `props`/`slots`), `requires`, `recommends`,
-     `requiresWhen`;
+     (`min`/`max`, nested `props`/`slots`, and the `line` of values the fill
+     takes — GRAMMAR §4.5), `childLines` for each `children` word,
+     `requires`, `recommends`, `requiresWhen`;
    - `checks`: the spec's validation table as data, using the rule kinds in
      `packages/core/src/checks.ts`. Codes are permanent and never reused;
      a new word takes the next free block of twenty and adds its row to the

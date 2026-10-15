@@ -64,6 +64,9 @@
     "plan": {
       "min": 1,
       "max": 4,
+      "line": [
+        "label"
+      ],
       "props": {
         "monthly": {
           "type": "string",
@@ -96,12 +99,20 @@
       "slots": {
         "feature": {
           "max": 24,
-          "description": "Feature line: label and value or yes"
+          "description": "Feature line: label and value or yes",
+          "line": [
+            "label",
+            "value"
+          ]
         },
         "cta": {
           "min": 1,
           "max": 1,
-          "description": "The plan's button"
+          "description": "The plan's button",
+          "line": [
+            "label",
+            "destination"
+          ]
         }
       },
       "description": "One plan; its label is the plan name"

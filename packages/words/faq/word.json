@@ -51,6 +51,9 @@
     "item": {
       "min": 1,
       "max": 12,
+      "line": [
+        "label"
+      ],
       "props": {
         "text": {
           "type": "string",
@@ -62,7 +65,11 @@
       "slots": {
         "more": {
           "max": 1,
-          "description": "Inline link to read more beyond the answer"
+          "description": "Inline link to read more beyond the answer",
+          "line": [
+            "label",
+            "destination"
+          ]
         }
       },
       "description": "One question; its label is the question text"

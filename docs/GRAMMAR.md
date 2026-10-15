@@ -444,7 +444,7 @@ block-word      = "nav" | "hero" | "feature" | "gallery" | "pricing"
                 | "faq"  | "cta"  | "footer"  | "auth"    | "scene" | "text"
                 | "chat" ;                       (* PRD §6.2 exception, 2026-10-15 *)
 
-inheritable-block = block ;      (* block-word ∈ { nav, footer }, §5.2 *)
+inheritable-block = block ;      (* nav, footer or scene backdrop under site, §5.2 *)
 
 atom            = variant        (* ∈ this block's word.json "variants"; max one *)
                 | modifier       (* ∈ this block's word.json "modifiers"; free *)
@@ -528,6 +528,18 @@ Nesting is permitted exactly where the parent's `word.json` declares a
 `children` list — there is no general "any block inside any block" rule, and a
 block placed somewhere its parent does not accept is
 `<word>: not allowed inside 'nav' — move it to the page` (AZ1202, link stage).
+The same holds for a block inside another block or inside a fill
+(`faq: not allowed inside 'hero' — move it to the page`) and for one at
+column 0 (`hero: not allowed at column 0 — indent it under the page it belongs to`),
+each AZ1202: before, they were linked and rendered by nothing.
+
+What a `children` word holds is declared beside it in `word.json`
+`childLines` (§4.5): nav's `group` holds `link` and nothing else. A key of
+the parent written under it is
+`mobile: not allowed inside 'group' — it is a nav key; move it under nav`,
+any other word `cta: not allowed inside 'group' — group holds link` (both
+AZ1202); an indented line under a word that holds none (a nav `link`) is
+`link: takes no indented lines — write it on one line` (AZ1219).
 
 `backend`'s diagnostics: AZ1223 declared outside `site` · AZ1224 not a backend
 setting · AZ1225 a setting missing · AZ1412 a value outside its choices (a
@@ -605,7 +617,7 @@ receiving word's `word.json` (ARCHITECTURE §4.1).
 
 | Type | Accepts | `word.json` extras | Link-stage check |
 |---|---|---|---|
-| `string` | `STRING` only | `maxWords`, `maxChars` | length limits; escaped at emit, never concatenated |
+| `string` | `STRING`; a bare number is kept as a value (`monthly 29`) — a bare word is AZ1406 (§4.5) | `maxWords`, `maxChars` | length limits; escaped at emit, never concatenated |
 | `path` | `BARE` starting `./` | `ext`, `maxBytes` | resolves inside the project root, extension in `ext`, size under `maxBytes` |
 | `url` | `BARE` starting `/` or `#`, or `PAIR` with a known scheme | `schemes` | scheme in the allowed set; route matches a declared `page`; anchor is non-empty |
 | `number` | `BARE` matching `["-"] digit {digit} ["." digit {digit}]` | `min`, `max`, `int` | range and integrality |
@@ -675,7 +687,8 @@ A site with `data` tables also has the pages the build generates for them,
 validation row, AZ2081.
 
 A button is a label and a destination, and an optional `as`: a third value is
-`cta: takes a label and a destination — remove 'extra'` (AZ1406).
+`cta: takes a label and a destination — remove 'extra'` (AZ1406). Every
+other fill's line is declared the same way (§4.5).
 
 A `path`-shaped value in a `url` position is legal and means *download*
 (buttons §1.3, `./deck.pdf` → download); it is then checked as a `path`.
@@ -823,12 +836,34 @@ Every other part of a key's line is accounted for the same way:
 | Written | Diagnostic |
 |---|---|
 | no value | `hero: 'title' has no value — write: title <value>` (AZ1205) |
+| one bare word for a `string` key (`title made`) — §4.1, copy is quoted; a bare number stays a value (`monthly 29`) | `hero: 'title' is copy and takes quotes — write: title "made"` (AZ1406) |
+| a value past a fill's declared `line` (`link "Shoes" /shoes extra`) | `link: takes a label and a destination — remove 'extra'` (AZ1406) |
 | a `flag` key (`lead`) given a value | `item: 'lead' takes no value — remove 'on'` (AZ1406) |
 | `as` after a key's value | `hero: 'title' takes no 'as' — remove 'as ghost'` (AZ1406) |
 | an indented line under a key | `hero: 'title' takes no indented lines — write it on one line` (AZ1219) |
 | copy or a link on a block's own line (`hero center "Hi"`) | `hero: '"Hi"' is not a variant or modifier — put copy and links on their own lines beneath it` (AZ1204) |
 | a second name, route or value on `site`, `page`, `theme`, `width` or a `font` role | `site: takes one name — remove 'extra'` (AZ1406) |
 | a value on `font` itself | `font: takes no value — write its roles beneath it: display sans\|serif\|mono\|rounded` (AZ1219) |
+
+**A fill's line.** The values written after a fill's name are declared in
+its `word.json`: a slot's definition carries `"line"`, and a `children` word
+(nav's `link`, `group`, `cta`) carries it in `"childLines"`, with `"holds"`
+naming the children words that may be indented under it (§3.3). A line is
+the values in order, each a role — `label`, `destination`, `value`, `file` —
+or a flag of the fill written bare, `{ "flag": "lead" }`:
+
+```jsonc
+"slots":      { "item": { "line": ["label", { "flag": "lead" }] } },   // item "Sewn" lead
+"childLines": { "group": { "line": ["label"], "holds": ["link"] } }    // group "Shop"
+```
+
+The roles name what the word's emitter reads at each position; the link
+stage enforces the count and a flag's spelling — a value past the line, or a
+word in a flag's place that is not the flag, is AZ1406. Every button (`cta`,
+`alt`) is `["label", "destination"]` (§4.3).
+`packages/words/test/fill-lines.test.ts` requires a line on every fill and
+measures it: each fill is emitted with its line full and with one value more,
+and the two outputs must be byte-identical.
 
 *Decision: `repeat` rather than a list type keeps the type set at seven and
 keeps the parse grammar unchanged — a repeated prop is just a statement with
@@ -856,8 +891,18 @@ Lowest to highest. A higher level always wins outright.
 > **A page-level declaration of an inheritable word replaces the site-level one
 > entirely. It does not merge with it.**
 
-Inheritable words in Phase 1: **`nav` and `footer`.** Everything else declared
-at site level (`theme`, `font`) is site-scoped and cannot be redeclared.
+Inheritable words in Phase 1: **`nav` and `footer`**, and `scene backdrop`
+(scene-spec §6). Everything else declared at site level (`theme`, `font`) is
+site-scoped and cannot be redeclared.
+
+A block under `site` is one of those three, or a word declared there only
+for its site-scoped settings (auth's `adapter`, which no page renders). Any
+other block was dropped from every page without a word; it is
+`hero: not allowed inside 'site' — only nav, footer and scene backdrop are inherited; move it under the page it belongs to`,
+and a scene that is not a backdrop is
+`scene: 'inline' is not inherited — only nav, footer and scene backdrop are; move it under the page it belongs to`
+(both AZ1202). A site-level `chat` is AZ1214 instead — not available yet,
+since it is phase C3's `float` (chat-block-spec §3).
 
 ```
 site aurora

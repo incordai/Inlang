@@ -46,10 +46,20 @@
     "item": {
       "min": 2,
       "max": 12,
+      "line": [
+        "label",
+        {
+          "flag": "lead"
+        }
+      ],
       "slots": {
         "link": {
           "max": 1,
-          "description": "Link from the item to more detail"
+          "description": "Link from the item to more detail",
+          "line": [
+            "label",
+            "destination"
+          ]
         }
       },
       "props": {
@@ -92,11 +102,19 @@
     },
     "cta": {
       "max": 1,
-      "description": "Primary button for the section"
+      "description": "Primary button for the section",
+      "line": [
+        "label",
+        "destination"
+      ]
     },
     "alt": {
       "max": 1,
-      "description": "Secondary action beside the primary"
+      "description": "Secondary action beside the primary",
+      "line": [
+        "label",
+        "destination"
+      ]
     }
   },
   "from": {

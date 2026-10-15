@@ -55,11 +55,19 @@
   "slots": {
     "cta": {
       "max": 1,
-      "description": "Primary button: label and destination"
+      "description": "Primary button: label and destination",
+      "line": [
+        "label",
+        "destination"
+      ]
     },
     "alt": {
       "max": 1,
-      "description": "Secondary action beside the primary"
+      "description": "Secondary action beside the primary",
+      "line": [
+        "label",
+        "destination"
+      ]
     }
   },
   "requires": {

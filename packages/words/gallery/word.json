@@ -78,6 +78,9 @@
     "image": {
       "min": 2,
       "max": 200,
+      "line": [
+        "file"
+      ],
       "props": {
         "src": {
           "type": "path",
@@ -125,11 +128,19 @@
     },
     "cta": {
       "max": 1,
-      "description": "Primary button for the section"
+      "description": "Primary button for the section",
+      "line": [
+        "label",
+        "destination"
+      ]
     },
     "alt": {
       "max": 1,
-      "description": "Secondary action beside the primary"
+      "description": "Secondary action beside the primary",
+      "line": [
+        "label",
+        "destination"
+      ]
     }
   },
   "from": {

@@ -51,7 +51,10 @@
   },
   "slots": {
     "ask": {
-      "description": "A suggested question, shown as a button"
+      "description": "A suggested question, shown as a button",
+      "line": [
+        "label"
+      ]
     }
   },
   "requires": {},

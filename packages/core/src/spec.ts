@@ -4,7 +4,7 @@
  * Spec: docs/ARCHITECTURE.md §3
  * Exports: buildSpec, serialiseSpec, blocksFor, Spec, SpecPage, SITE_DEFAULTS
  * Edit guide: blocksFor() is the one place page/site inheritance is decided; keep serialiseSpec key-sorted (determinism).
- * Tests: packages/core/test/compile.test.ts, packages/core/test/inheritance.test.ts, packages/core/test/site-scope.test.ts
+ * Tests: packages/core/test/compile.test.ts, packages/core/test/inheritance.test.ts, packages/core/test/site-scope.test.ts, packages/core/test/strict-fills.test.ts
  */
 
 /**
@@ -121,6 +121,9 @@ export const SITE_DEFAULTS = {
 
 /** Blocks that may be declared at site level and inherited — nav-spec §8. */
 const INHERITABLE = new Set(['nav', 'footer', 'scene']);
+
+/** What may be declared under `site` and inherited, for a message (placementOf decides). */
+const INHERITED_AT_SITE = 'nav, footer and scene backdrop';
 
 /**
  * Recursively build a block, applying manifest defaults.
@@ -387,9 +390,29 @@ export function buildSpec(
     fonts[role.word] = role.args[0]?.value ?? '';
   }
 
-  const inherited = kids
-    .filter((w) => INHERITABLE.has(w.word))
-    .map((w) => toBlock(w, manifests));
+  // GRAMMAR §5.2: a block under `site` is inherited by every page — nav,
+  // footer and a scene backdrop. A word with site-scoped settings (auth's
+  // adapter) is declared there for them. Any other block was linked and
+  // dropped from every page without a word; chat reports its own (AZ1214).
+  const inherited: SpecBlock[] = [];
+  for (const w of kids) {
+    const m = manifests.get(w.word);
+    if (!m || w.word === CHAT_WORD) continue;
+    const block = INHERITABLE.has(w.word) ? toBlock(w, manifests) : null;
+    if (block && placementOf(block) !== undefined) {
+      inherited.push(block);
+      continue;
+    }
+    if (!block && Object.values(m.props ?? {}).some((p) => p.scope === 'site')) continue;
+    diagnostics.push({
+      code: 'AZ1202',
+      message: block
+        ? `${w.word}: '${block.variant}' is not inherited — only ${INHERITED_AT_SITE} are; move it under the page it belongs to`
+        : `${w.word}: not allowed inside 'site' — only ${INHERITED_AT_SITE} are inherited; move it under the page it belongs to`,
+      pos: w.pos,
+      severity: 'error',
+    });
+  }
 
   const site = siteScopedProps(kids, manifests);
 

@@ -110,7 +110,11 @@
   "slots": {
     "alt": {
       "max": 2,
-      "description": "Link to a sibling flow, e.g. sign up or reset"
+      "description": "Link to a sibling flow, e.g. sign up or reset",
+      "line": [
+        "label",
+        "destination"
+      ]
     }
   },
   "requires": {

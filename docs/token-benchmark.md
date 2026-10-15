@@ -9,9 +9,9 @@ tokens that file is, against the same site written in other ways an AI could
 write it: as JSON data, as a component tree, as HTML. Every number below was
 produced by the script on this repository; nothing is estimated by hand.
 
-**Result, in one line:** over all 33 sites, the median site takes
-**1.52×** the `.az` source's tokens as a minimal component tree, **2.68×**
-as minified Spec JSON, and **8.2×** as its pre-rendered body HTML. The
+**Result, in one line:** over all 34 sites, the median site takes
+**1.50×** the `.az` source's tokens as a minimal component tree, **2.71×**
+as minified Spec JSON, and **9.0×** as its pre-rendered body HTML. The
 `.az` source is the smallest representation of every site. The worst case
 (the site where `.az` saves least) is `text.columns`, a page that is mostly
 prose: there the tree takes 1.12× and the HTML 1.55×.
@@ -19,13 +19,13 @@ prose: there the tree takes 1.12× and the HTML 1.55×.
 ## 1. Corpus
 
 Every `.az` source in the repository that compiles, plus two full sites
-written for this benchmark. All 33 are reported; none is left out.
+written for this benchmark. All 34 are reported; none is left out.
 
 | Group | Sites | Source |
 |---|---|---|
 | fixture | `minimal` | `fixtures/minimal.az` |
 | fixture | `grammar-fixture` | `packages/core/test/fixture-site.az` (GRAMMAR §8), with its `fixture-assets/` |
-| preview | 27 sites, one per word preview and variant preview (`auth`, `auth.signup`, … `text.columns`) | `packages/words/<word>/preview*.az`, with the word's `preview-assets/` |
+| preview | 28 sites, one per word preview and variant preview (`auth`, `auth.signup`, `chat`, … `text.columns`) | `packages/words/<word>/preview*.az`, with the word's `preview-assets/` |
 | site | `combined` | the `COMBINED` source in `scripts/lighthouse.mjs`: nav, 3D hero, feature, gallery, pricing and cta on one page |
 | site | `data-e2e` | the `SITE` source in `scripts/data-e2e.mjs`: auth, a backend, six data tables and eleven pages |
 | site | `ledger` | `scripts/token-benchmark/ledger.az`: a product site, six pages (nav, hero, feature, text, cta, pricing, two faqs, footer) |
@@ -87,7 +87,7 @@ spells by quoting; that makes the tree slightly smaller than a lossless one.
 The tree of `minimal`, in full:
 
 ```json
-{"type":"Site","props":{"accent":"violet","name":"aurora","pattern":"glow"},"children":[{"type":"nav","children":[{"type":"link","props":{"args":["Work","/work"]}}]},{"type":"Page","props":{"route":"/"},"children":[{"type":"hero","props":{"eyebrow":"Limited run","sub":"Handmade. Forty pairs a month.","title":"Built in the dark"}}]}]}
+{"type":"Site","props":{"accent":"violet","name":"aurora","pattern":"glow"},"children":[{"type":"nav","children":[{"type":"link","props":{"args":["Work","/work"]}}]},{"type":"Page","props":{"route":"/"},"children":[{"type":"hero","props":{"eyebrow":"Limited run","sub":"Handmade. Forty pairs a month.","title":"Built in the dark"}}]},{"type":"Page","props":{"route":"/work"}}]}
 ```
 
 ### 2.5 `html` — the pre-rendered body markup
@@ -100,7 +100,8 @@ React's server renderer writes them (`prerendered` in the script: boolean
 attributes as `name=""`, void elements as `/>`, script text unescaped,
 `<!-- -->` between adjacent text nodes).
 
-That serialisation was checked against real pre-rendered pages: 19 sites
+That serialisation was checked against real pre-rendered pages, on the
+corpus as this document first measured it: 19 sites
 built with the project's own build (`az-vite/build.mjs`, React's
 `renderToString`, after `npm install`). For 17 — `minimal`, `ledger`,
 `harbour`, `footer.mega`, `faq`, `auth`, `auth.signup`, `nav.mega`,
@@ -111,7 +112,8 @@ uses on `<input>` and `<button>`, once React's own
 `<link rel="preload" as="image">` hints are removed (React adds them; a
 person writing markup would not). The two that differ, by design:
 
-- `grammar-fixture` (5,094 here, 5,157 pre-rendered): its two author
+- `grammar-fixture` (5,094 here, 5,157 pre-rendered, at that first
+  measurement): its two author
   components (`raw`, `slot after`) are left out here. Their markup is the
   author's own TSX, which no representation counts.
 - `data-e2e` (10,701 here, 9,820 pre-rendered): `/private` is a protected
@@ -176,18 +178,21 @@ The package is named once, in `package.json`: its `imports` map
 
 ## 4. Results
 
-`pnpm bench:tokens`, 2026-10-15, on `main` at the commit that adds this
-document. `o200k_base` tokens; the multiple is the representation's tokens
-over the `.az` source's.
+`pnpm bench:tokens`, 2026-10-15, regenerated after `fixtures/minimal.az` and
+the GRAMMAR fixture declared the pages they link to (`minimal` is now 78
+tokens over two pages, `grammar-fixture` 673 over eight) and the `chat`
+preview joined the corpus. `o200k_base` tokens; the multiple is the
+representation's tokens over the `.az` source's.
 
 ### 4.1 Every site
 
 | site | pages | .az | spec min | spec pretty | tree | html | html shared | App.tsx |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| minimal | 1 | 74 | 194 (2.6×) | 338 (4.6×) | 95 (1.3×) | 597 (8.1×) | 597 (8.1×) | 2931 (39.6×) |
-| grammar-fixture | 3 | 652 | 1592 (2.4×) | 2700 (4.1×) | 871 (1.3×) | 5094 (7.8×) | 3823 (5.9×) | 12665 (19.4×) |
+| minimal | 2 | 78 | 202 (2.6×) | 354 (4.5×) | 107 (1.4×) | 1098 (14.1×) | 652 (8.4×) | 3891 (49.9×) |
+| grammar-fixture | 8 | 673 | 1633 (2.4×) | 2781 (4.1×) | 932 (1.4×) | 10980 (16.3×) | 4099 (6.1×) | 25236 (37.5×) |
 | auth | 3 | 65 | 185 (2.8×) | 331 (5.1×) | 112 (1.7×) | 663 (10.2×) | 663 (10.2×) | 2972 (45.7×) |
 | auth.signup | 4 | 81 | 204 (2.5×) | 360 (4.4×) | 139 (1.7×) | 3414 (42.1×) | 3414 (42.1×) | 10892 (134.5×) |
+| chat | 1 | 92 | 265 (2.9×) | 461 (5.0×) | 134 (1.5×) | 915 (9.9×) | 915 (9.9×) | 3609 (39.2×) |
 | cta | 2 | 87 | 256 (2.9×) | 443 (5.1×) | 132 (1.5×) | 387 (4.4×) | 387 (4.4×) | 2342 (26.9×) |
 | cta.split | 2 | 80 | 214 (2.7×) | 364 (4.5×) | 123 (1.5×) | 388 (4.8×) | 388 (4.8×) | 2374 (29.7×) |
 | faq | 1 | 127 | 315 (2.5×) | 521 (4.1×) | 175 (1.4×) | 1140 (9.0×) | 1140 (9.0×) | 3702 (29.1×) |
@@ -218,40 +223,40 @@ over the `.az` source's.
 | ledger | 6 | 948 | 2528 (2.7×) | 4442 (4.7×) | 1321 (1.4×) | 10844 (11.4×) | 5744 (6.1×) | 24638 (26.0×) |
 | harbour | 5 | 694 | 1671 (2.4×) | 2838 (4.1×) | 938 (1.4×) | 7587 (10.9×) | 4499 (6.5×) | 16910 (24.4×) |
 
-### 4.2 Median, worst and best (33 sites, `o200k_base`)
+### 4.2 Median, worst and best (34 sites, `o200k_base`)
 
 "Worst" is the smallest multiple: the site where `.az` saves least.
 
 | vs `.az` | median | worst | best |
 |---|---:|---|---|
-| tree | 1.52× | 1.12× (`text.columns`) | 2.36× (`data-e2e`) |
-| spec min | 2.68× | 1.42× (`text.columns`) | 4.18× (`nav.mega`) |
-| spec pretty | 4.61× | 1.85× (`text.columns`) | 7.60× (`nav.mega`) |
-| html shared | 6.48× | 1.55× (`text.columns`) | 42.15× (`auth.signup`) |
-| html | 8.20× | 1.55× (`text.columns`) | 69.33× (`footer.mega`) |
-| App.tsx | 29.15× | 7.66× (`feature`) | 175.69× (`footer.mega`) |
+| tree | 1.50× | 1.12× (`text.columns`) | 2.36× (`data-e2e`) |
+| spec min | 2.71× | 1.42× (`text.columns`) | 4.18× (`nav.mega`) |
+| spec pretty | 4.65× | 1.85× (`text.columns`) | 7.60× (`nav.mega`) |
+| html shared | 6.64× | 1.55× (`text.columns`) | 42.15× (`auth.signup`) |
+| html | 8.99× | 1.55× (`text.columns`) | 69.33× (`footer.mega`) |
+| App.tsx | 29.42× | 7.66× (`feature`) | 175.69× (`footer.mega`) |
 
 On the five full sites alone (`grammar-fixture`, `combined`, `data-e2e`,
-`ledger`, `harbour`) the medians are: tree 1.35×, spec min 2.44×, spec
-pretty 4.14×, html shared 6.06×, html 10.93×.
+`ledger`, `harbour`) the medians are: tree 1.38×, spec min 2.43×, spec
+pretty 4.13×, html shared 6.09×, html 11.44×.
 
 Corpus totals:
 
 | | tokens | characters | characters per token |
 |---|---:|---:|---:|
-| .az | 7,382 | 26,939 | 3.65 |
-| spec min | 19,342 | 71,305 | 3.69 |
-| spec pretty | 33,307 | 158,802 | 4.77 |
-| tree | 11,126 | 41,472 | 3.73 |
-| html | 101,431 | 304,256 | 3.00 |
-| html shared | 54,617 | 172,651 | 3.16 |
-| App.tsx | 271,898 | 1,433,594 | 5.27 |
+| .az | 7,499 | 27,352 | 3.65 |
+| spec min | 19,656 | 72,458 | 3.69 |
+| spec pretty | 33,865 | 161,123 | 4.76 |
+| tree | 11,333 | 42,228 | 3.73 |
+| html | 108,733 | 325,262 | 2.99 |
+| html shared | 55,863 | 176,768 | 3.16 |
+| App.tsx | 289,038 | 1,523,142 | 5.27 |
 
 ### 4.3 The second vocabulary
 
-With `cl100k_base` the medians move by 8% or less: tree 1.41×,
-spec min 2.47×, spec pretty 4.50×, html shared 6.43×, html 7.99×, App.tsx
-28.48×; the worst case is the same site for every representation. `.az` is
+With `cl100k_base` the medians move by 8.1% or less: tree 1.40×,
+spec min 2.49×, spec pretty 4.51×, html shared 6.48×, html 8.84×, App.tsx
+28.80×; the worst case is the same site for every representation. `.az` is
 the smallest on every site under both.
 
 ### 4.4 Characters per token, and why the estimate is not enough
@@ -272,7 +277,7 @@ quarter, so the counted tokens are the figures to use.
   to 1.1× on `text.columns`, a page that is mostly a long paragraph of prose,
   which costs the same in any format.
 - Against what an AI would otherwise write to ship a page, raw markup, the
-  median is 8× (6.5× with shared chrome written once), before any CSS.
+  median is 9× (6.6× with shared chrome written once), before any CSS.
 - The structure a word expands to is where the gap is widest: a sign-up form
   (`auth.signup`, 42×), a mega menu (`nav.mega`, 12× with the nav written
   once), a mega footer.
@@ -295,7 +300,7 @@ quarter, so the counted tokens are the figures to use.
 - **Author code is out.** `raw` and `slot` components, and the data lock
   file `az backend schema` writes (derived from the source), are counted by
   no representation.
-- **Previews dominate the median.** 27 of the 33 sites are single-word
+- **Previews dominate the median.** 28 of the 34 sites are single-word
   previews; §4.2 gives the five full sites separately.
 - **Two sites were written for this.** `ledger` and `harbour` are realistic
   but are this benchmark's own; their results sit inside the range of the

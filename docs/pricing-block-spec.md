@@ -170,7 +170,7 @@ PRD principle 7 forbids expressions in `.az`, so there is **no way to express
 - **`annual` is all-or-nothing across plans.** Some with, some without, and the
   toggle blanks half the row. Error, not warning.
 
-`currency USD` (ISO 4217) with `locale en-US`. Symbol, position, grouping and
+`currency USD` (ISO 4217) with `locale "en-US"`. Symbol, position, grouping and
 decimals come from `Intl.NumberFormat` at **emit time**, so the output is a
 static string and the byte-identical-build rule (CONVENTIONS §6) holds.
 Formatting is not arithmetic — no value changes, only its presentation — so
