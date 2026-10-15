@@ -52,7 +52,7 @@ import {
 } from './visual/behaviours.mjs';
 import { behaviourSelfTest } from './visual/behaviour-selftest.mjs';
 import { withVariant } from './thumbnails.mjs';
-import { COMPILE_MS, INSTALL_MS, PREVIEW_BACKEND_URL, PROJECT_BUILD_MS } from './visual/pipeline.mjs';
+import { COMPILE_MS, INSTALL_MS, PREVIEW_BACKEND_URL, PROJECT_BUILD_MS, answerPreviewBackend } from './visual/pipeline.mjs';
 import { Overdue, within, closeWithin, watchdog, human, slowest } from './lib/bounded.mjs';
 import { cspResult, watchCsp } from './visual/csp.mjs';
 import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
@@ -481,6 +481,8 @@ async function surface(browser, server, path, init = {}, csp = null) {
   sf.reset = async (reopen = true) => {
     if (sf.ctx) await closeWithin(sf.ctx, CLOSE_MS, 'context.close');
     sf.ctx = await within(CHECK_MS, 'newContext', () => browser.newContext(init));
+    // A backend site's preview reads the session from its (absent) backend: answered, nobody signed in.
+    await within(CHECK_MS, 'answerPreviewBackend', () => answerPreviewBackend(sf.ctx));
     if (csp) await within(CHECK_MS, 'watchCsp', () => watchCsp(sf.ctx, csp));
     sf.page = await within(CHECK_MS, 'newPage', () => sf.ctx.newPage());
     sf.page.setDefaultTimeout(NAV_TIMEOUT_MS);

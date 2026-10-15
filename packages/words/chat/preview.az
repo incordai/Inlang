@@ -16,4 +16,3 @@ page /
     greeting "Hi! Ask me about sizes, shipping or repairs."
     ask      "How long does a pair take?"
     ask      "Do you resole?"
-    allow    anyone

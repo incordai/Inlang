@@ -44,6 +44,31 @@ export const PROJECT_BUILD_MS = 5 * 60_000;
 export const PREVIEW_BACKEND_URL = 'https://backend.invalid';
 
 /**
+ * Answer a browser context's requests to PREVIEW_BACKEND_URL as a backend
+ * with nobody signed in would: `GET /auth/session` is `{ session: null }`
+ * (CORS for the asking origin, preflight included), anything else 404. A
+ * signed-in-only chat panel reads the session on load; without this the
+ * request would fail, and a failed load is a console error every engine
+ * reports. Nothing is sent anywhere — the route answers before any lookup.
+ */
+export async function answerPreviewBackend(ctx) {
+  await ctx.route(`${PREVIEW_BACKEND_URL}/**`, (route) => {
+    const req = route.request();
+    const origin = req.headers().origin;
+    const cors = origin ? {
+      'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true',
+      'access-control-allow-headers': 'content-type, x-az-request', 'access-control-allow-methods': 'GET, POST', vary: 'Origin',
+    } : {};
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const session = req.method() === 'GET' && new URL(req.url()).pathname === '/auth/session';
+    return route.fulfill({
+      status: session ? 200 : 404, headers: { ...cors, 'content-type': 'application/json' },
+      body: session ? '{"session":null}' : '{"error":"unknown"}',
+    });
+  });
+}
+
+/**
  * node <script> …, with the bundled words; rejects with stdout/stderr
  * attached. Bounded: past `timeout` the child is killed and the call rejects.
  */

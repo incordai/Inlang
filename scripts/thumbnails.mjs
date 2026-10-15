@@ -24,7 +24,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, exist
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
-import { ROOT, WORDS, buildSites, firstRoute } from './visual/pipeline.mjs';
+import { ROOT, WORDS, answerPreviewBackend, buildSites, firstRoute } from './visual/pipeline.mjs';
 import { startServer } from './visual/serve.mjs';
 import { Overdue, within, closeWithin, watchdog, human } from './lib/bounded.mjs';
 
@@ -80,8 +80,13 @@ const PER_TARGET_MS = 30_000;
 
 /** One target in its own context: the word's block at the top of the frame, then a screenshot (null when the block is missing). */
 async function shoot(ctx, s, server) {
+  await answerPreviewBackend(ctx);
   const page = await ctx.newPage();
   await page.goto(new URL(firstRoute(s.source), server.url).href, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+  // The page is wired, and nothing on it is still deciding what to show
+  // (a chat panel reads the session first), so every shot is the settled page.
+  await page.waitForFunction(() => document.documentElement.hasAttribute('data-az-ready')
+    && !document.querySelector('[data-az-chat][aria-busy="true"]'), null, { timeout: NAV_TIMEOUT_MS });
   // A whole class token, so `az-nav` does not match `az-nav-logo`.
   const found = await page.evaluate((cls) => {
     const el = [...document.querySelectorAll('[class]')].find((e) => e.classList.contains(cls));

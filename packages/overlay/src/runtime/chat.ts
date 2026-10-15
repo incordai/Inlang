@@ -173,6 +173,9 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     if (next === 'full') { p.reset.hidden = false; p.retry.hidden = true; }
     p.actions.hidden = !(next === 'signin' && p.signin) && p.reset.hidden && p.retry.hidden;
     setState(next === 'ready' ? 'idle' : next);
+    // Busy while the session is read: what the panel offers is not decided yet.
+    if (next === 'checking') p.host.setAttribute('aria-busy', 'true');
+    else p.host.removeAttribute('aria-busy');
   };
 
   const addMessage = (who: 'visitor' | 'site', text: string): HTMLElement => {
@@ -389,6 +392,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     p.error.textContent = '';
     p.status.textContent = '';
     p.input.value = '';
+    p.host.removeAttribute('aria-busy');
     setState('idle');
   };
 }

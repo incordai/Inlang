@@ -27,14 +27,12 @@ page /
     greeting "Hi! Ask me about sizes, shipping or repairs."
     ask      "How long does a pair take?"
     ask      "Do you resole?"
-    allow    anyone
 ```
 
 A chat needs the built-in backend with `model default` (AZ1250), and the
-backend needs `auth adapter azbackend` (AZ1507). The preview writes
-`allow anyone` so it can be shown without signing in; the default is
-`signedin`, and `allow anyone` is warning AZ1256 — every stranger spends the
-operator's model budget.
+backend needs `auth adapter azbackend` (AZ1507). Only signed-in visitors may
+ask by default; `allow anyone` opens it to everyone and is warning AZ1256 —
+every stranger spends the operator's model budget.
 
 ## Variants
 

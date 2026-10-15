@@ -8,6 +8,7 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
+import { answerPreviewBackend } from './pipeline.mjs';
 
 /** word-gate §1 item 3: the three test widths. */
 export const WIDTHS = [390, 768, 1440];
@@ -417,6 +418,7 @@ export async function noJs(browser, url) {
  */
 export async function hydration(browser, url, readySelector) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await answerPreviewBackend(ctx);
   try {
     const page = await ctx.newPage();
     const errors = [];
@@ -606,6 +608,7 @@ const IMAGES_ARRIVE_MS = 15_000;
  */
 export async function imageShift(browser, url, readySelector) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
+  await answerPreviewBackend(ctx);
   let release = () => {};
   const released = new Promise((done) => { release = done; });
   try {
