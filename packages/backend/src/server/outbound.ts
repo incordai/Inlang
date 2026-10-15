@@ -4,7 +4,7 @@
  * Spec: docs/backend-spec.md §6, §7 (and the chat block spec §4.3)
  * Exports: cappedChunks, readCapped, BodyTooLarge
  * Edit guide: every byte read counts; past the cap the reader is cancelled (the connection drops) before the error; no message quotes the body.
- * Tests: packages/backend/test/security.test.ts, packages/backend/test/chat-adapters.test.ts
+ * Tests: packages/backend/test/outbound.test.ts, packages/backend/test/security.test.ts, packages/backend/test/chat-adapters.test.ts
  */
 
 /**
@@ -32,7 +32,7 @@ export class BodyTooLarge extends Error {
  * reader is cancelled and BodyTooLarge thrown; a consumer that stops early
  * (break, return, a throw) cancels the reader too.
  */
-export async function* cappedChunks(body: ReadableStream<Uint8Array>, limit: number): AsyncGenerator<Uint8Array> {
+export const cappedChunks = async function* (body: ReadableStream<Uint8Array>, limit: number): AsyncGenerator<Uint8Array> {
   const reader = body.getReader();
   let size = 0;
   try {
@@ -44,7 +44,7 @@ export async function* cappedChunks(body: ReadableStream<Uint8Array>, limit: num
   } finally {
     await reader.cancel().catch(() => undefined);
   }
-}
+};
 
 /** The whole body as text, read until `limit` bytes; decoded as response.json() does (UTF-8, a leading byte-order mark dropped). */
 export async function readCapped(response: Response, limit: number): Promise<string> {

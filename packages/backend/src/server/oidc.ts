@@ -26,6 +26,7 @@ import { createHmac, createPublicKey, verify as verifySig, constants, type KeyOb
 type JsonWebKey = webcrypto.JsonWebKey & { readonly kid?: string };
 import { safeEqual } from './crypto.ts';
 import { urlProblem, type Provider } from './env.ts';
+import { BodyTooLarge, readCapped } from './outbound.ts';
 
 export interface Discovery {
   readonly issuer: string;
@@ -49,29 +50,21 @@ const BODY_LIMIT_BYTES = 256 * 1024;
 
 export class ProviderError extends Error {}
 
-/** The body as text, read until BODY_LIMIT_BYTES; past it the read is cancelled, which drops the connection. */
-async function readCapped(response: Response, host: string): Promise<string> {
-  if (!response.body) return '';
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (let next = await reader.read(); !next.done; next = await reader.read()) {
-    size += next.value.byteLength;
-    if (size > BODY_LIMIT_BYTES) {
-      await reader.cancel();
-      throw new ProviderError(`${host} answered more than ${BODY_LIMIT_BYTES} bytes`);
-    }
-    chunks.push(next.value);
+/** The body as text, read until BODY_LIMIT_BYTES (outbound.ts); past it the read is cancelled, which drops the connection. */
+async function readBody(response: Response, host: string): Promise<string> {
+  try {
+    return await readCapped(response, BODY_LIMIT_BYTES);
+  } catch (e) {
+    if (e instanceof BodyTooLarge) throw new ProviderError(`${host} answered more than ${BODY_LIMIT_BYTES} bytes`);
+    throw e;
   }
-  // Decoded as response.json() does: UTF-8, a leading byte-order mark dropped.
-  return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
 async function getJson(fetchFn: Fetch, url: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const response = await fetchFn(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: 'error' });
   const host = new URL(url).host;
   if (!response.ok) throw new ProviderError(`${host} answered ${response.status}`);
-  const body: unknown = JSON.parse(await readCapped(response, host));
+  const body: unknown = JSON.parse(await readBody(response, host));
   if (!body || typeof body !== 'object') throw new ProviderError('provider answered with no JSON object');
   return body as Record<string, unknown>;
 }
