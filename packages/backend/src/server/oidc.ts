@@ -40,13 +40,38 @@ const JWKS_TTL_MS = 10 * 60 * 1000;
 const JWKS_REFRESH_MIN_MS = 60 * 1000;
 const CLOCK_SKEW_S = 60;
 const FETCH_TIMEOUT_MS = 10_000;
+/**
+ * The most a provider answer may hold. Discovery documents, key sets, token
+ * and profile answers are a few kilobytes; one this size is hostile, so the
+ * read stops there instead of buffering whatever the provider sends.
+ */
+const BODY_LIMIT_BYTES = 256 * 1024;
 
 export class ProviderError extends Error {}
 
+/** The body as text, read until BODY_LIMIT_BYTES; past it the read is cancelled, which drops the connection. */
+async function readCapped(response: Response, host: string): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (let next = await reader.read(); !next.done; next = await reader.read()) {
+    size += next.value.byteLength;
+    if (size > BODY_LIMIT_BYTES) {
+      await reader.cancel();
+      throw new ProviderError(`${host} answered more than ${BODY_LIMIT_BYTES} bytes`);
+    }
+    chunks.push(next.value);
+  }
+  // Decoded as response.json() does: UTF-8, a leading byte-order mark dropped.
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 async function getJson(fetchFn: Fetch, url: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const response = await fetchFn(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: 'error' });
-  if (!response.ok) throw new ProviderError(`${new URL(url).host} answered ${response.status}`);
-  const body: unknown = await response.json();
+  const host = new URL(url).host;
+  if (!response.ok) throw new ProviderError(`${host} answered ${response.status}`);
+  const body: unknown = JSON.parse(await readCapped(response, host));
   if (!body || typeof body !== 'object') throw new ProviderError('provider answered with no JSON object');
   return body as Record<string, unknown>;
 }

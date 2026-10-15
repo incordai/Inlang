@@ -566,3 +566,92 @@ test('email smtp: a server that accepts but never greets fails the send at the d
     assert.equal(!r.hung && (r.error as { code?: string }).code, 'ETIMEDOUT');
   } finally { hung.close(); }
 });
+
+/* ---- email: a mail server that answers a byte at a time --------------- */
+
+/**
+ * A TCP listener that greets at once, then answers the client's first line
+ * one byte every DRIP_MS and never ends the line, so a silence timeout never
+ * fires. `open` counts the connections it still holds.
+ */
+const DRIP_MS = 200;
+async function drippingServer(): Promise<{ port: number; open(): number; close(): void }> {
+  const held = new Set<Socket>();
+  const server = createTcpServer((s) => {
+    held.add(s);
+    let drip: ReturnType<typeof setInterval> | undefined;
+    s.on('close', () => { clearInterval(drip); held.delete(s); });
+    s.on('error', () => s.destroy());
+    s.write('220 test ready\r\n');
+    s.once('data', () => { drip = setInterval(() => s.write('2'), DRIP_MS); });
+  });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  return {
+    port: (server.address() as AddressInfo).port,
+    open: () => held.size,
+    close: () => { for (const s of held) s.destroy(); server.close(); },
+  };
+}
+
+/** Resolves once `check` holds, polling every 10 ms; false if it still does not after `ms`. */
+function eventually(check: () => boolean, ms: number): Promise<boolean> {
+  return new Promise((done) => {
+    const start = Date.now();
+    const t = setInterval(() => {
+      if (check()) { clearInterval(t); done(true); } else if (Date.now() - start > ms) { clearInterval(t); done(false); }
+    }, 10);
+  });
+}
+
+test('email smtp: a server that drips a byte at a time fails the send at the total deadline, and its connection is closed', async () => {
+  const drip = await drippingServer();
+  const deadlineMs = 1_000;
+  try {
+    const loaded = loadConfig({
+      AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'https://api.example.org', AZ_ALLOWED_ORIGINS: 'https://www.example.org',
+      AZ_EMAIL_FROM: 'Studio <no-reply@example.org>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(drip.port),
+    }, { database: 'sqlite', email: 'smtp' }, 'Studio');
+    assert.ok(loaded.ok);
+    // The silence timeout (500 ms) is longer than the drip, so only the total deadline can end this send.
+    const mailer = await createMailer(loaded.config, { fetch: (...a) => fetch(...a), timeoutMs: 500, deadlineMs });
+    const started = Date.now();
+    const r = await within(mailer.send({ to: 'a@b.c', subject: 'S', text: 'T' }), HUNG_MS);
+    const took = Date.now() - started;
+    assert.equal(r.hung, false, `the send was still waiting after ${HUNG_MS} ms`);
+    assert.equal(!r.hung && (r.error as Error).name, 'TimeoutError');
+    assert.ok(took >= deadlineMs && took < deadlineMs + 500, `failed after ${took} ms, the deadline is ${deadlineMs} ms`);
+    assert.ok(await eventually(() => drip.open() === 0, 1_000), `${drip.open()} connection(s) still open after the deadline`);
+  } finally { drip.close(); }
+});
+
+test('email smtp: CONTROL: a send that completes succeeds and its connection is closed', async () => {
+  const held = new Set<Socket>();
+  const server = createTcpServer((s) => {
+    held.add(s);
+    s.on('close', () => held.delete(s));
+    s.on('error', () => s.destroy());
+    let data = false;
+    s.write('220 test ready\r\n');
+    s.on('data', (chunk) => {
+      for (const line of chunk.toString().split('\r\n').filter(Boolean)) {
+        if (data) { if (line === '.') { data = false; s.write('250 queued\r\n'); } continue; }
+        const verb = line.slice(0, 4).toUpperCase();
+        if (verb === 'EHLO' || verb === 'HELO') s.write('250 test\r\n');
+        else if (verb === 'DATA') { data = true; s.write('354 go on\r\n'); } else if (verb === 'QUIT') s.end('221 bye\r\n');
+        else s.write('250 ok\r\n');
+      }
+    });
+  });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  try {
+    const loaded = loadConfig({
+      AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'https://api.example.org', AZ_ALLOWED_ORIGINS: 'https://www.example.org',
+      AZ_EMAIL_FROM: 'Studio <no-reply@example.org>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String((server.address() as AddressInfo).port),
+    }, { database: 'sqlite', email: 'smtp' }, 'Studio');
+    assert.ok(loaded.ok);
+    const mailer = await createMailer(loaded.config, { fetch: (...a) => fetch(...a), deadlineMs: 2_000 });
+    const r = await within(mailer.send({ to: 'a@b.c', subject: 'S', text: 'T' }), HUNG_MS);
+    assert.deepEqual(r, { hung: false, error: undefined }, 'CONTROL: a normal server takes the message');
+    assert.ok(await eventually(() => held.size === 0, 1_000), 'the connection is closed after the send');
+  } finally { for (const s of held) s.destroy(); server.close(); }
+});

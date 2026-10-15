@@ -21,6 +21,7 @@
  * Copied into a generated server; imports only its siblings.
  */
 
+import { Socket } from 'node:net';
 import { loadDriver } from './drivers.ts';
 import type { Config } from './env.ts';
 
@@ -36,14 +37,37 @@ const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
  */
 const EMAIL_TIMEOUT_MS = 10_000;
 
-interface Transport { sendMail(o: Record<string, unknown>): Promise<unknown> }
+/**
+ * How long one SMTP send may take in total. The stage timeouts above fire
+ * only on silence, so a server that sends a byte every few seconds would hold
+ * the send, and its connection, for as long as it likes. A healthy server
+ * takes well under a second for one short message; 30 s is three stage
+ * bounds, room for a slow but honest DNS, connect, TLS, login and data
+ * exchange. Sends run off the request path, so the wait costs one connection,
+ * never a visitor's answer. (The API post is already capped in total by its
+ * EMAIL_TIMEOUT_MS signal.)
+ */
+const EMAIL_DEADLINE_MS = 30_000;
 
-/** `timeoutMs` replaces EMAIL_TIMEOUT_MS — for tests that prove the bound without waiting it out. */
+interface Transport { sendMail(o: Record<string, unknown>): Promise<unknown>; close(): void }
+
+/** The error a send that passed EMAIL_DEADLINE_MS fails with — the class the API path's timeout has. */
+function deadlinePassed(): Error {
+  const error = new Error('email send passed its deadline');
+  error.name = 'TimeoutError';
+  return error;
+}
+
+/**
+ * `timeoutMs` replaces EMAIL_TIMEOUT_MS and `deadlineMs` EMAIL_DEADLINE_MS —
+ * for tests that prove the bounds without waiting them out.
+ */
 export async function createMailer(
   config: Config,
-  env: { fetch: typeof fetch; timeoutMs?: number } = { fetch: (...a) => fetch(...a) },
+  env: { fetch: typeof fetch; timeoutMs?: number; deadlineMs?: number } = { fetch: (...a) => fetch(...a) },
 ): Promise<Mailer> {
   const timeoutMs = env.timeoutMs ?? EMAIL_TIMEOUT_MS;
+  const deadlineMs = env.deadlineMs ?? EMAIL_DEADLINE_MS;
   if (config.setup.email === 'api') {
     return {
       async send(m) {
@@ -65,7 +89,7 @@ export async function createMailer(
   // TLS is required on the wire except to a loopback relay (local development):
   // port 465 is TLS from the start, anything else must upgrade with STARTTLS.
   const local = LOOPBACK.has(host);
-  const transport = createTransport({
+  const options = {
     host, port,
     secure: port === 465,
     requireTLS: port !== 465 && !local,
@@ -76,8 +100,36 @@ export async function createMailer(
     connectionTimeout: timeoutMs,
     greetingTimeout: timeoutMs,
     socketTimeout: timeoutMs,
-  });
-  return { async send(m) { await transport.sendMail({ from: config.emailFrom, to: m.to, subject: m.subject, text: m.text }); } };
+  };
+  return {
+    async send(m) {
+      // Each send gets its own transport over a socket made here, so the
+      // deadline can end that one connection: the library connects the socket
+      // (TLS and STARTTLS included), but closing a transport leaves a send in
+      // progress open.
+      const socket = new Socket();
+      const transport = createTransport({ ...options, socket });
+      let expired = false;
+      // A socket destroyed while the library is still resolving the host is
+      // reopened by its later connect; ending it again there frees it.
+      socket.on('connect', () => { if (expired) socket.destroy(); });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<Error>((done) => {
+        timer = setTimeout(() => { expired = true; socket.destroy(); done(deadlinePassed()); }, deadlineMs);
+      });
+      // Settles as a value, so a send cut by the deadline (which then fails as
+      // closed) reports the deadline once, not an unhandled rejection later.
+      const sent = transport.sendMail({ from: config.emailFrom, to: m.to, subject: m.subject, text: m.text })
+        .then(() => null, (error: unknown) => error);
+      try {
+        const failure = await Promise.race([sent, deadline]);
+        if (failure !== null) throw failure;
+      } finally {
+        clearTimeout(timer);
+        transport.close();
+      }
+    },
+  };
 }
 
 export function resetMessage(site: string, to: string, link: string): Message {

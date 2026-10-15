@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { client, SECRET, SITE, startBackend, startIdp } from './helpers.ts';
+import { client, listen, SECRET, SITE, startBackend, startIdp } from './helpers.ts';
 import { dataOf } from './data-fixture.ts';
 import { migrate, openSqlite } from '../src/server/db.ts';
 import { migrateData } from '../src/server/data-migrate.ts';
@@ -20,6 +20,7 @@ import { createStore } from '../src/server/store.ts';
 import { clientIp, createBackendServer, createLimiter, rateKey, readCookies, requestListener, SECURITY_HEADERS } from '../src/server/http.ts';
 import { isEmail, isSitePath } from '../src/server/app.ts';
 import { loadConfig } from '../src/server/env.ts';
+import { createOidc, ProviderError } from '../src/server/oidc.ts';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -490,4 +491,60 @@ test('CONTROL malformed request: a connection the client reset gets no answer an
     const { answer } = await rawExchange(s.url, 'GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
     assert.match(answer, /^HTTP\/1\.1 204 /, 'still serving');
   } finally { await s.close(); }
+});
+
+/* ---- an identity provider that answers with megabytes --------------- */
+
+/** A discovery document of about `bytes`, streamed in chunks as the reader takes them; `sent` counts what got out. */
+async function bigDiscovery(bytes: number) {
+  const CHUNK = 64 * 1024;
+  const state = { sent: 0, closed: false };
+  const server = createServer(async (_req, res) => {
+    const issuer = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const head = JSON.stringify({ issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, padding: '' }).slice(0, -2);
+    res.on('close', () => { state.closed = true; });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    const write = (s: string) => {
+      state.sent += Buffer.byteLength(s);
+      if (res.write(s)) return Promise.resolve();
+      return new Promise<void>((ok) => {
+        const done = () => { res.off('drain', done); res.off('close', done); ok(); };
+        res.once('drain', done);
+        res.once('close', done);
+      });
+    };
+    await write(head);
+    while (state.sent + CHUNK < bytes && !state.closed) await write('a'.repeat(CHUNK));
+    if (!state.closed) res.end('"}');
+  });
+  const url = await listen(server);
+  const provider = {
+    id: 'big', label: 'Big', type: 'oidc' as const, issuer: url, clientId: 'c', clientSecret: 's',
+    scopes: 'openid email', emailField: 'email', verifiedField: 'email_verified',
+  };
+  return { state, provider, close: () => { server.closeAllConnections(); server.close(); } };
+}
+
+test('SECURITY provider body: a 10 MB discovery document fails the sign-in fast, read no further than the cap', async () => {
+  const TEN_MB = 10 * 1024 * 1024;
+  const idp = await bigDiscovery(TEN_MB);
+  try {
+    const started = Date.now();
+    await assert.rejects(createOidc((...a) => fetch(...a)).discover(idp.provider),
+      (e: unknown) => e instanceof ProviderError && /answered more than 262144 bytes/.test(e.message));
+    const took = Date.now() - started;
+    assert.ok(took < 2_000, `failed after ${took} ms`);
+    for (let waited = 0; !idp.state.closed && waited < 1_000; waited += 10) await new Promise((ok) => setTimeout(ok, 10));
+    assert.ok(idp.state.closed, 'the read was cut, not drained: the provider\'s connection is closed');
+    assert.ok(idp.state.sent < TEN_MB / 2, `the provider got ${idp.state.sent} bytes out of ${TEN_MB} before the read stopped`);
+  } finally { idp.close(); }
+});
+
+test('CONTROL provider body: a discovery document of normal size is read', async () => {
+  const idp = await bigDiscovery(4 * 1024);
+  try {
+    const found = await createOidc((...a) => fetch(...a)).discover(idp.provider);
+    assert.equal(found.issuer, idp.provider.issuer);
+    assert.equal(found.tokenEndpoint, `${idp.provider.issuer}/token`);
+  } finally { idp.close(); }
 });

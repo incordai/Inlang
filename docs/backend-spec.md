@@ -220,6 +220,13 @@ profile's email counts as verified only if `VERIFIED_FIELD` is present and
 `true`, so a provider that does not say never links to an existing account.
 The token endpoint is called with `client_secret_post`.
 
+Every call to a provider (discovery, keys, token, profile) is bounded twice:
+it must finish within 10 s (`FETCH_TIMEOUT_MS`), and its answer may hold at
+most 256 KB (`BODY_LIMIT_BYTES`). Those documents are a few kilobytes, so a
+larger one is hostile: the read stops at the cap, the connection is dropped,
+and the sign-in fails like any other provider failure, without buffering the
+rest.
+
 ## 7. Email
 
 `email smtp` uses the SMTP library (TLS required on the wire — port 465, or
@@ -228,6 +235,17 @@ STARTTLS — except to a loopback relay for development). `email api` posts
 `AZ_EMAIL_API_URL`; any service that accepts that shape, or a small relay in
 front of one, works. Messages are plain text containing only the link the
 server made.
+
+A send never waits on the mail service without bound. The API post must
+finish within 10 s (`EMAIL_TIMEOUT_MS`). Over SMTP, each stage (DNS, connect,
+greeting, a silent socket) gets the same 10 s, and the whole send at most
+30 s (`EMAIL_DEADLINE_MS`): the stage bounds fire only on silence, so a server
+that answers a byte at a time would otherwise hold the send for hours. At the
+deadline that send's connection is destroyed. Sends run after the request is
+answered, so a slow service never delays a visitor; a failed send is logged
+by its error class only (`TimeoutError` for the API or whole-send deadline,
+`Error ETIMEDOUT` for an SMTP stage), never the address or the server's
+reply.
 
 ## 8. What `az build` writes
 
