@@ -29,9 +29,21 @@ export interface Mailer { send(m: Message): Promise<void> }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
 
+/**
+ * How long one send may wait on the mail service: the whole API request, and
+ * each SMTP stage (DNS, connect, greeting, a silent socket). A hung service
+ * then fails the send instead of holding it, and its connection, forever.
+ */
+const EMAIL_TIMEOUT_MS = 10_000;
+
 interface Transport { sendMail(o: Record<string, unknown>): Promise<unknown> }
 
-export async function createMailer(config: Config, env: { fetch: typeof fetch } = { fetch: (...a) => fetch(...a) }): Promise<Mailer> {
+/** `timeoutMs` replaces EMAIL_TIMEOUT_MS — for tests that prove the bound without waiting it out. */
+export async function createMailer(
+  config: Config,
+  env: { fetch: typeof fetch; timeoutMs?: number } = { fetch: (...a) => fetch(...a) },
+): Promise<Mailer> {
+  const timeoutMs = env.timeoutMs ?? EMAIL_TIMEOUT_MS;
   if (config.setup.email === 'api') {
     return {
       async send(m) {
@@ -39,7 +51,10 @@ export async function createMailer(config: Config, env: { fetch: typeof fetch } 
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${config.emailApi.key}` },
           body: JSON.stringify({ from: config.emailFrom, to: m.to, subject: m.subject, text: m.text }),
+          signal: AbortSignal.timeout(timeoutMs),
         });
+        // Only the status is used: the body is discarded unread, which also frees the connection.
+        await response.body?.cancel();
         if (!response.ok) throw new Error(`email API answered ${response.status}`);
       },
     };
@@ -57,6 +72,10 @@ export async function createMailer(config: Config, env: { fetch: typeof fetch } 
     ignoreTLS: local,
     ...(user ? { auth: { user, pass: password } } : {}),
     tls: { rejectUnauthorized: true },
+    dnsTimeout: timeoutMs,
+    connectionTimeout: timeoutMs,
+    greetingTimeout: timeoutMs,
+    socketTimeout: timeoutMs,
   });
   return { async send(m) { await transport.sendMail({ from: config.emailFrom, to: m.to, subject: m.subject, text: m.text }); } };
 }

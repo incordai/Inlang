@@ -11,6 +11,8 @@ import { hashPassword, verifyPassword, SCRYPT, digest, safeEqual } from '../src/
 import { loadConfig, KEYS } from '../src/server/env.ts';
 import { migrate, numbered, openSqlite } from '../src/server/db.ts';
 import { createMailer } from '../src/server/email.ts';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
 
 const GOOD = 'a-long-enough-password';
 const ada = { name: 'Ada', email: 'Ada@Studio.test', password: GOOD, passwordConfirm: GOOD, location: 'Lisbon' };
@@ -485,4 +487,82 @@ test('email api: posts { from, to, subject, text } with the bearer key, and fail
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { from: 'Studio <no-reply@example.org>', to: 'a@b.c', subject: 'S', text: 'T' });
   status = 500;
   await assert.rejects(mailer.send({ to: 'a@b.c', subject: 'S', text: 'T' }), /500/);
+});
+
+/* ---- email: a mail service that never answers ------------------------ */
+
+/** The deadline the mailer is given in these tests, and the wall time a send may take before the test calls it hung. */
+const MAIL_DEADLINE_MS = 200;
+const HUNG_MS = 5_000;
+
+/** How `p` settled within `ms` of wall time — `hung` if it had not. */
+function within(p: Promise<unknown>, ms: number): Promise<{ hung: true } | { hung: false; error: unknown }> {
+  return new Promise((done) => {
+    const timer = setTimeout(() => done({ hung: true }), ms);
+    p.then(() => ({ hung: false as const, error: undefined }), (error: unknown) => ({ hung: false as const, error }))
+      .then((r) => { clearTimeout(timer); done(r); });
+  });
+}
+
+/** A TCP listener that accepts and then says nothing; `close` drops the held connections. */
+async function silentServer(http: boolean): Promise<{ port: number; close(): void }> {
+  const held = new Set<Socket>();
+  const server = http ? createHttpServer(() => {}) : createTcpServer(() => {});
+  server.on('connection', (s: Socket) => { held.add(s); s.on('close', () => held.delete(s)); });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  return {
+    port: (server.address() as AddressInfo).port,
+    close: () => { for (const s of held) s.destroy(); server.close(); },
+  };
+}
+
+const apiConfig = (port: number) => {
+  const loaded = loadConfig({
+    AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'https://api.example.org', AZ_ALLOWED_ORIGINS: 'https://www.example.org',
+    AZ_EMAIL_FROM: 'Studio <no-reply@example.org>', AZ_EMAIL_API_URL: `http://127.0.0.1:${port}/send`, AZ_EMAIL_API_KEY: 'k-123',
+  }, { database: 'sqlite', email: 'api' }, 'Studio');
+  assert.ok(loaded.ok, loaded.ok ? '' : loaded.problems.join('\n'));
+  return loaded.config;
+};
+
+test('email api: a service that never answers fails the send at the deadline, not never', async () => {
+  const hung = await silentServer(true);
+  try {
+    const mailer = await createMailer(apiConfig(hung.port), { fetch: (...a) => fetch(...a), timeoutMs: MAIL_DEADLINE_MS });
+    const r = await within(mailer.send({ to: 'a@b.c', subject: 'S', text: 'T' }), HUNG_MS);
+    assert.equal(r.hung, false, `the send was still waiting after ${HUNG_MS} ms`);
+    assert.equal(!r.hung && (r.error as Error).name, 'TimeoutError');
+  } finally { hung.close(); }
+});
+
+test('email api: a reset whose email hangs answers at once, and the failure is logged by class within the deadline', async () => {
+  const hung = await silentServer(true);
+  const lines: string[] = [];
+  const logged = new Promise<void>((ok) => { const t = setInterval(() => { if (lines.length) { clearInterval(t); ok(); } }, 10); t.unref(); });
+  const mailer = await createMailer(apiConfig(hung.port), { fetch: (...a) => fetch(...a), timeoutMs: MAIL_DEADLINE_MS });
+  const h = await startBackend({}, { mailer, log: (l) => lines.push(l) });
+  try {
+    await client(h.url).post('/auth/sign-up', ada);
+    const reset = await within(client(h.url).post('/auth/reset', { email: 'ada@studio.test' }).then(async (r) => {
+      assert.deepEqual([r.status, await r.json()], [200, {}], 'the usual answer: the same for any address');
+    }), HUNG_MS);
+    assert.deepEqual(reset, { hung: false, error: undefined });
+    assert.equal((await within(logged, HUNG_MS)).hung, false, `no failure logged after ${HUNG_MS} ms`);
+    assert.deepEqual(lines, ['email (reset) failed: TimeoutError'], 'the class only — no address, no reply');
+  } finally { await h.close(); hung.close(); }
+});
+
+test('email smtp: a server that accepts but never greets fails the send at the deadline, not never', async () => {
+  const hung = await silentServer(false);
+  try {
+    const loaded = loadConfig({
+      AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'https://api.example.org', AZ_ALLOWED_ORIGINS: 'https://www.example.org',
+      AZ_EMAIL_FROM: 'Studio <no-reply@example.org>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(hung.port),
+    }, { database: 'sqlite', email: 'smtp' }, 'Studio');
+    assert.ok(loaded.ok);
+    const mailer = await createMailer(loaded.config, { fetch: (...a) => fetch(...a), timeoutMs: MAIL_DEADLINE_MS });
+    const r = await within(mailer.send({ to: 'a@b.c', subject: 'S', text: 'T' }), HUNG_MS);
+    assert.equal(r.hung, false, `the send was still waiting after ${HUNG_MS} ms`);
+    assert.equal(!r.hung && (r.error as { code?: string }).code, 'ETIMEDOUT');
+  } finally { hung.close(); }
 });
