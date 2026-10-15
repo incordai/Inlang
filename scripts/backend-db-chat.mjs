@@ -65,16 +65,21 @@ export async function chatSuite(engine, db, openAgain, check, url) {
     AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: '/in-process.json',
   }, { database: engine, email: 'api', chat: true }, 'Studio');
   if (!loaded.ok) throw new Error(loaded.problems.join('\n'));
-  const context = parseChatContext(JSON.stringify({ site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5 } }, routes: ['/'] }));
+  // C2: the answer also holds a call to action off the allow-list, which the parser drops and the row counts.
+  const context = parseChatContext(JSON.stringify({
+    site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5, show: ['cta'] } }, routes: ['/'],
+    answer: { quotes: [], destinations: ['/'] },
+  }));
   const chat = createChat({
     config: loaded.config.chat, secret: loaded.config.secret, db, prompt: 'Answer.', context,
-    adapter: createFakeAdapter({ answers: [{ chunks: ['Hello.'], usage: { input: 40, output: 2 } }] }), log: () => {},
+    adapter: createFakeAdapter({ answers: [{ chunks: ['Hello.\ncta "Claim" https://evil.example/\n'], usage: { input: 40, output: 2 } }] }), log: () => {},
   });
   const app = createApp({ config: loaded.config, store: createStore(db, loaded.config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: () => {}, chat });
   const server = createServer((q, r) => { void app.handler(q, r); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   try {
     const before = await usage.spent(utcDay(Date.now()));
+    const droppedBefore = (await usage.row(utcDay(Date.now())))?.dropped ?? 0;
     const r = await fetch(`http://127.0.0.1:${server.address().port}/chat`, {
       method: 'POST', signal: AbortSignal.timeout(FETCH_MS),
       headers: { origin: SITE, 'x-az-request': '1', 'content-type': 'application/json' },
@@ -88,6 +93,9 @@ export async function chatSuite(engine, db, openAgain, check, url) {
       if (after === before) await new Promise((res) => setTimeout(res, 50));
     }
     check(`${engine} chat: an answer through the route streams and is counted (42 tokens)`, r.status === 200 && /event: done/.test(body) && after - before === 42, `${r.status} ${after - before}`);
+    const droppedAfter = (await usage.row(utcDay(Date.now())))?.dropped ?? 0;
+    check(`${engine} chat: the component the parser dropped is counted in the day's row, and never sent`,
+      droppedAfter - droppedBefore === 1 && !body.includes('evil.example') && !/event: block/.test(body), `${droppedAfter - droppedBefore}`);
   } finally {
     await closeWithin(server, DB_CLOSE_MS, `${engine} chat server close`);
   }

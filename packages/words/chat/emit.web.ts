@@ -137,7 +137,7 @@ function part(key: string, node: EmittedNode, extra: Record<string, string> = {}
 }
 
 /** A `from` template for one composed list: the word's own item, with markers where the answer's text goes. */
-function composed(word: 'faq' | 'feature', ctx: EmitContext): EmittedNode | null {
+function composed(word: 'faq' | 'feature', embed: NonNullable<EmitContext['embed']>): EmittedNode | null {
   const map: Record<string, string> = word === 'faq' ? { question: 'q', text: 'a' } : { text: 'text', title: 'title' };
   const from: SpecFrom = {
     table: CHAT_COPY.answer, slot: 'item', label: word === 'faq' ? 'question' : 'title', map,
@@ -145,7 +145,7 @@ function composed(word: 'faq' | 'feature', ctx: EmitContext): EmittedNode | null
     sort: null, limit: ANSWER_ITEMS, filter: {}, mine: false, empty: '', signin: null,
   };
   // A title keeps the items one heading level under the panel's own h2; it is not drawn (only the template is kept).
-  const rendered = ctx.embed!({
+  const rendered = embed({
     word, variant: word === 'faq' ? 'list' : 'rows', modifiers: [], args: [], as: null, children: [], from,
     props: { title: CHAT_COPY.answer, ...(word === 'faq' ? { schema: 'off' } : {}) },
   });
@@ -179,7 +179,7 @@ function parts(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
   }
   for (const word of ['faq', 'feature'] as const) {
     if (!answer.show.includes(word)) continue;
-    const list = composed(word, ctx);
+    const list = composed(word, ctx.embed);
     if (list) out.push(part(word, asTemplate(list, `chat-${word}`)));
   }
   if (answer.show.includes('cta')) {

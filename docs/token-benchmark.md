@@ -1,7 +1,7 @@
 # Token benchmark — how many tokens describe one site
 
 **Status** measured · **Run** `pnpm bench:tokens` · **Code**
-`scripts/token-benchmark.mjs`, `scripts/lib/token-bench.mjs`, tested by
+`scripts/token-benchmark.mjs`, `scripts/lib/token-bench.mjs` (and `answer-bench.mjs`, §7), tested by
 `scripts/lib/token-bench.test.mjs`
 
 An AI that builds a site with az writes a `.az` file. This measures how many
@@ -321,3 +321,51 @@ two seconds. The output is deterministic: two runs write byte-identical
 JSON (the unit test checks this on two sites). The JSON holds every site's
 characters, tokens per vocabulary and the estimate for every
 representation, and the summaries for both vocabularies.
+
+## 7. Chat answers — the answer format (chat-block-spec §5)
+
+**Code** `scripts/lib/answer-bench.mjs`, tested by
+`scripts/lib/answer-bench.test.mjs`; printed by `pnpm bench:tokens` after
+the site table and written to the JSON as `answers` and `chatInput`.
+
+A chat answer can be written as the restricted `.az` subset the model is
+taught (`show pricing /pricing`, `faq` with `item`/`text`, `cta "…" /route`,
+`feature`), as a compact JSON document of the same events, or as
+markdown. Each answer below is written all three ways, and each `.az` form
+is first run through the real answer parser (server `chat-answer.ts`): it
+must hold exactly the blocks its JSON form carries, so this compares one
+content in three spellings. Markdown cannot quote a block, so where the
+`.az` form quotes the site's pricing the markdown form spells out the
+table (the chat e2e site's two plans, as their page renders them).
+
+`o200k_base` tokens, 2026-10-15 (`cl100k_base` is within 4% on every row):
+
+| Answer | `.az` subset | compact JSON | markdown |
+|---|---:|---:|---:|
+| prose only | 18 | 26 (1.44×) | 18 (1.00×) |
+| prose + the site's pricing, quoted | 22 | 39 (1.77×) | 76 (3.45×) |
+| faq, 3 items | 87 | 94 (1.08×) | 73 (0.84×) |
+| cta | 8 | 18 (2.25×) | 8 (1.00×) |
+| feature, 3 items | 58 | 62 (1.07×) | 48 (0.83×) |
+| prose + faq (2) + cta | 86 | 101 (1.17×) | 76 (0.88×) |
+| **the six together** | **279** | **340 (1.22×)** | **299 (1.07×)** |
+| composed two-plan pricing (refused in answers) | 50 | 76 (1.52×) | 58 (1.16×) |
+
+Characters per token: `.az` 3.99, JSON 3.77, markdown 3.69 — so the
+server's fallback estimate of 3 characters per token, used only when a
+provider reports no usage, over-charges rather than under.
+
+**What the model is sent besides the conversation**, for the chat e2e site
+(8 pages, a chat that shows every component): the generated `prompt.txt`
+553 tokens (2 346 characters) and `context.json` 732 tokens (2 887
+characters).
+
+What the numbers say: the subset is smaller than JSON on every answer and
+18% smaller over the six; markdown is smaller for composed lists, because
+it has no `item`/`text` keywords, but it cannot quote and brings exactly
+what an answer must never hold — links, images, raw HTML. The quote is
+where the subset wins outright: one line for the author's whole table.
+
+Limits: the same as §5's, and these are tokens written, not a model's
+success rate at writing each form; `az backend probe` reports, per model,
+the provider's own counts and what the parser dropped.

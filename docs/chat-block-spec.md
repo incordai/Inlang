@@ -1,8 +1,8 @@
 # Chat — an AI chat block that answers in az's own components
 
 **Status** proposed 2026-10-15 · **approved by the owner 2026-10-15, every
-recommendation** (§17) · **C0 and C1 built 2026-10-15** (§19: what was built,
-and where it differs) · C2–C4 not started · **C2b specified 2026-10-15**
+recommendation** (§17) · **C0, C1 and C2 built 2026-10-15** (§19: what was
+built, and where it differs) · C3–C4 not started · **C2b specified 2026-10-15**
 (§20: charts, tables, stats, image cards, dashboards and share links in
 answers, on the owner's Q13–Q15) · Extends backend-spec.md,
 data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12)
@@ -188,9 +188,9 @@ page /login
     alt "Back to Acme" /
 ```
 
-The whole design, once C2 (`show`) and C3 (`float`, `knows`) land — until
-then `show` and a site-level `chat` are refused as not available yet
-(AZ1214), `float` is not a variant (AZ1204) and `knows` is not a key:
+`show` compiles since C2 (§19.5). The whole design, once C3 (`float`,
+`knows`) lands — until then a site-level `chat` is refused as not available
+yet (AZ1214), `float` is not a variant (AZ1204) and `knows` is not a key:
 
 ```
 az 1
@@ -544,6 +544,27 @@ input/output token counts for a fixed set of answers in each form, through
 
 And in practice the quote form makes most of it moot: the model writes
 `show pricing /pricing` (21 bytes), not the plans.
+
+**Measured in tokens (C2, `pnpm bench:tokens`, `o200k_base`; `cl100k_base`
+within 4%; docs/token-benchmark.md §7).** The same answers, each `.az`
+form checked by the real parser to hold exactly the JSON form's blocks:
+
+| Answer | `.az` subset | compact JSON | markdown |
+|---|---:|---:|---:|
+| prose only | 18 | 26 (1.44×) | 18 (1.00×) |
+| prose + the site's pricing, quoted | 22 | 39 (1.77×) | 76 (3.45×, the table spelled out) |
+| faq, 3 items | 87 | 94 (1.08×) | 73 (0.84×) |
+| cta | 8 | 18 (2.25×) | 8 (1.00×) |
+| feature, 3 items | 58 | 62 (1.07×) | 48 (0.83×) |
+| prose + faq (2) + cta | 86 | 101 (1.17×) | 76 (0.88×) |
+| the six together | 279 | 340 (1.22×) | 299 (1.07×) |
+| composed two-plan pricing (§5.2's case; refused in answers) | 50 | 76 (1.52×) | 58 (1.16×) |
+
+So: the subset is 18% fewer tokens than JSON over the answers an answer may
+hold, and fewer on every one; markdown is smaller for composed lists (no
+`item`/`text` keywords) but cannot quote, and its links, images and raw HTML
+are exactly what §6 must refuse. The decision (a) stands on safety and on the
+quote, not on size alone.
 
 ### 5.3 The answer grammar
 
@@ -1005,7 +1026,17 @@ chars ≈ 6 000–8 000 tokens) + rows (≤ 36 000 chars) + history; output ≤ 
 INFERENCE: the chars-per-token ratio is unmeasured here; C2's benchmark
 replaces these with numbers. The default budget (300 000 tokens/day) is
 therefore on the order of 30 answers a day — deliberately small; the
-operator raises it knowingly. The README prints the formula with the
+operator raises it knowingly.
+
+**Measured (C2, `pnpm bench:tokens`, `o200k_base`).** For the chat e2e site
+(8 pages, every component shown): `prompt.txt` 553 tokens (2 346
+characters, 4.24 per token), `context.json` 732 tokens (2 887 characters,
+3.94 per token). Answers in the subset run 3.99 characters per token, so the
+server's fallback of 3 (§6.5) over-charges by about a third when a provider
+reports no usage — the intended direction. A context at its 24 000-character
+cap is therefore about 6 100 tokens, and the prompt about 550, not 2 000.
+These are one tokenizer's counts; a provider's own are what `az backend
+probe` reports. The README prints the formula with the
 operator's own per-token prices as placeholders (`<PRICE_PER_INPUT_TOKEN>`),
 never a vendor's.
 
@@ -1104,7 +1135,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0 and C1 as built — deviations and findings (2026-10-15)
+## 19. C0, C1 and C2 as built — deviations and findings (2026-10-15)
 
 ### 19.1 Against §14's C1 list
 
@@ -1168,6 +1199,72 @@ C2b (§20, 2026-10-15) — charts, tables, stat cards, image cards,
 dashboards and share links in answers — is specified, not built. It is
 built on C2's parser, events and templates once they are on main, and
 records its own "as built" deviations here when it lands.
+
+### 19.5 C2 as built (2026-10-15)
+
+Against §14's C2 row:
+
+| Item | State |
+|---|---|
+| `show pricing\|faq\|cta\|feature` | built; the AZ1214 refusal is gone (a site-level `chat` keeps it, C3). A word outside the four is still AZ1254 with its reason |
+| reserved codes | **AZ1255** raised (`show pricing` with no pricing block a signed-out visitor can see — a pricing block only on an `auth protect` page does not count, since quoting it would put protected prices in a public page). AZ1252, AZ1253, AZ1257's `knows` half and AZ1258 belong to `knows` (C3) and stay reserved |
+| the answer parser and typed events | built: `server/chat-answer.ts`, a dedicated line lexer (GRAMMAR §1.5's three escapes), not `lex.ts` — §5.3's INFERENCE replaced. Events `text`, `block` (`quote`, `faq`, `cta`, `feature`, §4.2's shapes), `done`, `error`; nothing else reaches the page |
+| a line that does not parse is text; a failing component is dropped | built, as §5.3. Dropped components count in `az_chat_usage.dropped` and the log line (`dropped 2 (destination,shape)` — reasons, never text) |
+| pricing quote-only | built: `show pricing /route` (`#2` for a page's second) quotes; a composed `pricing` line is dropped whatever follows it |
+| templates rendered by the words' own emitters | built through a new optional `EmitContext.embed` (core emit-contract): the target injects every emitter, so no word imports another. Each quotable pricing block is embedded exactly as its page renders it; faq and feature items are those words' own `from` templates (`fromFill` markers); a call to action is the button primitive, one template per kind of destination (route, https, mailto, tel). Ids and radio groups are suffixed per template and per copy; behaviour marks are parked as `data-az-chat-behaviour` and restored on each copy, so the behaviour runtime wires a quoted billing switch or an FAQ like any late content |
+| the client fills templates with text only | built: `textContent` on marker text nodes; the one URL write is `setDestination`, after `allowedDestination` (a unit test holds it to one place) |
+| the destination allow-list | built (core `chatAnswers`): every declared route, every `route#anchor` the file writes as a destination whose route exists, every exact `https://`, `mailto:` and `tel:` value in the file — lower-case scheme, nothing a browser reads past. A destination only a protected page holds is left out. Checked on the server and again in the page |
+| the injection corpus | built: `packages/backend/test/fixtures/chat-attacks/`, 15 cases and `rules.json`, read by `chat-attacks.test.ts` (the parser, at once and in pieces; the route end to end) and by `test:chat` (the real page, three engines) |
+| `az backend probe <server-dir>` | built: `server/chat-probe.ts`, run in the server folder by the CLI (so it reads `.env` as `main.ts` does); bounded per answer by the server's own timeouts, 10 minutes in all (the CLI kills it at 16). Asks prose, then one question per component some chat shows, on the first page that shows it. Prints per answer: streamed, first-text and total time, the provider's tokens, events, drops and why — never the key or the answer's words. Exits 1 on an empty, failed, timed-out or unasked answer, or on any dropped component (a model that writes a component the filter refuses is one not to pin); `--json` gives the same as JSON |
+| the token benchmark | built into `pnpm bench:tokens` (docs/token-benchmark.md §7); the numbers are in §5.2 and §13 |
+
+Where the build differs from the text above:
+
+- **The history turn is the answer's record**, not its prose: `done`
+  carries `text`, the prose plus each shown component in its canonical
+  lines, and the tag covers that. The model sees what it showed. A
+  component that would take the record past 12 000 characters (the history
+  cap) is dropped, so a tagged answer always fits a `site` turn.
+- **A forbidden word's line is prose**, as §6.1 says ("prose at most") —
+  `auth login` shows as the text it is; `show auth /login` is a component
+  and is dropped. Keywords that hold a line: `text`, `show`, `faq`, `cta`,
+  `feature`, `pricing`; `faq`/`feature`/`pricing` may carry their own
+  variant words, which the page ignores.
+- **Prose streams one character behind**: the last character of each piece
+  waits for the next, so a combining mark that arrives later still
+  normalises with it (NFC) and a stream split anywhere gives the same text.
+- **The line cap holds a line, not prose**: a line that starts like a
+  component is held to 2 000 characters and dropped past them; a prose line
+  streams, bounded by the 4 000-character prose cap.
+- **A cap passed ends the answer**: the fifth component, like the prose
+  cap, stops the read and aborts the model; what was sent stands.
+- **`quote` is pricing only.** §5.4 named quotable blocks for `pricing`
+  alone; `show faq /help` is dropped rather than quoting a site FAQ.
+- **The cta template follows the button primitive**: an `https:`
+  destination opens in a new tab with `rel="noopener noreferrer"` and its
+  "(opens in new tab)" note, as every external link on the site does
+  (§6.2 said same tab; the site-wide rule won).
+- **`az prompt`** lists `show pricing|faq|cta|feature` from the manifest's
+  `valueDescriptions` (a `values` list would turn AZ1254's reasoned refusal
+  into a bare AZ1208).
+- **The prompt's component forms** are generated from the parser's own
+  table (`ANSWER_FORMS`, `ANSWER_LIMITS`), not the words' manifests: the
+  parser's caps are what is enforced, so they are what is taught. Which
+  components a page allows, its quotes and its destinations are said per
+  request, after the site content.
+
+What was measured (2026-10-15): `pnpm verify` (2 698 tests), `pnpm
+test:chat` (156 checks, up from 82; Chromium 153, Firefox 155, WebKit 26.6 — every
+corpus case rendered exactly as filtered, a quoted billing switch and a
+composed FAQ working in the answer, the cta reaching `/contact`, axe clean
+with components, no request off the site and its backend, no CSP
+violation), `pnpm verify:build` (the components' templates ship hidden and
+unwired; the chat page's policy still equals the plain page's), `pnpm
+test:backend-db` (a dropped component counted on PostgreSQL 18.6 and MySQL
+8.4.11). No real model was reachable from this machine, so `az backend
+probe` was run against a local server speaking the completions shape
+(`chat-probe.test.ts`), not against a candidate model: the owner's
+curl-probe of each candidate remains to be done before one is pinned.
 
 ---
 

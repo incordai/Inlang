@@ -473,7 +473,13 @@ timeouts, abort on disconnect, HMAC-tagged history), the `completions` and
 `fake` adapters (fetch only), the secret guard refusing `AZ_PUBLIC_CHAT_*`,
 and `az dev` on `fake`. Measured in `pnpm verify`, `pnpm test:chat` (three
 engines), `pnpm test:backend-db` and `pnpm verify:build` — chat-block-spec
-§19. Open: C2 (components in answers, `az backend probe`), C2b
+§19. C2 (built 2026-10-15, chat-block-spec §19.5): `show pricing faq cta
+feature` — the server parses the model's `.az`-subset answer into typed
+events, the page fills templates the words' own emitters rendered, pricing
+is quote-only, a call to action only to a destination the file declares;
+the injection corpus in three engines; `az backend probe`; answer-format
+tokens in `pnpm bench:tokens`. Open: a curl-probe of a real candidate
+model before one is pinned, C2b
 (specified 2026-10-15, chat-block-spec §20: charts, tables, stat cards,
 image cards and dashboards inside answers only — no new word — with
 figures computed by the server from public tables, an "AI-generated
