@@ -23,7 +23,7 @@ for (const n of readdirSync(wordsDir)) {
 }
 
 const site = (width: string | null, theme = 'midnight') =>
-  `az 1\nsite bench\n${width === null ? '' : `  width ${width}\n`}  theme ${theme}\n\npage /\n  hero center\n    title "Built slowly"\n  text prose\n    body "Oak."\n  cta card\n    title "Reserve"\n    cta "Reserve a pair" /reserve\n`;
+  `az 1\nsite bench\n${width === null ? '' : `  width ${width}\n`}  theme ${theme}\n\npage /\n  hero center\n    title "Built slowly"\n  text prose\n    body "Oak."\n  cta card\n    title "Reserve"\n    cta "Reserve a pair" /reserve\n\npage /reserve\n`;
 
 function build(src: string) {
   const r = compile(src, { manifests });

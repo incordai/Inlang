@@ -73,3 +73,10 @@ page /legal
   text
     title "Privacy"
     body  "We keep your order and your address, and nothing else."
+
+# Every route a link or button names is a page of the site (§4.1).
+page /work
+page /studio
+page /shoes
+page /bags
+page /reserve

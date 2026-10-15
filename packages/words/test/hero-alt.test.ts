@@ -30,7 +30,7 @@ for (const n of readdirSync(wordsDir)) {
 const THEME = resolve(THEMES.midnight, 'dark') as unknown as Parameters<typeof emitBlock>[1];
 
 function heroOf(lines: string[]) {
-  const src = ['az 1', 'site aurora', 'page /', ...lines.map((l) => `  ${l}`)].join('\n') + '\n';
+  const src = ['az 1', 'site aurora', 'page /', ...lines.map((l) => `  ${l}`), 'page /reserve'].join('\n') + '\n';
   const result = compile(src, { manifests });
   const spec = result.spec;
   const hero = spec ? blocksFor(spec, spec.pages[0]).find((b) => b.word === 'hero') : undefined;

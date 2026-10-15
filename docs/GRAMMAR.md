@@ -492,14 +492,14 @@ value           = STRING | PAIR | BARE ;
 | `az 1` | file, line 1 | 1 | PRD §Stability |
 | `site <name>` | file | 1 | PRD §6.1 |
 | `width <preset>` | `site` | 1 | PRD §6.1a — the frame |
-| `theme <name>` | file, `site` | 1 | PRD §6.1 |
+| `theme <name>` | `site` | 1 | PRD §6.1 — anywhere else is AZ1503 (§5.4) |
 | `accent <hue> [<hue2>]` | `theme` | 1 | PRD §6.1a — shade ramp; two hues a gradient pair (theme-spec §13) |
 | `pattern <shape> [origin]` | `theme` | 1 | PRD §6.1a — background |
-| `font` + indented roles | file, `site` | 1 | PRD §6.1 |
+| `font` + indented roles | `site` | 1 | PRD §6.1 — anywhere else is AZ1503 (§5.4) |
 | `display` / `body` / `mono` `<family>` | `font` | 1 | PRD §6.1 |
 | `description "<text>"` | `site`, `page` | 1 | §4.4 — the meta description; the page's wins |
 | `icon <path>` | `site` | 1 | §4.4 — the site icon, PNG or SVG |
-| `page <route>` | file | 1 | PRD §6.1 |
+| `page <route>` | file | 1 | PRD §6.1 — `page` or `site` nested is AZ1202 |
 | `raw <path>` | `page`, any block | 1 (M3) | PRD §6.6 |
 | `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
 | `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here |
@@ -619,6 +619,13 @@ A `path` is **project-relative and must begin `./`**. All of these are errors:
 | `/etc/passwd` | lexes as a route; fails `path` typing with AZ1402 |
 | `~/models/x.glb` | AZ1402 |
 
+The `./` is required, never added: `poster assets/x.jpg` is AZ1402 with the
+`./` form as its fix, so a file is always told from a word by its first two
+characters. A name holding a space or a quote is written quoted, still `./`
+first (`poster "./assets/a b.jpg"`); any other quoted value, a URL or an
+anchor in a `path` key is
+`hero: poster 'https://…' is not a project file — write: poster ./file.jpg` (AZ1402).
+
 `..` is rejected **anywhere** in the path, not only at the start, and the check
 is on the literal text before resolution — a segment check on the resolved path
 is the mitigation word-quality-gate §2A calls for, and doing it on the text as
@@ -647,6 +654,18 @@ applies (leading spaces and control characters dropped, tabs and line breaks
 removed). Such a value becomes an `href`, and a link that runs script is never
 compiled. Any other quoted text is left alone: a second argument is sometimes a
 value, not a destination (`feature "Projects" "10"`).
+
+A **route** destination names a page the file declares — on a block's button
+(`cta`, `alt`), a nav or footer `link`, anywhere a fill carries one. Any
+other is a link the compiler can see is dead:
+`cta: '/nowhere' is not a page in this site — add it or fix the link` (AZ1215,
+at the route; a query or `#anchor` after the path is not part of the match).
+A site with `data` tables also has the pages the build generates for them,
+`/admin` and `/admin/<table>` (data-spec §11). The footer's own links keep its
+validation row, AZ2081.
+
+A button is a label and a destination, and an optional `as`: a third value is
+`cta: takes a label and a destination — remove 'extra'` (AZ1406).
 
 A `path`-shaped value in a `url` position is legal and means *download*
 (buttons §1.3, `./deck.pdf` → download); it is then checked as a `path`.
@@ -781,9 +800,25 @@ indented body AZ1219.
 
 A prop declared `"repeat": true` accepts more than one value on one line, all
 of the same declared type. This exists for `versions v1 v2`
-(buttons-and-sections §3) and nothing else in Phase 1. Without `repeat`, a
-second value is
-`<word>: '<key>' takes one value — put the rest on their own lines` (AZ1406).
+(buttons-and-sections §3) and nothing else in Phase 1; a `list` prop
+(`methods password link`) takes every value on its line the same way. Without
+either, a second value is
+`<word>: '<key>' takes one value — remove '<value>'` (AZ1406, at that value),
+and is never dropped silently. For a `string` key written without quotes the
+fix is the quotes, since unquoted copy splits into words:
+`hero: 'title' takes one value — quote the copy: title "made by hand"`.
+
+Every other part of a key's line is accounted for the same way:
+
+| Written | Diagnostic |
+|---|---|
+| no value | `hero: 'title' has no value — write: title <value>` (AZ1205) |
+| a `flag` key (`lead`) given a value | `item: 'lead' takes no value — remove 'on'` (AZ1406) |
+| `as` after a key's value | `hero: 'title' takes no 'as' — remove 'as ghost'` (AZ1406) |
+| an indented line under a key | `hero: 'title' takes no indented lines — write it on one line` (AZ1219) |
+| copy or a link on a block's own line (`hero center "Hi"`) | `hero: '"Hi"' is not a variant or modifier — put copy and links on their own lines beneath it` (AZ1204) |
+| a second name, route or value on `site`, `page`, `theme`, `width` or a `font` role | `site: takes one name — remove 'extra'` (AZ1406) |
+| a value on `font` itself | `font: takes no value — write its roles beneath it: display sans\|serif\|mono\|rounded` (AZ1219) |
 
 *Decision: `repeat` rather than a list type keeps the type set at seven and
 keeps the parse grammar unchanged — a repeated prop is just a statement with
@@ -870,10 +905,14 @@ structural fact, not an authoring choice.*
 |---|---|
 | `theme` twice at site level | `theme: declared twice — keep one` (AZ1502) |
 | `theme` under a `page` | `theme: declared under a page — move it to site level, one theme per site` (AZ1503) |
+| `font` under a `page` | `font: declared under a page — move it to site level, one font set per site` (AZ1503) |
+| `theme` or `font` at file level, or under a block | `theme: declared outside site — move it to site level, one theme per site` (AZ1503) |
 | `icon` under a `page` | `icon: declared under a page — move it to site level, one icon per site` (AZ1503) |
 | `description` twice in one site or page, `icon` twice | `site: 'description' set twice — keep one` (AZ1504) |
+| `width` or `font` twice at site level | `site: 'width' set twice — keep one` (AZ1504) |
 | Two `hero` blocks on one page | `hero: only one per page (it owns the <h1>)` — hero-spec §11 |
-| Same prop twice in one block, no `max` | `hero: 'title' set twice — keep one` (AZ1504) |
+| Same prop twice in one block or one fill, no `max` | `hero: 'title' set twice — keep one` (AZ1504, at the second; the first is kept) |
+| `page` or `site` nested under another statement | `page: not allowed inside 'site' — write it at column 0` (AZ1202) |
 | `site` twice | `site: declared twice — keep one` (AZ1508) |
 | Two `page` declarations on one route | `page: '/' declared twice — keep one` (AZ1509) |
 | Two variants on one block | `hero: 'center' and 'split' are both layouts — pick one` — hero-spec §11 |
@@ -1142,6 +1181,13 @@ page /legal
   text
     title "Privacy"
     body  "We keep your order and your address, and nothing else."
+
+# Every route a link or button names is a page of the site (§4.1).
+page /work
+page /studio
+page /shoes
+page /bags
+page /reserve
 ```
 
 ### 8.1 Line-by-line commentary

@@ -93,7 +93,7 @@ const FEATURE = (variant: string, items: string[], columns = '3') =>
   render([`feature ${variant}`, '    title "Made properly"', ...(variant === 'grid' ? [`    columns ${columns}`] : []), ...items], 'feature');
 const PROSE_ITEMS = ['    item "Hand-cut leather"', '      text "Cut by hand."', '    item "Sewn welt"', '      text "Replaceable sole."',
   '    item "Forty a month"', '      text "Two people."'];
-const SPEC_ITEMS = ['    item "Waterproof"', '      icon drop', '    item "Resoleable"', '      icon tool', '    item "Two year warranty"', '      icon shield'];
+const SPEC_ITEMS = ['    item "Waterproof"', '      icon ./drop.svg', '    item "Resoleable"', '      icon ./tool.svg', '    item "Two year warranty"', '      icon ./shield.svg'];
 
 test('feature §6 grid: one column below sm, and at most two below md', () => {
   const items = byClass(FEATURE('grid', PROSE_ITEMS), 'az-feature-items');

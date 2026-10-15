@@ -27,6 +27,8 @@ page /
     title   "Built in the dark"
     sub     "Handmade. Forty pairs a month."
     height  peek
+
+page /work
 ```
 
 That is [`fixtures/minimal.az`](fixtures/minimal.az). The full grammar is

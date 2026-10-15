@@ -4,7 +4,7 @@
  * Spec: docs/GRAMMAR.md §4–§5 · docs/ARCHITECTURE.md §4.1
  * Exports: link, LinkOptions, Manifest, PropSpec, STRUCTURE, STRUCTURE_PROPS
  * Edit guide: never name a specific word here — per-word rules are manifest data (checks.ts); lookups use Object.hasOwn.
- * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts, packages/core/test/head-settings.test.ts
+ * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts, packages/core/test/head-settings.test.ts, packages/core/test/strict-values.test.ts
  */
 
 /**
@@ -371,8 +371,17 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
   // Every page the file declares, so a `route` prop can be checked against
   // the site rather than only its shape. Top-level only: GRAMMAR §5 puts
   // `page` at file level and nowhere else.
-  const routes = options.openRoutes ? ANY_ROUTE : new Set(
+  const declared = new Set(
     file.body.filter((s) => s.word === 'page').map((s) => routePath(s.args[0]?.value ?? '/')));
+  // A site with data tables also has the pages the build generates for them
+  // (data-spec §11): `/admin` and `/admin/<table>`.
+  const tables = file.body.filter((s) => s.word === 'site')
+    .flatMap((s) => s.children.filter((c) => c.word === 'data' && c.args[0]).map((c) => c.args[0].value));
+  if (tables.length > 0) {
+    declared.add('/admin');
+    for (const t of tables) declared.add(`/admin/${t}`);
+  }
+  const routes = options.openRoutes ? ANY_ROUTE : declared;
 
   /**
    * The checks that depend only on a prop's own value and its declaration.
@@ -392,6 +401,18 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     // text's `body` is `markdown` and takes a file (text-spec §11).
     for (const [key, arg] of Object.entries(props)) {
       if (specs?.[key]?.type !== 'path' && arg.kind !== 'path') continue;
+      // GRAMMAR §4.2: a path is written from the project root, `./` first —
+      // quoted only when the name holds a space or a quote. Read without it,
+      // `assets/x.jpg` was taken as a path anyway: the one character that
+      // tells a file from a word was never required.
+      const quotedPath = arg.kind === 'string' && arg.value.startsWith('./');
+      if (arg.kind !== 'path' && arg.kind !== 'route' && !quotedPath) {
+        err('AZ1402', arg.kind === 'word' || arg.kind === 'number' || arg.kind === 'string'
+          ? `${word}: '${shown(arg.value)}' is not a path — write './${shown(arg.value)}'`
+          : `${word}: ${key} '${shown(arg.value)}' is not a project file — write: ${key} ./file${specs?.[key]?.ext?.[0] ?? ''}`,
+          arg.pos);
+        continue;
+      }
       const cleaned = arg.value.replace(/\\/g, '/');
       if (/^[a-zA-Z]:/.test(cleaned) || cleaned.startsWith('/')) {
         err('AZ1210',
@@ -487,6 +508,70 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
         warn('AZ1409', `${word}: ${key} is ${n} words, ${max} is the limit — shorten it`, arg.pos);
       }
     }
+  }
+
+  /**
+   * GRAMMAR §4.1: a route destination on a fill (`cta "Go" /reserve`, a nav
+   * `link`) names a page this site declares — otherwise it is a link the
+   * compiler can see is dead. A word whose own table already checks this
+   * fill's routes (footer, AZ2081) keeps its message instead.
+   */
+  function checkRoutes(s: Statement, parent: Manifest): void {
+    if ((parent.checks ?? []).some((c) => c.kind === 'childRoute' && c.slots?.includes(s.word))) return;
+    for (const a of s.args) {
+      if (a.kind === 'route' && !routes.has(routePath(a.value))) {
+        err('AZ1215', `${s.word}: '${a.value}' is not a page in this site — add it or fix the link`, a.pos);
+      }
+    }
+  }
+
+  /**
+   * One `key value` line of a block or a fill (GRAMMAR §4.4–§4.5, §5.4): the
+   * value it carries, or null when the line is refused.
+   *
+   * Taking `args[0]` and moving on once dropped the rest of the line without
+   * a word — `title made by hand` compiled to "made" — and a second line of
+   * the same key replaced the first. Every part of the line is accounted for
+   * here: a key is set once (AZ1504), takes exactly its values (AZ1205 none,
+   * AZ1406 one too many), and has no `as` and no indented body. A `list`
+   * takes every value on the line; its items are checked by the caller.
+   */
+  function propLine(owner: string, c: Statement, spec: PropSpec, seen: Set<string>): Arg | null {
+    if (seen.has(c.word)) {
+      err('AZ1504', `${owner}: '${c.word}' set twice — keep one`, c.pos);
+      return null;
+    }
+    seen.add(c.word);
+    if (c.as !== null) {
+      err('AZ1406', `${owner}: '${c.word}' takes no 'as' — remove 'as ${shown(c.as)}'`, c.pos);
+      return null;
+    }
+    if (c.children.length > 0) {
+      err('AZ1219', `${owner}: '${c.word}' takes no indented lines — write it on one line`, c.children[0].pos);
+      return null;
+    }
+    // A flag is the key alone (`lead`); its presence is its value.
+    if (spec.type === 'flag') {
+      if (c.args.length > 0) {
+        err('AZ1406', `${owner}: '${c.word}' takes no value — remove '${shown(c.args[0].value)}'`, c.args[0].pos);
+        return null;
+      }
+      return { kind: 'word', value: 'on', pos: c.pos };
+    }
+    if (c.args.length === 0) {
+      err('AZ1205', `${owner}: '${c.word}' has no value — write: ${c.word} <value>`, c.pos);
+      return null;
+    }
+    if (spec.type !== 'list' && c.args.length > 1) {
+      const extra = c.args[1];
+      // Copy written without quotes splits into words; the fix is the quotes.
+      const copy = spec.type === 'string' && c.args.every((a) => a.kind !== 'string');
+      err('AZ1406', copy
+        ? `${owner}: '${c.word}' takes one value — quote the copy: ${c.word} "${shown(c.args.map((a) => a.value).join(' '))}"`
+        : `${owner}: '${c.word}' takes one value — remove '${shown(extra.value)}'`, extra.pos);
+      return null;
+    }
+    return c.args[0];
   }
 
   /**
@@ -630,6 +715,9 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
   function fontRoles(s: Statement): LinkedWord[] {
     const roles = [...STRUCTURE_PROPS.font];
     const families = Object.keys(FONT_FAMILIES);
+    if (s.args.length > 0) {
+      err('AZ1219', `font: takes no value — write its roles beneath it: display ${families.join('|')}`, s.args[0].pos);
+    }
     if (s.children.length === 0) {
       err('AZ1205', `font: no roles — write, indented: display ${families.join('|')}`, s.pos);
     }
@@ -647,6 +735,14 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       }
       if (!Object.hasOwn(FONT_FAMILIES, value.value)) {
         err('AZ1416', `font: '${shown(value.value)}' is not a family — use ${families.join(', ')}`, value.pos);
+        continue;
+      }
+      if (c.args.length > 1) {
+        err('AZ1406', `font: '${c.word}' takes one family — remove '${shown(c.args[1].value)}'`, c.args[1].pos);
+        continue;
+      }
+      if (c.children.length > 0) {
+        err('AZ1219', `font: '${c.word}' takes no indented lines — write it on one line: ${c.word} ${value.value}`, c.children[0].pos);
         continue;
       }
       if (seen.has(c.word)) {
@@ -672,6 +768,8 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     const themes = Object.keys(THEME_NAMES);
     if (name && !Object.hasOwn(THEME_NAMES, name.value)) {
       err('AZ1417', `theme: '${shown(name.value)}' is not a theme — use ${themes.join(', ')}`, name.pos);
+    } else if (s.args.length > 1) {
+      err('AZ1406', `theme: takes one name — remove '${shown(s.args[1].value)}'`, s.args[1].pos);
     }
     const settings = [...STRUCTURE_PROPS.theme];
     const seen = new Set<string>();
@@ -810,6 +908,10 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
         if (!value) err('AZ1205', `site: 'width' has no value — write: width ${choices.join('|')}`, s.pos);
         else if (!Object.hasOwn(SITE_WIDTHS, value.value)) {
           err('AZ1414', `site: width '${shown(value.value)}' is not one of: ${choices.join(', ')}`, value.pos);
+        } else if (s.args.length > 1) {
+          err('AZ1406', `site: 'width' takes one value — remove '${shown(s.args[1].value)}'`, s.args[1].pos);
+        } else if (s.children.length > 0) {
+          err('AZ1219', `site: 'width' takes no indented lines — write it on one line: width ${value.value}`, s.children[0].pos);
         }
       }
       // `font` carries its roles as children (GRAMMAR font-decl); returning
@@ -837,15 +939,17 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       const def = slotManifest(s.word, parent.slots[s.word]);
       const props: Record<string, Arg> = {};
       const children: LinkedWord[] = [];
+      const seen = new Set<string>();
       for (const c of s.children) {
         if (def.props && Object.prototype.hasOwnProperty.call(def.props, c.word)) {
-          if (c.args.length > 0) props[c.word] = c.args[0];
-          else err('AZ1205', `${s.word}: '${c.word}' has no value — write: ${c.word} <value>`, c.pos);
+          const value = propLine(s.word, c, def.props[c.word], seen);
+          if (value) props[c.word] = value;
           continue;
         }
         const linked = resolve(c, def, s.word);
         if (linked) children.push(linked);
       }
+      checkRoutes(s, parent);
       // A fill is checked like a block: pricing's `plan` must have exactly
       // one `cta` (pricing-spec §11), and nothing enforced it.
       checkValues(s.word, props, def.props);
@@ -862,6 +966,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     // different things by position, and the enclosing word's `children` list
     // is that position.
     if (parent?.children?.includes(s.word)) {
+      checkRoutes(s, parent);
       return { word: s.word, variant: null, modifiers: [], args: s.args, props: {}, as: s.as,
                children: s.children.map((c) => resolve(c, parent, s.word)).filter(Boolean) as LinkedWord[],
                pos: s.pos };
@@ -882,6 +987,27 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       return null;
     }
 
+    // GRAMMAR §3.2, §5.4: the theme and the fonts are the site's, resolved
+    // once. Under `site` they were taken above; anywhere else they were kept
+    // and never read, so `theme paper` under a page compiled to midnight.
+    if (s.word === 'theme' || s.word === 'font') {
+      const where = parentWord === null ? 'outside site' : parentWord === 'page' ? 'under a page' : `under '${parentWord}'`;
+      err('AZ1503', `${s.word}: declared ${where} — move it to site level, one ${s.word === 'theme' ? 'theme' : 'font set'} per site`, s.pos);
+      return null;
+    }
+
+    // `site` and `page` are file-level (GRAMMAR §3.2 file-member); nested,
+    // they were linked and never read.
+    if ((s.word === 'site' || s.word === 'page') && parentWord !== null) {
+      err('AZ1202', `${s.word}: not allowed inside '${parentWord}' — write it at column 0`, s.pos);
+      return null;
+    }
+
+    // One name, one route: anything after it on the line was never read.
+    if ((s.word === 'site' || s.word === 'page') && s.args.length > 1) {
+      err('AZ1406', `${s.word}: takes one ${s.word === 'site' ? 'name' : 'route'} — remove '${shown(s.args[1].value)}'`, s.args[1].pos);
+    }
+
     const m = manifests.get(s.word);
     const structural = STRUCTURE.has(s.word);
 
@@ -896,7 +1022,15 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     const props: Record<string, Arg> = {};
 
     for (const a of s.args) {
-      if (a.kind !== 'word') continue;
+      if (a.kind !== 'word') {
+        // A block's line holds its layout and modifiers only; copy or a link
+        // written there was carried into the Spec and rendered by nothing.
+        if (m) {
+          err('AZ1204', `${s.word}: '${shown(a.kind === 'string' ? `"${a.value}"` : a.value)}' is not a variant or modifier — `
+            + 'put copy and links on their own lines beneath it', a.pos);
+        }
+        continue;
+      }
       if (m?.variants?.includes(a.value)) {
         if (variant !== null) {
           // hero-spec §11: two variants must fail loudly, never silently pick.
@@ -928,6 +1062,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     // `from <table>` (data-spec §10), kept as written like `data`: the spec
     // stage checks it against the tables, which it alone sees.
     let from: LinkedWord | null = null;
+    const seen = new Set<string>();
     for (const c of s.children) {
       if (c.word === 'from' && m?.from) {
         if (from) err('AZ1504', `${s.word}: 'from' set twice — keep one`, c.pos);
@@ -943,18 +1078,16 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       }
       // A child that names a prop of THIS word carries its value.
       if (m?.props && Object.prototype.hasOwnProperty.call(m.props, c.word)) {
-        if (c.args.length > 0 && m.props[c.word].type === 'list') {
+        const value = propLine(s.word, c, m.props[c.word], seen);
+        if (value && m.props[c.word].type === 'list') {
           // `methods password link` is ONE prop with two items. Taking only
           // the first argument, as a scalar prop does, silently dropped `link`.
           listItems[c.word] = c.args;
           props[c.word] = {
-            ...c.args[0],
+            ...value,
             value: c.args.map((a) => a.value).join(LIST_SEPARATOR),
           };
-        } else if (c.args.length > 0) props[c.word] = c.args[0];
-        else {
-          err('AZ1205', `${s.word}: '${c.word}' has no value — write: ${c.word} <value>`, c.pos);
-        }
+        } else if (value) props[c.word] = value;
         continue;
       }
       const linked = resolve(c, m, s.word);
@@ -1045,7 +1178,9 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       // A site-scoped prop is declared once for the file, so its absence HERE
       // is not an error — spec.ts checks the file as a whole.
       if (spec.scope === 'site') continue;
-      if (spec.required && !(key in props)) {
+      // A key written on a line refused above is not missing: that line's
+      // diagnostic names the fix, and "is required" would contradict it.
+      if (spec.required && !(key in props) && !seen.has(key)) {
         err('AZ1207', `${s.word}: '${key}' is required — add: ${key} <value>`, s.pos);
       }
     }
@@ -1153,6 +1288,11 @@ function checkActions(
     let ctaIndex = 0;
     const primaries: LinkedWord[] = [];
     for (const f of fills) {
+      // buttons §1.1: a button is a label and a destination; a target reads
+      // those two and nothing after them.
+      if (f.args.length > 2) {
+        err('AZ1406', `${f.word}: takes a label and a destination — remove '${shown(f.args[2].value)}'`, f.args[2].pos);
+      }
       if (f.as !== null && !isHierarchy(f.as)) {
         err('AZ1220', `${f.word}: 'as ${f.as}' is not a button weight — use: ${HIERARCHIES.join(', ')}`, f.pos);
       }

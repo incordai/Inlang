@@ -19,6 +19,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile } from '../src/index.ts';
+import { lex } from '../src/lex.ts';
+import { routePath } from '../src/checks.ts';
 import type { Manifest } from '../src/link.ts';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
@@ -53,12 +55,22 @@ function firstExample(md: string): string | null {
  * Most specs show a bare block, because a spec for `faq` should not have to
  * restate the site header. A file needs one, so it is added here — and the
  * example's own lines are indented under `page /` rather than rewritten.
+ * The rest of that site is supplied the same way: a route the block links
+ * to (`cta "Reserve" /reserve`) must be a declared page (GRAMMAR §4.1), and
+ * those pages are the part of the site a block spec does not show. An
+ * example that is a whole file (`site` at column 0) declares its own; one
+ * that writes its own pages (`page` at column 0) is given only the header.
  */
 function wholeFile(example: string): string {
   const body = example.split('\n').slice(1); // drop `az 1`
   if (body.some((l) => /^site\s/.test(l))) return example;
-  const indented = body.map((l) => (l.trim() === '' ? '' : '  ' + l)).join('\n');
-  return `az 1\nsite probe\n\npage /\n${indented}\n`;
+  const ownPages = body.filter((l) => /^page\s/.test(l)).map((l) => routePath(l.split(/\s+/)[1] ?? '/'));
+  const main = ownPages.length > 0 ? body.join('\n')
+    : `page /\n${body.map((l) => (l.trim() === '' ? '' : '  ' + l)).join('\n')}`;
+  const declared = new Set(['/', ...ownPages]);
+  const linked = [...new Set(lex(example).tokens.filter((t) => t.kind === 'route').map((t) => routePath(t.value)))]
+    .filter((r) => !declared.has(r));
+  return `az 1\nsite probe\n\n${main}\n${linked.map((r) => `page ${r}\n`).join('')}`;
 }
 
 const specs = readdirSync(DOCS).filter((f) => f.endsWith('-block-spec.md')).sort();

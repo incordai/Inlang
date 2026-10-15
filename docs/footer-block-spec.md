@@ -33,6 +33,10 @@ site aurora
 page /checkout
   footer minimal          # override: no IA to escape into mid-purchase
 
+page /shoes               # the group links' pages, the same rule
+page /bags
+page /about
+
 page /privacy           # the legal link's page — an internal link must name one (§11)
 ```
 

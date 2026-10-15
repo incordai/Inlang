@@ -366,6 +366,15 @@ export function buildSpec(
   };
   const siteDescription = single('site', kids, 'description');
   const siteIcon = single('site', kids, 'icon');
+  // The frame, the theme and the fonts are set once too: the first was read
+  // and a second, different one was silently ignored.
+  for (const key of ['theme', 'width', 'font']) {
+    for (const extra of kids.filter((w) => w.word === key).slice(1)) {
+      diagnostics.push(key === 'theme'
+        ? { code: 'AZ1502', message: 'theme: declared twice — keep one', pos: extra.pos, severity: 'error' }
+        : { code: 'AZ1504', message: `site: '${key}' set twice — keep one`, pos: extra.pos, severity: 'error' });
+    }
+  }
   const themeWord = kids.find((w) => w.word === 'theme');
   const fontWord = kids.find((w) => w.word === 'font');
 

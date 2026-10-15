@@ -29,6 +29,8 @@ page /login
     alt      "Create an account" /signup
 
 page /account                  # a redirect must name a page of this site (§11)
+
+page /signup                   # so must a link
 ```
 
 **Variants are mutually exclusive:** `login` `signup` `reset`. Two is a compile

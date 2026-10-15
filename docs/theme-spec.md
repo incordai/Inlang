@@ -1499,7 +1499,7 @@ regenerating it is how it stays true).
 ```
 az 1
 site aurora
-theme midnight
+  theme midnight
 ```
 
 Unknown theme, per CONVENTIONS §5's message format:
