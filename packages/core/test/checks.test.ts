@@ -251,6 +251,22 @@ const CASES: Case[] = [
     good: file(`${HERO}\ntext columns\n  body "${words(120)}"`) },
   { code: 'AZ2204', severity: 'warning', bad: file(`${HERO}\ntext columns\n  body "${words(301)}"`),
     good: file(`${HERO}\ntext columns\n  body "${words(300)}"`) },
+  // ---- chat (its backend rules are chat-decl.test.ts; these are its own rows)
+  { code: 'AZ2220', severity: 'error', bad: file(`${HERO}\nchat panel\nchat panel`),
+    good: file(`${HERO}\nchat panel`) },
+  { code: 'AZ2221', severity: 'error', bad: file(`chat panel\n  title "${'t'.repeat(61)}"`),
+    good: file(`chat panel\n  title "${'t'.repeat(60)}"`) },
+  { code: 'AZ2222', severity: 'error', bad: file(`chat panel\n  greeting "${'g'.repeat(201)}"`),
+    good: file(`chat panel\n  greeting "${'g'.repeat(200)}"`) },
+  { code: 'AZ2223', severity: 'error', bad: file(`chat panel\n  ask "${'a'.repeat(81)}"`),
+    good: file(`chat panel\n  ask "${'a'.repeat(80)}"`) },
+  { code: 'AZ2224', severity: 'error', bad: file(`chat panel\n${times(5, (i) => `  ask "Question ${i}?"`)}`),
+    good: file(`chat panel\n${times(4, (i) => `  ask "Question ${i}?"`)}`) },
+  { code: 'AZ2225', severity: 'warning', bad: file('chat panel\n  ask "Same?"\n  ask "Same?"'),
+    good: file('chat panel\n  ask "Same?"\n  ask "Other?"') },
+  { code: 'AZ2226', severity: 'error', bad: file('chat panel\n  title " "'), good: file('chat panel\n  title "Ask"') },
+  { code: 'AZ2227', severity: 'error', bad: file('chat panel\n  greeting ""'), good: file('chat panel\n  greeting "Hi"') },
+  { code: 'AZ2228', severity: 'error', bad: file('chat panel\n  ask ""'), good: file('chat panel\n  ask "Why?"') },
 
   // ---- generic: what manifests declared and nothing enforced -------------
   // A slot fill's own slot minimum: pricing's plan must have its cta.

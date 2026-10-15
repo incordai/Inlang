@@ -19,8 +19,9 @@ for (const w of words) {
   manifests.set(m.name, m);
 }
 
-test('CONTROL: the word list is the eleven blocks', () => {
-  assert.equal(words.length, 11);
+test('CONTROL: the word list is the twelve blocks — the eleven and chat (PRD §6.2, 2026-10-15)', () => {
+  assert.equal(words.length, 12);
+  assert.ok(words.includes('chat'), 'chat is the one dated exception to the cap');
 });
 
 for (const w of words) {

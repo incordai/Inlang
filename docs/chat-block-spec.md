@@ -1,8 +1,9 @@
 # Chat — an AI chat block that answers in az's own components
 
-**Status** proposed 2026-10-15, **awaiting owner approval** (§17) · nothing
-here is built · Extends backend-spec.md, data-spec.md §4.7 and §10 ·
-Becomes `docs/chat-block-spec.md` when C1 starts (§14, Q12)
+**Status** proposed 2026-10-15 · **approved by the owner 2026-10-15, every
+recommendation** (§17) · **C0 and C1 built 2026-10-15** (§19: what was built,
+and where it differs) · C2–C4 not started · Extends backend-spec.md,
+data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12)
 
 The owner's goal: **a visitor on an az site asks a question and gets an
 answer from an AI, where the answer can be the site's own components** — a
@@ -155,6 +156,38 @@ owner should confirm the reading (Q1).
 
 ### 3.1 Placement and a whole example
 
+What compiles today (C1 — a `panel` on a page, prose answers):
+
+```
+az 1
+site acme
+  theme petal
+  auth
+    adapter azbackend
+  backend
+    database postgres
+    email    smtp
+    model    default
+
+page /
+  hero center
+    title "Acme"
+  chat panel
+    title    "Ask Acme"
+    greeting "Hi! Ask me about plans, setup or billing."
+    ask      "Which plan fits a team of five?"
+    ask      "Can I cancel any time?"
+    limit    20
+
+page /login
+  auth login
+    alt "Back to Acme" /
+```
+
+The whole design, once C2 (`show`) and C3 (`float`, `knows`) land — until
+then `show` and a site-level `chat` are refused as not available yet
+(AZ1214), `float` is not a variant (AZ1204) and `knows` is not a key:
+
 ```
 az 1
 site acme
@@ -284,6 +317,54 @@ Per-word rows (`word.json` `checks`, block **AZ2220–AZ2239**, added to
 GRAMMAR §7.5 in C1's commit): title/greeting/ask lengths, `ask` count,
 `limit` range, `float` on a page that also inherits one. Each code gets a
 fixture (CONVENTIONS §9).
+
+As built in C1 (each with a case in `packages/core/test/chat-decl.test.ts`):
+
+| Code | Severity | Row |
+|---|---|---|
+| AZ2220 | error | `only one chat per page — remove the second` |
+| AZ2221 | error | `title is longer than 60 characters — shorten it` |
+| AZ2222 | error | `greeting is longer than 200 characters — shorten it` |
+| AZ2223 | error | `suggested question '…' is longer than 80 characters — shorten it` |
+| AZ2224 | error | `5 suggested questions, maximum is 4 — remove some` |
+| AZ2225 | warning | `'…' is suggested twice — keep one` |
+| AZ2226 | error | `title is empty — write a heading, or remove the line for the default` |
+| AZ2227 | error | `greeting is empty — write the first message, or remove the line` |
+| AZ2228 | error | `a suggested question is empty — write it, or remove the line` |
+
+`limit` outside 1–50 is the generic AZ1408 (the manifest types it `int`,
+`min` 1, `max` 50) rather than a row of its own; the `float` row waits for C3.
+
+### 3.5 The manifest (as built in C1)
+
+```jsonc
+{
+  "name": "chat", "kind": "block",
+  "variants": ["panel"], "modifiers": [],
+  "props": {
+    "title":    { "type": "string", "default": "Ask a question" },
+    "greeting": { "type": "string" },
+    "allow":    { "type": "enum", "values": ["signedin", "anyone"], "default": "signedin" },
+    "limit":    { "type": "int", "min": 1, "max": 50, "default": 20 },
+    "show":     { "type": "list", "max": 4 }      // refused until C2 (core chat.ts)
+  },
+  "slots": { "ask": {} },
+  "themeReads": [
+    "color.bg", "color.border-strong", "color.danger", "color.focus", "color.muted", "color.surface",
+    "color.surface-alt", "color.text", "radius.md", "radius.sm", "size.gutter-sm", "size.measure-body",
+    "size.measure-display", "size.ring", "size.ring-offset", "size.tap", "space.8", "space.12", "space.16",
+    "space.24", "space.48", "space.96", "type.display", "type.leading-body", "type.leading-tight",
+    "type.size.2xl", "type.size.base", "type.size.sm", "type.weight-display"
+  ],
+  "checks": ["AZ2220 … AZ2228, the table above"]
+}
+```
+
+`show` is a free list in the manifest so that a word outside the closed set
+reaches the file-wide rule that gives its reason (AZ1254) rather than a bare
+"not a show". The colour reads are §9's: visitor messages on `surface-alt`,
+answers on `surface`, the input's edge `border-strong`, errors `danger`;
+Send is the button primitive's primary (its own accent reads).
 
 ---
 
@@ -965,9 +1046,15 @@ grows; the authoring order is unchanged) · WORDS.md · ROADMAP status.
 
 ---
 
-## 17. Open questions for the owner
+## 17. Owner decisions — 2026-10-15
 
-| # | Question | Recommendation |
+**Decided:** the owner approved this spec (commit `8b15fe6`) with every
+recommendation below, and asked for phases C0 and C1 to be built exactly as
+§14 defines them. Each row's recommendation is now the decision; the table is
+kept as the record of what was weighed. Q1's exception is recorded in PRD
+§6.2 and §6.8 (dated 2026-10-15); Q12's rename is done.
+
+| # | Question | Recommendation (decided) |
 |---|---|---|
 | Q1 | PRD §6.2 caps blocks at 11 until M5, which has not started (`ROADMAP.md:466`). Record a dated exception making `chat` the 12th block before M5? And confirm PRD §6.8's "AI front-end" non-goal means the authoring AI, not this? | **Yes to both** — a dated decision in §6.2 and §6.8 like the 2026-09-23 and 2026-10-05 ones; the cap becomes 12 with `chat` named as the only exception |
 | Q2 | Which provider adapters ship by default? | **`completions` only in C1** (it covers hosted APIs that speak it and local model servers); add the `messages` shape in C4 only if a real deployment needs it. Both HTTP-only, no SDK |

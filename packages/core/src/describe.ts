@@ -110,10 +110,11 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
     settings: { ...WHO_DESCRIPTIONS, ...ACTION_DESCRIPTIONS },
   },
   backend: {
-    description: 'Built-in server: database and email choices',
+    description: 'Built-in server: database, email and model choices',
     settings: {
       database: 'Database engine the server uses',
       email: 'How the server sends email',
+      model: 'The server talks to a model for chat (optional)',
     },
     values: {
       database: {
@@ -124,6 +125,9 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
       email: {
         smtp: 'Send through an SMTP server',
         api: 'Send through an HTTPS email API',
+      },
+      model: {
+        default: 'The operator picks it in the server .env',
       },
     },
   },

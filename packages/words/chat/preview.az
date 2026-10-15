@@ -1,0 +1,19 @@
+az 1
+
+site aurora
+  auth
+    adapter azbackend
+  backend
+    database sqlite
+    email    smtp
+    model    default
+
+page /
+  hero center
+    title "Built in the dark"
+  chat panel
+    title    "Ask Aurora"
+    greeting "Hi! Ask me about sizes, shipping or repairs."
+    ask      "How long does a pair take?"
+    ask      "Do you resole?"
+    allow    anyone

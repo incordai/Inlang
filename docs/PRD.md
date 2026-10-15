@@ -328,10 +328,10 @@ distinction right is what makes the cap meaningful rather than arithmetic.
 **Structure keywords (5)** — implemented in `core`, not word folders:
 `site` `theme` `font` `page` `raw`
 
-**Block words (11)** — one directory each under `words/` (CONVENTIONS §3).
+**Block words (12)** — one directory each under `words/` (CONVENTIONS §3).
 **This is the capped number:**
 `nav` `hero` `feature` `gallery` `pricing` `faq` `cta` `footer` `auth`
-`scene` `text`
+`scene` `text` — and `chat`, the one dated exception below
 
 **Variants and modifiers** are **not** separate words. Each block declares its
 own in `word.json` (ARCHITECTURE §4.1) — variants are mutually exclusive,
@@ -351,6 +351,7 @@ review, one maintenance burden.
 | `auth` | `login` `signup` `reset` | `glass` |
 | `scene` | `backdrop`‡ `full` `inline` | `3d` `scroll` `parallax` |
 | `text` | `prose` `centered` `columns` | `reveal` |
+| `chat` | `panel` (`float` in a later phase) | — |
 
 ‡ `scene backdrop` is the one block that is a *layer*, not a section: a
 fixed full-viewport 3D surface that the whole page scrolls over. It is
@@ -366,11 +367,20 @@ The manifests are generated from the specs, and the graph, autocomplete, lint
 and validation are generated from the manifests — one source, no second copy.
 
 **Cap is deliberate: 11 blocks, not one more, until Milestone 5 (dogfood) is
-done.** Every word added before real usage is a guess, and a guessed word is
+done** — 12 since the dated `chat` exception below, and still not one more. Every word added before real usage is a guess, and a guessed word is
 the expensive kind — you maintain it forever whether it was right or not.
 Adding a *variant* to an existing block is not adding a word, but it is not
 free either: it needs its own snapshots and its own row in the responsive
 table. Log variant requests alongside word requests.
+
+> **Decision, 2026-10-15 (owner): `chat` is the 12th block — the cap's one
+> exception before M5.** The owner approved docs/chat-block-spec.md with all
+> of its recommendations (§17 there, Q1): a visitor-facing block whose
+> answers come from a model the operator picks in the server's `.env` —
+> the `.az` file says only `model default` under `backend`. The cap is now
+> **12 blocks**, with `chat` named as the only word admitted before M5; any
+> other word still waits for M5 and goes to the ROADMAP backlog first. The
+> three tests that held the count at eleven hold it at twelve.
 
 ### 6.3 Why 3D first — the strategic bet
 
@@ -544,6 +554,14 @@ Explicitly out — say no now, or the phase never ships:
 admin area, and existing blocks can show rows (`from <table>`) — the design is
 docs/data-spec.md. This narrows "CMS / content editing" above: checkout,
 payments and a visual page editor stay out.
+
+*Decision, 2026-10-15 (owner):* **"the AI front-end (Phase 4)" above is the AI
+that WRITES `.az` files** — it stays a non-goal. The `chat` block
+(docs/chat-block-spec.md) is a different thing: a visitor on a built site
+asks the site's own backend a question, and the generated server — never the
+compiler, which still calls no network (principle 1) — asks the model the
+operator chose. It can show only the site's own content, and it can do
+nothing (no tools, no actions).
 
 ---
 

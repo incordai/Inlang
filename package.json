@@ -24,6 +24,7 @@
     "lint": "node packages/cli/bin/az.js lint packages/words",
     "test:backend-db": "node scripts/backend-db.mjs",
     "test:data": "node scripts/data-e2e.mjs",
+    "test:chat": "node scripts/chat-e2e.mjs",
     "bench:tokens": "node scripts/token-benchmark.mjs",
     "scan:secrets": "gitleaks git --redact --no-banner . && gitleaks dir --redact --no-banner .",
     "scan:deps": "osv-scanner scan source -L pnpm-lock.yaml -L spike-m0/pnpm-lock.yaml",

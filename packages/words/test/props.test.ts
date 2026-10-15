@@ -192,6 +192,10 @@ const KNOWN_INERT: Record<string, string[]> = {
   // the custom adapter module the app imports, `protect` the pages it wraps,
   // `profile` which hosted protocol module it imports (§3.5).
   auth: ['impl', 'profile', 'protect'],
+  // Declared so a word outside the closed set is told why (AZ1254), and
+  // refused as not available yet in C1 (AZ1214): no compiled site has it,
+  // so the emitter has nothing to draw until components ship (chat-block-spec §14 C2).
+  chat: ['show'],
 };
 
 test('CONTROL: a prop KNOWN to work is detected as working', () => {

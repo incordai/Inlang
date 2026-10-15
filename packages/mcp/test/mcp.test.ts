@@ -156,8 +156,9 @@ test('az_build writes the project inside the root and lists it', async () => {
 test('az_words is the catalogue; az_word_docs reads a README; az_grammar the reference', async () => {
   const root = project();
   const words = (await tool(root, 'az_words')).structuredContent.words as { name: string; variants: string[] }[];
-  assert.equal(words.length, 11);
+  assert.equal(words.length, 12);
   assert.ok(words.find((w) => w.name === 'hero')?.variants.includes('split'));
+  assert.ok(words.find((w) => w.name === 'chat')?.variants.includes('panel'));
   assert.match((await tool(root, 'az_word_docs', { word: 'hero' })).structuredContent.readme, /# `hero`/);
   assert.equal((await tool(root, 'az_word_docs', { word: 'nope' })).isError, true);
   assert.match((await tool(root, 'az_grammar')).structuredContent.grammar, /az 1/);

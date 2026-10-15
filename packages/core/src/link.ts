@@ -23,7 +23,7 @@ import {
   ACTION_WORDS, DESTINATION_SCHEMES, defaultHierarchy, intentOf, isHierarchy, isScriptUrl, schemeOf,
 } from './actions.ts';
 import { quotable as shown } from './secrets.ts';
-import { BACKEND_SETTINGS } from './backend.ts';
+import { BACKEND_HINTS, BACKEND_REQUIRED, BACKEND_SETTINGS } from './backend.ts';
 import { HIERARCHIES } from './emit-contract.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { Arg, Statement, AzFile } from './parse.ts';
@@ -670,10 +670,12 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       }
       if (value.kind !== 'word' || !choices.includes(value.value)) {
         const secretLike = /[:/@]/.test(value.value);
-        err('AZ1412', secretLike
-          ? `backend: ${c.word} is a choice, not an address — write ${c.word} ${choices.join('|')}; `
-            + 'connection strings and keys go in the backend\'s .env (az backend init)'
-          : `backend: ${c.word} '${shown(value.value)}' is not one of: ${choices.join(', ')}`, value.pos);
+        const hint = Object.hasOwn(BACKEND_HINTS, c.word) ? BACKEND_HINTS[c.word] : undefined;
+        err('AZ1412', hint
+          ?? (secretLike
+            ? `backend: ${c.word} is a choice, not an address — write ${c.word} ${choices.join('|')}; `
+              + 'connection strings and keys go in the backend\'s .env (az backend init)'
+            : `backend: ${c.word} '${shown(value.value)}' is not one of: ${choices.join(', ')}`), value.pos);
         continue;
       }
       if (c.word in props) {
@@ -682,7 +684,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       }
       props[c.word] = value;
     }
-    for (const key of Object.keys(BACKEND_SETTINGS)) {
+    for (const key of BACKEND_REQUIRED) {
       if (!(key in props) && s.children.every((c) => c.word !== key)) {
         err('AZ1225', `backend: no ${key} — add: ${key} ${BACKEND_SETTINGS[key].join('|')}`, s.pos);
       }

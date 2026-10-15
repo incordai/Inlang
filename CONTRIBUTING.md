@@ -35,6 +35,7 @@ drifts.
 | the CLI or MCP server | `pnpm verify`; `pnpm test:dev` for `az dev` |
 | auth (word, target wiring, auth runtime) | `pnpm verify`, `pnpm test:auth`; `pnpm test:cloud-auth` for the token-endpoint profile (Docker) |
 | the backend or data tables | `pnpm verify`, `pnpm test:backend-db` (Docker), `pnpm test:data`, `pnpm test:auth` |
+| chat (the word, its runtime, the `/chat` route) | the backend row, plus `pnpm test:chat` |
 | docs only | `pnpm verify` (word READMEs, the root README and docs/WORDS.md are tested) |
 
 `pnpm gate` with no argument runs all 12 items for every word; `--self-test`
@@ -104,13 +105,14 @@ name words explicitly:
 |---|---|
 | `packages/words/registry.ts` | static import of every bundled emitter, so a bundler can see it |
 | `docs/<word>-block-spec.md` | the authority; its first `az 1` example is compiled by `packages/core/test/spec-examples.test.ts` |
-| `packages/words/test/docs.test.ts`, `words.test.ts`, `packages/mcp/test/mcp.test.ts` | assert the word count (eleven) — the Phase 1 block cap |
+| `packages/words/test/docs.test.ts`, `words.test.ts`, `packages/core/test/link.test.ts`, `packages/mcp/test/mcp.test.ts` | assert the word count (twelve: the eleven and `chat`) — the block cap |
 | `scripts/visual.mjs` (`RESTACK`, `COLUMN`, `OVER_MEDIA`, `CENTRED`, …) | per-variant browser checks; a variant listed there needs its own `preview.<variant>.az` |
 | `packages/overlay/src/runtime/behaviours.ts`, `scripts/visual/behaviours.mjs` | only for a word with browser behaviour (`data-az-behaviour`) |
 
 ## Adding a word
 
-The block cap is eleven until M5 (PRD §6.2, ROADMAP M2). A twelfth word is an
+The block cap is twelve until M5 (PRD §6.2, ROADMAP M2): the eleven Phase 1
+words and `chat`, the one dated exception (2026-10-15). Another word is an
 owner decision: log it in the ROADMAP backlog first. When it is approved:
 
 1. **Spec.** Write `docs/<word>-block-spec.md` — syntax, variants, responsive

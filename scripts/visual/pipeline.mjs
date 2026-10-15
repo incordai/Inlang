@@ -35,13 +35,22 @@ export const INSTALL_MS = 10 * 60_000;
 export const PROJECT_BUILD_MS = 5 * 60_000;
 
 /**
+ * The backend address a preview of a backend site is built with, unless the
+ * caller sets its own (test:data, test:chat start a real one). A preview
+ * with `auth adapter azbackend` — the chat word's — cannot build without
+ * one (auth-spec §3.4), and nothing it renders at load calls it; `.invalid`
+ * never resolves (RFC 2606), so a stray request fails rather than leaves.
+ */
+export const PREVIEW_BACKEND_URL = 'https://backend.invalid';
+
+/**
  * node <script> …, with the bundled words; rejects with stdout/stderr
  * attached. Bounded: past `timeout` the child is killed and the call rejects.
  */
 export const node = (script, args, cwd, timeout = PROJECT_BUILD_MS) => execFileP(process.execPath, [script, ...args], {
   cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout, killSignal: 'SIGKILL',
   // AZ_BUILD_LOG quiets a project's own build (az-vite/build.mjs) to errors.
-  env: { AZ_BUILD_LOG: 'error', ...process.env, AZ_WORDS: WORDS },
+  env: { AZ_BUILD_LOG: 'error', AZ_PUBLIC_BACKEND_URL: PREVIEW_BACKEND_URL, ...process.env, AZ_WORDS: WORDS },
 });
 
 /** Run `fn` over `items`, at most `limit` at a time, results in input order. */

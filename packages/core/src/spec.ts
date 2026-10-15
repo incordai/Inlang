@@ -23,7 +23,7 @@
  * begins here — if the Spec is unstable, nothing downstream can be stable.
  */
 
-import type { BackendDatabase, BackendEmail, SpecBackend } from './backend.ts';
+import type { BackendDatabase, BackendEmail, BackendModel, SpecBackend } from './backend.ts';
 import { buildTables, type SpecTable } from './data.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { SpecBlock } from './spec-block.ts';
@@ -31,6 +31,7 @@ import { LIST_SEPARATOR, type LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
 import { buildFrom, GALLERY_FROM_REFUSED, type FromContext } from './from.ts';
 import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
+import { CHAT_WORD, chatDiagnostics, chatOf } from './chat.ts';
 
 /**
  * Where each block was written. A SpecBlock carries no position — it is the
@@ -220,6 +221,8 @@ function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteS
     as: w.as,
     children: w.children.filter((c) => c !== fromLine).map((c) => toBlock(c, manifests, site)),
     ...(from ? { from } : {}),
+    // chat-block-spec §4.2: the page a chat answers from, and its sign-in.
+    ...(w.word === CHAT_WORD && page ? { chat: chatOf(page.route, ordered.allow, page.data.login) } : {}),
   };
 }
 
@@ -404,7 +407,11 @@ export function buildSpec(
   }
   const declared = backendWords[0];
   const backend: SpecBackend | null = declared && declared.props.database && declared.props.email
-    ? { database: declared.props.database.value as BackendDatabase, email: declared.props.email.value as BackendEmail }
+    ? {
+        database: declared.props.database.value as BackendDatabase,
+        email: declared.props.email.value as BackendEmail,
+        ...(declared.props.model ? { model: declared.props.model.value as BackendModel } : {}),
+      }
     : null;
   // The built-in backend IS an azbackend (auth-spec §3.4): a site that
   // declares one but signs in some other way would ship a server nothing uses.
@@ -450,6 +457,15 @@ export function buildSpec(
       ...(description !== undefined ? { description } : {}),
     };
   });
+
+  // ---- chat (chat-block-spec §3.4): its backend, what it may show, who asks
+  diagnostics.push(...chatDiagnostics(
+    [
+      ...kids.filter((w) => w.word === CHAT_WORD).map((w) => ({ props: w.props, pos: w.pos, atSite: true })),
+      ...pageWords.flatMap((p) => p.children.filter((w) => w.word === CHAT_WORD).map((w) => ({ props: w.props, pos: w.pos, atSite: false }))),
+    ],
+    declared?.props.model,
+  ));
 
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');
   const patternWord = themeWord?.children.find((w) => w.word === 'pattern');

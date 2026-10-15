@@ -75,7 +75,7 @@ Halt and re-plan rather than working around these:
 | Escape-hatch ratio < 50% at M5 | ROADMAP M5 |
 | A word cannot be added without editing `core` | ARCHITECTURE §4 — fix the abstraction |
 | A feature seems to need logic in `.az` | rule 5 — add words or slots instead |
-| Block count would exceed 11 before M5 | ROADMAP M2 — log it in the backlog |
+| Block count would exceed 12 before M5 (the eleven and `chat`, PRD §6.2's dated exception) | ROADMAP M2 — log it in the backlog |
 
 ## When unsure
 

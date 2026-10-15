@@ -441,7 +441,8 @@ block           = block-word , { atom } , [ as-clause ] , NEWLINE ,
                   [ INDENT , { block-member } , DEDENT ] ;
 
 block-word      = "nav" | "hero" | "feature" | "gallery" | "pricing"
-                | "faq"  | "cta"  | "footer"  | "auth"    | "scene" | "text" ;
+                | "faq"  | "cta"  | "footer"  | "auth"    | "scene" | "text"
+                | "chat" ;                       (* PRD §6.2 exception, 2026-10-15 *)
 
 inheritable-block = block ;      (* block-word ∈ { nav, footer }, §5.2 *)
 
@@ -503,6 +504,8 @@ value           = STRING | PAIR | BARE ;
 | `raw <path>` | `page`, any block | 1 (M3) | PRD §6.6 |
 | `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
 | `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here |
+| `model default` | `backend` | 1 | chat-block-spec §3.1 — optional; the server talks to a model the operator picks in `.env` (`AZ_CHAT_API`, `AZ_CHAT_MODEL`); any other value is AZ1412 |
+| `chat panel` | `page` | 1 | chat-block-spec §3 — a section; at most one per page (AZ2220). `float`, site-level `chat` (inherited) and `chat none` come with phase C3 |
 | `data <table>` + indented lines | `site` | 1 | data-spec §4 — needs `backend`; a table and its `/data/<table>` API; not a block |
 | `<field> <type> [type-arg…] [modifier…]` | `data` | 1 | data-spec §4.2–§4.5 — types `text longtext number money flag date datetime email url choice image ref`; modifiers `required unique index search private locked default <v>` |
 | `allow <who> <action…>` | `data` | 1 | data-spec §4.7 — who `anyone signedin owner`, action `read create edit delete`; the matrix is closed |
@@ -538,6 +541,13 @@ the site's `auth` must use `adapter azbackend`.
 `<site>.data.json` disagree, the lock is damaged, or a change needs its flag:
 AZ1708 is a read rule or a removed `private` that shows stored rows to more
 people, until `az backend schema --expose <table>` (data-spec §6, §18.7).
+`chat`'s file-wide diagnostics are AZ1250–AZ1259 at the link stage
+(chat-block-spec §3.4): AZ1250 a chat without `backend … model default` ·
+AZ1251 (warning) `model default` that no page uses · AZ1254 a word an answer
+can never show, with its reason · AZ1256 (warning) `allow anyone`. AZ1252,
+AZ1253, AZ1255, AZ1257 and AZ1258 are reserved for `show` and `knows`, which
+arrive in phases C2 and C3; until then `show` and a site-level `chat` are
+AZ1214, not available yet. Its own rows are AZ2220–AZ2228 (§7.5).
 `from <table>` in a block is AZ1260–AZ1269 (data-spec §10, §12): a gallery's
 `alt` maps only to a `required` field (AZ1262), and a site with data owns
 `/admin`, so a page there is AZ1268 (§5.5).
@@ -1093,8 +1103,10 @@ IDs.
 | pricing | AZ2160–AZ2179 |
 | scene | AZ2180–AZ2199 |
 | text | AZ2200–AZ2219 |
+| chat | AZ2220–AZ2239 |
 
-The next free block is **AZ2220–AZ2239**.
+`chat` took the next free block on 2026-10-15, the PRD §6.2 exception
+(chat-block-spec.md §3.4). The next free block is **AZ2240–AZ2259**.
 `packages/core/test/diagnostic-codes.test.ts` holds the manifests and the
 compiler to this section and to §7.4.
 

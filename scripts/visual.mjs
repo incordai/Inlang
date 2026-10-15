@@ -52,7 +52,7 @@ import {
 } from './visual/behaviours.mjs';
 import { behaviourSelfTest } from './visual/behaviour-selftest.mjs';
 import { withVariant } from './thumbnails.mjs';
-import { COMPILE_MS, INSTALL_MS, PROJECT_BUILD_MS } from './visual/pipeline.mjs';
+import { COMPILE_MS, INSTALL_MS, PREVIEW_BACKEND_URL, PROJECT_BUILD_MS } from './visual/pipeline.mjs';
 import { Overdue, within, closeWithin, watchdog, human, slowest } from './lib/bounded.mjs';
 import { cspResult, watchCsp } from './visual/csp.mjs';
 import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
@@ -107,8 +107,9 @@ const node = (script, args, cwd, timeout) => execFileP(process.execPath, [script
   cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
   // Bounded: a hung child is killed and its call rejects, naming the signal.
   timeout, killSignal: 'SIGKILL',
-  // AZ_BUILD_LOG quiets a project's own build (az-vite/build.mjs) to errors.
-  env: { AZ_BUILD_LOG: 'error', ...process.env, AZ_WORDS: WORDS },
+  // AZ_BUILD_LOG quiets a project's own build (az-vite/build.mjs) to errors;
+  // a backend site's preview needs a backend address to build (pipeline.mjs).
+  env: { AZ_BUILD_LOG: 'error', AZ_PUBLIC_BACKEND_URL: PREVIEW_BACKEND_URL, ...process.env, AZ_WORDS: WORDS },
 });
 
 /** Run `fn` over `items`, at most `limit` at a time. */

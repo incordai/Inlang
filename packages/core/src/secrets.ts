@@ -31,9 +31,12 @@ export const PUBLIC_ENV_PREFIX = 'AZ_PUBLIC_';
  * Variable names that say "this is not public" whatever their value is —
  * including the built-in backend's server-only settings (backend-spec §4),
  * so `AZ_PUBLIC_SMTP_PASSWORD` or `AZ_PUBLIC_DATABASE_URL` fails the site's
- * build instead of shipping a credential to every visitor.
+ * build instead of shipping a credential to every visitor. Nothing about
+ * chat is public either (chat-block-spec §6.4): the page reaches it through
+ * the backend's URL, so `AZ_PUBLIC_CHAT_KEY` is refused by name — a generic
+ * `KEY` cannot be, since `AZ_PUBLIC_AUTH_KEY` is public by design.
  */
-const PRIVATE_NAME = /SERVICE|SECRET|PRIVATE|PASSWORD|PASSWD|DATABASE_URL|SMTP|EMAIL_API_KEY/i;
+const PRIVATE_NAME = /SERVICE|SECRET|PRIVATE|PASSWORD|PASSWD|DATABASE_URL|SMTP|EMAIL_API_KEY|CHAT/i;
 
 /** JWT roles that bypass row-level security — a service key, not a public one. */
 const PRIVILEGED_ROLES: ReadonlySet<string> = new Set(['service_role', 'service', 'admin']);

@@ -26,7 +26,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSyn
 import { join, dirname, basename, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { chromium, firefox, webkit } from 'playwright';
@@ -232,18 +232,22 @@ try {
   const html = routes.map((r) => rendered[r]).join('');
 
   // The behaviour runtime ships with the site, byte for byte from its source;
-  // its rows module only with a `from` block (data-spec §10.3), which this
-  // fixture has none of.
+  // its rows module only with a `from` block (data-spec §10.3) and its chat
+  // module only with a chat panel (chat-block-spec §7), which this fixture
+  // has none of.
   {
     const runtimeDir = join(ROOT, 'packages/overlay/src/runtime');
     const ROWS = ['rows.ts', 'rows-logic.ts'];
-    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts') && !ROWS.includes(f));
+    const CHAT = ['chat.ts', 'chat-logic.ts'];
+    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts') && !ROWS.includes(f) && !CHAT.includes(f));
     check('behaviour runtime shipped verbatim into src/az/',
       shipped.length > 0 && shipped.every((f) =>
         existsSync(join(proj, 'src/az', f)) &&
         readFileSync(join(proj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8')),
       shipped.join(' '));
     check('a site without a from block ships no rows runtime', ROWS.every((f) => !existsSync(join(proj, 'src/az', f))));
+    check('a site without a chat panel ships no chat runtime, no chat module and no chat server',
+      CHAT.every((f) => !existsSync(join(proj, 'src/az', f))) && !existsSync(join(proj, 'src/chat')) && !existsSync(join(proj, 'server/chat')));
   }
   // The 3D runtime ships only with a 3D site — this fixture is one — verbatim.
   {
@@ -668,6 +672,69 @@ try {
       good === null && readdirSync(join(backendProj, 'dist/assets'))
         .some((f) => f.endsWith('.js') && readFileSync(join(backendProj, 'dist/assets', f), 'utf8').includes('https://api.example.org')),
       good?.split('\n').find((l) => /error|Error/.test(l)) ?? '');
+  }
+
+  /* ---- chat (chat-block-spec §6.3, §6.4): no chat key ships, the CSP is unchanged --- */
+  // A small chat site, built twice — with its panel, and without it (no
+  // `model default`, no chat block) — under an environment that holds the
+  // server's chat key, URL and model id as an operator's shell might. Vite
+  // inlines only AZ_PUBLIC_ names, so none may reach a shipped file; a chat
+  // key given a public name must fail the build (secrets.ts PRIVATE_NAME);
+  // and the chat page's policy must be the plain page's, hashes aside: the
+  // panel talks only to the backend origin connect-src already allows.
+  {
+    const CHAT_SITE = 'az 1\n\nsite chatcheck\n  auth\n    adapter azbackend\n  backend\n    database sqlite\n    email    smtp\n'
+      + '    model    default\n\npage /\n  hero center\n    title "Chat check"\n  chat panel\n    title    "Ask us"\n'
+      + '    greeting "Ask about anything on this site."\n    allow    anyone\n';
+    const PLAIN_SITE = CHAT_SITE.replace('    model    default\n', '').replace(/ {2}chat panel\n(?: {4}.*\n)*/, '');
+    const buildSite = (name, source) => {
+      const file = join(work, `${name}.az`);
+      writeFileSync(file, source);
+      const out = join(work, `proj-${name}`);
+      node(CLI, ['build', file, '--out', out], work);
+      symlinkSync(join(proj, 'node_modules'), join(out, 'node_modules'), 'dir');
+      return out;
+    };
+    const chatProj = buildSite('chat', CHAT_SITE);
+    const plainProj = buildSite('chat-plain', PLAIN_SITE);
+    const chatKey = randomBytes(24).toString('base64url');
+    const serverKeys = {
+      AZ_PUBLIC_BACKEND_URL: 'https://api.example.org',
+      AZ_CHAT_KEY: chatKey, AZ_CHAT_URL: 'https://models.example.org/v1', AZ_CHAT_MODEL: 'model-under-verify',
+    };
+    shippedBuild(chatProj, serverKeys);
+    shippedBuild(plainProj, serverKeys);
+    const shipped = readdirSync(join(chatProj, 'dist'), { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name));
+    const leaked = shipped.filter((f) => {
+      const text = readFileSync(f, 'latin1');
+      return text.includes(chatKey) || text.includes('models.example.org') || text.includes('model-under-verify');
+    });
+    check('chat §6.4: no shipped file holds the chat key, the model URL or the model id',
+      shipped.length > 0 && leaked.length === 0, `${shipped.length} files read; leaked: ${leaked.map((f) => relative(chatProj, f)).join(' ') || 'none'}`);
+    const chatPage = readFileSync(join(chatProj, 'dist/index.html'), 'utf8');
+    const plainPage = readFileSync(join(plainProj, 'dist/index.html'), 'utf8');
+    const policyOf = (html) => /<meta http-equiv="Content-Security-Policy" content="([^"]*)" \/>/.exec(html)?.[1] ?? null;
+    const unhashed = (policy) => (policy ?? '').split('; ').map((d) => d.split(' ').filter((t) => !t.startsWith('&#x27;sha256-') && !t.startsWith("'sha256-")).join(' ')).join('; ');
+    check('chat §6.3: the chat page\'s policy is the plain page\'s, hashes aside — connect-src is self and the backend origin',
+      policyOf(chatPage) !== null && unhashed(policyOf(chatPage)) === unhashed(policyOf(plainPage))
+        && /connect-src 'self' https:\/\/api\.example\.org(;|$)/.test(policyOf(chatPage).replace(/&#x27;/g, "'"))
+        && !/unsafe-(inline|eval)/.test(policyOf(chatPage)),
+      unhashed(policyOf(chatPage)));
+    const runtimeDir = join(ROOT, 'packages/overlay/src/runtime');
+    check('chat: the chat runtime ships verbatim with a chat panel, beside its generated module',
+      ['chat.ts', 'chat-logic.ts'].every((f) => readFileSync(join(chatProj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8'))
+        && existsSync(join(chatProj, 'src/chat/runtime.tsx')));
+    check('chat §7: the page ships the shell — the greeting as text, the form hidden until the runtime runs, a noscript line',
+      /data-az-chat="/.test(chatPage) && chatPage.includes('Ask about anything on this site.')
+        && /<form[^>]*\shidden=""[^>]*data-az-chat-form|<form[^>]*data-az-chat-form[^>]*\shidden=""/.test(chatPage)
+        && /<noscript><p[^>]*>Turn on JavaScript to ask a question\.<\/p><\/noscript>/.test(chatPage),
+      chatPage.slice(chatPage.indexOf('data-az-chat='), chatPage.indexOf('data-az-chat=') + 160));
+    const publicKey = failing(process.execPath, [join(chatProj, 'node_modules/vite/bin/vite.js'), 'build'], chatProj,
+      { ...serverKeys, AZ_PUBLIC_CHAT_KEY: chatKey });
+    check('chat §6.4: a chat key given a public name (AZ_PUBLIC_CHAT_KEY) fails the build, its value never printed',
+      publicKey !== null && publicKey.includes('AZ_PUBLIC_CHAT_KEY') && !publicKey.includes(chatKey),
+      publicKey?.split('\n').find((l) => l.includes('AZ_PUBLIC_CHAT_KEY')) ?? 'the build passed');
   }
 
   /* ---- M4: the login page's form is wired, and marked up per §6 ------- */

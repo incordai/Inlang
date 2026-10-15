@@ -2,7 +2,7 @@
  * @az module spec-block
  * Purpose: the SpecBlock type — what a word emitter receives.
  * Spec: docs/ARCHITECTURE.md §4.3
- * Exports: SpecBlock
+ * Exports: SpecBlock, SpecFrom, SpecChat
  * Edit guide: kept dependency-free so an ejected word can copy it.
  * Tests: packages/core/test/compile.test.ts
  */
@@ -37,6 +37,20 @@ export interface SpecBlock {
    * serialises exactly as before.
    */
   readonly from?: SpecFrom;
+  /**
+   * A `chat` block's place in the site (chat-block-spec §4.2): the route its
+   * questions are asked from, and where a signed-out visitor signs in.
+   * Absent on every other block, so such a block serialises as before.
+   */
+  readonly chat?: SpecChat;
+}
+
+/** What a chat block's emitter needs beyond its props (core/src/chat.ts chatOf). */
+export interface SpecChat {
+  /** The page the block is on — the server answers only its declared chat pages. */
+  readonly route: string;
+  /** The site's sign-in page when only signed-in visitors may ask; null otherwise. */
+  readonly signin: string | null;
 }
 
 /**

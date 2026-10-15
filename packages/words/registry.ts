@@ -24,6 +24,7 @@
 import type { WordEmitter } from '../core/src/emit-contract.ts';
 
 import * as auth from './auth/emit.web.ts';
+import * as chat from './chat/emit.web.ts';
 import * as cta from './cta/emit.web.ts';
 import * as faq from './faq/emit.web.ts';
 import * as feature from './feature/emit.web.ts';
@@ -38,11 +39,11 @@ import * as text from './text/emit.web.ts';
 /**
  * Word name to emitter.
  *
- * All eleven words have an emitter. A word missing from this map renders
+ * All twelve words have an emitter. A word missing from this map renders
  * through the target's fallback rather than crashing the build, so an
  * unfinished word degrades visibly (`data-az-unimplemented`) instead of
  * silently dropping a page's navigation.
  */
 export const WEB_EMITTERS: Readonly<Record<string, WordEmitter>> = {
-  auth, cta, faq, feature, footer, gallery, hero, nav, pricing, scene, text,
+  auth, chat, cta, faq, feature, footer, gallery, hero, nav, pricing, scene, text,
 };

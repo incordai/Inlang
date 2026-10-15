@@ -130,6 +130,23 @@ test('env: a backend server setting given a public name fails the site build (ba
   assert.deepEqual(scanEnv({ AZ_SMTP_PASSWORD: 'hunter2hunter2', AZ_DATABASE_URL: 'postgres://u:p@h/db' }), []);
 });
 
+test('env: nothing about chat is public — AZ_PUBLIC_CHAT_* fails the site build (chat-block-spec §6.4)', () => {
+  // The page reaches chat through AZ_PUBLIC_BACKEND_URL; a key, URL or model
+  // id with a public name would ship the operator's model access to every visitor.
+  const found = scanEnv({
+    AZ_PUBLIC_CHAT_KEY: 'k-123',
+    AZ_PUBLIC_CHAT_URL: 'https://models.example.org/v1',
+    AZ_PUBLIC_CHAT_MODEL: 'some-model',
+    AZ_PUBLIC_BACKEND_URL: 'https://api.example.org',
+    // Public by design (auth-block-spec §3.1): a generic KEY rule would refuse it.
+    AZ_PUBLIC_AUTH_KEY: 'pk-123',
+  });
+  assert.deepEqual(found.map((f) => f.where), ['AZ_PUBLIC_CHAT_KEY', 'AZ_PUBLIC_CHAT_MODEL', 'AZ_PUBLIC_CHAT_URL']);
+  assert.ok(found.every((f) => f.rule === 'private-name'));
+  // The server's own chat names carry no public prefix and are never judged.
+  assert.deepEqual(scanEnv({ AZ_CHAT_KEY: 'k-123', AZ_CHAT_URL: 'https://models.example.org/v1' }), []);
+});
+
 /* ---- the JWT rule: one pass, exactly the old regular expression's finds ---- */
 
 /** CPU milliseconds `f` takes: the least of `runs` (process.cpuUsage, so a loaded machine cannot fail it). */

@@ -37,8 +37,8 @@ const find = (ws: LinkedWord[], word: string): LinkedWord | undefined => {
   return undefined;
 };
 
-test('all 11 manifests load', () => {
-  assert.equal(manifests.size, 11, [...manifests.keys()].join(','));
+test('all 12 manifests load — the eleven and chat (PRD §6.2, 2026-10-15)', () => {
+  assert.equal(manifests.size, 12, [...manifests.keys()].join(','));
 });
 
 test('a variant and modifiers are sorted apart', () => {

@@ -1,0 +1,177 @@
+{
+  "name": "chat",
+  "version": "1.0.0",
+  "kind": "block",
+  "description": "A panel where visitors ask the site's AI a question",
+  "descriptions": {
+    "variants": {
+      "panel": "A section on the page: transcript, suggestions, input"
+    },
+    "modifiers": {}
+  },
+  "variants": [
+    "panel"
+  ],
+  "modifiers": [],
+  "props": {
+    "title": {
+      "type": "string",
+      "default": "Ask a question",
+      "description": "Panel heading (h2), at most 60 characters"
+    },
+    "greeting": {
+      "type": "string",
+      "description": "First message, shown before anyone asks"
+    },
+    "allow": {
+      "type": "enum",
+      "values": [
+        "signedin",
+        "anyone"
+      ],
+      "default": "signedin",
+      "description": "Who may send a message",
+      "valueDescriptions": {
+        "signedin": "Signed-in visitors only (default)",
+        "anyone": "Anyone, signed in or not; spends the model budget"
+      }
+    },
+    "limit": {
+      "type": "int",
+      "min": 1,
+      "max": 50,
+      "default": 20,
+      "description": "Messages per conversation before a new chat"
+    },
+    "show": {
+      "type": "list",
+      "max": 4,
+      "description": "Components an answer may hold; not available yet"
+    }
+  },
+  "slots": {
+    "ask": {
+      "description": "A suggested question, shown as a button"
+    }
+  },
+  "requires": {},
+  "themeReads": [
+    "color.bg",
+    "color.border-strong",
+    "color.danger",
+    "color.focus",
+    "color.muted",
+    "color.surface",
+    "color.surface-alt",
+    "color.text",
+    "radius.md",
+    "radius.sm",
+    "size.gutter-sm",
+    "size.measure-body",
+    "size.measure-display",
+    "size.ring",
+    "size.ring-offset",
+    "size.tap",
+    "space.8",
+    "space.12",
+    "space.16",
+    "space.24",
+    "space.48",
+    "space.96",
+    "type.display",
+    "type.leading-body",
+    "type.leading-tight",
+    "type.size.2xl",
+    "type.size.base",
+    "type.size.sm",
+    "type.weight-display"
+  ],
+  "deps": {},
+  "targets": [
+    "web"
+  ],
+  "tested": {
+    "browsers": [
+      "chromium-153",
+      "firefox-155",
+      "webkit-26.6"
+    ],
+    "with": [
+      "hero"
+    ]
+  },
+  "checks": [
+    {
+      "code": "AZ2220",
+      "kind": "perPage",
+      "severity": "error",
+      "message": "only one chat per page — remove the second",
+      "atMost": 1
+    },
+    {
+      "code": "AZ2221",
+      "kind": "valuePattern",
+      "severity": "error",
+      "message": "title is longer than 60 characters — shorten it",
+      "prop": "title",
+      "pattern": "^[\\s\\S]{61,}$"
+    },
+    {
+      "code": "AZ2222",
+      "kind": "valuePattern",
+      "severity": "error",
+      "message": "greeting is longer than 200 characters — shorten it",
+      "prop": "greeting",
+      "pattern": "^[\\s\\S]{201,}$"
+    },
+    {
+      "code": "AZ2223",
+      "kind": "childLabelPattern",
+      "severity": "error",
+      "message": "suggested question '{label}' is longer than 80 characters — shorten it",
+      "slot": "ask",
+      "pattern": "^[\\s\\S]{0,80}$"
+    },
+    {
+      "code": "AZ2224",
+      "kind": "count",
+      "severity": "error",
+      "message": "{n} suggested questions, maximum is 4 — remove some",
+      "slots": [
+        "ask"
+      ],
+      "atLeast": 5
+    },
+    {
+      "code": "AZ2225",
+      "kind": "childUnique",
+      "severity": "warning",
+      "message": "'{label}' is suggested twice — keep one",
+      "slot": "ask"
+    },
+    {
+      "code": "AZ2226",
+      "kind": "propWords",
+      "severity": "error",
+      "message": "title is empty — write a heading, or remove the line for the default",
+      "prop": "title",
+      "atMost": 0
+    },
+    {
+      "code": "AZ2227",
+      "kind": "propWords",
+      "severity": "error",
+      "message": "greeting is empty — write the first message, or remove the line",
+      "prop": "greeting",
+      "atMost": 0
+    },
+    {
+      "code": "AZ2228",
+      "kind": "childLabelPattern",
+      "severity": "error",
+      "message": "a suggested question is empty — write it, or remove the line",
+      "slot": "ask",
+      "pattern": "\\S"
+    }
+  ]
+}

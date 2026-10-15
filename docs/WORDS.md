@@ -77,6 +77,7 @@ Gates for any word change: `pnpm verify` (unit, typecheck, this index), `pnpm li
 | Word | Info | Variants |
 |---|---|---|
 | [`auth`](#auth) | Sign-in, sign-up or password-reset form on its own page | `login` `signup` `reset` |
+| [`chat`](#chat) | A panel where visitors ask the site's AI a question | `panel` |
 | [`cta`](#cta) | Closing call-to-action section before the footer | `band` `card` `split` |
 | [`faq`](#faq) | Questions with expandable answers, plus FAQ schema | `list` `columns` |
 | [`feature`](#feature) | Set of features or benefits | `grid` `rows` `bento` |
@@ -137,6 +138,44 @@ Sign-in, sign-up or password-reset form on its own page
 | Tests | `packages/words/test/props.test.ts`, `packages/words/test/variants.test.ts`, `packages/words/test/structure.test.ts`, `packages/words/test/auth-props.test.ts`, `packages/target-web/test/auth.test.ts` |
 
 Gate: `pnpm verify` · `pnpm lint` · `pnpm gate words/auth` · `pnpm thumbnails auth --verify`
+
+## `chat`
+
+A panel where visitors ask the site's AI a question
+
+[README](../packages/words/chat/README.md) · [spec](chat-block-spec.md) · terms: `az explain chat`
+
+### Variants
+
+| Variant | Info | Preview |
+|---|---|---|
+| `panel` (default) | A section on the page: transcript, suggestions, input | `preview.az` |
+
+### Keys
+
+| Key | Kind | Values | Default | Info |
+|---|---|---|---|---|
+| `title` | string |  | `Ask a question` | Panel heading (h2), at most 60 characters |
+| `greeting` | string |  |  | First message, shown before anyone asks |
+| `allow` | enum | `signedin` / `anyone` | `signedin` | Who may send a message |
+| `limit` | int |  | `20` | Messages per conversation before a new chat |
+| `show` | list |  |  | Components an answer may hold; not available yet |
+| `ask` | child |  |  | A suggested question, shown as a button |
+
+### Where to edit
+
+| Concern | Edit |
+|---|---|
+| Copy | the site's `.az` file (the keys above); worked examples: `preview.az` |
+| Info lines, keys, values, bounds | `packages/words/chat/word.json` — `description`, `descriptions`, each key's `description` |
+| Style tokens | values: `packages/theme/src/themes.ts` (per theme), `packages/theme/src/tokens.ts` (scales); its own code reads `color.bg`, `color.border-strong`, `color.danger`, `color.focus`, `color.muted`, `color.surface`, `color.surface-alt`, `color.text`, `radius.md`, `radius.sm`, `size.gutter-sm`, `size.measure-body`, `size.measure-display`, `size.ring`, `size.ring-offset`, `size.tap`, `space.8`, `space.12`, `space.16`, `space.24`, `space.48`, `space.96`, `type.display`, `type.leading-body`, `type.leading-tight`, `type.size.2xl`, `type.size.base`, `type.size.sm`, `type.weight-display` (`themeReads`, held to the code by `pnpm lint`; shared helpers and `ctx.actions` read their own) |
+| Style and layout | `packages/words/chat/emit.web.ts` — theme tokens only; visitor messages on color.surface-alt, answers on color.surface; the input's edge color.border-strong; focusVisible ring color.focus; errors color.danger; below sm the mobile gutter. |
+| Markup | `packages/words/chat/emit.web.ts` — one message → message(); the controls → form(); the hidden state lines → notes(); the config → config(). Keep: no inline handler, no markup from the network, every control a real button or link, the label visible. |
+| Behaviour | packages/overlay runtime chat.ts sends with fetch, reads the event stream and writes every answer as text (textContent) into copies of the hidden templates; the status region hears finished sentences. With JavaScript off the greeting and the noscript line show, and the form stays hidden. |
+| Validation | `packages/words/chat/word.json` `checks`: `AZ2220`–`AZ2228` (9) |
+| Tests | `packages/words/test/props.test.ts`, `packages/words/test/variants.test.ts`, `packages/words/test/structure.test.ts`, `packages/words/test/chat-shell.test.ts` |
+
+Gate: `pnpm verify` · `pnpm lint` · `pnpm gate words/chat` · `pnpm thumbnails chat --verify`
 
 ## `cta`
 

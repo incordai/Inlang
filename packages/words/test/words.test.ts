@@ -28,7 +28,8 @@ const withEmitter = wordDirs.filter((d) => existsSync(join(WORDS, d, 'emit.web.t
 
 test('CONTROL: words and emitters were actually found', () => {
   // An empty list would make every check below pass on nothing.
-  assert.equal(wordDirs.length, 11, wordDirs.join(','));
+  // Twelve: the eleven Phase 1 blocks and `chat`, the cap's one dated exception (PRD §6.2, 2026-10-15).
+  assert.equal(wordDirs.length, 12, wordDirs.join(','));
   assert.ok(withEmitter.length > 0, 'no emitters found to lint');
 });
 

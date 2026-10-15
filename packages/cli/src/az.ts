@@ -35,6 +35,7 @@ import { compilePreview } from '../../core/src/preview.ts';
 import { bannerHtml, withBanner } from './preview-banner.ts';
 import type { Spec } from '../../core/src/spec.ts';
 import { ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
+import { CHAT_RUNTIME_FILES } from '../../target-web/src/chat.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
 import { IconError } from '../../target-web/src/head.ts';
 import { MarkdownError } from '../../target-web/src/markdown.ts';
@@ -323,8 +324,9 @@ export function build(options: BuildOptions): BuildOutcome {
   // that uses auth.
   const generated = [
     ...project.files,
-    // Its rows module only with a `from` block (data-spec §10.3).
-    ...copied('../../overlay/src/runtime/', RUNTIME_DIR, (f) => project.rows || !ROWS_RUNTIME_FILES.includes(f)),
+    // Its rows module only with a `from` block (data-spec §10.3), its chat module only with a chat panel.
+    ...copied('../../overlay/src/runtime/', RUNTIME_DIR, (f) => (project.rows || !ROWS_RUNTIME_FILES.includes(f))
+      && (project.chat || !CHAT_RUNTIME_FILES.includes(f))),
     ...copied('../../core/src/', GUARD_DIR, (f) => f === 'secrets.ts'),
     // And the walk that reads back what the build wrote (az audit's too).
     ...copied('./', GUARD_DIR, (f) => f === 'shipped.ts'),
@@ -341,7 +343,8 @@ export function build(options: BuildOptions): BuildOutcome {
     ...(result.spec.site.backend
       ? [...backendFiles(result.spec.site.name, result.spec.site.backend,
           tables ? { tables, steps: readLockSteps(options.source) } : undefined),
-         ...copied('../../backend/src/server/', `${SERVER_DIR}/src`, (f) => tables !== undefined || !f.startsWith('data-'))]
+         ...copied('../../backend/src/server/', `${SERVER_DIR}/src`, (f) => (tables !== undefined || !f.startsWith('data-'))
+           && (project.chat || !f.startsWith('chat')))]
       : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
   // A preview says so on every page, with the whole file's problems.
