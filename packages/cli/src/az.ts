@@ -3,8 +3,8 @@
  * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, palette, prompt, doctor, audit.
  * Spec: docs/PRD.md §6.7 · docs/ARCHITECTURE.md §1a
  * Exports: main, build, specOf, wordsFor, promptInput, parseDotenv, DOTENV_FILES, EXIT
- * Edit guide: filesystem work lives here, never in core; a new command needs USAGE, COMMANDS and a test.
- * Tests: packages/cli/test/cli.test.ts, packages/cli/test/hardening.test.ts, packages/cli/test/prompt-cli.test.ts
+ * Edit guide: filesystem work lives here, never in core; a new command needs USAGE, COMMANDS and a test; a module only it needs is imported through later().
+ * Tests: packages/cli/test/cli.test.ts, packages/cli/test/hardening.test.ts, packages/cli/test/prompt-cli.test.ts, packages/cli/test/startup-imports.test.ts
  */
 
 /**
@@ -41,30 +41,20 @@ import { MarkdownError } from '../../target-web/src/markdown.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
 import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
-// dev.ts imports `build` from here; the cycle is safe because neither module
-// touches the other's exports until a command runs.
-import { dev, devLine } from './dev.ts';
-import { findNpmCli, serve, DEFAULT_SITE_PORT, type Served } from './serve.ts';
-import { lintWords } from './lint.ts';
+import type { Served } from './serve.ts';
 import { BUNDLED_WORDS, eject, loadWords, wordExamples } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
 import { initBackendEnv } from './backend-init.ts';
 import { lockOption, readLockSteps, runDataPlan, runDataSchema } from './data-schema.ts';
 import { writeOutput } from './output.ts';
 import { createResizer, imageCacheDir } from './images.ts';
-// mcp.ts imports build/wordsFor from here; the cycle is safe for the same
-// reason as dev.ts's — nothing is touched until a command runs.
-import { runMcp } from './mcp.ts';
-// doctor-checks.ts imports compileReader, wordsFor and the .env reader from here; the same.
-import { doctor } from './doctor-checks.ts';
-import { formatReport, systemProbe } from './doctor.ts';
-import { formatFindings } from '../../theme/src/lint.ts';
-import {
-  colourChoices, colourChoicesJson, filterColourChoices, formatColourChoices,
-} from '../../core/src/colour.ts';
-import {
-  TOKEN_RULE, TRIM_ORDER, buildPrompt, promptJson, promptOptionsFrom, type PromptInput,
-} from '../../core/src/prompt.ts';
+import type { PromptInput } from '../../core/src/prompt.ts';
+// A module only some commands use — az dev's watcher and servers, mcp,
+// doctor, audit, lint, palette, prompt — is imported by the command when it
+// runs (see `later`), never here: `az build` and `az check` start without
+// it (m1-exit's cold CPU budget; startup-imports.test.ts holds the line).
+// dev.ts, mcp.ts and doctor-checks.ts import from this module; by the time
+// a command loads them, this module has finished loading.
 
 const MB = 1024 * 1024;
 /** A8 and the hero/scene manifests' `maxBytes`: a 3D model's budget. */
@@ -503,6 +493,24 @@ const USAGE = `az — words to a website
 const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'palette', 'prompt', 'doctor', 'audit']);
 
 /**
+ * Runs a command that imports its own modules, so that no other command
+ * loads them. Until `run` settles the process stays up (its import is
+ * pending). A failing exit code is set when it resolves; ok sets nothing, so
+ * a failure the command recorded itself (az dev's servers, which outlive
+ * `run`) is never overwritten. A module that fails to load, or a command
+ * that throws, is reported under the command's name with the usage code.
+ */
+function later(name: string, run: () => Promise<number>): number {
+  void run().then((code) => {
+    if (code !== EXIT.ok) process.exitCode = code;
+  }, (e: unknown) => {
+    process.stderr.write(`az: ${name}: ${(e as Error).message}\n`);
+    process.exitCode = EXIT.config;
+  });
+  return EXIT.ok;
+}
+
+/**
  * `az backend init <server-dir>` — write `.env` beside a generated server's
  * `az.config.json` (backend-spec §4): every key its setup reads, a fresh
  * random session secret, owner-only permissions. Refuses to overwrite: a
@@ -601,7 +609,8 @@ const PALETTE_USAGE = `az palette — colour comes first: every theme, accent, p
  * page it writes. Exit 0 done, 1 the page could not be written, 2 usage.
  * The choices are core's colour.ts, the one list az_palette serves too.
  */
-function runPalette(args: string[]): number {
+async function runPalette(args: string[]): Promise<number> {
+  const colour = await import('../../core/src/colour.ts');
   let mode: 'page' | 'list' | 'json' = 'page';
   let out: string | null = null;
   const filter: { theme?: string; accent?: string } = {};
@@ -631,34 +640,30 @@ function runPalette(args: string[]): number {
     }
   }
   if (mode !== 'page' && out !== null) return usage('--out writes the page; --list and --json print instead');
-  const chosen = filterColourChoices(colourChoices(), filter);
+  const chosen = colour.filterColourChoices(colour.colourChoices(), filter);
   if (!chosen.ok) return usage(chosen.message);
   if (mode === 'list') {
-    process.stdout.write(formatColourChoices(chosen.choices));
+    process.stdout.write(colour.formatColourChoices(chosen.choices));
     return EXIT.ok;
   }
   if (mode === 'json') {
-    process.stdout.write(`${JSON.stringify(colourChoicesJson(chosen.choices), null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(colour.colourChoicesJson(chosen.choices), null, 2)}\n`);
     return EXIT.ok;
   }
-  // The page proves every pair it paints; loaded only for it, as audit is.
-  void import('./palette-page.ts').then((page) => {
-    const dir = out ?? page.PALETTE_DIR;
-    const written = writeOutput(dir, [{ path: page.PALETTE_FILE, content: page.palettePage(chosen.choices, filter.accent ?? null) }]);
-    if (!written.ok) {
-      process.stderr.write(`${written.problems.join('\n')}\n`);
-      process.exitCode = EXIT.missing;
-      return;
-    }
-    process.stdout.write(`az: wrote ${join(dir, page.PALETTE_FILE)} — open it in a browser\n`);
-  }, (e: unknown) => {
-    process.stderr.write(`az: palette: ${(e as Error).message}\n`);
-    process.exitCode = EXIT.config;
-  });
+  // The page proves every pair it paints; it is loaded only for the page.
+  const page = await import('./palette-page.ts');
+  const dir = out ?? page.PALETTE_DIR;
+  const written = writeOutput(dir, [{ path: page.PALETTE_FILE, content: page.palettePage(chosen.choices, filter.accent ?? null) }]);
+  if (!written.ok) {
+    process.stderr.write(`${written.problems.join('\n')}\n`);
+    return EXIT.missing;
+  }
+  process.stdout.write(`az: wrote ${join(dir, page.PALETTE_FILE)} — open it in a browser\n`);
   return EXIT.ok;
 }
 
-const PROMPT_USAGE = `az prompt — the instructions any AI model needs to write .az, as Markdown
+/** `az prompt`'s usage: prompt.ts's own trim order and token rule. */
+const promptUsage = ({ TRIM_ORDER, TOKEN_RULE }: typeof import('../../core/src/prompt.ts')): string => `az prompt — the instructions any AI model needs to write .az, as Markdown
 
   az prompt                  the full prompt: order, syntax, colour, every word, errors
   az prompt --words hero,cta only these words in the words section
@@ -685,7 +690,9 @@ export function promptInput(projectWords: string): PromptInput {
  * nothing. Exit 0 printed, 2 usage (a bad flag, an unknown word, a budget
  * below the smallest prompt).
  */
-function runPrompt(args: string[]): number {
+async function runPrompt(args: string[]): Promise<number> {
+  const prompt = await import('../../core/src/prompt.ts');
+  const PROMPT_USAGE = promptUsage(prompt);
   const raw: { words?: string; compact?: boolean; budget?: string } = {};
   let json = false;
   const usage = (why: string) => {
@@ -711,18 +718,18 @@ function runPrompt(args: string[]): number {
       return usage(`unexpected '${a}'`);
     }
   }
-  const parsed = promptOptionsFrom(raw);
+  const parsed = prompt.promptOptionsFrom(raw);
   if (!parsed.ok) return usage(parsed.message);
-  const built = buildPrompt(promptInput(resolve('words')), parsed.options);
+  const built = prompt.buildPrompt(promptInput(resolve('words')), parsed.options);
   if (!built.ok) return usage(built.message);
   const p = built.prompt;
   if (json) {
-    process.stdout.write(`${JSON.stringify(promptJson(p), null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(prompt.promptJson(p), null, 2)}\n`);
     return EXIT.ok;
   }
   process.stdout.write(p.markdown);
   const dropped = p.dropped.length ? `; left out: ${p.dropped.join(', ')}` : '';
-  process.stderr.write(`az: prompt is ${p.chars} characters, about ${p.tokens} tokens (${TOKEN_RULE})${dropped}\n`);
+  process.stderr.write(`az: prompt is ${p.chars} characters, about ${p.tokens} tokens (${prompt.TOKEN_RULE})${dropped}\n`);
   return EXIT.ok;
 }
 
@@ -734,7 +741,7 @@ function runPrompt(args: string[]): number {
  * error. The report is written when every check has answered or hit its
  * deadline, so the exit code is set then.
  */
-function runDoctor(args: string[]): number {
+async function runDoctor(args: string[]): Promise<number> {
   let json = false;
   let out = '.az-build';
   let file: string | null = null;
@@ -756,21 +763,19 @@ function runDoctor(args: string[]): number {
     const here = readdirSync(process.cwd(), { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith('.az'));
     if (here.length === 1) file = here[0].name;
   }
-  void doctor({
+  const [{ doctor }, { formatReport, systemProbe }, { findNpmCli }] = await Promise.all([
+    import('./doctor-checks.ts'), import('./doctor.ts'), import('./serve.ts'),
+  ]);
+  const r = await doctor({
     source: file === null ? null : resolve(file),
     outDir: resolve(out),
     cwd: process.cwd(),
     wordsDir: process.env.AZ_WORDS ?? BUNDLED_WORDS,
     probe: systemProbe(findNpmCli),
     projectModules: true,
-  }).then((r) => {
-    process.stdout.write(json ? `${JSON.stringify(r, null, 2)}\n` : formatReport(r));
-    process.exitCode = r.exit;
-  }, (e: unknown) => {
-    process.stderr.write(`az: doctor: ${(e as Error).message}\n`);
-    process.exitCode = EXIT.config;
   });
-  return EXIT.ok;
+  process.stdout.write(json ? `${JSON.stringify(r, null, 2)}\n` : formatReport(r));
+  return r.exit;
 }
 
 /**
@@ -779,7 +784,7 @@ function runDoctor(args: string[]): number {
  * call and runs only with --online. Exit 0 when nothing failed, 1 when
  * something did, 2 for a usage error; set when every check has answered.
  */
-function runAudit(args: string[]): number {
+async function runAudit(args: string[]): Promise<number> {
   let json = false;
   let online = false;
   let out = '.az-build';
@@ -794,22 +799,20 @@ function runAudit(args: string[]): number {
       return EXIT.config;
     }
   }
-  // Loaded only for this command: every az build starts without it (m1-exit's cold budget).
-  void import('./audit.ts').then(({ audit }) => audit({ outDir: resolve(out), cwd: process.cwd(), probe: systemProbe(findNpmCli), online })).then((r) => {
-    process.stdout.write(json ? `${JSON.stringify(r, null, 2)}\n` : formatReport(r, 'az audit'));
-    process.exitCode = r.exit;
-  }, (e: unknown) => {
-    process.stderr.write(`az: audit: ${(e as Error).message}\n`);
-    process.exitCode = EXIT.config;
-  });
-  return EXIT.ok;
+  const [{ audit }, { formatReport, systemProbe }, { findNpmCli }] = await Promise.all([
+    import('./audit.ts'), import('./doctor.ts'), import('./serve.ts'),
+  ]);
+  const r = await audit({ outDir: resolve(out), cwd: process.cwd(), probe: systemProbe(findNpmCli), online });
+  process.stdout.write(json ? `${JSON.stringify(r, null, 2)}\n` : formatReport(r, 'az audit'));
+  return r.exit;
 }
 
-function runLint(wordsDir: string): number {
+async function runLint(wordsDir: string): Promise<number> {
   if (!existsSync(wordsDir) || !statSync(wordsDir).isDirectory()) {
     process.stderr.write(`az: no words directory at '${wordsDir}' — try: az lint path/to/words\n`);
     return EXIT.config;
   }
+  const [{ lintWords }, { formatFindings }] = await Promise.all([import('./lint.ts'), import('../../theme/src/lint.ts')]);
   const report = lintWords(wordsDir);
   if (report.words.length === 0) {
     process.stderr.write(`az: no word packs in '${wordsDir}' — a word pack is a folder with a word.json\n`);
@@ -873,7 +876,8 @@ function runMigrate(file: string): number {
  * the backend with its development profile (serve.ts, dev-backend.ts).
  * Serving starts after the first build that succeeds; Ctrl-C stops it all.
  */
-function runDev(file: string, outDir: string, wordsDir: string, rest: string[]): number {
+async function runDev(file: string, outDir: string, wordsDir: string, rest: string[]): Promise<number> {
+  const [{ dev, devLine }, { serve, DEFAULT_SITE_PORT }] = await Promise.all([import('./dev.ts'), import('./serve.ts')]);
   const print = (line: string) => process.stdout.write(`${line}\n`);
   const portFlag = rest.indexOf('--port');
   const sitePort = portFlag >= 0 ? Number(rest[portFlag + 1]) : DEFAULT_SITE_PORT;
@@ -940,12 +944,12 @@ export function main(argv: string[]): number {
     process.stderr.write(`az: unknown command "${cmd}"\n\n${USAGE}`);
     return EXIT.config;
   }
-  if (cmd === 'lint') return runLint(file ?? process.env.AZ_WORDS ?? 'words');
+  if (cmd === 'lint') return later(cmd, () => runLint(file ?? process.env.AZ_WORDS ?? 'words'));
   if (cmd === 'explain') return runExplain(argv.slice(1));
-  if (cmd === 'palette') return runPalette(argv.slice(1));
-  if (cmd === 'prompt') return runPrompt(argv.slice(1));
-  if (cmd === 'doctor') return runDoctor(argv.slice(1));
-  if (cmd === 'audit') return runAudit(argv.slice(1));
+  if (cmd === 'palette') return later(cmd, () => runPalette(argv.slice(1)));
+  if (cmd === 'prompt') return later(cmd, () => runPrompt(argv.slice(1)));
+  if (cmd === 'doctor') return later(cmd, () => runDoctor(argv.slice(1)));
+  if (cmd === 'audit') return later(cmd, () => runAudit(argv.slice(1)));
   if (cmd === 'mcp') {
     // stdin keeps the process alive; the server ends when the client closes it.
     const rootFlag = argv.indexOf('--root');
@@ -954,8 +958,7 @@ export function main(argv: string[]): number {
       process.stderr.write(`az: mcp: '${root}' is not a folder — try: az mcp --root path/to/project\n`);
       return EXIT.config;
     }
-    void runMcp(root);
-    return EXIT.ok;
+    return later(cmd, () => import('./mcp.ts').then(({ runMcp }) => runMcp(root)).then(() => EXIT.ok));
   }
   if (!file) {
     process.stderr.write(`az: ${cmd} needs a file — try: az ${cmd} site.az\n`);
@@ -994,7 +997,7 @@ export function main(argv: string[]): number {
         process.stderr.write(`az: ${file} does not exist — try: az dev site.az\n`);
         return EXIT.missing;
       }
-      return runDev(file, outDir, wordsDir, rest);
+      return later(cmd, () => runDev(file, outDir, wordsDir, rest));
     }
 
     const outcome = build({ source: file, outDir, wordsDir, write: cmd === 'build' });
