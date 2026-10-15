@@ -31,6 +31,8 @@ import {
 import { emitProject, PathEscapeError, RUNTIME_DIR, safeAssetPath, USER_DIR } from '../../target-web/src/emit.ts';
 import type { ByteSource } from '../../target-web/src/image-size.ts';
 import { isFromMark } from '../../core/src/emit-contract.ts';
+import { compilePreview } from '../../core/src/preview.ts';
+import { bannerHtml, withBanner } from './preview-banner.ts';
 import type { Spec } from '../../core/src/spec.ts';
 import { ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
@@ -91,6 +93,12 @@ export interface BuildOptions {
    * build that writes nothing (`az check`) does.
    */
   readonly imageCache?: string | null;
+  /**
+   * `az dev` only (docs/partial-preview.md): a file that fails the strict
+   * compile is built from its longest valid prefix of whole blocks, with the
+   * "still writing" banner on every page. Every other caller leaves it unset.
+   */
+  readonly preview?: boolean;
 }
 
 export interface BuildOutcome {
@@ -100,6 +108,12 @@ export interface BuildOutcome {
   readonly assets: string[];
   readonly report: string;
   readonly exit: number;
+  /**
+   * Set when the files are a preview of a file that does not compile
+   * (BuildOptions.preview): `ok` stays false, `report` is the whole file's,
+   * and the files hold the blocks before `cutLine`.
+   */
+  readonly preview?: { readonly cutLine: number; readonly errors: number };
 }
 
 /**
@@ -266,10 +280,14 @@ export const wordsFor = (options: Omit<BuildOptions, 'outDir'>, code = true) => 
 export function build(options: BuildOptions): BuildOutcome {
   const src = readFileSync(options.source, 'utf8');
   const words = wordsFor(options);
-  const result = compile(src, { manifests: words.manifests, lock: lockOption(options.source), readBytes: compileReader(options.source) });
+  const compileOptions = { manifests: words.manifests, lock: lockOption(options.source), readBytes: compileReader(options.source) };
+  const { strict, preview } = options.preview
+    ? compilePreview(src, compileOptions)
+    : { strict: compile(src, compileOptions), preview: null };
+  const result = preview?.result ?? strict;
 
-  const report = result.diagnostics.length
-    ? formatDiagnostics(result.diagnostics, options.source)
+  const report = strict.diagnostics.length
+    ? formatDiagnostics(strict.diagnostics, options.source)
     : '';
 
   // Errors block; warnings never do — CONVENTIONS §5.
@@ -313,7 +331,7 @@ export function build(options: BuildOptions): BuildOutcome {
   // and checked like any emitted file. The build guard's scanner and the
   // page policy ship with every site too; the auth runtime only with a site
   // that uses auth.
-  const files = [
+  const generated = [
     ...project.files,
     // Its rows module only with a `from` block (data-spec §10.3).
     ...copied('../../overlay/src/runtime/', RUNTIME_DIR, (f) => project.rows || !ROWS_RUNTIME_FILES.includes(f)),
@@ -336,6 +354,10 @@ export function build(options: BuildOptions): BuildOutcome {
          ...copied('../../backend/src/server/', `${SERVER_DIR}/src`, (f) => tables !== undefined || !f.startsWith('data-'))]
       : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
+  // A preview says so on every page, with the whole file's problems.
+  const files = preview
+    ? withBanner(generated, bannerHtml(strict.diagnostics, basename(options.source), preview.cutLine))
+    : generated;
 
   // The author's components go through the same sandbox as assets: they must
   // exist and really be inside the project, symlinks followed.
@@ -389,7 +411,12 @@ export function build(options: BuildOptions): BuildOutcome {
     .map((source) => `warning: model '${basename(source)}' is ${(statSync(source).size / MB).toFixed(1)}MB — Draco-compress it or the page will stall on mobile (budget ${MODEL_BUDGET_BYTES / MB}MB)`);
   const read = [...project.warnings, ...(resizer?.warnings ?? []), ...galleryOverBudget(spec, projectDir)]
     .map((w) => `warning: ${w}`);
-  return { ok: true, files, assets, report: [report, ...read, ...heavy].filter(Boolean).join('\n'), exit: EXIT.ok };
+  const full = [report, ...read, ...heavy].filter(Boolean).join('\n');
+  if (preview) {
+    const errors = strict.diagnostics.filter((d) => d.severity === 'error').length;
+    return { ok: false, files, assets, report: full, exit: EXIT.missing, preview: { cutLine: preview.cutLine, errors } };
+  }
+  return { ok: true, files, assets, report: full, exit: EXIT.ok };
 }
 
 /** A package directory's modules, copied verbatim into the generated project at `to`. */
@@ -867,7 +894,8 @@ function runDev(file: string, outDir: string, wordsDir: string, rest: string[]):
     onResult: (outcome, ms) => {
       const stream = outcome.ok ? process.stdout : process.stderr;
       stream.write(devLine(outcome, ms) + '\n');
-      if (!outcome.ok || !serving) return;
+      // A preview (a file still being written) is served like a build.
+      if ((!outcome.ok && !outcome.preview) || !serving) return;
       const pkg = outcome.files.find((f) => f.path === 'package.json')?.content ?? '';
       if (packageHash !== null && pkg !== packageHash) {
         print('az dev: the site\'s dependencies changed — restart az dev to install them');

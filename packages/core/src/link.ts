@@ -2,7 +2,7 @@
  * @az module link
  * Purpose: statements → resolved words against manifests: props, slots, requires, values, routes.
  * Spec: docs/GRAMMAR.md §4–§5 · docs/ARCHITECTURE.md §4.1
- * Exports: link, Manifest, PropSpec, STRUCTURE, STRUCTURE_PROPS
+ * Exports: link, LinkOptions, Manifest, PropSpec, STRUCTURE, STRUCTURE_PROPS
  * Edit guide: never name a specific word here — per-word rules are manifest data (checks.ts); lookups use Object.hasOwn.
  * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts, packages/core/test/head-settings.test.ts
  */
@@ -349,7 +349,19 @@ function destinations(body: Statement[], err: (code: string, message: string, po
   body.forEach(walk);
 }
 
-export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult {
+export interface LinkOptions {
+  /**
+   * Routes are open: a route need not be a page of this file. Only `az dev`'s
+   * preview of a partial file sets it (docs/partial-preview.md §3), where the
+   * pages a nav or footer links to are further down and not written yet.
+   */
+  readonly openRoutes?: boolean;
+}
+
+/** Every route is a page — the open-routes reading of LinkOptions. */
+const ANY_ROUTE: Pick<ReadonlySet<string>, 'has'> = { has: () => true };
+
+export function link(file: AzFile, manifests: Map<string, Manifest>, options: LinkOptions = {}): LinkResult {
   const diagnostics: Diagnostic[] = [];
   const err = (code: string, message: string, pos: Pos) =>
     diagnostics.push({ code, message, pos, severity: 'error' });
@@ -359,7 +371,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>): LinkResult
   // Every page the file declares, so a `route` prop can be checked against
   // the site rather than only its shape. Top-level only: GRAMMAR §5 puts
   // `page` at file level and nowhere else.
-  const routes = new Set(
+  const routes = options.openRoutes ? ANY_ROUTE : new Set(
     file.body.filter((s) => s.word === 'page').map((s) => routePath(s.args[0]?.value ?? '/')));
 
   /**

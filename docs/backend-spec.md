@@ -90,6 +90,10 @@ the wired addresses, database and mailbox in that file are always overridden.
 
 `az dev --no-serve` only compiles on every save, as before.
 
+A file still being written previews its finished blocks with a "still
+writing" banner instead of failing (docs/partial-preview.md); `az build` and
+`az check` stay strict.
+
 ## 3. Storage
 
 One small interface over three engines (`server/src/db.ts`). Every query is

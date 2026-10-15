@@ -202,7 +202,7 @@ type Report = (d: Diagnostic) => void;
 
 /** Run one block's BLOCK-kind checks. `routes` are the pages the file declares. */
 export function runBlockChecks(
-  checks: readonly Check[], s: CheckSubject, routes: ReadonlySet<string>, report: Report,
+  checks: readonly Check[], s: CheckSubject, routes: Pick<ReadonlySet<string>, 'has'>, report: Report,
 ): void {
   const say = (c: Check, pos: Pos, vars: Record<string, string | number> = {}) =>
     report({ code: c.code, severity: c.severity, pos, message: `${s.word}: ${fill(c.message, vars)}` });

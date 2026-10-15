@@ -15,7 +15,7 @@
     "test:visual": "node scripts/visual.mjs",
     "test:auth": "node scripts/auth-e2e.mjs",
     "test:cloud-auth": "node scripts/cloud-auth-e2e.mjs",
-    "test:dev": "node scripts/dev-e2e.mjs",
+    "test:dev": "node scripts/dev-e2e.mjs && node scripts/dev-preview-e2e.mjs",
     "test:3d": "node scripts/test-3d.mjs",
     "test:lighthouse": "node scripts/lighthouse.mjs",
     "gate": "node scripts/gate.mjs",

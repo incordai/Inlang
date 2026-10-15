@@ -2,8 +2,8 @@
  * @az module dev
  * Purpose: az dev: watch the source and recompile on save.
  * Spec: docs/PRD.md §6.7
- * Exports: dev, devLine
- * Edit guide: watch the directory (editors rename on save); a reconcile tick catches dropped events.
+ * Exports: dev, devLine, DEBOUNCE_MAX_MS
+ * Edit guide: watch the directory (editors rename on save); a reconcile tick catches dropped events; a pending compile waits at most DEBOUNCE_MAX_MS.
  * Tests: packages/cli/test/cli.test.ts
  */
 
@@ -22,6 +22,7 @@
 import { watch, statSync, type FSWatcher } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { build, type BuildOutcome } from './az.ts';
+import { previewSummary } from './preview-banner.ts';
 
 /**
  * How often the source is re-checked against what was last built.
@@ -33,12 +34,22 @@ import { build, type BuildOutcome } from './az.ts';
  */
 const RECONCILE_MS = 250;
 
+/**
+ * The longest a change waits for its compile, however often the file keeps
+ * changing (docs/partial-preview.md §5). An AI writing a file in chunks
+ * saves faster than the debounce; without a cap every save restarted the
+ * wait and nothing compiled until the writing stopped.
+ */
+export const DEBOUNCE_MAX_MS = 250;
+
 export interface DevOptions {
   readonly source: string;
   readonly outDir: string;
   readonly wordsDir: string;
   /** Coalesce bursts of change events. Editors write a file several times. */
   readonly debounceMs?: number;
+  /** The cap on a change's wait while changes keep coming; DEBOUNCE_MAX_MS by default. */
+  readonly maxWaitMs?: number;
   readonly onResult?: (outcome: BuildOutcome, ms: number) => void;
 }
 
@@ -64,6 +75,8 @@ function once(options: DevOptions): { outcome: BuildOutcome; ms: number } {
       source: options.source,
       outDir: options.outDir,
       wordsDir: options.wordsDir,
+      // A file still being written previews its whole, valid blocks.
+      preview: true,
     });
   } catch (e) {
     // A rebuild runs from a timer, where a throw is an uncaught exception
@@ -77,7 +90,10 @@ function once(options: DevOptions): { outcome: BuildOutcome; ms: number } {
 
 export function dev(options: DevOptions): DevHandle {
   const debounceMs = options.debounceMs ?? 40;
+  const maxWaitMs = options.maxWaitMs ?? DEBOUNCE_MAX_MS;
   let timer: NodeJS.Timeout | null = null;
+  /** When the oldest change not yet compiled arrived; null when none waits. */
+  let waitingSince: number | null = null;
   let watcher: FSWatcher | null = null;
   /** mtime and size of the source as last compiled; null when unreadable. */
   let built: string | null = null;
@@ -92,6 +108,9 @@ export function dev(options: DevOptions): DevHandle {
   };
 
   const run = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    waitingSince = null;
     // Stamped BEFORE compiling, so a save during the compile differs from it
     // and is picked up on the next tick.
     built = stamp();
@@ -101,10 +120,15 @@ export function dev(options: DevOptions): DevHandle {
   };
 
   // Debounce: an editor save can fire several events, and recompiling per
-  // event would report three builds for one edit.
+  // event would report three builds for one edit. Latest wins: at most one
+  // compile is pending, and it reads the file as it is when it runs. The
+  // wait never passes maxWaitMs from the first change it covers, so a
+  // stream of saves still compiles instead of postponing forever.
   const schedule = () => {
+    const now = performance.now();
+    waitingSince ??= now;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(run, debounceMs);
+    timer = setTimeout(run, Math.max(0, Math.min(debounceMs, waitingSince + maxWaitMs - now)));
   };
 
   // The DIRECTORY, not the file. Many editors save by writing a temporary
@@ -138,6 +162,10 @@ export function dev(options: DevOptions): DevHandle {
 
 /** Format one dev-loop result for a terminal. */
 export function devLine(outcome: BuildOutcome, ms: number): string {
+  if (outcome.preview) {
+    const first = outcome.report.split('\n').find((line) => line.includes(' error ')) ?? '';
+    return `az: still writing — ${previewSummary(outcome.preview.errors, outcome.preview.cutLine)}; first: ${first}`;
+  }
   if (!outcome.ok) {
     const first = outcome.report.split('\n')[0] ?? 'compile failed';
     return `az: ${first}`;

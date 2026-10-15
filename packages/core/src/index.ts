@@ -100,6 +100,12 @@ export interface CompileOptions {
    * still reads it before declaring a type.
    */
   readonly readBytes?: (projectPath: string) => Uint8Array | null;
+  /**
+   * A route need not be a page of this file (link.ts LinkOptions). Set only
+   * by compilePreview (preview.ts) for `az dev`'s preview of a partial file;
+   * every strict caller leaves it unset.
+   */
+  readonly openRoutes?: boolean;
 }
 
 /**
@@ -113,7 +119,7 @@ export interface CompileOptions {
 export function compile(source: string, options: CompileOptions): CompileResult {
   const lexed = lex(source);
   const parsed = parse(lexed.tokens, lexed.diagnostics);
-  const linked = link(parsed.file, options.manifests);
+  const linked = link(parsed.file, options.manifests, { openRoutes: options.openRoutes === true });
   const built = buildSpec(parsed.file.version, linked.root, options.manifests);
 
   // A fatal version error (GRAMMAR §7.3) leaves an empty body; the missing

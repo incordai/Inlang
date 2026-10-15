@@ -2,8 +2,8 @@
  * @az module serve
  * Purpose: az dev's serving half: install once, Vite dev server, optional local backend.
  * Spec: docs/PRD.md §6.7 · docs/backend-spec.md §2a
- * Exports: serve, ensureInstalled, freePort, openerFor, findNpmCli
- * Edit guide: everything started is stopped on failure and on Ctrl-C.
+ * Exports: serve, ensureInstalled, freePort, openerFor, findNpmCli, devViteConfig, DEV_VITE_CONFIG
+ * Edit guide: everything started is stopped on failure and on Ctrl-C; Vite reads the site's config through DEV_VITE_CONFIG, never restarting on it.
  * Tests: packages/cli/test/dev-serve.test.ts
  */
 
@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { LOOPBACK, startDevBackend, startMailbox, type DevBackend, type Mailbox } from './dev-backend.ts';
 
 /** Vite's own default, so the printed address is the familiar one when free. */
@@ -52,6 +53,30 @@ function npmCli(): string {
 const hashOf = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 /** Records which package.json the installed node_modules belong to. */
 const STAMP = 'node_modules/.az-installed';
+
+/**
+ * The config the dev server starts with, beside STAMP — outside the
+ * generated files, so the output stays exactly what `az build` writes.
+ */
+export const DEV_VITE_CONFIG = 'node_modules/.az-dev.vite.config.mjs';
+
+/**
+ * The dev server's config: the site's own vite.config.ts, imported when the
+ * server starts (docs/partial-preview.md §5). Vite restarts its server when
+ * its config file or anything that file imports changes, and vite.config.ts
+ * changes whenever a page is added or removed — its build input lists every
+ * page. Each restart dropped the open page's connection, and a page that
+ * reloaded during one stayed blank. The page list matters only to `vite
+ * build`; the dev server serves every page's HTML file without it. The
+ * import goes through a variable, so the config bundler does not follow it
+ * and Vite watches only this file, which never changes.
+ */
+export function devViteConfig(outDir: string): string {
+  const site = pathToFileURL(join(resolve(outDir), 'vite.config.ts')).href;
+  return '// az dev: the site\'s vite.config.ts, read once — a new page must not restart the dev server.\n'
+    + `const site = ${JSON.stringify(site)};\n`
+    + 'export default (await import(site)).default;\n';
+}
 
 /** True when node_modules exists and was installed from this package.json. */
 export function installed(outDir: string): boolean {
@@ -188,8 +213,11 @@ export async function serve(options: ServeOptions): Promise<Served> {
     }
 
     await ensureInstalled(outDir, print);
+    const config = join(outDir, DEV_VITE_CONFIG);
+    writeFileSync(config, devViteConfig(outDir), 'utf8');
     const child = spawn(process.execPath,
-      [join(outDir, 'node_modules/vite/bin/vite.js'), '--host', LOOPBACK, '--port', String(sitePort), '--strictPort', '--clearScreen', 'false'],
+      [join(outDir, 'node_modules/vite/bin/vite.js'), '--config', config,
+        '--host', LOOPBACK, '--port', String(sitePort), '--strictPort', '--clearScreen', 'false'],
       { cwd: outDir, env, stdio: ['ignore', 'pipe', 'inherit'] });
     vite = child;
     process.on('exit', orphanGuard);

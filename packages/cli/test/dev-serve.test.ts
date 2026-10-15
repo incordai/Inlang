@@ -6,14 +6,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, statSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   assertLoopback, devBackendEnv, devDir, devSecret, LOOPBACK, readEnvFile, startDevBackend, startMailbox, withoutSecure,
 } from '../src/dev-backend.ts';
-import { openerFor, freePort } from '../src/serve.ts';
+import { openerFor, freePort, devViteConfig, DEV_VITE_CONFIG } from '../src/serve.ts';
 import { loadConfig } from '../../backend/src/server/env.ts';
 import { build } from '../src/az.ts';
 
@@ -169,4 +169,19 @@ test('the browser opener is a command and an argument list, never a shell line',
   assert.deepEqual(openerFor('darwin', url), { file: 'open', args: [url] });
   assert.deepEqual(openerFor('linux', url), { file: 'xdg-open', args: [url] });
   assert.deepEqual(openerFor('win32', url), { file: 'rundll32', args: ['url.dll,FileProtocolHandler', url] });
+});
+
+test('the dev server reads the site\'s vite.config.ts through a config that never changes', async () => {
+  // A page added mid-session rewrites vite.config.ts (its build input); Vite
+  // restarts on a change to its config or the config's static imports, so
+  // the dev config imports the site's config through a variable only.
+  const out = mkdtempSync(join(tmpdir(), 'az-devconfig-"quoted"-'));
+  writeFileSync(join(out, 'vite.config.ts'), 'export default { base: "./", envPrefix: "AZ_PUBLIC_" } as const;\n', 'utf8');
+  mkdirSync(join(out, 'node_modules'));
+  const text = devViteConfig(out);
+  assert.doesNotMatch(text, /^\s*import\s/m, 'no static import for the bundler to follow');
+  assert.ok(text.includes(JSON.stringify(pathToFileURL(join(out, 'vite.config.ts')).href)), 'the site config, by its file URL');
+  writeFileSync(join(out, DEV_VITE_CONFIG), text, 'utf8');
+  const loaded = (await import(pathToFileURL(join(out, DEV_VITE_CONFIG)).href)) as { default: unknown };
+  assert.deepEqual(loaded.default, { base: './', envPrefix: 'AZ_PUBLIC_' }, 'it is the site config, unchanged');
 });
