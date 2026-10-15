@@ -1,10 +1,10 @@
 /**
  * @az server app
- * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth; the /data and /admin edge.
+ * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth; the /data, /admin and /chat edge.
  * Spec: docs/auth-block-spec.md §3.4 · docs/backend-spec.md §5 · docs/data-spec.md §5.4
- * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES, DataRequest, DataRoutes, DataResult, DataFile
+ * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES, DataRequest, DataRoutes, DataResult, DataFile, ChatRequest, ChatRoutes
  * Edit guide: same answer for unknown account and wrong password; rate-limit before hashing; claim unverified accounts safely.
- * Tests: packages/backend/test/backend.test.ts, packages/backend/test/security.test.ts, packages/backend/test/data-api.test.ts
+ * Tests: packages/backend/test/backend.test.ts, packages/backend/test/security.test.ts, packages/backend/test/data-api.test.ts, packages/backend/test/chat-route.test.ts
  */
 
 /**
@@ -83,6 +83,29 @@ export interface DataRoutes {
   sweep(): void;
 }
 
+/** A POST /chat as the chat route sees it (chat.ts); the edge checks are done. */
+export interface ChatRequest {
+  /** The rate-limit key of the client's address. */
+  readonly ip: string;
+  /** The CORS headers every answer to this request carries. */
+  readonly cors: Record<string, string>;
+  /** The signed-in account's id, or null. Used for limits only — never sent to a model. */
+  user(): Promise<string | null>;
+  /** The JSON body (16 KB cap); throws BodyError. */
+  body(): Promise<Record<string, unknown>>;
+  /** Aborts when the client goes away before the answer has ended. */
+  readonly closed: AbortSignal;
+}
+
+/** The chat route — present only when a page shows a chat (chat.ts, copied only then). */
+export interface ChatRoutes {
+  handle(req: ChatRequest, res: ServerResponse): Promise<void>;
+  /** Forget old limiter keys; also on the sweep timer. */
+  sweep(): void;
+  /** Remove usage rows past their retention; how many went. */
+  prune(): Promise<number>;
+}
+
 /** `GET /data/<t>/<id>/<field>` and its admin twin: an image, loaded by `<img>`, which sends no Origin. */
 const IMAGE_GET = /^\/(?:admin\/)?data\/[^/]+\/[^/]+\/[^/]+$/;
 
@@ -112,6 +135,8 @@ export interface AppDeps {
   readonly oidc: Oidc;
   /** The /data routes (data-spec §5); absent, /data is 404 like any unknown path. */
   readonly data?: DataRoutes;
+  /** POST /chat (the chat block spec §4.2); absent, /chat is 404 like any unknown path. */
+  readonly chat?: ChatRoutes;
   readonly now?: () => number;
   /** Operational log. Never passed a password, token, secret or address. */
   readonly log?: (line: string) => void;
@@ -206,6 +231,7 @@ export function createApp(deps: AppDeps) {
   const sweep = () => {
     for (const l of Object.values(limits)) l.sweep();
     deps.data?.sweep();
+    deps.chat?.sweep();
   };
 
   const sessionCookie = (token: string) =>
@@ -521,6 +547,31 @@ export function createApp(deps: AppDeps) {
       // A refused upload is answered before its body is read; closing the
       // connection stops the rest of it arriving instead of reading it all.
       return send(res, result.status, result.body, req.complete ? cors : { ...cors, connection: 'close' });
+    }
+
+    if (deps.chat && url.pathname === '/chat') {
+      // The /data edge (chat-spec §4.2): an allowed origin always, exact
+      // CORS, and the CSRF header on the one method that does anything.
+      const origin = req.headers.origin ?? '';
+      if (!allowed.has(origin)) return send(res, 403, { error: 'unknown' });
+      const cors = corsHeaders(origin, 'POST');
+      if (method === 'OPTIONS') return send(res, 204, undefined, cors);
+      if (method !== 'POST') return send(res, 405, { error: 'unknown' }, cors);
+      if (req.headers['x-az-request'] !== '1') return send(res, 403, { error: 'unknown' }, cors);
+      // The visitor leaving — the connection closing before the answer is
+      // written out — stops the answer and its upstream request.
+      const left = new AbortController();
+      res.once('close', () => { if (!res.writableFinished) left.abort(); });
+      return deps.chat.handle({
+        ip,
+        cors,
+        user: async () => {
+          const token = readCookies(req).get(names.session);
+          return token ? (await store.sessionUser(token))?.user.id ?? null : null;
+        },
+        body: () => readJson(req),
+        closed: left.signal,
+      }, res);
     }
 
     if (!url.pathname.startsWith('/auth/')) return send(res, 404, { error: 'unknown' });

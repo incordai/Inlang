@@ -914,8 +914,15 @@ async function runDev(file: string, outDir: string, wordsDir: string, rest: stri
       if (started) return;
       dataAtStart = dataJson;
       const config = outcome.files.find((f) => f.path === 'server/az.config.json');
+      // A chat's prompt and context, as the build wrote them (the chat block spec §8.1).
+      const prompt = outcome.files.find((f) => f.path === 'server/chat/prompt.txt')?.content;
+      const context = outcome.files.find((f) => f.path === 'server/chat/context.json')?.content;
       const backend = config
-        ? { siteName: (JSON.parse(config.content) as { siteName: string }).siteName, ...(dataJson !== undefined ? { data: dataJson } : {}) }
+        ? {
+            siteName: (JSON.parse(config.content) as { siteName: string }).siteName,
+            ...(dataJson !== undefined ? { data: dataJson } : {}),
+            ...(prompt !== undefined && context !== undefined ? { chat: { prompt, context } } : {}),
+          }
         : null;
       started = serve({ source: file, outDir, sitePort, open: rest.includes('--open'), backend, print })
         .catch((e: unknown) => {

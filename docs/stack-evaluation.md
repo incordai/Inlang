@@ -1015,3 +1015,15 @@ network, but GPU work (the 3D canvas) runs on this machine's GPU.
 Revisit when M5 measures a deployed site (a real host's compression,
 caching and latency), or if the engine requirement outruns the
 repository's Node.
+
+## 18. The chat's model client — **no dependency: Node's `fetch`, `AbortSignal`, `TextDecoder`, `crypto`**
+
+The generated server's `POST /chat` (chat block spec §4.3) calls a model
+over HTTP and reads its streamed answer. Evaluated 2026-10-15 for C1:
+
+| Option | Verdict | Why |
+|---|---|---|
+| a provider's official SDK | **REJECT** | ties the server to one vendor (owner's rule: providers are switchable, services are thin proxies), brings its own dependency tree into every generated server, and its value — retries, typed responses for dozens of endpoints — is for one call we use |
+| a generic multi-provider client library | **REJECT** | a second abstraction over ours; its provider list is a vendor list in our lockfile; supply-chain surface |
+| an SSE parsing package | **REJECT** | the format is a few dozen lines (line framing, `data:`, blank-line dispatch); `chat-sse.ts` is tested against chunks split at every byte offset and a line cap |
+| Node built-ins (`fetch`, `AbortSignal`, `TextDecoder`, `crypto`) | **ADOPT** | already required (Node ≥ 22.18, backend-spec §8); the adapters (`chat-adapters.ts`) are named by wire shape — `completions`, `fake` — and every endpoint, key and model id comes from `.env` |

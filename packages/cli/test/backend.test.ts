@@ -91,6 +91,19 @@ test('az backend images refuses a folder that is not a built server, and any fla
   assert.match(flag.stderr, /try: az backend images <server-dir> \[--confirm\]/);
 });
 
+test('az backend init lists the chat keys only for a server whose config says chat (key left blank)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'az-be-chat-'));
+  writeFileSync(join(dir, 'az.config.json'), JSON.stringify({ siteName: 'studio', database: 'sqlite', email: 'smtp', chat: true }));
+  assert.equal(az('backend', 'init', dir).status, 0);
+  const text = readFileSync(join(dir, '.env'), 'utf8');
+  assert.match(text, /^AZ_CHAT_API=completions$/m);
+  assert.match(text, /^AZ_CHAT_KEY=$/m);
+  const plain = mkdtempSync(join(tmpdir(), 'az-be-nochat-'));
+  writeFileSync(join(plain, 'az.config.json'), JSON.stringify({ siteName: 'studio', database: 'sqlite', email: 'smtp' }));
+  assert.equal(az('backend', 'init', plain).status, 0);
+  assert.doesNotMatch(readFileSync(join(plain, '.env'), 'utf8'), /AZ_CHAT_/, 'CONTROL: no chat, no chat keys');
+});
+
 test('az backend init refuses a folder that is not a generated server', () => {
   const r = az('backend', 'init', mkdtempSync(join(tmpdir(), 'az-be-empty-')));
   assert.notEqual(r.status, 0);

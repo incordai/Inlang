@@ -24,7 +24,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { LOOPBACK, startDevBackend, startMailbox, type DevBackend, type Mailbox } from './dev-backend.ts';
+import { LOOPBACK, startDevBackend, startMailbox, type DevBackend, type DevChat, type Mailbox } from './dev-backend.ts';
 
 /** Vite's own default, so the printed address is the familiar one when free. */
 export const DEFAULT_SITE_PORT = 5173;
@@ -158,8 +158,11 @@ export interface ServeOptions {
   readonly outDir: string;
   readonly sitePort: number;
   readonly open: boolean;
-  /** The backend's site name, and its `server/data.json` when the site has tables; null without a `server/`. */
-  readonly backend: { readonly siteName: string; readonly data?: string } | null;
+  /**
+   * The backend's site name, its `server/data.json` when the site has tables
+   * and its `server/chat/` files when a page shows a chat; null without a `server/`.
+   */
+  readonly backend: { readonly siteName: string; readonly data?: string; readonly chat?: DevChat } | null;
   readonly print: (line: string) => void;
 }
 
@@ -208,7 +211,7 @@ export async function serve(options: ServeOptions): Promise<Served> {
       const mailboxPort = await freePort(0);
       mailbox = await startMailbox(mailboxPort, print);
       backend = await startDevBackend(projectDir, options.backend.siteName,
-        { site: sitePort, backend: backendPort, mailbox: mailboxPort }, mailbox, print, options.backend.data);
+        { site: sitePort, backend: backendPort, mailbox: mailboxPort }, mailbox, print, options.backend.data, options.backend.chat);
       env.AZ_PUBLIC_BACKEND_URL = backend.url;
     }
 

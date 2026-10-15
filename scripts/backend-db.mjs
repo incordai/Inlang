@@ -18,6 +18,7 @@ import { loadConfig } from '../packages/backend/src/server/env.ts';
 import { createOidc } from '../packages/backend/src/server/oidc.ts';
 import { createStore } from '../packages/backend/src/server/store.ts';
 import { dataSuite } from './backend-db-data.mjs';
+import { chatSuite } from './backend-db-chat.mjs';
 import { closeWithin, watchdog, within } from './lib/bounded.mjs';
 
 /** A database connection that will not close is abandoned after this (rule 13: bound every wait). */
@@ -175,6 +176,9 @@ async function suite(engine) {
 
     // The data tables on this engine (data-spec §14).
     await dataSuite(engine, db, () => (engine === 'postgres' ? openPostgres(c.url, false) : openMysql(c.url, false)), check, info);
+
+    // The chat's usage table on this engine (the chat block spec §12).
+    await chatSuite(engine, db, () => (engine === 'postgres' ? openPostgres(c.url, false) : openMysql(c.url, false)), check, c.url);
   } finally {
     // Closed whether the checks passed or threw: a server left listening
     // would hold the run open after its last check.

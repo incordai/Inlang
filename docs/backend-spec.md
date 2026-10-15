@@ -32,7 +32,14 @@ site studio
   backend
     database sqlite          # sqlite | postgres | mysql
     email    smtp            # smtp | api
+    model    default         # optional: this server talks to a chat model (chat block spec)
 ```
+
+`model default` is the third setting, optional, and `default` is its only
+value: *the operator picks* — the wire shape, URL, key and model id live in
+`.env` (§4, `AZ_CHAT_…`), never in the `.az` file. A site whose pages show a
+`chat` needs it; the build then writes the chat files (§8) and the server
+gains `POST /chat`.
 
 `backend` is a site-level **structure keyword**, not a block — it renders
 nothing and does not count against the eleven-block cap. Its two settings are
@@ -173,6 +180,13 @@ one schema for all three readers:
 | `AZ_ADMIN_EMAILS` | sites with `data` | verified addresses that may use `/admin` (data-spec §11); empty = nobody |
 | `AZ_FILES_DIR` | sites with an `image` field | where uploaded images are stored (`./data/files`), outside anything served statically (data-spec §8) |
 | `AZ_UPLOAD_MAX_MB` | sites with an `image` field | the largest upload, 1–20 MB (default 5) |
+| `AZ_CHAT_API` | sites with `chat` | the model's wire shape: `completions` (the common chat-completions streaming shape), or `fake` (scripted answers from `AZ_CHAT_FAKE_FILE`; refused unless `AZ_BACKEND_PUBLIC_URL` is on localhost — the generated server's "development profile") |
+| `AZ_CHAT_URL`, `AZ_CHAT_MODEL` | `completions` | the API base (https; http only on localhost) — answers come from `<url>/chat/completions` — and the model id, passed as written |
+| `AZ_CHAT_KEY` | optional | bearer key (secret; empty for a local model server) |
+| `AZ_CHAT_DAILY_TOKENS`, `AZ_CHAT_MAX_OUTPUT_TOKENS` | optional | the day's budget for all chats (300 000; 1 000–100 000 000) and one answer's cap (600; 100–2 000) |
+| `AZ_CHAT_PER_ADDRESS`, `AZ_CHAT_PER_ACCOUNT` | optional | `<n>/hour`, `<n>/day` or both (`20/hour,60/day`; `100/day`) |
+| `AZ_CHAT_CONCURRENCY`, `AZ_CHAT_TIMEOUT_SECONDS` | optional | answers at once (4; 1–64; four times as many wait ≤ 10 s) and one answer's longest time (60; 10–300 — the first token within 15 s, each next within 20 s) |
+| `AZ_CHAT_ENABLED` | optional | `off` is the kill switch |
 | `AZ_OAUTH_<ID>_…` | per provider | `LABEL`, `TYPE` (oidc/oauth2), `ISSUER` or the three URLs, `CLIENT_ID`, `CLIENT_SECRET`, `SCOPES`, `EMAIL_FIELD`, `VERIFIED_FIELD` |
 
 **Nothing here reaches a browser.** No key carries the `AZ_PUBLIC_` prefix a
@@ -201,6 +215,11 @@ gives a server setting a public name (`AZ_PUBLIC_…PASSWORD`,
 | Provider sign-in | `site` allow-listed, `next` a site path; state bound to the browser by cookie and single use; PKCE S256; OIDC nonce; id_token signature (RS256, PS256, ES256, EdDSA via JWKS; HS256 only with the client secret), `iss`, `aud`/`azp`, `exp`, `iat`; JWKS cached, refetched on an unknown `kid`; accounts link by **verified** email only; no new account unless `AZ_OAUTH_SIGNUP=allow` | `none`, algorithm confusion, wrong audience, wrong issuer, expired, wrong nonce, missing/replayed state, unverified email, key rotation |
 | Headers | `Cache-Control: no-store`, `nosniff`, `Referrer-Policy: no-referrer`, `CSP default-src 'none'`, HSTS, CORP — on every response the server writes, the last-line 500 (`requestListener`) included, and the 400/408/413/431 to a request Node cannot parse (`createBackendServer`'s `clientError` listener: a raw status line and the set, no body, nothing echoed, then the socket destroyed; no write on a reset, an unwritable socket or a response already begun) | asserted; a handler that throws past its own catch still answers 500 with the full set; a raw client's malformed request line gets 400 and an oversized header 431, each with the full set and the socket closed — on `createBackendServer` in process, and on the real entry (`main.ts` started from a copied server folder, `packages/backend/test/main.test.ts`), which failed before `main.ts` used it (`cache-control` absent) |
 | Bodies | JSON objects only, 16 KB cap | refused otherwise |
+| Chat edge | `POST /chat` is a fetch route with the /data edge: an allowed `Origin`, exact CORS (`POST`), `OPTIONS` 204, `x-az-request: 1`, other methods 405; absent unless a page shows a chat | `chat-route.test.ts`: foreign origin 403, missing header 403, GET 405, preflight headers; a server without chat answers 404 |
+| Chat history | the page resends the conversation; every answer the server finished carries an HMAC-SHA-256 tag (conversation, turn, exact text) under a key derived from `AZ_SESSION_SECRET`; a `site` turn without its tag is `400 tampered` | forged, altered, moved and untagged answers refused (`chat-text.test.ts`, `chat-route.test.ts`) |
+| Chat output | prose only (C1): every piece of model text has controls, bidi overrides and zero-width characters removed, is NFC-normalised, never decoded, and reaches the page as a `text` event the page writes with `textContent`; 4 000 characters per answer | the cap ±1, a markup string arrives as literal text |
+| Chat cost | per-address and per-account windows (the limiter above, /64 rule, key bound), a per-conversation length, the per-answer token cap, the day's budget in `az_chat_usage` (refused **before** sending when the largest cost would cross it), the kill switch, 4 at once with 16 waiting ≤ 10 s, first-token/between/whole timeouts, and the upstream aborted the moment the visitor leaves | each limit with a fake clock or a scripted model; a disconnect aborts the upstream; `test:backend-db` counts concurrent answers on PostgreSQL and MySQL |
+| Chat logs | one line per answer: outcome, duration, token counts — never text, address, account, key or a provider's body | a planted marker in a message and in the answer is absent from the log |
 | Logs | route and error class/code only — never a password, token, secret, address, or a provider's or mail server's reply text | the browser run checks the server's log; a mail failure quoting the recipient logs only its class |
 
 **Stated limits.** Rate limits are counted per process; behind several
@@ -259,7 +278,17 @@ server/
   .gitignore          .env, data/, node_modules/
   README.md           the runbook: local run, keys, deploy (same site, https, proxy)
   src/*.ts            the server, copied verbatim from packages/backend/src/server
+                      (data-*.ts only with tables, chat*.ts only with a chat)
+  chat/prompt.txt     with a chat: the fixed instructions the model is given
+  chat/context.json   with a chat: the site's public pages as text (protected
+                      pages left out, 24 000 characters at most), the chat
+                      pages and their `allow`/`limit`, the routes
 ```
+
+A chat adds one table, `az_chat_usage` (UTC day, input/output tokens,
+messages, dropped components — counts only, kept 400 days), created by its
+own migration history (`az_chat_migrations`) through the same claim as the
+others; a site without a chat never gets it.
 
 Node ≥ 22.18 runs the TypeScript directly. `/health` answers `{"ok":true}`.
 

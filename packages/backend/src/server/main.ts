@@ -1,10 +1,10 @@
 /**
  * @az server main
- * Purpose: start the backend: config, migrations, store, routes, HTTP server; --migrate --confirm for data steps; --images [--confirm] for the image backfill.
+ * Purpose: start the backend: config, migrations, store, routes (and the chat route when the site has one), HTTP server; --migrate --confirm for data steps; --images [--confirm] for the image backfill.
  * Spec: docs/backend-spec.md §8 · docs/data-spec.md §6.3, §8
  * Exports: (none — entry point)
  * Edit guide: refuse to start on invalid config or an unconfirmed destructive step; never let a handler rejection crash the process.
- * Tests: packages/backend/test/backend.test.ts
+ * Tests: packages/backend/test/backend.test.ts, packages/backend/test/chat-main.test.ts
  */
 
 /**
@@ -21,7 +21,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { createApp, type DataRoutes } from './app.ts';
+import { createApp, type ChatRoutes, type DataRoutes } from './app.ts';
 import { MigrationBusy } from './claim.ts';
 import type { DataStep } from './data-migrate.ts';
 import { migrate, openMysql, openPostgres, openSqlite, type Db } from './db.ts';
@@ -40,7 +40,11 @@ const FILE_SWEEP_MS = 60 * 60 * 1000;
 const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string } & Setup;
 if (existsSync('.env')) process.loadEnvFile('.env');
 
-const loaded = loadConfig(process.env, { database: site.database, email: site.email, ...(site.images === true ? { images: true } : {}) }, site.siteName);
+const loaded = loadConfig(process.env, {
+  database: site.database, email: site.email,
+  ...(site.images === true ? { images: true } : {}),
+  ...(site.chat === true ? { chat: true } : {}),
+}, site.siteName);
 if (!loaded.ok) {
   process.stderr.write(`backend: cannot start — fix these in .env (see .env.example):\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}\n`);
   process.exit(1);
@@ -159,6 +163,33 @@ if (existsSync(dataFile)) {
     process.exit(0);
   }
 }
+// The chat route, only when a page shows a chat: its modules, prompt and
+// context are part of the build only then (the chat block spec §10).
+let chat: ChatRoutes | undefined;
+if (config.chat) {
+  const { migrateChat } = await import('./chat-usage.ts');
+  const { createChat, parseChatContext } = await import('./chat.ts');
+  const { createAdapter } = await import('./chat-adapters.ts');
+  const chatSteps = await orStop(() => migrateChat(db), [MigrationBusy], 'the chat migration');
+  if (chatSteps.length > 0) process.stdout.write(`backend: applied chat migrations ${chatSteps.join(', ')}\n`);
+  const read = (name: string) => readFileSync(new URL(`../chat/${name}`, import.meta.url), 'utf8');
+  const context = parseChatContext(read('context.json'));
+  if (typeof context === 'string') {
+    process.stderr.write(`backend: cannot start — chat/context.json ${context}; rebuild the site to regenerate server/\n`);
+    process.exit(1);
+  }
+  let adapter;
+  try {
+    adapter = await createAdapter(config.chat);
+  } catch (e) {
+    process.stderr.write(`backend: cannot start — fix this in .env (see .env.example):\n  - ${(e as Error).message.startsWith('AZ_CHAT_FAKE_FILE') ? (e as Error).message : `AZ_CHAT_FAKE_FILE cannot be read (${(e as Error).name})`}\n`);
+    process.exit(1);
+  }
+  chat = createChat({
+    config: config.chat, secret: config.secret, db, prompt: read('prompt.txt'), context, adapter,
+    log: (line) => process.stderr.write(`backend: ${line}\n`),
+  });
+}
 if (args.images !== null) {
   process.stdout.write('backend: this server has no data tables, so no stored images\n');
   await db.close();
@@ -171,7 +202,7 @@ if (args.migrate) {
 }
 
 const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }, ownedRows);
-const app = createApp({ config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)), ...(data ? { data } : {}) });
+const app = createApp({ config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)), ...(data ? { data } : {}), ...(chat ? { chat } : {}) });
 // The handler answers its own failures; requestListener is the last line.
 // Its 500, like the answer to a request Node cannot parse, carries the
 // security headers like every other response.
@@ -184,6 +215,7 @@ const sweep = setInterval(() => app.sweep(), SWEEP_MS);
 sweep.unref();
 const prune = setInterval(() => {
   store.prune().catch((e: unknown) => process.stderr.write(`backend: prune failed: ${(e as Error).name}\n`));
+  chat?.prune().catch((e: unknown) => process.stderr.write(`backend: chat usage sweep failed: ${(e as Error).name}\n`));
 }, PRUNE_MS);
 prune.unref();
 const fileSweep = sweepImages && setInterval(() => {

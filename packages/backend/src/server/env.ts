@@ -1,10 +1,10 @@
 /**
  * @az server env
  * Purpose: the configuration: every key, validation, refuse to start naming bad keys.
- * Spec: docs/backend-spec.md §4
- * Exports: loadConfig, KEYS, urlProblem
+ * Spec: docs/backend-spec.md §4 (chat keys: the chat block spec §11.1)
+ * Exports: loadConfig, KEYS, urlProblem, CHAT_LIMITS, parseRate, ChatConfig, ChatRate
  * Edit guide: server keys are never AZ_PUBLIC_; defaults are safe.
- * Tests: packages/backend/test/backend.test.ts
+ * Tests: packages/backend/test/backend.test.ts, packages/backend/test/chat-route.test.ts
  */
 
 /**
@@ -30,6 +30,8 @@ export interface Setup {
   readonly data?: boolean;
   /** A data table has an image field (data-spec §8): the upload keys are listed too. */
   readonly images?: boolean;
+  /** A page shows a chat (chat-spec): the model keys are listed too. */
+  readonly chat?: boolean;
 }
 
 export interface KeySpec {
@@ -76,6 +78,18 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_ADMIN_EMAILS', about: 'Who may use /admin: verified account addresses, comma-separated. An unverified account with a listed address is not an admin. Empty: nobody.', when: (s) => s.data === true, required: false, example: '' },
   { name: 'AZ_FILES_DIR', about: 'Where uploaded images are stored, outside anything served statically. Created on first start; back it up with the database.', when: (s) => s.images === true, required: false, example: './data/files' },
   { name: 'AZ_UPLOAD_MAX_MB', about: `The largest image upload, in MB (default ${UPLOAD_MB.default}, at most ${UPLOAD_MB.max}).`, when: (s) => s.images === true, required: false, example: String(UPLOAD_MB.default) },
+  { name: 'AZ_CHAT_API', about: 'The chat model\'s wire shape: `completions` (the common chat-completions streaming shape, hosted or a local model server). `fake` replays AZ_CHAT_FAKE_FILE and is refused unless AZ_BACKEND_PUBLIC_URL is on localhost.', when: (s) => s.chat === true, required: true, example: 'completions' },
+  { name: 'AZ_CHAT_URL', about: 'The model API\'s base URL; answers are requested from <url>/chat/completions. https, or plain http only for localhost (a model server on this machine). Required for completions.', when: (s) => s.chat === true, required: false, example: '' },
+  { name: 'AZ_CHAT_KEY', about: 'Sent as `Authorization: Bearer <key>` to the model API. May be empty for a local model server.', when: (s) => s.chat === true, required: false, secret: true },
+  { name: 'AZ_CHAT_MODEL', about: 'The model id, passed to the API as written. Required for completions.', when: (s) => s.chat === true, required: false, example: '' },
+  { name: 'AZ_CHAT_DAILY_TOKENS', about: 'Tokens (input + output) all chats together may spend per UTC day; past it every message answers budget_exhausted until midnight UTC (default 300000, 1000–100000000).', when: (s) => s.chat === true, required: false, example: '300000' },
+  { name: 'AZ_CHAT_MAX_OUTPUT_TOKENS', about: 'The most tokens one answer may use (default 600, 100–2000).', when: (s) => s.chat === true, required: false, example: '600' },
+  { name: 'AZ_CHAT_PER_ADDRESS', about: 'Messages one address may send: `<n>/hour`, `<n>/day`, or both comma-separated (default 20/hour,60/day). An IPv6 address counts as its /64.', when: (s) => s.chat === true, required: false, example: '20/hour,60/day' },
+  { name: 'AZ_CHAT_PER_ACCOUNT', about: 'Messages one signed-in account may send, in the same form (default 100/day).', when: (s) => s.chat === true, required: false, example: '100/day' },
+  { name: 'AZ_CHAT_CONCURRENCY', about: 'Answers streamed at once (default 4, 1–64); four times as many wait up to 10 s, then are told busy.', when: (s) => s.chat === true, required: false, example: '4' },
+  { name: 'AZ_CHAT_TIMEOUT_SECONDS', about: 'The longest one answer may take, in seconds (default 60, 10–300). The first token must come within 15 s, and each next within 20 s.', when: (s) => s.chat === true, required: false, example: '60' },
+  { name: 'AZ_CHAT_ENABLED', about: '`off` switches chat off at once (every message answers disabled); `on` is the default.', when: (s) => s.chat === true, required: false, example: 'on' },
+  { name: 'AZ_CHAT_FAKE_FILE', about: 'With AZ_CHAT_API=fake only: a JSON file of scripted answers, for tests and local development.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: always, required: false, example: 'deny' },
 ];
 
@@ -107,6 +121,50 @@ const MIN_SECRET_BYTES = 32;
 /** More trusted proxies than this is a misconfiguration, not an architecture. */
 const MAX_PROXY_HOPS = 10;
 const MINUTE_MS = 60 * 1000;
+
+/** chat-spec §6.5: each chat setting's default and bounds. */
+export const CHAT_LIMITS = {
+  dailyTokens: { default: 300_000, min: 1_000, max: 100_000_000 },
+  maxOutputTokens: { default: 600, min: 100, max: 2_000 },
+  concurrency: { default: 4, min: 1, max: 64 },
+  timeoutSeconds: { default: 60, min: 10, max: 300 },
+  perAddress: '20/hour,60/day',
+  perAccount: '100/day',
+  /** A model id is text passed through; this is its longest. */
+  modelMax: 200,
+} as const;
+
+/** A message allowance per hour and per day; an absent window is not limited. */
+export interface ChatRate { readonly hour?: number; readonly day?: number }
+
+/** `20/hour,60/day`, `100/day` or `5/hour` as a ChatRate, or null when it is not one. */
+export function parseRate(value: string): ChatRate | null {
+  const out: { hour?: number; day?: number } = {};
+  const parts = value.split(',').map((p) => p.trim());
+  if (parts.length > 2) return null;
+  for (const part of parts) {
+    const m = /^(\d{1,7})\/(hour|day)$/.exec(part);
+    if (!m || Number(m[1]) < 1 || m[2] in out) return null;
+    out[m[2] as 'hour' | 'day'] = Number(m[1]);
+  }
+  return out;
+}
+
+/** The chat settings (chat-spec §11.1); present only for a site with chat. */
+export interface ChatConfig {
+  readonly api: 'completions' | 'fake';
+  readonly url: string;
+  readonly key: string;
+  readonly model: string;
+  readonly dailyTokens: number;
+  readonly maxOutputTokens: number;
+  readonly perAddress: ChatRate;
+  readonly perAccount: ChatRate;
+  readonly concurrency: number;
+  readonly timeoutMs: number;
+  readonly enabled: boolean;
+  readonly fakeFile: string;
+}
 
 export interface Provider {
   readonly id: string;
@@ -152,6 +210,8 @@ export interface Config {
   readonly filesDir: string;
   /** AZ_UPLOAD_MAX_MB in bytes (setup.images only). */
   readonly uploadLimit: number;
+  /** The chat settings (setup.chat only); null otherwise. */
+  readonly chat: ChatConfig | null;
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -306,6 +366,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
     problems.push(`AZ_UPLOAD_MAX_MB must be a whole number of MB, 1–${UPLOAD_MB.max}`);
   }
 
+  const chat = setup.chat === true ? chatConfig(get, publicUrl, problems) : null;
+
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -331,6 +393,78 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
       oauthSignup: signup === 'allow',
       filesDir: get('AZ_FILES_DIR') || './data/files',
       uploadLimit: uploadMb * 1024 * 1024,
+      chat,
     },
+  };
+}
+
+/** A whole number from `key` within `bounds`, its default when unset; a problem named otherwise. */
+function bounded(get: (k: string) => string, key: string, bounds: { default: number; min: number; max: number }, problems: string[]): number {
+  const raw = get(key);
+  const n = raw === '' ? bounds.default : /^\d{1,10}$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n < bounds.min || n > bounds.max) {
+    problems.push(`${key} must be a whole number, ${bounds.min}–${bounds.max}`);
+  }
+  return n;
+}
+
+/** Is a URL's host this machine? The `fake` model is for development only, which is a loopback server. */
+function onLoopback(value: string): boolean {
+  try {
+    return LOOPBACK.has(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** The chat keys (chat-spec §11.1), every problem named. */
+function chatConfig(get: (k: string) => string, publicUrl: string, problems: string[]): ChatConfig {
+  const api = get('AZ_CHAT_API').toLowerCase();
+  if (api && api !== 'completions' && api !== 'fake') problems.push('AZ_CHAT_API must be completions or fake');
+  const url = get('AZ_CHAT_URL');
+  const model = get('AZ_CHAT_MODEL');
+  const fakeFile = get('AZ_CHAT_FAKE_FILE');
+  if (api === 'completions') {
+    if (!url) problems.push('AZ_CHAT_URL is missing — the model API\'s base URL (required for completions)');
+    else {
+      const p = urlProblem(url, { base: false });
+      if (p) problems.push(`AZ_CHAT_URL ${p}`);
+    }
+    if (!model) problems.push('AZ_CHAT_MODEL is missing — the model id (required for completions)');
+    // A model id is one line of printable text.
+    else if (model.length > CHAT_LIMITS.modelMax || /[\u0000-\u001f\u007f]/.test(model)) {
+      problems.push(`AZ_CHAT_MODEL must be at most ${CHAT_LIMITS.modelMax} characters, without control characters`);
+    }
+    if (fakeFile) problems.push('AZ_CHAT_FAKE_FILE is only read with AZ_CHAT_API=fake — remove it');
+  }
+  if (api === 'fake') {
+    if (!fakeFile) problems.push('AZ_CHAT_FAKE_FILE is missing — AZ_CHAT_API=fake replays scripted answers from it');
+    if (publicUrl && !onLoopback(publicUrl)) {
+      problems.push('AZ_CHAT_API=fake is for development only — it needs AZ_BACKEND_PUBLIC_URL on localhost; use completions for a real model');
+    }
+  }
+  const rate = (key: string, fallback: string): ChatRate => {
+    const parsed = parseRate(get(key) || fallback);
+    if (!parsed) {
+      problems.push(`${key} must be <n>/hour, <n>/day or both, comma-separated (e.g. ${fallback})`);
+      return parseRate(fallback)!;
+    }
+    return parsed;
+  };
+  const enabled = (get('AZ_CHAT_ENABLED') || 'on').toLowerCase();
+  if (enabled !== 'on' && enabled !== 'off') problems.push('AZ_CHAT_ENABLED must be on or off');
+  return {
+    api: api === 'fake' ? 'fake' : 'completions',
+    url: url.replace(/\/+$/, ''),
+    key: get('AZ_CHAT_KEY'),
+    model,
+    dailyTokens: bounded(get, 'AZ_CHAT_DAILY_TOKENS', CHAT_LIMITS.dailyTokens, problems),
+    maxOutputTokens: bounded(get, 'AZ_CHAT_MAX_OUTPUT_TOKENS', CHAT_LIMITS.maxOutputTokens, problems),
+    perAddress: rate('AZ_CHAT_PER_ADDRESS', CHAT_LIMITS.perAddress),
+    perAccount: rate('AZ_CHAT_PER_ACCOUNT', CHAT_LIMITS.perAccount),
+    concurrency: bounded(get, 'AZ_CHAT_CONCURRENCY', CHAT_LIMITS.concurrency, problems),
+    timeoutMs: bounded(get, 'AZ_CHAT_TIMEOUT_SECONDS', CHAT_LIMITS.timeoutSeconds, problems) * 1000,
+    enabled: enabled !== 'off',
+    fakeFile,
   };
 }

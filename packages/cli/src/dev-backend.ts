@@ -2,7 +2,7 @@
  * @az module dev-backend
  * Purpose: the real backend run locally with a dev profile: SQLite, dev secret, local mailbox.
  * Spec: docs/backend-spec.md §2a
- * Exports: startDevBackend, startMailbox, devBackendEnv, assertLoopback
+ * Exports: startDevBackend, startMailbox, devBackendEnv, assertLoopback, chatDemoFile, CHAT_DEMO, DevChat
  * Edit guide: loopback only; dev settings never reach a production build.
  * Tests: packages/cli/test/dev-serve.test.ts, packages/cli/test/dev-mailbox-security.test.ts
  */
@@ -33,7 +33,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { createApp, type DataRoutes } from '../../backend/src/server/app.ts';
+import { createApp, type ChatRoutes, type DataRoutes } from '../../backend/src/server/app.ts';
+import { createAdapter } from '../../backend/src/server/chat-adapters.ts';
+import { createChat, parseChatContext } from '../../backend/src/server/chat.ts';
+import { migrateChat } from '../../backend/src/server/chat-usage.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
 import { createData, parseAdminEmails } from '../../backend/src/server/data-api.ts';
 import { migrateData, type DataStep } from '../../backend/src/server/data-migrate.ts';
@@ -254,6 +257,28 @@ function loopbackCookies(res: ServerResponse): void {
   }) as ServerResponse['writeHead'];
 }
 
+/** The scripted answers `az dev` chats with when no real model is set (the chat block spec §11.1). */
+export const CHAT_DEMO = {
+  answers: [{
+    chunks: [
+      'This is the local demo answer from az dev. ',
+      'No model was called and nothing left this machine. ',
+      '\n\nTo try a real model, set AZ_CHAT_API, AZ_CHAT_URL, AZ_CHAT_MODEL and AZ_CHAT_KEY in .az-dev/backend.env and restart az dev.',
+    ],
+    delayMs: 150,
+  }],
+} as const;
+
+/** `.az-dev/chat-demo.json`, written once, so a developer may edit the script. */
+export function chatDemoFile(dir: string): string {
+  const file = join(dir, 'chat-demo.json');
+  if (!existsSync(file)) writeFileSync(file, `${JSON.stringify(CHAT_DEMO, null, 2)}\n`, 'utf8');
+  return file;
+}
+
+/** The build's chat files (`server/chat/`), when a page shows a chat. */
+export interface DevChat { readonly prompt: string; readonly context: string }
+
 export interface DevBackend {
   readonly url: string;
   close(): Promise<void>;
@@ -269,12 +294,17 @@ export async function startDevBackend(
   projectDir: string, siteName: string, ports: DevPorts, mailbox: Mailbox, print: (line: string) => void,
   /** The build's `server/data.json`, when the site declares tables. */
   dataJson?: string,
+  /** The build's chat files, when a page shows a chat. */
+  chat?: DevChat,
 ): Promise<DevBackend> {
   const dir = devDir(projectDir);
-  const env = devBackendEnv(ports, devSecret(dir), join(dir, 'dev.db'), mailbox.key, readEnvFile(join(dir, 'backend.env')));
+  const extra = readEnvFile(join(dir, 'backend.env'));
+  // A chat answers from the scripted demo unless backend.env names a real model.
+  const chatEnv: Record<string, string> = chat && !extra.AZ_CHAT_API ? { AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: chatDemoFile(dir) } : {};
+  const env = devBackendEnv(ports, devSecret(dir), join(dir, 'dev.db'), mailbox.key, { ...chatEnv, ...extra });
   // The dev profile always runs SQLite and the mailbox, whatever the site
   // declares for production — so its checks are the ones for that setup.
-  const loaded = loadConfig(env, { database: 'sqlite', email: 'api' }, siteName);
+  const loaded = loadConfig(env, { database: 'sqlite', email: 'api', ...(chat ? { chat: true } : {}) }, siteName);
   if (!loaded.ok) {
     throw new Error(`the dev backend cannot start — fix these in ${DEV_DIR}/backend.env:\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}`);
   }
@@ -299,10 +329,28 @@ export async function startDevBackend(
     ownedRows = ownedRowDeletes(db.dialect, tables);
     data = createData({ db, tables, admins: admins.emails });
   }
+  let chatRoutes: ChatRoutes | undefined;
+  if (chat && config.chat) {
+    await migrateChat(db);
+    const context = parseChatContext(chat.context);
+    if (typeof context === 'string') throw new Error(`the dev backend cannot start — server/chat/context.json ${context}`);
+    let adapter;
+    try {
+      adapter = await createAdapter(config.chat);
+    } catch (e) {
+      throw new Error(`the dev backend cannot start — fix this in ${DEV_DIR}/backend.env or ${DEV_DIR}/chat-demo.json:\n  - ${(e as Error).message}`);
+    }
+    chatRoutes = createChat({
+      config: config.chat, secret: config.secret, db, prompt: chat.prompt, context, adapter,
+      log: (line) => print(`backend: ${line}`),
+    });
+    print(`az dev: chat answers from ${config.chat.api === 'fake' ? `the demo script in ${DEV_DIR}/chat-demo.json` : 'the model set in .az-dev/backend.env'}`);
+  }
   const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }, ownedRows);
   const app = createApp({
     config, store,
     ...(data ? { data } : {}),
+    ...(chatRoutes ? { chat: chatRoutes } : {}),
     mailer: await createMailer(config),
     oidc: createOidc((...a) => fetch(...a)),
     log: (line) => print(`backend: ${line}`),

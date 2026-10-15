@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  assertLoopback, devBackendEnv, devDir, devSecret, LOOPBACK, readEnvFile, startDevBackend, startMailbox, withoutSecure,
+  assertLoopback, CHAT_DEMO, devBackendEnv, devDir, devSecret, LOOPBACK, readEnvFile, startDevBackend, startMailbox, withoutSecure,
 } from '../src/dev-backend.ts';
 import { openerFor, freePort, devViteConfig, DEV_VITE_CONFIG } from '../src/serve.ts';
 import { loadConfig } from '../../backend/src/server/env.ts';
@@ -116,6 +116,43 @@ test('the dev backend signs up over SQLite and mails the reset link to the mailb
   } finally {
     await backend.close();
     await mailbox.close();
+  }
+});
+
+test('az dev chats through the scripted demo, written once to .az-dev/, unless backend.env names a model', async () => {
+  const project = tmp();
+  const ports = { site: await freePort(0), backend: await freePort(0), mailbox: await freePort(0) };
+  const mailbox = await startMailbox(ports.mailbox, quiet);
+  const printed: string[] = [];
+  const chat = {
+    prompt: 'Answer about the studio.\n',
+    context: JSON.stringify({ site: { name: 'studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20 } }, routes: ['/'] }),
+  };
+  const backend = await startDevBackend(project, 'studio', ports, mailbox, (l) => printed.push(l), undefined, chat);
+  try {
+    const r = await fetch(`${backend.url}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${ports.site}`, 'x-az-request': '1' },
+      body: JSON.stringify({ page: '/', messages: [{ role: 'visitor', text: 'hello' }] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    assert.equal(r.status, 200);
+    const body = await r.text();
+    assert.match(body, /event: text\ndata: \{"s":"This is the local demo answer from az dev\. "\}/);
+    assert.match(body, /event: done\n/);
+    assert.deepEqual(JSON.parse(readFileSync(join(project, '.az-dev/chat-demo.json'), 'utf8')), CHAT_DEMO);
+    assert.ok(printed.some((l) => l.includes('chat answers from the demo script')));
+  } finally {
+    await backend.close();
+    await mailbox.close();
+  }
+  // A real model named in backend.env replaces the demo (here an invalid one, so the start names it).
+  writeFileSync(join(project, '.az-dev/backend.env'), 'AZ_CHAT_API=completions\n');
+  const mailbox2 = await startMailbox(await freePort(0), quiet);
+  try {
+    await assert.rejects(startDevBackend(project, 'studio', { ...ports, mailbox: 0 }, mailbox2, quiet, undefined, chat), /AZ_CHAT_URL is missing/);
+  } finally {
+    await mailbox2.close();
   }
 });
 

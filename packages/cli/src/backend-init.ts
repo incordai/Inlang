@@ -26,20 +26,21 @@ export type BackendInitResult =
   | { readonly ok: false; readonly kind: 'missing' | 'exists'; readonly message: string };
 
 /** The server's database and email choices, or null when the file is not a valid config. */
-function readSetup(file: string): { database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api'; data?: boolean } | null {
+function readSetup(file: string): { database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api'; data?: boolean; chat?: boolean } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8'));
   } catch {
     return null;
   }
-  const o = parsed as { database?: unknown; email?: unknown; data?: unknown } | null;
+  const o = parsed as { database?: unknown; email?: unknown; data?: unknown; chat?: unknown } | null;
   const database = o?.database;
   const email = o?.email;
   if (database !== 'sqlite' && database !== 'postgres' && database !== 'mysql') return null;
   if (email !== 'smtp' && email !== 'api') return null;
   // A site with data tables lists their keys too (AZ_ADMIN_EMAILS).
-  return { database, email, ...(o?.data === true ? { data: true } : {}) };
+  // A site with a chat lists the model keys (AZ_CHAT_…).
+  return { database, email, ...(o?.data === true ? { data: true } : {}), ...(o?.chat === true ? { chat: true } : {}) };
 }
 
 export function initBackendEnv(dir: string): BackendInitResult {
