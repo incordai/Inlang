@@ -148,6 +148,7 @@ The page carries the same Content-Security-Policy a build gives its pages
 | `az explain <term...>` | one line per term, e.g. `az explain hero center` |
 | `az palette [--theme t] [--accent h] [--out dir]` | write the colour gallery: every theme, hue, pair and pattern in light and dark, with its `.az` lines |
 | `az palette --list \| --json [--theme t] [--accent h]` | print every colour choice, for a terminal or a tool |
+| `az prompt [--words a,b] [--compact] [--budget N] [--json]` | print the Markdown instructions any AI model needs to write `.az`, generated from the compiler's tables; writes nothing |
 | `az doctor [file.az] [--out dir] [--json]` | check this machine and project; changes nothing |
 | `az audit [--out dir] [--online] [--json]` | check a build's output; changes nothing (`--online` adds the advisory lookup) |
 
@@ -309,6 +310,22 @@ Start with [AGENTS.md](docs/AGENTS.md) (reading order and the rules), then
 
 ## Using with an AI assistant
 
+- **Any model, no connection: paste `az prompt` into its instructions.**
+  `az prompt` prints one Markdown block — the authoring order (colour
+  first), the syntax with a minimal site, the colour choices, every word
+  with its variants and keys (types and allowed values), the backend and
+  data rules, and the common errors with the compiler's own fix — generated
+  from the same tables the compiler checks against, so it cannot drift.
+  Every example in it compiles with zero diagnostics (a test holds it to
+  that). Its size goes to stderr in characters and approximate tokens
+  (characters / 4, rounded up — a model's own tokenizer will differ).
+  `--compact` keeps the order, syntax, colour and every word's variants and
+  keys, and a test keeps it under 12,000 characters (3,000 approximate
+  tokens). `--words hero,cta` describes only those words;
+  `--budget N` fits N tokens by dropping, in this order, each word's
+  example, each word's validation rules, the info lines, the backend and
+  data section, then the common errors; `--json` gives the prompt and its
+  size to a tool, as the MCP tool `az_prompt` does.
 - **Colour comes first.** An assistant chooses the theme, accent and pattern
   with the user before it writes any section, then the frame, then the
   sections. `az mcp`'s instructions say so, and docs/WORDS.md and every

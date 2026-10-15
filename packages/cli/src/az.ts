@@ -1,10 +1,10 @@
 /**
  * @az module az
- * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, palette, doctor, audit.
+ * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, palette, prompt, doctor, audit.
  * Spec: docs/PRD.md §6.7 · docs/ARCHITECTURE.md §1a
- * Exports: main, build, specOf, wordsFor, parseDotenv, DOTENV_FILES, EXIT
+ * Exports: main, build, specOf, wordsFor, promptInput, parseDotenv, DOTENV_FILES, EXIT
  * Edit guide: filesystem work lives here, never in core; a new command needs USAGE, COMMANDS and a test.
- * Tests: packages/cli/test/cli.test.ts, packages/cli/test/hardening.test.ts
+ * Tests: packages/cli/test/cli.test.ts, packages/cli/test/hardening.test.ts, packages/cli/test/prompt-cli.test.ts
  */
 
 /**
@@ -44,7 +44,7 @@ import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
 import { dev, devLine } from './dev.ts';
 import { findNpmCli, serve, DEFAULT_SITE_PORT, type Served } from './serve.ts';
 import { lintWords } from './lint.ts';
-import { BUNDLED_WORDS, eject, loadWords } from './words.ts';
+import { BUNDLED_WORDS, eject, loadWords, wordExamples } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
 import { initBackendEnv } from './backend-init.ts';
 import { lockOption, readLockSteps, runDataPlan, runDataSchema } from './data-schema.ts';
@@ -60,6 +60,9 @@ import { formatFindings } from '../../theme/src/lint.ts';
 import {
   colourChoices, colourChoicesJson, filterColourChoices, formatColourChoices,
 } from '../../core/src/colour.ts';
+import {
+  TOKEN_RULE, TRIM_ORDER, buildPrompt, promptJson, promptOptionsFrom, type PromptInput,
+} from '../../core/src/prompt.ts';
 
 const MB = 1024 * 1024;
 /** A8 and the hero/scene manifests' `maxBytes`: a 3D model's budget. */
@@ -462,13 +465,15 @@ const USAGE = `az — words to a website
                                    write the colour gallery
   az palette --list | --json [--theme t] [--accent h]
                                    print every colour choice
+  az prompt [--words a,b] [--compact] [--budget N] [--json]
+                                   print what any AI model needs to write .az
   az doctor [file.az] [--out dir] [--json]
                                    check this machine and project; changes nothing
   az audit [--out dir] [--online] [--json]
                                    check a build's output; changes nothing
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'palette', 'doctor', 'audit']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'palette', 'prompt', 'doctor', 'audit']);
 
 /**
  * `az backend init <server-dir>` — write `.env` beside a generated server's
@@ -623,6 +628,74 @@ function runPalette(args: string[]): number {
     process.stderr.write(`az: palette: ${(e as Error).message}\n`);
     process.exitCode = EXIT.config;
   });
+  return EXIT.ok;
+}
+
+const PROMPT_USAGE = `az prompt — the instructions any AI model needs to write .az, as Markdown
+
+  az prompt                  the full prompt: order, syntax, colour, every word, errors
+  az prompt --words hero,cta only these words in the words section
+  az prompt --compact        the smallest prompt, for a small context window
+  az prompt --budget N       fit N tokens, dropping in order: ${TRIM_ORDER.join(', ')}
+  az prompt --json           the prompt and its size as JSON, for tools
+
+Sizes are ${TOKEN_RULE}; the size goes to stderr.
+`;
+
+/**
+ * What `az prompt` and az_prompt describe: the bundled words (or AZ_WORDS),
+ * overridden by the project's own `words/` — manifests and previews read as
+ * data; no word code runs.
+ */
+export function promptInput(projectWords: string): PromptInput {
+  const dir = process.env.AZ_WORDS ?? BUNDLED_WORDS;
+  return { manifests: loadWords(dir, projectWords, { code: false }).manifests, examples: wordExamples(dir, projectWords) };
+}
+
+/**
+ * `az prompt` — the system-prompt block for any model, generated from the
+ * compiler's tables (core's prompt.ts, which az_prompt serves too). Writes
+ * nothing. Exit 0 printed, 2 usage (a bad flag, an unknown word, a budget
+ * below the smallest prompt).
+ */
+function runPrompt(args: string[]): number {
+  const raw: { words?: string; compact?: boolean; budget?: string } = {};
+  let json = false;
+  const usage = (why: string) => {
+    process.stderr.write(`az: prompt: ${why}\n\n${PROMPT_USAGE}`);
+    return EXIT.config;
+  };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const value = args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[i + 1] : undefined;
+    if (a === '--help' || a === '-h') {
+      process.stdout.write(PROMPT_USAGE);
+      return EXIT.ok;
+    }
+    if (a === '--compact') raw.compact = true;
+    else if (a === '--json') json = true;
+    else if ((a === '--words' || a === '--budget') && value !== undefined) {
+      if (raw[a === '--words' ? 'words' : 'budget'] !== undefined) return usage(`${a} given twice — give it once`);
+      raw[a === '--words' ? 'words' : 'budget'] = value;
+      i++;
+    } else if (a === '--words' || a === '--budget') {
+      return usage(`${a} needs a value`);
+    } else {
+      return usage(`unexpected '${a}'`);
+    }
+  }
+  const parsed = promptOptionsFrom(raw);
+  if (!parsed.ok) return usage(parsed.message);
+  const built = buildPrompt(promptInput(resolve('words')), parsed.options);
+  if (!built.ok) return usage(built.message);
+  const p = built.prompt;
+  if (json) {
+    process.stdout.write(`${JSON.stringify(promptJson(p), null, 2)}\n`);
+    return EXIT.ok;
+  }
+  process.stdout.write(p.markdown);
+  const dropped = p.dropped.length ? `; left out: ${p.dropped.join(', ')}` : '';
+  process.stderr.write(`az: prompt is ${p.chars} characters, about ${p.tokens} tokens (${TOKEN_RULE})${dropped}\n`);
   return EXIT.ok;
 }
 
@@ -842,6 +915,7 @@ export function main(argv: string[]): number {
   if (cmd === 'lint') return runLint(file ?? process.env.AZ_WORDS ?? 'words');
   if (cmd === 'explain') return runExplain(argv.slice(1));
   if (cmd === 'palette') return runPalette(argv.slice(1));
+  if (cmd === 'prompt') return runPrompt(argv.slice(1));
   if (cmd === 'doctor') return runDoctor(argv.slice(1));
   if (cmd === 'audit') return runAudit(argv.slice(1));
   if (cmd === 'mcp') {

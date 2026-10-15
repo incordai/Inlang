@@ -49,6 +49,7 @@ server offers no MCP prompts.
 | Tool | Writes? | What it does |
 |---|---|---|
 | `az_palette {theme?, accent?}` | no | `az palette --json`: every theme with its character, the hues and the allowed gradient pairs per theme, the pattern shapes and origins — each choice with the `.az` line that makes it, and an example block per theme; filtered by theme and hue |
+| `az_prompt {words?, compact?, budget?}` | no | `az prompt --json`: the Markdown instructions any model needs to write `.az` — authoring order, syntax with a minimal site, colour choices, every word's variants and keys, backend and data rules, common errors with their fixes — generated from the compiler's tables, with its size in characters and approximate tokens (characters / 4); `words` comma-separated, `compact` `"true"`, `budget` a whole number of tokens; reads word manifests and previews as data, runs no project code |
 | `az_explain {terms}` | no | the cheapest lookup: one ≤60-character line per term, in context — `"hero center"`, `"hero height peek"`, `"backend database postgres"`; unknown terms get a did-you-mean |
 | `az_words` | no | the catalogue: every word's variants, modifiers, properties (type, values, default, required) and slots, each with its ≤60-character description |
 | `az_word_docs {word}` | no | one word's README |

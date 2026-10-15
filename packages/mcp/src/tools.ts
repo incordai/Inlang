@@ -4,7 +4,8 @@
  * Spec: docs/mcp.md
  * Exports: TOOLS, validate, ToolFailure, Toolbox
  * Edit guide: mark any tool that writes or runs project code; arguments are validated against own keys only.
- * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/hardening.test.ts, packages/mcp/test/explain.test.ts, packages/mcp/test/palette.test.ts
+ * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/hardening.test.ts, packages/mcp/test/explain.test.ts, packages/mcp/test/palette.test.ts,
+ *   packages/mcp/test/prompt.test.ts
  */
 
 /**
@@ -99,6 +100,14 @@ export interface Toolbox {
    */
   readonly palette: (filter: { theme?: string; accent?: string }) =>
     { ok: true; palette: unknown } | { ok: false; message: string };
+  /**
+   * az prompt --json (core's prompt.ts): the Markdown instructions any model
+   * needs to write .az, generated from the compiler's tables, with its size.
+   * `words` comma-separated, `budget` approximate tokens; a word that is not
+   * one or a budget below the smallest prompt is `{ ok: false }`.
+   */
+  readonly prompt: (options: { words?: string; compact?: boolean; budget?: string }) =>
+    { ok: true; prompt: unknown } | { ok: false; message: string };
   /** One line per term (`hero center` → hero, center); unknown terms get a suggestion. */
   readonly explain: (terms: string[]) => {
     lines: { term: string; kind: string; of: string; text: string }[];
@@ -214,6 +223,24 @@ export const TOOLS: ToolDef[] = [
       const r = box.palette({ ...(theme !== undefined ? { theme } : {}), ...(accent !== undefined ? { accent } : {}) });
       if (!r.ok) throw new ToolFailure(r.message);
       return r.palette;
+    },
+  },
+  {
+    name: 'az_prompt',
+    description: 'The whole .az vocabulary as one Markdown block to put in a model\'s instructions: the authoring order (colour first), the syntax with a minimal site that compiles, the colour choices, every word with its variants and keys (types and allowed values), the backend and data rules, the common errors with their fixes. Generated from the compiler\'s tables, the same text `az prompt` prints. Optional: words (comma-separated), compact ("true"), budget (approximate tokens = characters / 4). Writes nothing.',
+    inputSchema: obj({
+      words: 'Optional comma-separated words, e.g. "hero,cta": only these in the words section.',
+      compact: '"true" for the smallest prompt; default "false".',
+      budget: 'Optional whole number of approximate tokens (characters / 4) to fit; parts drop in a fixed order.',
+    }, []),
+    annotations: READ,
+    run: ({ words, compact, budget }, box) => {
+      if (compact !== undefined && compact !== 'true' && compact !== 'false') throw new ToolFailure('compact is "true" or "false"');
+      const r = box.prompt({
+        ...(words !== undefined ? { words } : {}), compact: compact === 'true', ...(budget !== undefined ? { budget } : {}),
+      });
+      if (!r.ok) throw new ToolFailure(r.message);
+      return r.prompt;
     },
   },
   {

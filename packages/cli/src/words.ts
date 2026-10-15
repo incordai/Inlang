@@ -2,9 +2,9 @@
  * @az module words
  * Purpose: the word set a project compiles with (bundled + project overrides) and az eject.
  * Spec: docs/ARCHITECTURE.md §7
- * Exports: loadWords, loadManifests, eject, BUNDLED_WORDS
+ * Exports: loadWords, loadManifests, wordExamples, eject, BUNDLED_WORDS
  * Edit guide: read-only tools load manifests only ({ code: false }) — project code never runs for them.
- * Tests: packages/cli/test/escape-hatch.test.ts
+ * Tests: packages/cli/test/escape-hatch.test.ts, packages/cli/test/prompt-cli.test.ts
  */
 
 /**
@@ -113,6 +113,27 @@ export function loadWords(bundledDir: string, projectDir: string | null, options
     emitters[m.name] = mod as WordEmitter;
   }
   return { manifests, emitters };
+}
+
+/**
+ * Each word's example — its `preview.az`, the file its docs and thumbnails
+ * are built from — by word name, with the same override rule as loadWords:
+ * the project's own copy of a word brings its own preview. Read as text
+ * only; `az prompt` shows one only when it compiles clean.
+ */
+export function wordExamples(bundledDir: string, projectDir: string | null): Map<string, string> {
+  const examples = new Map<string, string>();
+  const dirs = [bundledDir];
+  if (projectDir && existsSync(projectDir) && resolve(projectDir) !== resolve(bundledDir)) dirs.push(projectDir);
+  for (const base of dirs) {
+    for (const name of wordDirs(base)) {
+      const preview = join(base, name, 'preview.az');
+      const m = readManifest(join(base, name), name);
+      if (existsSync(preview)) examples.set(m.name, readFileSync(preview, 'utf8'));
+      else examples.delete(m.name);
+    }
+  }
+  return examples;
 }
 
 /* ---- az eject ------------------------------------------------------------ */

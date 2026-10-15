@@ -4,7 +4,7 @@
  * Spec: docs/mcp.md
  * Exports: toolbox, runMcp
  * Edit guide: each tool calls the same function its CLI command does, so they cannot drift.
- * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/explain.test.ts, packages/mcp/test/palette.test.ts
+ * Tests: packages/mcp/test/mcp.test.ts, packages/mcp/test/explain.test.ts, packages/mcp/test/palette.test.ts, packages/mcp/test/prompt.test.ts
  */
 
 /**
@@ -23,7 +23,8 @@ import { compile, explain, serialiseSpec, STRUCTURE_DESCRIPTIONS, type Diagnosti
 import { colourChoices, colourChoicesJson, filterColourChoices } from '../../core/src/colour.ts';
 import { serve } from '../../mcp/src/server.ts';
 import type { KeywordEntry, Toolbox, ToolDiagnostic, WordEntry } from '../../mcp/src/tools.ts';
-import { build, compileReader, wordsFor } from './az.ts';
+import { buildPrompt, promptJson, promptOptionsFrom } from '../../core/src/prompt.ts';
+import { build, compileReader, promptInput, wordsFor } from './az.ts';
 import { initBackendEnv } from './backend-init.ts';
 import { lockOption } from './data-schema.ts';
 import { lintWords } from './lint.ts';
@@ -159,6 +160,14 @@ export function toolbox(root: string): Toolbox {
     palette: (filter) => {
       const r = filterColourChoices(colourChoices(), filter);
       return r.ok ? { ok: true, palette: colourChoicesJson(r.choices) } : r;
+    },
+
+    // Manifests and previews as data (no project code runs): the same JSON `az prompt --json` prints.
+    prompt: (raw) => {
+      const parsed = promptOptionsFrom(raw);
+      if (!parsed.ok) return parsed;
+      const r = buildPrompt(promptInput(projectWords), parsed.options);
+      return r.ok ? { ok: true, prompt: promptJson(r.prompt) } : r;
     },
 
     // Manifests only (no project code runs), like every read-only tool.
