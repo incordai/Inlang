@@ -473,7 +473,12 @@ timeouts, abort on disconnect, HMAC-tagged history), the `completions` and
 `fake` adapters (fetch only), the secret guard refusing `AZ_PUBLIC_CHAT_*`,
 and `az dev` on `fake`. Measured in `pnpm verify`, `pnpm test:chat` (three
 engines), `pnpm test:backend-db` and `pnpm verify:build` — chat-block-spec
-§19. Open: C2 (components in answers, `az backend probe`), C3 (`float`,
+§19. Open: C2 (components in answers, `az backend probe`), C2b
+(specified 2026-10-15, chat-block-spec §20: charts, tables, stat cards,
+image cards and dashboards inside answers only — no new word — with
+figures computed by the server from public tables, an "AI-generated
+figures" label on the model's own numbers, and opt-in share links that
+expire after 30 days), C3 (`float`,
 `knows`, §9's scroll polish), C4 (doctor/audit checks, moderation, a second
 adapter if wanted).
 
