@@ -24,7 +24,7 @@ import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
 import {
   ACCENT_RAMPS, FONT_STACKS, PATTERN_ORIGINS, PATTERN_REFERENCES, PATTERN_SHAPES, patternCss, patternLayers,
-  resolve, schemeCss, schemeReferences, THEMES, withAccentPair, gradientCss, GRADIENT_REFERENCES,
+  resolve, schemeCss, schemeReferences, THEMES, withAccentPair, withSeries, gradientCss, GRADIENT_REFERENCES,
   type AccentName, type PatternOrigin, type PatternShape, type Theme,
 } from '../../theme/src/index.ts';
 import { generated, generatedJson } from './generated.ts';
@@ -45,7 +45,7 @@ import type { PageNeeds } from './csp.ts';
 import { DATA_DIR, dataClient } from './data-client.ts';
 import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminValuesTs } from './data-admin.ts';
 import { ROWS_FILE, fromTables, rowsTsx } from './data-rows.ts';
-import { CHAT_FILE, chatTsx, usesChat } from './chat.ts';
+import { CHAT_FILE, SHARED_ROUTE, chatTsx, showsCards, usesChat, usesSeries, withSharedPage } from './chat.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
 import { imageSizes, sizeImages } from './image-dims.ts';
 import { bytesSource, type ByteSource } from './image-size.ts';
@@ -644,7 +644,9 @@ const hueOf = (hue: string | null | undefined): AccentName | null =>
  */
 function namedTheme(spec: Spec, override?: Theme): Theme {
   const base = override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
-  return withAccentPair(base, hueOf(spec.site.accent), hueOf(spec.site.accent2));
+  const named = withAccentPair(base, hueOf(spec.site.accent), hueOf(spec.site.accent2));
+  // A chat that draws charts gets the theme's series colours (chat-block-spec §20.4); every other site is unchanged.
+  return usesSeries(spec) ? withSeries(named) : named;
 }
 
 /** Whether the site's theme carries an accent pair — then words get the gradients. */
@@ -754,14 +756,14 @@ function iconTag(icon: IconRef | null): string {
 // The icon: `site icon`, its type read from the file (head.ts). Without one
 // the page says it has none (an empty data: URL) rather than leave the
 // browser to request /favicon.ico — a 404 and a console error on every view.
-function indexHtml(spec: Spec, admin = false, description: string | null = null, icon: IconRef | null = null): string {
+function indexHtml(spec: Spec, admin = false, description: string | null = null, icon: IconRef | null = null, noindex = admin): string {
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-${admin ? '    <meta name="robots" content="noindex, nofollow" />\n' : ''}${description ? `    <meta name="description" content="${escapeHtml(description)}" />\n` : ''}    ${iconTag(icon)}
+${noindex ? '    <meta name="robots" content="noindex, nofollow" />\n' : ''}${description ? `    <meta name="description" content="${escapeHtml(description)}" />\n` : ''}    ${iconTag(icon)}
     <title>${admin ? 'Admin · ' : ''}${escapeHtml(spec.site.name)}</title>
   </head>
   <body>
@@ -907,7 +909,8 @@ function pageNeeds(
   const plan = authPlan(spec);
   const connect = plan?.adapter === 'hosted' ? [HOSTED_ENV[0]] : plan?.adapter === 'azbackend' ? [BACKEND_ENV[0]] : [];
   const images = (spec.site.data ?? []).some((t) => t.fields.some((f) => f.type === 'image')) ? [BACKEND_ENV[0]] : [];
-  const reads = new Set(spec.pages.filter((p) => p.blocks.some((b) => b.from)).map((p) => p.route));
+  // A `from` block reads rows; a chat showing image cards may show a row's image (chat-block-spec §20.6).
+  const reads = new Set(spec.pages.filter((p) => p.blocks.some((b) => b.from) || showsCards(p.blocks)).map((p) => p.route));
   const has = (test: (n: EmittedNode) => boolean) => {
     const walk = (n: EmittedNode | string): boolean => typeof n !== 'string' && (test(n) || (n.children ?? []).some(walk));
     return (nodes: readonly EmittedNode[]) => nodes.some(walk);
@@ -961,7 +964,9 @@ export function emit(spec: Spec, options: EmitOptions = {}): EmittedFile[] {
   return emitProject(spec, options).files;
 }
 
-export function emitProject(spec: Spec, options: EmitOptions = {}): EmittedProject {
+export function emitProject(source: Spec, options: EmitOptions = {}): EmittedProject {
+  // A chat site's shared-answer page is one more page from here on (chat-block-spec §20.7).
+  const spec = withSharedPage(source);
   const named = namedTheme(spec, options.theme);
   const pattern = sitePattern(spec, named);
   const theme = themeFor(named, spec.site.fonts, pattern !== null);
@@ -1235,7 +1240,8 @@ export default defineConfig({
         include: ['src'],
       }, null, 2) + '\n',
     },
-    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec, adminFiles.has(path), descriptions.get(path) ?? null, icon) })),
+    // A shared answer (chat-block-spec §20.7) is kept out of search results, as admin pages are.
+    ...htmlFiles(spec).map((path) => ({ path, content: indexHtml(spec, adminFiles.has(path), descriptions.get(path) ?? null, icon, adminFiles.has(path) || path === htmlFileFor(SHARED_ROUTE)) })),
     {
       path: 'AZ.md',
       content: azMd({

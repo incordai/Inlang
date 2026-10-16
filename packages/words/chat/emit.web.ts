@@ -9,6 +9,9 @@
  *       a quoted pricing block as its page renders it ([data-az-chat-quote=/route#n][data-az-chat-plans=n]; its behaviour
  *       marks parked as [data-az-chat-behaviour]), an faq or feature item list as those
  *       words render a `from` template (markers where the text goes), a call to action per kind of destination ·
+ *       and (C2b, figures.ts) the paint, figure, table, stats, cards, dashboard, unavailable, asset and share parts ·
+ *     (the shared-answer page, chat.shared: the title an h1) p.az-chat-note + h2.az-chat-shared-heading + the transcript, templates and parts + p.az-chat-error +
+ *       button.az-chat-delete[data-az-chat-delete] (hidden; shown for the delete link) — no form, no suggestions ·
  *     ul.az-chat-asks[hidden][data-az-chat-asks] > li.az-chat-ask-item > button.az-action[data-az-chat-ask] ·
  *     form.az-chat-form[hidden][data-az-chat-form] > label.az-chat-label + textarea.az-chat-input#az-chat-input ·
  *       div.az-chat-controls > Send [data-az-chat-send] (submit, primary) + Stop [data-az-chat-stop] (button, secondary, hidden) ·
@@ -49,6 +52,7 @@
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { SpecFrom } from '../../core/src/spec-block.ts';
 import { framed, fromMark, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { assetParts, richParts, sharePart } from './figures.ts';
 
 /** The shell's fixed copy; the runtime's copy lives in overlay chat-logic.ts. */
 export const CHAT_COPY = {
@@ -63,6 +67,11 @@ export const CHAT_COPY = {
   noscript: 'Turn on JavaScript to ask a question.',
   /** The name a composed list's template is made under; never shown. */
   answer: 'answer',
+  /** The shared-answer page (chat-block-spec §20.7). */
+  shared: 'A shared answer',
+  sharedIntro: 'An answer from this site’s AI assistant, shared by a visitor.',
+  sharedDelete: 'Delete this shared answer',
+  sharedAnswer: 'The answer',
 } as const;
 
 /** chat-block-spec §4.2: a visitor message is at most this many characters. */
@@ -84,6 +93,7 @@ function config(block: SpecBlock): string {
     limit: Number(block.props.limit ?? 20),
     signin: block.chat?.signin ?? null,
     ...(answer ? { show: answer.show, to: answer.destinations } : {}),
+    ...(block.chat?.shared ? { shared: true } : {}),
   });
 }
 
@@ -195,6 +205,8 @@ function parts(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
       out.push(part(`cta-${kind}`, action));
     }
   }
+  // C2b (§20): charts, tables, stats, image cards and dashboards, the gallery images a card may name, and Share.
+  out.push(...richParts(answer, ctx), ...assetParts(answer, ctx), sharePart(ctx));
   return {
     tag: 'div',
     attrs: { class: 'az-chat-parts', hidden: 'hidden', 'data-az-chat-parts': '' },
@@ -335,6 +347,43 @@ function notes(block: SpecBlock, ctx: EmitContext): EmittedNode[] {
   ];
 }
 
+/**
+ * The shared-answer page's shell (chat-block-spec §20.7): read-only — no
+ * input, no suggestions, no Share. The runtime reads the link's fragment,
+ * fetches that one answer and draws it with the same templates; with the
+ * delete link's token it offers Delete.
+ */
+function sharedShell(ctx: EmitContext, components: EmittedNode | null): EmittedNode[] {
+  const t = ctx.theme;
+  const line = { margin: 0, fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'] };
+  const del = control(CHAT_COPY.sharedDelete, 'data-az-chat-delete', ctx);
+  return [
+    { tag: 'p', attrs: { class: 'az-chat-note', 'data-az-chat-note': '' }, style: { ...line, color: t.color.muted }, children: [CHAT_COPY.sharedIntro] },
+    // The page's h1 is the shell's title; the answer's own headings (h3) sit under this one.
+    {
+      tag: 'h2', attrs: { class: 'az-chat-shared-heading' },
+      style: { margin: 0, fontSize: t.typeSize.base, lineHeight: t.type['leading-tight'], color: t.color.text },
+      children: [CHAT_COPY.sharedAnswer],
+    },
+    {
+      tag: 'ol',
+      attrs: { class: 'az-chat-transcript', 'aria-label': CHAT_COPY.transcript, 'data-az-chat-transcript': '', 'aria-busy': 'true' },
+      style: { display: 'grid', gap: px(t.space[12]), margin: 0, padding: 0 },
+      children: [],
+    },
+    {
+      tag: 'ol',
+      attrs: { class: 'az-chat-templates', hidden: 'hidden', 'data-az-chat-templates': '' },
+      children: [message('visitor', '', ctx), message('site', '', ctx)],
+    },
+    ...(components ? [components] : []),
+    { tag: 'p', attrs: { class: 'az-chat-error', hidden: 'hidden', 'data-az-chat-error': '' }, style: { ...line, color: t.color.danger } },
+    del,
+    { ...visuallyHidden(''), tag: 'p', attrs: { class: 'az-visually-hidden az-chat-status', role: 'status', 'data-az-chat-status': '' }, children: [] },
+    { tag: 'noscript', children: [{ tag: 'p', attrs: { class: 'az-chat-noscript' }, style: { ...line, color: t.color.muted }, children: [CHAT_COPY.noscript] }] },
+  ];
+}
+
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'panel';
@@ -357,7 +406,8 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     below: { sm: { paddingInline: px(t.size['gutter-sm']), paddingBlock: px(t.space[48]) } },
     children: [
       {
-        tag: 'h2',
+        // The shared-answer page has nothing above it: its heading is the page's own (§20.7).
+        tag: block.chat?.shared ? 'h1' : 'h2',
         attrs: { id: 'az-chat-title', class: 'az-chat-title' },
         style: {
           fontSize: t.typeSize['2xl'],
@@ -367,13 +417,13 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
           maxWidth: `${t.size['measure-display']}ch`,
           margin: `0 0 ${px(t.space[24])}`,
         },
-        children: [block.props.title ?? 'Ask a question'],
+        children: [block.chat?.shared ? CHAT_COPY.shared : block.props.title ?? 'Ask a question'],
       },
       {
         tag: 'div',
         attrs: { class: 'az-chat-panel' },
         style: { display: 'grid', gap: px(t.space[16]), maxWidth: `${t.size['measure-body']}ch` },
-        children: [
+        children: block.chat?.shared ? sharedShell(ctx, components) : [
           {
             tag: 'ol',
             attrs: { class: 'az-chat-transcript', 'aria-label': CHAT_COPY.transcript, 'data-az-chat-transcript': '' },

@@ -36,6 +36,7 @@ import { randomBytes } from 'node:crypto';
 import { createApp, type ChatRoutes, type DataRoutes } from '../../backend/src/server/app.ts';
 import { createAdapter } from '../../backend/src/server/chat-adapters.ts';
 import { createChat, parseChatContext } from '../../backend/src/server/chat.ts';
+import { createQueries, figuresRun } from '../../backend/src/server/chat-query.ts';
 import { migrateChat } from '../../backend/src/server/chat-usage.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
 import { createData, parseAdminEmails } from '../../backend/src/server/data-api.ts';
@@ -313,6 +314,7 @@ export async function startDevBackend(
   const db = await openSqlite(config.sqlitePath);
   await migrate(db);
   let data: DataRoutes | undefined;
+  let dataTables: ReturnType<typeof loadTables> | undefined;
   let ownedRows: string[] = [];
   if (dataJson !== undefined) {
     // AZ_ADMIN_EMAILS in backend.env names the dev admins (data-spec §11).
@@ -326,6 +328,7 @@ export async function startDevBackend(
       print(`az dev: applied data step ${step.version} to ${DEV_DIR}/dev.db: ${step.summary.join('; ')}${step.destructive ? ' (data dropped or changed)' : ''}`);
     }
     const tables = loadTables(model);
+    dataTables = tables;
     ownedRows = ownedRowDeletes(db.dialect, tables);
     data = createData({ db, tables, admins: admins.emails });
   }
@@ -334,6 +337,8 @@ export async function startDevBackend(
     await migrateChat(db);
     const context = parseChatContext(chat.context);
     if (typeof context === 'string') throw new Error(`the dev backend cannot start — server/chat/context.json ${context}`);
+    // A chat's figures from the dev tables (chat-block-spec §20.5), as the generated server does.
+    const figures = dataTables ? figuresRun(createQueries({ db, database: db.dialect, publicBase: config.publicUrl }), dataTables, context.tables) : undefined;
     let adapter;
     try {
       adapter = await createAdapter(config.chat);
@@ -342,7 +347,7 @@ export async function startDevBackend(
     }
     chatRoutes = createChat({
       config: config.chat, secret: config.secret, db, prompt: chat.prompt, context, adapter,
-      log: (line) => print(`backend: ${line}`),
+      log: (line) => print(`backend: ${line}`), ...(figures ? { figures } : {}),
     });
     print(`az dev: chat answers from ${config.chat.api === 'fake' ? `the demo script in ${DEV_DIR}/chat-demo.json` : 'the model set in .az-dev/backend.env'}`);
   }

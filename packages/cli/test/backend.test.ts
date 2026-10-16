@@ -61,11 +61,20 @@ test('a site that declares a backend gets server/ with every source file copied 
   const withChat = build({ source: c.file, outDir: c.out, wordsDir: WORDS });
   assert.equal(withChat.ok, true, withChat.report);
   for (const f of readdirSync(src)) {
-    if (f.startsWith('data-')) { assert.ok(!existsSync(join(c.out, 'server/src', f)), `chat, no tables: ${f}`); continue; }
+    // chat-query.ts reads the tables (chat-block-spec §20.5): with chat and tables only.
+    if (f.startsWith('data-') || f === 'chat-query.ts') { assert.ok(!existsSync(join(c.out, 'server/src', f)), `chat, no tables: ${f}`); continue; }
     assert.equal(readFileSync(join(c.out, 'server/src', f), 'utf8'), readFileSync(join(src, f), 'utf8'), `with chat: ${f}`);
   }
   for (const f of ['chat/prompt.txt', 'chat/context.json']) assert.ok(existsSync(join(c.out, 'server', f)), `with chat: ${f}`);
   assert.ok(!existsSync(join(p.out, 'server/chat')), 'CONTROL: without chat, no server/chat/');
+  assert.ok(!existsSync(join(d.out, 'server/src/chat-query.ts')), 'CONTROL: tables without chat, no chat figures');
+
+  // Chat and tables: the figures module too, verbatim.
+  const both = project(SITE(`${BACKEND}    model default\n  data notes\n    title text required\n    allow anyone read\n`).replace('    title "Hi"\n', '    title "Hi"\n  chat panel\n'));
+  assert.equal(az('backend', 'schema', both.file).status, 0);
+  const withBoth = build({ source: both.file, outDir: both.out, wordsDir: WORDS });
+  assert.equal(withBoth.ok, true, withBoth.report);
+  assert.equal(readFileSync(join(both.out, 'server/src/chat-query.ts'), 'utf8'), readFileSync(join(src, 'chat-query.ts'), 'utf8'));
 });
 
 test('CONTROL: a site without one gets no server/ at all', () => {

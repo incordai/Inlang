@@ -1,8 +1,8 @@
 /**
  * @az module chat
  * Purpose: the file-wide rules of a `chat` block: a backend that talks to a model, what an answer may show and quote and link to, who may ask.
- * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §14 (C1, C2)
- * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_REFUSED, chatOf, chatAnswers, withAnswer, chatDiagnostics, ChatAnswers
+ * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §14 (C1, C2, C2b), §20
+ * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, CHAT_REFUSED, SHARED_ROUTE, chatOf, chatAnswers, withAnswer, chatDiagnostics, sharedRouteDiagnostics, ChatAnswers
  * Edit guide: rules that need the whole file live here; a rule about one chat block alone is a word.json check (AZ2220–AZ2239).
  * Tests: packages/core/test/chat-decl.test.ts, packages/core/test/chat-answer-decl.test.ts
  */
@@ -25,14 +25,23 @@
 
 import type { Diagnostic, Pos } from './lex.ts';
 import type { Arg } from './parse.ts';
-import type { SpecBlock, SpecChatAnswer } from './spec-block.ts';
+import type { SpecBlock, SpecChatAnswer, SpecChatTable } from './spec-block.ts';
+import type { SpecTable } from './data.ts';
+import { CURRENCY_DIGITS } from './currencies.ts';
 import { LIST_SEPARATOR } from './link.ts';
+import { isFromMark } from './emit-contract.ts';
 
 /** The block's name, so the rules below never repeat it as a bare string. */
 export const CHAT_WORD = 'chat';
 
-/** The words an answer may contain (chat-block-spec §3.2), in this order everywhere. */
-export const CHAT_ANSWER_WORDS: readonly string[] = ['pricing', 'faq', 'cta', 'feature'];
+/** The rich components (chat-block-spec §20): answer-only, never page words. */
+export const CHAT_RICH_WORDS: readonly string[] = ['chart', 'table', 'stats', 'cards', 'dashboard'];
+
+/** The words an answer may contain (chat-block-spec §3.2, §20.1), in this order everywhere. */
+export const CHAT_ANSWER_WORDS: readonly string[] = ['pricing', 'faq', 'cta', 'feature', ...CHAT_RICH_WORDS];
+
+/** The page the build makes for a shared answer (§20.7); an author's page there is AZ1259. */
+export const SHARED_ROUTE = '/chat/shared';
 
 /** The one word an answer quotes rather than composes (§5.3, L8): its prices are always the author's. */
 const QUOTED_WORD = 'pricing';
@@ -79,6 +88,24 @@ export function chatOf(route: string, allow: string | undefined, login: string |
 export interface ChatAnswers {
   readonly quotes: SpecChatAnswer['quotes'];
   readonly destinations: readonly string[];
+  /** Gallery images on public pages with their author's alt, keyed `i1`, `i2`… in page order (§20.6). */
+  readonly images: NonNullable<SpecChatAnswer['images']>;
+  /** Tables anyone may read, their public fields (§20.5). */
+  readonly tables: readonly SpecChatTable[];
+}
+
+/** The field types a figure may be asked of: measured, grouped or filtered (server chat-query.ts). */
+const FIGURE_TYPES: ReadonlySet<string> = new Set(['text', 'longtext', 'number', 'money', 'flag', 'date', 'datetime', 'choice', 'image']);
+
+/** A table chat may ask figures of — read by anyone, owner rows never — with only its public fields. */
+function chatTable(t: SpecTable): SpecChatTable | null {
+  if (!t.rules.read.includes('anyone')) return null;
+  const fields = t.fields.filter((f) => !f.private && FIGURE_TYPES.has(f.type)).map((f) => ({
+    name: f.name, type: f.type,
+    ...(f.choices ? { choices: f.choices } : {}),
+    ...(f.currency ? { currency: f.currency, digits: CURRENCY_DIGITS[f.currency] ?? 2 } : {}),
+  }));
+  return fields.length > 0 ? { name: t.name, fields } : null;
 }
 
 /** A block and every fill under it, depth first. */
@@ -99,7 +126,7 @@ const everyBlock = (b: SpecBlock): SpecBlock[] => [b, ...b.children.flatMap(ever
  */
 export function chatAnswers(
   pages: readonly { readonly route: string; readonly blocks: readonly SpecBlock[] }[],
-  inherited: readonly SpecBlock[], protect: ReadonlySet<string>,
+  inherited: readonly SpecBlock[], protect: ReadonlySet<string>, tables: readonly SpecTable[] = [],
 ): ChatAnswers {
   const routes = new Set(pages.map((p) => p.route));
   const quotes: { route: string; n: number; block: SpecBlock }[] = [];
@@ -119,7 +146,20 @@ export function chatAnswers(
       }
     }
   }
-  return { quotes, destinations: [...destinations].sort() };
+  // A gallery's images, written as files with the author's alt: the only images an answer's card may show (§20.6).
+  const images: { key: string; src: string; alt: string }[] = [];
+  for (const b of visible.flatMap((p) => p.blocks).flatMap(everyBlock)) {
+    // A file the build copies — not a row marker (a `from` gallery), not an address.
+    const file = b.args[0]?.value ?? '';
+    if (b.word !== 'image' || (b.args[0]?.kind !== 'path' && b.args[0]?.kind !== 'string') || file === '' || isFromMark(file) || file.includes(':')) continue;
+    const alt = (b.props.alt ?? '').trim();
+    if (alt === '' || images.some((i) => i.src === file)) continue;
+    images.push({ key: `i${images.length + 1}`, src: file, alt });
+  }
+  return {
+    quotes, destinations: [...destinations].sort(), images,
+    tables: tables.map(chatTable).filter((t): t is SpecChatTable => t !== null),
+  };
 }
 
 /** The `show` words a chat block lists, in the closed list's order — only the words an answer may hold. */
@@ -137,6 +177,7 @@ export function withAnswer(block: SpecBlock, answers: ChatAnswers): SpecBlock {
   if (block.word !== CHAT_WORD || !block.chat) return block;
   const show = showOf(block.props);
   if (show.length === 0) return block;
+  const rich = show.some((w) => CHAT_RICH_WORDS.includes(w));
   return {
     ...block,
     chat: {
@@ -144,7 +185,9 @@ export function withAnswer(block: SpecBlock, answers: ChatAnswers): SpecBlock {
       answer: {
         show,
         quotes: show.includes(QUOTED_WORD) ? answers.quotes : [],
-        destinations: show.includes('cta') ? answers.destinations : [],
+        destinations: show.includes('cta') || show.includes('cards') ? answers.destinations : [],
+        ...(show.includes('cards') ? { images: answers.images } : {}),
+        ...(rich ? { tables: answers.tables } : {}),
       },
     },
   };
@@ -174,6 +217,10 @@ export function chatDiagnostics(
     }
     const show = c.props.show;
     if (show) {
+      const words = show.value.split(LIST_SEPARATOR).filter(Boolean);
+      if (words.includes('dashboard') && !words.some((w) => w !== 'dashboard' && CHAT_RICH_WORDS.includes(w))) {
+        err('AZ1270', `${CHAT_WORD}: show dashboard, but nothing it can hold — add chart, table, stats or cards to show`, show.pos);
+      }
       for (const word of show.value.split(LIST_SEPARATOR).filter(Boolean)) {
         if (CHAT_ANSWER_WORDS.includes(word)) {
           if (word === QUOTED_WORD && quotable === 0) {
@@ -194,4 +241,16 @@ export function chatDiagnostics(
     warn('AZ1251', `backend: model default but no page shows chat — remove it, or add to a page: chat panel`, model.pos);
   }
   return out;
+}
+
+/**
+ * AZ1259: a site with a chat owns its shared-answer page (§20.7), as a site
+ * with data owns /admin (AZ1268) — in any case, since `/Chat/Shared` is the
+ * same folder on a case-insensitive disk.
+ */
+export function sharedRouteDiagnostics(hasChat: boolean, pages: readonly { readonly route: string | undefined; readonly pos: Pos }[]): Diagnostic[] {
+  if (!hasChat) return [];
+  return pages.filter((p) => p.route?.toLowerCase() === SHARED_ROUTE).map((p) => ({
+    code: 'AZ1259', message: `page: '${p.route}' is the shared-answer page chat generates — use another route`, pos: p.pos, severity: 'error' as const,
+  }));
 }

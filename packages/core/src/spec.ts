@@ -31,7 +31,7 @@ import { LIST_SEPARATOR, type LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
 import { buildFrom, GALLERY_FROM_REFUSED, type FromContext } from './from.ts';
 import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
-import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, withAnswer } from './chat.ts';
+import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, sharedRouteDiagnostics, withAnswer } from './chat.ts';
 
 /**
  * Where each block was written. A SpecBlock carries no position — it is the
@@ -484,7 +484,11 @@ export function buildSpec(
   // ---- chat (chat-block-spec §3.4, §5.3, §6.2): its backend, what it may show and quote and link to, who asks
   // A chat's answers can quote any page's pricing and link to any declared
   // destination, so they are known only once every page is built.
-  const answers = chatAnswers(built, inherited, protect);
+  const answers = chatAnswers(built, inherited, protect, tables);
+  diagnostics.push(...sharedRouteDiagnostics(
+    pageWords.some((p) => p.children.some((w) => w.word === CHAT_WORD)),
+    pageWords.map((p) => ({ route: p.args[0]?.value, pos: p.args[0]?.pos ?? p.pos })),
+  ));
   const pages: SpecPage[] = built.map((p) => ({
     ...p,
     blocks: p.blocks.map((b) => {

@@ -55,7 +55,7 @@ None in this release.
 | `greeting` | string |  |  | 1–200 characters | the first message, shown before anyone asks; never sent to the model |
 | `allow` | enum | `signedin` / `anyone` | `signedin` |  | who may send a message; a signed-out visitor sees **Sign in to ask** |
 | `limit` | int | 1–50 | `20` |  | questions per conversation before the panel says to start a new chat |
-| `show` | list | `pricing` `faq` `cta` `feature` |  | at most 4 | what an answer may hold besides text (below); a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255 |
+| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` |  | at most 9 | what an answer may hold besides text (below); a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270 |
 
 ## Children
 
@@ -85,6 +85,23 @@ server's README, written by `az build`, lists them all. `az dev` runs the
 | `faq` | **composed**: 1–6 questions and answers the model writes, drawn by the faq word's own item markup; they open and close as on any page |
 | `cta` | one button the model labels, to a destination this `.az` file already declares (a page, a written `route#anchor`, an exact `https:`, `mailto:` or `tel:` value) |
 | `feature` | **composed**: 1–6 short items, drawn by the feature word's own item markup |
+
+And the rich components (chat-block-spec §20), which exist only inside
+answers — they are not page words:
+
+| Word | In an answer |
+|---|---|
+| `chart` | a bar, line, area, pie or donut chart in SVG drawn by the page, in the theme's six series colours (3:1 on every ground) with a pattern, marker or dash per series, a one-sentence summary and the same figures as a table. **Figures `from` a public table** (`chart bar "Orders" from orders count by status`) are the server's exact count; numbers the model writes carry a visible **"AI-generated figures"** label |
+| `table` | a table `from` a public table's columns, or the model's own (labelled); real headers, sortable when asked |
+| `stats` | 1–4 key figures with their change, in a sign, a glyph and words — never colour alone |
+| `cards` | 1–4 cards: a title, text, a link to a declared destination, and an image that is only a gallery image of this site (by key) or a public row's image — never an address the model writes |
+| `dashboard` | 2–6 stats, charts, tables or cards under one title |
+
+A visitor can **share** one finished answer: only then is that answer
+stored, under an unguessable link to `/chat/shared`, for 30 days
+(`AZ_CHAT_SHARE_DAYS`), with a delete link shown once; the question is kept
+only if they tick "Include my question". The shared page is read-only and
+`noindex`.
 
 The model writes these as a few lines of `.az` (`show pricing /pricing`,
 `faq` with `item "…"` and `text "…"`, `cta "Talk to us" /contact`); the
@@ -120,8 +137,9 @@ The full floor is in the spec (§9).
 
 ## Status
 
-C1 and C2 of the spec: a `panel` whose answers are prose and the components
-`show` lists. Before going live, `az backend probe server` asks the configured
+C1, C2 and C2b of the spec: a `panel` whose answers are prose and the
+components `show` lists — the site's own blocks, and charts, tables, stats,
+image cards and dashboards — with share links. Before going live, `az backend probe server` asks the configured
 model the real prompt, one question per component, and reports what it streamed
 and what the filter dropped.
 

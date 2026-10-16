@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { blocksFor, compile, formatDiagnostics, type Manifest } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
-import { resolve, THEMES } from '../../theme/src/index.ts';
+import { resolve, THEMES, withSeries } from '../../theme/src/index.ts';
 import { emitBlock } from '../../target-web/src/tree.ts';
 import { WEB_EMITTERS } from '../registry.ts';
 
@@ -215,4 +215,77 @@ test('CONTROL: the parts run nothing either — no script, image, inline handler
     assert.ok(!['script', 'img', 'iframe', 'object', 'embed'].includes(n.tag), n.tag);
     for (const a of Object.keys(n.attrs ?? {})) assert.ok(!/^on/i.test(a) && a !== 'style', `${n.tag} ${a}`);
   }
+});
+
+/* ---- C2b: the rich components' templates (chat-block-spec §20.4, §20.6, §20.7) ---- */
+
+const RICH_SITE = ['az 1', 'site aurora', '  auth', '    adapter azbackend', '  backend', '    database sqlite', '    email smtp', '    model default',
+  'page /', '  hero center', '    title "Aurora"', '  gallery grid', '    image ./a.webp', '      alt "A workbench"', '    image ./b.webp', '      alt ""',
+  '  chat panel', '    show chart table stats cards dashboard', '    allow anyone', ''].join('\n');
+const SERIES_THEME = resolve(withSeries(THEMES.midnight), 'dark') as unknown as ThemeLike;
+
+function richChat(): EmittedNode {
+  const r = compile(RICH_SITE, { manifests });
+  assert.ok(r.ok && r.spec, formatDiagnostics(r.diagnostics, 'site.az'));
+  const block = blocksFor(r.spec, r.spec.pages[0]).find((b) => b.word === 'chat')!;
+  return emitBlock(block, SERIES_THEME, WEB_EMITTERS, (p) => p, { name: 'aurora' });
+}
+
+test('the paint template: each series part painted with its series token, as a class — never an attribute', () => {
+  const [paint] = partOf(richChat(), 'paint');
+  const painted = marked(paint, 'data-az-chat-paint');
+  for (let n = 1; n <= 6; n++) {
+    const fill = painted.find((p) => p.attrs?.['data-az-chat-paint'] === `fill-${n}`)!;
+    assert.equal(fill.style?.fill, SERIES_THEME.color[`series-${n}`]);
+    assert.equal(fill.attrs?.fill, undefined);
+    const line = painted.find((p) => p.attrs?.['data-az-chat-paint'] === `line-${n}`)!;
+    assert.equal(line.style?.stroke, SERIES_THEME.color[`series-${n}`]);
+    // Lines past the first differ by their dash too: colour is never the only signal.
+    assert.equal(Boolean(line.style?.strokeDasharray), n > 1);
+  }
+  assert.equal(painted.find((p) => p.attrs?.['data-az-chat-paint'] === 'tick')!.style?.fill, SERIES_THEME.color.muted);
+});
+
+test('the figure frame carries the AI label as fixed copy, and the source line; the table its real headers', () => {
+  const root = richChat();
+  const [figure] = partOf(root, 'figure');
+  assert.deepEqual(texts(one(figure, 'data-az-chat-ai')), ['AI-generated figures']);
+  assert.ok(texts(one(figure, 'data-az-chat-source')).join('').startsWith('From the site’s data'));
+  const [table] = partOf(root, 'table');
+  const th = walk(table).filter((n) => n.tag === 'th');
+  assert.ok(th.length === 2 && th.every((n) => n.attrs?.scope === 'col'));
+  assert.ok(walk(table).some((n) => n.tag === 'caption'));
+  assert.equal(walk(table)[1].attrs?.tabindex, '0', 'a narrow table scrolls in a region the keyboard reaches');
+});
+
+test('an image card may show only a gallery image with its author\'s alt, by key; the row image template has no address', () => {
+  const root = richChat();
+  const assets = partOf(root, 'asset');
+  assert.deepEqual(assets.map((a) => a.attrs?.['data-az-chat-asset']), ['i1'], 'the image without alt is not offered');
+  const img = (assets[0].children ?? [])[0] as EmittedNode;
+  assert.deepEqual([img.tag, img.attrs?.src, img.attrs?.alt], ['img', './a.webp', 'A workbench']);
+  const row = (partOf(root, 'row-image')[0].children ?? [])[0] as EmittedNode;
+  assert.deepEqual([row.tag, row.attrs?.src, row.attrs?.alt], ['img', undefined, '']);
+});
+
+test('the share control: a button, an unticked choice to include the question, and read-only link fields', () => {
+  const [share] = partOf(richChat(), 'share');
+  const open = marked(share, 'data-az-chat-slot').find((n) => n.attrs?.['data-az-chat-slot'] === 'open')!;
+  assert.deepEqual([open.tag, open.attrs?.type, open.attrs?.['aria-expanded']], ['button', 'button', 'false']);
+  const include = marked(share, 'data-az-chat-slot').find((n) => n.attrs?.['data-az-chat-slot'] === 'include')!;
+  assert.equal(include.attrs?.type, 'checkbox');
+  assert.equal(include.attrs?.checked, undefined, 'the question is left out unless chosen');
+  for (const name of ['url', 'delete']) {
+    const field = marked(share, 'data-az-chat-slot').find((n) => n.attrs?.['data-az-chat-slot'] === name)!;
+    assert.equal(field.attrs?.readonly, 'readonly');
+  }
+});
+
+test('CONTROL: the rich parts run nothing — no script, no inline handler, no style attribute; images only the two templates', () => {
+  const nodes = walk(one(richChat(), 'data-az-chat-parts'));
+  for (const n of nodes) {
+    assert.ok(!['script', 'iframe', 'object', 'embed'].includes(n.tag), n.tag);
+    for (const a of Object.keys(n.attrs ?? {})) assert.ok(!/^on/i.test(a) && a !== 'style', `${n.tag} ${a}`);
+  }
+  assert.equal(nodes.filter((n) => n.tag === 'img').length, 2);
 });

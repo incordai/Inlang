@@ -56,6 +56,12 @@ export interface SpecChat {
    * `show`; absent for a prose-only chat, so it serialises as before.
    */
   readonly answer?: SpecChatAnswer;
+  /**
+   * The build's shared-answer page (chat-block-spec §20.7, target-web
+   * chat.ts withSharedPage): a read-only shell that shows one stored answer.
+   * Absent on every chat an author wrote.
+   */
+  readonly shared?: true;
 }
 
 /** The components a chat's answers may hold, the blocks they may quote, where they may link (core/src/chat.ts). */
@@ -64,8 +70,18 @@ export interface SpecChatAnswer {
   readonly show: readonly string[];
   /** With `pricing`: every pricing block a signed-out visitor can see, by page and position — the blocks an answer quotes. */
   readonly quotes: readonly { readonly route: string; readonly n: number; readonly block: SpecBlock }[];
-  /** With `cta`: the destinations the .az file declares (chat-block-spec §6.2), sorted. */
+  /** With `cta` (or `cards`, whose links follow the same list): the destinations the .az file declares (chat-block-spec §6.2), sorted. */
   readonly destinations: readonly string[];
+  /** With `cards`: the build images an image card may name — a gallery image on a public page with its author's alt (§20.6). */
+  readonly images?: readonly { readonly key: string; readonly src: string; readonly alt: string }[];
+  /** With a rich word: the tables an answer may take figures from — read by anyone, public fields only (§20.5). */
+  readonly tables?: readonly SpecChatTable[];
+}
+
+/** A table as chat may ask figures of it: its public fields, a money field's minor-unit digits. */
+export interface SpecChatTable {
+  readonly name: string;
+  readonly fields: readonly { readonly name: string; readonly type: string; readonly choices?: readonly string[]; readonly currency?: string; readonly digits?: number }[];
 }
 
 /**

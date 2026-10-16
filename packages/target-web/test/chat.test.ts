@@ -71,3 +71,31 @@ test('CONTROL: a site without a chat panel emits exactly what it did before', ()
   assert.equal(p.files.some((f) => f.path === CHAT_FILE), false);
   assert.doesNotMatch(p.files.find((f) => f.path === 'src/App.tsx')!.content, /Chat/);
 });
+
+/* ---- C2b (chat-block-spec §20.4, §20.6, §20.7) ---------------------------- */
+
+const file = (p: ReturnType<typeof project>, path: string) => p.files.find((f) => f.path === path)?.content ?? '';
+
+test('a chat that shows components gets the shared-answer page: read-only, noindex, its parts every chat\'s', () => {
+  const p = project(SITE('    model default\n', '  chat panel\n    show chart cta\n    allow anyone\n'));
+  const html = file(p, 'chat/shared/index.html');
+  assert.match(html, /<meta name="robots" content="noindex, nofollow" \/>/);
+  assert.doesNotMatch(file(p, 'index.html'), /noindex/, 'CONTROL: the chat page itself is indexed as before');
+  const app = file(p, 'src/App.tsx');
+  assert.match(app, /"\/chat\/shared"/);
+  assert.match(app, /\\"shared\\":true/, 'the shell says it is the shared page');
+  assert.match(app, /A shared answer/);
+});
+
+test('CONTROL: a prose-only chat gets no shared page; a site without chat neither', () => {
+  assert.equal(file(project(SITE('    model default\n', '  chat panel\n')), 'chat/shared/index.html'), '');
+  assert.equal(file(project(SITE('', '')), 'chat/shared/index.html'), '');
+});
+
+test('a chat that draws charts gets the theme\'s six series colours, in both schemes; every other site does not', () => {
+  const charts = file(project(SITE('    model default\n', '  chat panel\n    show chart\n')), 'src/theme.css');
+  for (let n = 1; n <= 6; n++) assert.match(charts, new RegExp(`--az-color-series-${n}: `));
+  assert.ok((charts.match(/--az-color-series-1: /g) ?? []).length >= 2, 'light and dark');
+  assert.doesNotMatch(file(project(SITE('    model default\n', '  chat panel\n    show faq\n')), 'src/theme.css'), /series-/);
+  assert.doesNotMatch(file(project(SITE('', '')), 'src/theme.css'), /series-/);
+});

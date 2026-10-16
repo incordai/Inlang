@@ -328,8 +328,10 @@ export function build(options: BuildOptions): BuildOutcome {
   const generated = [
     ...project.files,
     // Its rows module only with a `from` block (data-spec §10.3), its chat module only with a chat panel.
-    ...copied('../../overlay/src/runtime/', RUNTIME_DIR, (f) => (project.rows || !ROWS_RUNTIME_FILES.includes(f))
-      && (project.chat || !CHAT_RUNTIME_FILES.includes(f))),
+    // A file both lists name (rows-logic.ts: a row image's srcset, chat-block-spec §20.6) ships with either.
+    ...copied('../../overlay/src/runtime/', RUNTIME_DIR, (f) => (project.rows && ROWS_RUNTIME_FILES.includes(f))
+      || (project.chat && CHAT_RUNTIME_FILES.includes(f))
+      || (!ROWS_RUNTIME_FILES.includes(f) && !CHAT_RUNTIME_FILES.includes(f))),
     ...copied('../../core/src/', GUARD_DIR, (f) => f === 'secrets.ts'),
     // And the walk that reads back what the build wrote (az audit's too).
     ...copied('./', GUARD_DIR, (f) => f === 'shipped.ts'),
@@ -348,7 +350,9 @@ export function build(options: BuildOptions): BuildOutcome {
       ? [...backendFiles(result.spec.site.name, result.spec.site.backend,
           tables ? { tables, steps: readLockSteps(options.source) } : undefined, chat),
          ...copied('../../backend/src/server/', `${SERVER_DIR}/src`, (f) => (tables !== undefined || !f.startsWith('data-'))
-           && (chat !== undefined || !f.startsWith('chat')))]
+           && (chat !== undefined || !f.startsWith('chat'))
+           // A chat's figures read the tables (chat-block-spec §20.5): with both only.
+           && (f !== 'chat-query.ts' || (chat !== undefined && tables !== undefined)))]
       : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
   // A preview says so on every page, with the whole file's problems.
