@@ -26,7 +26,14 @@
  *   - keeps the conversation in the visitor's own browser (C5,
  *     chat-history.ts): capped, expiring after 7 days, restored on the next
  *     visit and offered with a visible Clear history; where storage is
- *     refused it is kept in memory only, as before;
+ *     refused it is kept in memory only, as before. It is bound to who read
+ *     the session — a salted hash of the account, or the browser for a
+ *     visitor nobody signed in — and cleared before anything is drawn when
+ *     that changes; two tabs on one chat stay in step through `storage`
+ *     events, and a tab that cannot keep its answer says so (§19.11);
+ *   - sends a long conversation's latest whole exchanges that fit the
+ *     server's request cap (`from`), and says once that older ones are not
+ *     sent;
  *   - draws prose through the markdown subset (chat-markdown.ts read,
  *     chat-prose.ts drawn — fixed elements, text leaves) and an answer's
  *     follow-up questions as buttons that ask them;
@@ -54,8 +61,8 @@
  */
 
 import {
-  ANSWER_MAX, BLOCK_LIMITS, CHAT_TEXT, RETRYABLE, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind, mayFollow,
-  mergeText, parseChatConfig, problemCopy, readShareLink, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
+  ANSWER_MAX, BLOCK_LIMITS, CHAT_TEXT, RETRYABLE, SHARE_TAG_MAX_MS, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind, mayFollow,
+  mergeText, parseChatConfig, problemCopy, readShareLink, requestBody, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn, type ShareTags,
 } from './chat-logic.ts';
 import { FOCUSABLE, lockScroll, wireSheetDrag } from './behaviours.ts';
 import { trapIndex } from './logic.ts';
@@ -64,15 +71,19 @@ import { drawRich } from './chat-draw.ts';
 import { shareControl } from './chat-shared.ts';
 import { spokenText } from './chat-markdown.ts';
 import { followUps, proseTemplatesOf, proseWriter, type ProseTemplates } from './chat-prose.ts';
-import { browserStorage, createHistory, historyKeyOf, turnsOf, type StoredTurn } from './chat-history.ts';
+import { browserStorage, createHistory, historyKeyOf, turnsOf, type StoredChat, type StoredTurn } from './chat-history.ts';
 
 export interface ChatOptions {
   /** The backend's base URL (AZ_PUBLIC_BACKEND_URL); the panel posts to `<base>/chat`. */
   readonly base: string;
-  /** Whether the visitor is signed in now — the auth adapter's session read. */
-  readonly signedIn?: () => Promise<boolean>;
-  /** Called whenever the visitor signs in or out; returns its unsubscribe. */
-  readonly onSession?: (fn: (signedIn: boolean) => void) => () => void;
+  /**
+   * The signed-in account's id, or null for nobody — the auth adapter's
+   * session read. It decides who may ask, and whom the kept chat is bound to
+   * (as a salted hash, chat-history.ts; the id itself is never stored).
+   */
+  readonly account?: () => Promise<string | null>;
+  /** Called whenever the visitor signs in, out, or as someone else; returns its unsubscribe. */
+  readonly onSession?: (fn: (account: string | null) => void) => () => void;
   /** The fetch to send with; the page's own by default. */
   readonly fetch?: typeof fetch;
 }
@@ -370,6 +381,11 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   const kept = createHistory(browserStorage(p.host.ownerDocument.defaultView));
   const keptKey = historyKeyOf(config);
   let stored: StoredTurn[] = [];
+  /** §19.11: the revision of the kept conversation this tab last drew or saved (0: none); whom the session last said was reading. */
+  let rev = 0;
+  let reader: string | null | undefined;
+  /** §19.11: this conversation sends only its latest exchanges now (the visitor was told). */
+  let trimmed = false;
   /** The kept conversation is read once, when the panel first lets the visitor ask. */
   let restoreDue = true;
   let conversation: string | null = null;
@@ -534,15 +550,18 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     let text = '';
     let said = 0;
     let finished = false;
+    // §19.11: a long conversation sends only its latest whole exchanges that fit the request cap; the visitor is told once.
+    const req = requestBody(config.page, conversation, history, question);
+    if (req.from > 0 && !trimmed) {
+      trimmed = true;
+      announce(CHAT_TEXT.trimmed, true);
+    }
     try {
       const res = await send(endpoint, {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json', 'x-az-request': '1' },
-        body: JSON.stringify({
-          page: config.page, ...(conversation ? { conversation } : {}),
-          messages: [...history, { role: 'visitor', text: question }],
-        }),
+        body: req.body,
         signal: ac.signal,
       });
       if (!res.ok) {
@@ -596,27 +615,27 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
             history = [...history, { role: 'visitor', text: question }, { role: 'site', text: e.text, tag: e.tag }];
             conversation = e.conversation;
             // C5 (§21.1.4): kept in this browser, with the events to draw it again — consecutive text joined, as a share
-            // holds them, so a model that streams word by word keeps one event per run; where storage is refused, nothing is.
-            stored = [...stored, { role: 'visitor', text: question }, { role: 'site', text: e.text, tag: e.tag, events: mergeText(received) }];
-            kept.save(keptKey, e.conversation, stored);
+            // holds them, so a model that streams word by word keeps one event per run — and its share tags, so the
+            // restored answer can be shared while they last (§19.11); where storage is refused, nothing is.
+            stored = [...stored, { role: 'visitor', text: question }, {
+              role: 'site', text: e.text, tag: e.tag, events: mergeText(received), ...(e.share ? { share: e.share } : {}),
+            }];
+            const keptAs = kept.save(keptKey, e.conversation, stored, rev);
+            if (keptAs.kept) rev = keptAs.rev;
+            // §19.11: another tab went on with this chat (or cleared it): its turns stand, and this answer is said not to be kept.
+            const lost = !keptAs.kept && (keptAs.why === 'conflict' || keptAs.why === 'cleared');
             const follows = drawn.finish();
             // §20.7: the server makes share links — this answer may be kept under one if the visitor asks.
-            const shareTemplate = p.components ? partFor(p.components, 'share')?.firstElementChild as HTMLElement | null : null;
-            if (e.share && shareTemplate && received.length > 0) {
-              const control = shareControl(doc, shareTemplate, {
-                base: options.base, page: config.page, conversation: e.conversation, index, tags: e.share,
-                events: received, question, fetch: send, announce: (t) => announce(t, true), suffix: `s${++copies}`,
-              }, signal);
-              if (control) answer.append(control);
-            }
+            if (e.share && received.length > 0) offerShare(answer, e.conversation, index, e.share, received, question);
             pending = null;
             answer.setAttribute('aria-busy', 'false');
             announce(spokenText(finishedSentences(text, said, true).said) || CHAT_TEXT.answered, true);
             if (follows > 0) announce(CHAT_TEXT.follows(follows), true);
             settle();
             const left = leftCopy(e.left);
+            if (lost) announce(CHAT_TEXT.notKept, true);
             if (e.left <= 0) setMode('full');
-            else { setState('idle'); p.note.textContent = left; }
+            else { setState('idle'); p.note.textContent = [left, lost ? CHAT_TEXT.notKept : '', trimmed ? CHAT_TEXT.trimmed : ''].filter(Boolean).join(' '); }
           } else {
             finished = true;
             fail(e.code, answer);
@@ -666,6 +685,17 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     streaming.abort();
   };
 
+  /** The Share control under an answer (§20.7) — a live one, or a restored one while its share tags last (§19.11). */
+  function offerShare(answer: HTMLElement, conv: string, index: number, tags: ShareTags, events: readonly Record<string, unknown>[], question: string): void {
+    const shareTemplate = p.components ? partFor(p.components, 'share')?.firstElementChild as HTMLElement | null : null;
+    if (!shareTemplate || Date.now() - tags.at > SHARE_TAG_MAX_MS) return;
+    const control = shareControl(doc, shareTemplate, {
+      base: options.base, page: config.page, conversation: conv, index, tags,
+      events, question, fetch: send, announce: (t) => announce(t, true), suffix: `s${++copies}`,
+    }, signal);
+    if (control) answer.append(control);
+  }
+
   /** The conversation gone from the panel and from memory: the greeting alone, nothing pending. */
   function forget(): void {
     // The answer in flight, if any, is abandoned: its request sees a new generation and leaves the panel alone.
@@ -676,34 +706,33 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     stored = [];
     conversation = null;
     pending = null;
+    rev = 0;
+    trimmed = false;
     restoreDue = false;
     p.transcript.replaceChildren(...greeting.map((g) => g.cloneNode(true)));
     p.note.textContent = '';
     if (p.asks) p.asks.hidden = mode !== 'ready';
   }
 
+  /** The panel asks again after a full conversation; who may ask is unchanged, so the session is not read again (focus stays put). */
+  const reopen = () => { if (mode === 'full') setMode('ready'); };
+
   /** New chat: a new conversation, and this chat's kept one forgotten (§21.1.4). */
   const startOver = () => {
     kept.remove(keptKey);
     forget();
     showError('');
-    void begin();
+    reopen();
   };
 
-  /**
-   * The conversation this browser kept for this chat (§21.1.4), drawn again
-   * from its events exactly as it was first drawn — or nothing, when there is
-   * none, it fails a check, or the visitor has already asked here.
-   */
-  const restore = () => {
-    restoreDue = false;
-    const chat = kept.load(keptKey);
-    if (!chat || history.length > 0 || pending !== null) return;
+  /** A kept conversation drawn into the transcript from its events, exactly as it was first drawn, and taken as this tab's. */
+  const drawKept = (chat: StoredChat) => {
     stored = [...chat.turns];
     history = turnsOf(chat.turns);
     conversation = chat.conversation;
-    for (const t of chat.turns) {
-      if (t.role === 'visitor') { addMessage('visitor', t.text); continue; }
+    rev = chat.rev;
+    chat.turns.forEach((t, i) => {
+      if (t.role === 'visitor') { addMessage('visitor', t.text); return; }
       const item = addMessage('site', '');
       item.setAttribute('aria-busy', 'false');
       const d = drawerFor(item);
@@ -716,10 +745,51 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
         if (made) d.part(made.el);
       }
       d.finish();
-    }
+      // Its position in the conversation is its index, as the server tagged it (§20.7, §19.11).
+      if (t.share) offerShare(item, chat.conversation, i, t.share, t.events, chat.turns[i - 1].text);
+    });
     if (p.asks) p.asks.hidden = true;
-    announce(CHAT_TEXT.restored, true);
     if (chat.turns.length / 2 >= config.limit) setMode('full');
+  };
+
+  /**
+   * The conversation this browser kept for this chat (§21.1.4), drawn again
+   * from its events exactly as it was first drawn — or nothing, when there is
+   * none, it fails a check, it is someone else's, or the visitor has already
+   * asked here.
+   */
+  const restore = () => {
+    restoreDue = false;
+    const chat = kept.load(keptKey);
+    if (!chat || history.length > 0 || pending !== null) return;
+    drawKept(chat);
+    announce(CHAT_TEXT.restored, true);
+  };
+
+  /**
+   * §19.11: another tab wrote the kept chats. A newer revision of this chat is
+   * drawn here when this tab is idle (when busy, its next save finds it and
+   * says so); this chat gone — cleared there, or by a sign-out — goes here too.
+   */
+  const fromElsewhere = () => {
+    if (mode === 'checking' || mode === 'signin') return;
+    const chat = kept.load(keptKey);
+    if (!chat) {
+      if (rev === 0) return;
+      forget();
+      showError('');
+      reopen();
+      announce(CHAT_TEXT.clearedElsewhere, true);
+      return;
+    }
+    if (chat.rev <= rev) return;
+    // Busy (answering, or a failed question waiting): left as it is — its next save finds the newer revision and says so.
+    if (streaming || pending !== null) return;
+    forget();
+    showError('');
+    reopen();
+    drawKept(chat);
+    announce(CHAT_TEXT.synced, true);
   };
 
   const on = <K extends keyof HTMLElementEventMap>(el: HTMLElement, type: K, fn: (e: HTMLElementEventMap[K]) => void) =>
@@ -838,7 +908,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
       kept.clear();
       forget();
       showError('');
-      void begin();
+      reopen();
       announce(CHAT_TEXT.cleared, true);
       p.input.focus({ preventScroll: true });
     });
@@ -847,23 +917,44 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     on(b, 'click', () => ask(b.textContent ?? ''));
   }
 
-  /** Ready to ask: the kept conversation is drawn the first time. Signed out: what this browser kept goes (§21.1.4). */
-  const decided = (ok: boolean) => {
-    if (!ok) kept.clear();
-    setMode(ok ? 'ready' : 'signin');
-    if (ok && restoreDue) restore();
+  /**
+   * Who is reading, from the session: it decides who may ask (signed-in
+   * visitors only, by default) and whom the kept chat is bound to (§19.11) —
+   * nothing kept is drawn until the binding says it is this reader's. Signed
+   * out on a signed-in chat: what this browser kept goes (§21.1.4).
+   */
+  const decide = async (account: string | null) => {
+    reader = account;
+    if (config.allow === 'signedin' && account === null) {
+      kept.clear();
+      setMode('signin');
+      return;
+    }
+    await kept.bind(account);
+    if (!live || reader !== account) return;
+    setMode('ready');
+    if (restoreDue) restore();
   };
-  /** Who may ask, decided once the session is known (signed-in visitors only, by default). */
   const begin = async () => {
-    if (config.allow === 'anyone' || !options.signedIn) { decided(true); return; }
     setMode('checking');
-    let ok = false;
-    try { ok = await options.signedIn(); } catch { ok = false; }
-    if (live) decided(ok);
+    let account: string | null = null;
+    if (options.account) {
+      try { account = await options.account(); } catch { account = null; }
+    }
+    if (live) await decide(account);
   };
-  const unsubscribe = config.allow === 'signedin' && options.onSession
-    ? options.onSession((ok) => { if (live && mode !== 'full' && !streaming) decided(ok); })
+  // Another person, or nobody, is reading now: this one's conversation leaves the panel at once (§19.11).
+  const unsubscribe = options.onSession
+    ? options.onSession((account) => {
+      if (!live || account === reader) return;
+      forget();
+      showError('');
+      restoreDue = true;
+      void decide(account);
+    })
     : null;
+  // §19.11: the same chat in another tab of this browser.
+  win?.addEventListener('storage', (e) => { if (live && kept.watches(e.key)) fromElsewhere(); }, { signal });
   void begin();
 
   return () => {

@@ -90,7 +90,12 @@ export const CHAT_COPY = {
   copy: 'Copy code',
   follows: 'Follow-up questions',
   clear: 'Clear history',
-  privacy: 'This chat is kept in this browser for 7 days. On a shared computer, clear it when you are done.',
+  /**
+   * chat-block-spec §19.11: what is kept is bound to who reads it — a signed-in chat to the account (signing out
+   * clears it, another account never sees it), a chat open to anyone to the browser until someone signs in.
+   */
+  privacy: 'This chat is kept in this browser for 7 days, for your account only; signing out clears it.',
+  privacyAnyone: 'This chat is kept in this browser for 7 days; signing in clears it. On a shared computer, clear it when you are done.',
 } as const;
 
 /** The float's dialog: the launcher's aria-controls points here. */
@@ -318,14 +323,15 @@ function proseParts(ctx: EmitContext): EmittedNode {
  * The line that says the chat is kept in this browser, and Clear history
  * (§21.1.4) — hidden until the runtime finds it can keep anything.
  */
-function historyLine(ctx: EmitContext): EmittedNode {
+function historyLine(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
+  const note = block.props.allow === 'anyone' ? CHAT_COPY.privacyAnyone : CHAT_COPY.privacy;
   return {
     tag: 'div',
     attrs: { class: 'az-chat-history', hidden: 'hidden', 'data-az-chat-history': '' },
     style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: px(t.space[8]) },
     children: [
-      { tag: 'p', attrs: { class: 'az-chat-privacy' }, style: { margin: 0, fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'], color: t.color.muted }, children: [CHAT_COPY.privacy] },
+      { tag: 'p', attrs: { class: 'az-chat-privacy' }, style: { margin: 0, fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'], color: t.color.muted }, children: [note] },
       control(CHAT_COPY.clear, 'data-az-chat-clear', ctx, false),
     ],
   };
@@ -514,7 +520,7 @@ function panelBody(block: SpecBlock, ctx: EmitContext, float: boolean): EmittedN
     proseParts(ctx),
     ...(suggested ? [suggested] : []),
     form(ctx),
-    historyLine(ctx),
+    historyLine(block, ctx),
     ...notes(block, ctx),
   ];
 }

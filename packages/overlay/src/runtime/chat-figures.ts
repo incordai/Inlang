@@ -150,6 +150,8 @@ export interface CardItem {
   readonly text: string | null;
   readonly image: CardImageRef | null;
   readonly link: { readonly label: string; readonly to: string } | null;
+  /** A tool's card (`cards from tool`, chat-block-spec §19.11): the operator's label and the minute it was read; null for any other card. */
+  readonly source: { readonly label: string; readonly asOf: string } | null;
 }
 
 /**
@@ -191,7 +193,14 @@ function rowImage(v: unknown, ctx: FigureContext): CardImageRef | null {
 }
 
 function validCard(v: unknown, ctx: FigureContext): CardItem | null {
-  if (!isRecord(v) || !only(v, ['title', 'text', 'image', 'link']) || !text(v.title, FIGURE_LIMITS.cardTitle)) return null;
+  if (!isRecord(v) || !only(v, ['title', 'text', 'image', 'link', 'src', 'source', 'asOf']) || !text(v.title, FIGURE_LIMITS.cardTitle)) return null;
+  // Only a tool's card says where it came from, with both its label and its minute; a card with neither says nothing (§19.11).
+  let source: CardItem['source'] = null;
+  if (v.src !== undefined || v.source !== undefined || v.asOf !== undefined) {
+    const from = sourceOf(v);
+    if (!from || from.src !== 'tool' || from.source === null || from.asOf === null) return null;
+    source = { label: from.source, asOf: from.asOf };
+  }
   if (v.text !== undefined && v.text !== null && !maybeText(v.text, FIGURE_LIMITS.cardText)) return null;
   let image: CardImageRef | null = null;
   if (isRecord(v.image) && only(v.image, ['asset']) && typeof v.image.asset === 'string' && KEY.test(v.image.asset)) {
@@ -207,7 +216,7 @@ function validCard(v: unknown, ctx: FigureContext): CardItem | null {
       || typeof v.link.to !== 'string' || !ctx.allowed(v.link.to)) return null;
     link = { label: v.link.label, to: v.link.to };
   }
-  return { title: v.title, text: typeof v.text === 'string' && v.text !== '' ? v.text : null, image, link };
+  return { title: v.title, text: typeof v.text === 'string' && v.text !== '' ? v.text : null, image, link, source };
 }
 
 export function validCards(v: unknown, ctx: FigureContext): CardItem[] | null {

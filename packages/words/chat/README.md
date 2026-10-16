@@ -69,7 +69,7 @@ None in this release.
 | `greeting` | string |  |  | 1–200 characters | the first message, shown before anyone asks; never sent to the model |
 | `allow` | enum | `signedin` / `anyone` | `signedin` |  | who may send a message; a signed-out visitor sees **Sign in to ask** |
 | `limit` | int | 1–50 | `20` |  | questions per conversation before the panel says to start a new chat |
-| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` |  | at most 9 | what an answer may hold besides text (below); a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270 |
+| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` |  | at most 9 | what an answer may hold besides text (below); a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270; a public table named `tool` beside a component that takes `from` is AZ1272 (`from tool` is the server's data tools) |
 | `knows` | list | table names |  | at most 3 | tables whose rows the answers draw on (below): each must be `allow anyone read` (AZ1252) and filled only by the site's admins (AZ1253); named twice or a fourth is AZ1258, not a table AZ1271 |
 
 ## Children
@@ -171,8 +171,13 @@ buttons that ask exactly their words as the visitor's next question.
 
 The conversation is kept in the visitor's own browser (`localStorage`) for
 7 days, so a reload — or the next page, under a float — carries on; the
-panel says so and offers **Clear history**, and a signed-in chat forgets it
-at sign-out. Nothing is stored on the server, and earlier answers carry a
+panel says so and offers **Clear history**. What is kept is bound to who
+reads it — a salted hash of the signed-in account, or the browser for a
+visitor nobody signed in — so another account, a sign-out, or a sign-in
+over a stranger's chat starts empty. The same chat in two tabs stays in
+step; a tab whose answer the other overtook says it is not kept. A restored
+answer can still be shared, and a long chat sends only its latest exchanges
+(and says so). Nothing is stored on the server, and earlier answers carry a
 server tag so an edited one is refused. Where storage is blocked the chat
 works as before, keeping nothing.
 

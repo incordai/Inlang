@@ -2,7 +2,7 @@
  * @az runtime chat-logic
  * Purpose: the chat runtime's pure rules: the shell's config, the event-stream reader, a visitor's text, finished sentences, fixed copy.
  * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
- * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, parseChatConfig, atEnd, mayFollow, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
+ * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, REQUEST_MAX, SHARE_TAG_MAX_MS, requestBody, parseChatConfig, atEnd, mayFollow, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
  * Edit guide: no DOM here; every event is checked against its closed shape and an unknown one is dropped, never guessed at.
  * Tests: packages/overlay/test/chat.test.ts
  */
@@ -127,7 +127,40 @@ export const CHAT_TEXT = {
   copied: 'Code copied.',
   copyFailed: 'Copy did not work — select the code to copy it.',
   follows: (n: number) => (n === 1 ? '1 follow-up question.' : `${n} follow-up questions.`),
+  /** §19.11: the same chat open in two tabs — one tab drew what the other saved, or could not keep what it answered. */
+  synced: 'This chat went on in another tab — it is shown as it is now.',
+  notKept: 'This chat went on in another tab, so this answer is not kept in this browser.',
+  clearedElsewhere: 'This chat was cleared in another tab.',
+  /** §19.11: a long chat sends only its latest exchanges, to fit what one request may carry. */
+  trimmed: 'Earlier messages in this chat are no longer sent with new questions.',
 } as const;
+
+/**
+ * The longest request body the page sends, in UTF-8 bytes: the server's JSON
+ * body cap (backend http.ts, 16 KB). A longer conversation sends its latest
+ * whole exchanges that fit, with `from` (chat-block-spec §19.11).
+ */
+export const REQUEST_MAX = 16 * 1024;
+
+/** A share tag is good this long after its answer (server chat-share.ts SHARE_LIMITS.tagMaxAgeMs): the history's 7 days. */
+export const SHARE_TAG_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The request for `question` after `history`: from the start when it fits
+ * REQUEST_MAX, else the latest whole exchanges that do — `from` the position
+ * of the first message sent (even: a visitor's), every earlier one left out.
+ * The question alone always fits (it is at most VISITOR_MAX characters).
+ */
+export function requestBody(
+  page: string, conversation: string | null, history: readonly ChatTurn[], question: string,
+): { readonly body: string; readonly from: number } {
+  const size = (s: string) => new TextEncoder().encode(s).length;
+  for (let from = 0; ; from += 2) {
+    const messages = [...history.slice(from), { role: 'visitor', text: question }];
+    const body = JSON.stringify({ page, ...(conversation ? { conversation } : {}), ...(from > 0 ? { from } : {}), messages });
+    if (size(body) <= REQUEST_MAX || from >= history.length) return { body, from };
+  }
+}
 
 /** One fixed line per refusal or failure (§7); an unknown code reads as the generic one. */
 const PROBLEMS: Readonly<Record<string, string>> = {
@@ -431,6 +464,8 @@ const SHARE_PROBLEMS: Readonly<Record<string, string>> = {
   disabled: 'Sharing is off on this site.',
   signin_required: 'Sign in to share.',
   tampered: 'This answer can no longer be shared — ask again to share a new one.',
+  /** §19.11: a tag makes one link while that link lives — the visitor already has it. */
+  already_shared: 'This answer is already shared — use the link made for it, or delete that link to make a new one.',
   too_large: 'This answer is too large to share.',
 };
 /** One fixed line per refusal; never server text. */

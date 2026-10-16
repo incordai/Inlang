@@ -212,6 +212,8 @@ function cards(t: ThemeLike): EmittedNode {
         slot('media', 'div', { borderRadius: px(t.radius.sm), overflow: 'hidden', background: t.color['surface-alt'] }),
         slot('title', 'h3', { margin: 0, fontSize: t.typeSize.base, lineHeight: t.type['leading-tight'], color: t.color.text }),
         slot('text', 'p', { margin: 0, fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'], color: t.color.muted }),
+        // A tool's card says where it came from (chat-block-spec §19.11); the runtime drops it from any other card.
+        slot('source', 'p', { margin: 0, fontSize: t.typeSize.sm, color: t.color.muted }),
         {
           tag: 'a', attrs: { class: 'az-chat-card-link', 'data-az-chat-slot': 'link' },
           style: { fontSize: t.typeSize.sm, color: t.color.accent, textDecoration: 'underline', minHeight: px(t.size.tap), display: 'inline-flex', alignItems: 'center' },

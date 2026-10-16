@@ -347,6 +347,9 @@ function drawCards(d: RichDraw, items: readonly CardItem[]): HTMLElement | null 
     const link = slot(card, 'link');
     if (c.link && link && d.link(link, c.link.to)) link.textContent = c.link.label;
     else link?.remove();
+    // A tool's card says where it came from, as a tool's figures do: operator copy, as text (§19.11).
+    if (c.source) fill(card, 'source', toolLine(d.doc, c.source.label, c.source.asOf));
+    else drop(card, 'source');
     return card;
   }));
   return list;

@@ -12,7 +12,8 @@
  * the runtime that runs it (overlay runtime chat.ts) is copied into the
  * site, and this generated module hands it the backend's address
  * (AZ_PUBLIC_BACKEND_URL, exactly as the auth adapter reads it) and the
- * auth adapter's session, so the panel knows whether its visitor may ask.
+ * auth adapter's session — the account's id or nobody — so the panel knows
+ * whether its visitor may ask, and whose the chat kept in the browser is.
  * A site without a chat block gets none of it: no module, no runtime files.
  */
 
@@ -93,18 +94,22 @@ import { adapter } from ${str(auth)};
 /** The backend's base URL; the panel posts to <base>/chat. */
 const BASE: string = import.meta.env.${BACKEND_ENV[0]} ?? "";
 
-/** Whether the visitor is signed in, from the session the auth adapter reads once. */
-async function signedIn(): Promise<boolean> {
+/**
+ * The signed-in account's id, or null, from the session the auth adapter
+ * reads once: who may ask, and whom the chat kept in this browser is bound
+ * to (only a salted hash of it is ever stored, chat-block-spec §19.11).
+ */
+async function account(): Promise<string | null> {
   await adapter.ready?.();
-  return adapter.session() !== null;
+  return adapter.session()?.user.id ?? null;
 }
 
 /** Runs the page's chat panels; renders nothing. A layout effect, so it never runs in a server render. */
 export function ChatRuntime(): null {
   useLayoutEffect(() => attachChat(document, {
     base: BASE,
-    signedIn,
-    onSession: (fn) => adapter.onChange((session) => fn(session !== null)),
+    account,
+    onSession: (fn) => adapter.onChange((session) => fn(session?.user.id ?? null)),
   }), []);
   return null;
 }

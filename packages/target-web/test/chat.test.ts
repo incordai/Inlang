@@ -60,7 +60,9 @@ test('the module reads the backend address as the auth adapter does, and the ses
   assert.match(text, /import \{ attachChat \} from "\.\.\/az\/chat\.ts";/);
   assert.match(text, /import \{ adapter \} from "\.\.\/az-auth\/config\.ts";/);
   assert.match(text, /const BASE: string = import\.meta\.env\.AZ_PUBLIC_BACKEND_URL \?\? "";/);
-  assert.match(text, /adapter\.session\(\) !== null/);
+  // The account's id (or null) — who may ask, and whom the kept chat is bound to (chat-block-spec §19.11).
+  assert.match(text, /return adapter\.session\(\)\?\.user\.id \?\? null;/);
+  assert.match(text, /onSession: \(fn\) => adapter\.onChange\(\(session\) => fn\(session\?\.user\.id \?\? null\)\)/);
   // Nothing but the public backend URL is read from the environment.
   assert.deepEqual([...text.matchAll(/import\.meta\.env\.([A-Z_]+)/g)].map((m) => m[1]), ['AZ_PUBLIC_BACKEND_URL']);
 });

@@ -70,6 +70,21 @@ test('validStats: values are finite numbers; a delta\'s reference is the server\
   assert.equal(validStats([{ label: 'Rate', value: 3.2, unit: '%', src: 'model' }]), null, 'units from the closed set only');
 });
 
+test('validCards: a tool\'s card carries its label and minute; a card claiming a source any other way is refused (chat-block-spec §19.11)', () => {
+  const meta = { src: 'tool', source: 'Race results service', asOf: '2026-10-16T14:05Z' };
+  const tool = validCards([{ title: 'Ana', text: 'Red', image: { asset: 'summer-1' }, ...meta }, { title: 'Ben', ...meta }], ctx);
+  assert.ok(tool);
+  assert.deepEqual(tool.map((c) => c.source), [{ label: 'Race results service', asOf: '2026-10-16T14:05Z' }, { label: 'Race results service', asOf: '2026-10-16T14:05Z' }]);
+  assert.equal(tool[0].image?.src, '/assets/summer-1.webp', 'an image only by the site\'s own key');
+  // CONTROL: a model's or a table's card says nothing of a source.
+  assert.equal(validCards([{ title: 'Chair' }], ctx)?.[0].source, null);
+  for (const bad of [
+    { title: 'x', src: 'model' }, { title: 'x', src: 'site', asOf: '2026-10-16' }, { title: 'x', src: 'tool', source: 'S' },
+    { title: 'x', src: 'tool', asOf: '2026-10-16T14:05Z' }, { title: 'x', source: 'S', asOf: '2026-10-16T14:05Z' },
+    { title: 'x', ...meta, asOf: '2026-10-16' }, { title: 'x', ...meta, source: 'x'.repeat(41) },
+  ]) assert.equal(validCards([bad], ctx), null, JSON.stringify(bad));
+});
+
 test('validCards: images by build key or the backend\'s exact row path — every smuggled URL is refused', () => {
   const asset = validCards([{ title: 'Linen shirt', image: { asset: 'summer-1' }, text: 'Breathable.', link: { label: 'See it', to: '/shop' } }], ctx);
   assert.ok(asset);

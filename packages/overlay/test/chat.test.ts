@@ -10,12 +10,38 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   BLOCK_LIMITS, CHAT_TEXT, EVENT_LINE_MAX, allowedDestination, blockCopy, createEventReader, finishedSentences, leftCopy, linkKind,
-  parseChatConfig, problemCopy, RETRYABLE, visitorText, type ChatEvent,
+  parseChatConfig, problemCopy, REQUEST_MAX, requestBody, RETRYABLE, visitorText, type ChatEvent, type ChatTurn,
 } from '../src/runtime/chat-logic.ts';
 
 const CONFIG = { page: '/pricing', allow: 'signedin', limit: 20, signin: '/login' };
 /** A prose-only shell's config, as parsed: nothing to show, nowhere to link. */
 const PARSED = { ...CONFIG, show: [], to: [], shared: false, narrow: null };
+
+test('requestBody: the whole conversation while it fits the request cap; past it, the latest whole exchanges that do, from an even position (chat-block-spec §19.11)', () => {
+  const CONV = 'c0nversation-id-0001';
+  const turns = (n: number, size: number): ChatTurn[] => Array.from({ length: n }, (_, i) => [
+    { role: 'visitor' as const, text: `Q${i}?` }, { role: 'site' as const, text: `${'a'.repeat(size)}${i}`, tag: 'AbCdEfGhIjKlMnOpQrStUv' },
+  ]).flat();
+  const bytes = (s: string) => new TextEncoder().encode(s).length;
+  const short = requestBody('/', CONV, turns(3, 50), 'Next?');
+  assert.equal(short.from, 0);
+  assert.deepEqual(JSON.parse(short.body), { page: '/', conversation: CONV, messages: [...turns(3, 50), { role: 'visitor', text: 'Next?' }] });
+  // Twelve answers of 2 000 characters: about 26 KB whole — the latest exchanges that fit go, the rest are left out.
+  const long = requestBody('/', CONV, turns(12, 2_000), 'Next?');
+  const sent = JSON.parse(long.body) as { from: number; messages: ChatTurn[] };
+  assert.ok(long.from > 0 && long.from % 2 === 0, String(long.from));
+  assert.equal(sent.from, long.from);
+  assert.ok(bytes(long.body) <= REQUEST_MAX, String(bytes(long.body)));
+  assert.deepEqual(sent.messages, [...turns(12, 2_000).slice(long.from), { role: 'visitor', text: 'Next?' }], 'whole exchanges, the newest kept');
+  // One more exchange would not have fit: the most that fits is sent.
+  const more = JSON.stringify({ page: '/', conversation: CONV, from: long.from - 2, messages: [...turns(12, 2_000).slice(long.from - 2), { role: 'visitor', text: 'Next?' }] });
+  assert.ok(bytes(more) > REQUEST_MAX);
+  // Characters that take more bytes (or escapes) count as bytes, as the server counts them; one answer past the cap alone: the question alone.
+  const wide = requestBody('/', CONV, [{ role: 'visitor', text: 'Q?' }, { role: 'site', text: '"'.repeat(11_000), tag: 'AbCdEfGhIjKlMnOpQrStUv' }], 'é'.repeat(1_000));
+  assert.equal(wide.from, 2);
+  assert.deepEqual((JSON.parse(wide.body) as { messages: unknown[] }).messages, [{ role: 'visitor', text: 'é'.repeat(1_000) }]);
+  assert.ok(bytes(wide.body) <= REQUEST_MAX);
+});
 
 test('the config the chat word writes parses; anything else is refused, not guessed at', () => {
   assert.deepEqual(parseChatConfig(JSON.stringify(CONFIG)), PARSED);
