@@ -387,3 +387,30 @@ outright: one line for the author's whole table or the server's figures.
 Limits: the same as §5's, and these are tokens written, not a model's
 success rate at writing each form; `az backend probe` reports, per model,
 the provider's own counts and what the parser dropped.
+
+## 8. The chat prompt budget
+
+**Code** `scripts/lib/chat-prompt-bench.mjs`, tested by
+`scripts/lib/chat-prompt-bench.test.mjs` (part of `pnpm verify`); printed by
+`pnpm bench:tokens` after the answers and written to the JSON as
+`chatPrompts`. **Budget** `scripts/token-benchmark/chat-prompt-budget.json`.
+
+The chat prompt is generated from the components' tables, so every new
+component or rule makes every chat request dearer. Two fixture sites hold
+it to a recorded budget: `scripts/token-benchmark/chat-all.az`, whose chat
+may show every component, and `chat-faq.az`, the same site whose chat shows
+`faq` only. Each is built (its data lock recorded first) and three texts
+are counted in both encodings: the chat's prompt file, `context.json`, and
+the whole system text the server sends for one question on the chat's page
+(no `knows` rows). A count over its budget, or one the budget does not
+name, fails the unit test and makes `pnpm bench:tokens` exit 1; a count
+under it is printed as room. The budget is changed by hand, in the change
+that moves the prompt, so a saving cannot slip back unnoticed.
+
+Starting numbers (2026-10-16, before the prompt-cost work of issues 5–11),
+tokens `o200k_base` / `cl100k_base`:
+
+| Fixture | prompt | context.json | system text |
+|---|---:|---:|---:|
+| `all` | 1 672 / 1 676 | 851 / 853 | 2 075 / 2 064 |
+| `faq` | 598 / 598 | 630 / 632 | 865 / 849 |

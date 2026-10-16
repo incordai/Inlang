@@ -1,0 +1,63 @@
+az 1
+
+# The chat prompt budget's second fixture (docs/token-benchmark.md §8): the
+# same site as chat-all.az, its chat showing questions and answers only.
+
+site bench
+  auth
+    adapter azbackend
+  backend
+    database sqlite
+    email    smtp
+    model    default
+  data orders
+    item     text     required
+    status   choice   paid open cancelled required
+    total    money    usd required
+    placed   datetime required
+    allow anyone read
+
+page /
+  hero center
+    title "Bench lamps"
+    sub   "Small lamps, built by hand."
+    cta   "See the plans" /pricing
+  chat panel
+    title    "Ask about Bench"
+    greeting "Ask me about the lamps."
+    show     faq
+    allow    anyone
+
+page /pricing
+  pricing cards
+    title    "Plans"
+    currency usd
+    plan "Home"
+      monthly 9
+      annual  90
+      cta     "Start" /signup
+    plan "Studio"
+      monthly 29
+      annual  290
+      cta     "Start" /signup
+
+page /help
+  faq
+    title "Questions"
+    item "Do you ship abroad?"
+      text "Yes, to most countries, in five to ten working days."
+    item "Is there a warranty?"
+      text "Every lamp has a two-year warranty."
+    item "Can I cancel any time?"
+      text "Yes, from your account page."
+  feature
+    title "Why Bench"
+    item "Bright"
+      text "800 lumens from a lamp the size of a mug."
+    item "Quiet"
+      text "No fan and no hum."
+
+page /signup
+  text
+    title "Sign up"
+    body  "Pick a plan, then make an account."
