@@ -746,7 +746,8 @@ train a model once you have real correction data from users.
    question becomes a standing one: **borrow a mid-range phone before M5**, to
    learn where the tier boundary actually falls. That is a quality question
    now, not a gate.
-5. **License?** MIT gets adoption; AGPL protects against a SaaS wrapping it.
+5. **License?** To be decided; the repository has no license file yet. MIT
+   gets adoption; AGPL protects against a SaaS wrapping it.
 
 ---
 

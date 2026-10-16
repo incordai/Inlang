@@ -527,5 +527,6 @@ answer snapshots stay self-compared. Open: C7, C8.
 **M5 — not started.**
 
 Still outstanding and not answerable by writing code — PRD §11: open-source
-vs internal, a real client site for the M5 dogfood, and the licence. (The
+vs internal, a real client site for the M5 dogfood, and the license (to be
+decided; the repository has no license file yet). (The
 backend project continues — decided 2026-09-23.)
