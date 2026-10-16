@@ -250,7 +250,10 @@ it must finish within 10 s (`FETCH_TIMEOUT_MS`), and its answer may hold at
 most 256 KB (`BODY_LIMIT_BYTES`). Those documents are a few kilobytes, so a
 larger one is hostile: the read stops at the cap, the connection is dropped,
 and the sign-in fails like any other provider failure, without buffering the
-rest.
+rest. An answer with an error status fails at its status: its body is
+cancelled unread, so the connection closes at once instead of staying open,
+and filling, until the response is collected (`security.test.ts`, a 404, 500
+and 503 each with a 10 MB body).
 
 ## 7. Email
 
@@ -271,6 +274,16 @@ answered, so a slow service never delays a visitor; a failed send is logged
 by its error class only (`TimeoutError` for the API or whole-send deadline,
 `Error ETIMEDOUT` for an SMTP stage), never the address or the server's
 reply.
+
+Both TLS paths are tested end to end over that socket
+(`packages/backend/test/email-tls.test.ts`): a local SMTP server with a
+certificate made at test time speaks implicit TLS and STARTTLS; the message
+and the sign-in go only over TLS, a server that drips a byte at a time after
+the handshake fails the send at the deadline with its connection closed, and
+an untrusted certificate or a server offering no STARTTLS fails the send with
+nothing sent in the clear. The certificate is always verified; the test
+names the one it trusts (`createMailer`'s `tls`, a test seam like its
+timeouts).
 
 ## 8. What `az build` writes
 

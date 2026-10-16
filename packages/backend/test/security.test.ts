@@ -495,15 +495,18 @@ test('CONTROL malformed request: a connection the client reset gets no answer an
 
 /* ---- an identity provider that answers with megabytes --------------- */
 
-/** A discovery document of about `bytes`, streamed in chunks as the reader takes them; `sent` counts what got out. */
-async function bigDiscovery(bytes: number) {
+/**
+ * A discovery document of about `bytes`, streamed in chunks as the reader
+ * takes them, under `status`; `sent` counts what got out.
+ */
+async function bigDiscovery(bytes: number, status = 200) {
   const CHUNK = 64 * 1024;
   const state = { sent: 0, closed: false };
   const server = createServer(async (_req, res) => {
     const issuer = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const head = JSON.stringify({ issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, padding: '' }).slice(0, -2);
     res.on('close', () => { state.closed = true; });
-    res.writeHead(200, { 'content-type': 'application/json' });
+    res.writeHead(status, { 'content-type': 'application/json' });
     const write = (s: string) => {
       state.sent += Buffer.byteLength(s);
       if (res.write(s)) return Promise.resolve();
@@ -538,6 +541,22 @@ test('SECURITY provider body: a 10 MB discovery document fails the sign-in fast,
     assert.ok(idp.state.closed, 'the read was cut, not drained: the provider\'s connection is closed');
     assert.ok(idp.state.sent < TEN_MB / 2, `the provider got ${idp.state.sent} bytes out of ${TEN_MB} before the read stopped`);
   } finally { idp.close(); }
+});
+
+test('SECURITY provider body: an error status with a 10 MB body fails at the status, and the body is cancelled, not left open', async () => {
+  const TEN_MB = 10 * 1024 * 1024;
+  for (const status of [404, 500, 503]) {
+    const idp = await bigDiscovery(TEN_MB, status);
+    try {
+      await assert.rejects(createOidc((...a) => fetch(...a)).discover(idp.provider),
+        (e: unknown) => e instanceof ProviderError && e.message.endsWith(`answered ${status}`), String(status));
+      // Left unread, the body held the provider's connection open until the
+      // response was collected; cancelled, the connection closes at once.
+      for (let waited = 0; !idp.state.closed && waited < 1_000; waited += 10) await new Promise((ok) => setTimeout(ok, 10));
+      assert.ok(idp.state.closed, `${status}: the provider's connection is closed`);
+      assert.ok(idp.state.sent < TEN_MB / 2, `${status}: the provider got ${idp.state.sent} bytes out of ${TEN_MB} before the read stopped`);
+    } finally { idp.close(); }
+  }
 });
 
 test('CONTROL provider body: a discovery document of normal size is read', async () => {

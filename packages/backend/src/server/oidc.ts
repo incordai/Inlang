@@ -63,7 +63,13 @@ async function readBody(response: Response, host: string): Promise<string> {
 async function getJson(fetchFn: Fetch, url: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const response = await fetchFn(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: 'error' });
   const host = new URL(url).host;
-  if (!response.ok) throw new ProviderError(`${host} answered ${response.status}`);
+  if (!response.ok) {
+    // Only the status is used. A body left unread held the provider's
+    // connection open until the response was collected, and a hostile one
+    // could keep streaming into it; cancelled, the connection closes now.
+    await response.body?.cancel().catch(() => undefined);
+    throw new ProviderError(`${host} answered ${response.status}`);
+  }
   const body: unknown = JSON.parse(await readBody(response, host));
   if (!body || typeof body !== 'object') throw new ProviderError('provider answered with no JSON object');
   return body as Record<string, unknown>;
