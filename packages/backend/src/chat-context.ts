@@ -48,7 +48,7 @@ export const promptFileName = (n: number): string => `prompt-${n}.txt`;
 export interface BackendChat {
   /**
    * server/chat/prompt-<n>.txt: each chat's own instructions, teaching only
-   * the components its `show` lists (chat-block-spec §19.15). Chats told the
+   * the components its `show` lists (chat-block-spec §19.16). Chats told the
    * same share one file; numbered in page order of first use.
    */
   readonly prompts: readonly ChatPromptFile[];
@@ -66,7 +66,7 @@ export interface BackendChat {
  * and no other: their forms are taught from the answer parser's own table
  * and caps (server chat-answer.ts), so what the model is told is what the
  * parser accepts, and a chat pays only for its own components
- * (chat-block-spec §19.15). `knows`: this chat is sent rows of the tables it
+ * (chat-block-spec §19.16). `knows`: this chat is sent rows of the tables it
  * knows (§8.2).
  */
 export const CHAT_PROMPT = (site: string, words: readonly AnswerWord[] = [], knows = false, presets: readonly AnswerPreset[] = []): string => `You are the assistant on the website "${site}". You answer visitors' questions about this site only.
@@ -83,7 +83,7 @@ ${FORMATTING}
 ${FOLLOW_UPS}${words.length === 0 ? '' : answerFormat(words)}${presets.length === 0 ? '' : presetList(presets)}`;
 
 /**
- * The chat's answer presets (chat-block-spec §19.15), each by name and what
+ * The chat's answer presets (chat-block-spec §19.16), each by name and what
  * it shows — its component's first line — never its body: the server reads
  * that from context.json when the model writes `use <name>`.
  */
@@ -253,7 +253,7 @@ function listQuotes(spec: Spec, protect: ReadonlySet<string>, words: readonly ('
  */
 export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat | undefined {
   const chats: { [route: string]: Json } = {};
-  /** Each chat's prompt file, by what it says: chats told the same share one (§19.15). */
+  /** Each chat's prompt file, by what it says: chats told the same share one (§19.16). */
   const prompts = new Map<string, string>();
   /** The components any chat may show, and what the site offers their answers (core chat.ts chatAnswers). */
   const shown = new Set<AnswerWord>();
@@ -295,7 +295,7 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
   if (Object.keys(chats).length === 0) return undefined;
 
   const protect = new Set((spec.site.scoped.auth?.protect ?? '').split(',').map((r) => r.trim()).filter(Boolean));
-  // The site's faq and feature lists an answer may quote (§19.15): on public pages, numbered per page, the author's items.
+  // The site's faq and feature lists an answer may quote (§19.16): on public pages, numbered per page, the author's items.
   const lists = (['faq', 'feature'] as const).filter((w) => shown.has(w));
   if (lists.length > 0) quotes = [...quotes, ...listQuotes(spec, protect, lists)];
   const pages: Json[] = [];

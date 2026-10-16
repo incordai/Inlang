@@ -212,7 +212,7 @@ test('resolveRich: table from figures and from rows; cards from rows carry the s
   assert.deepEqual(c, { cards: [{ title: 'Chair', image: { row, ...image } }] });
 });
 
-test('§19.15 one-line points: points "label" n … reads as one point a line — in a chart, a series and a dashboard tile — under the same caps', () => {
+test('§19.16 one-line points: points "label" n … reads as one point a line — in a chart, a series and a dashboard tile — under the same caps', () => {
   const long = run('chart line "Visitors"\n  point "W1" 120\n  point "W2" 180\n  point "W3" 160');
   const short = run('chart line "Visitors"\n  points "W1" 120 "W2" 180 "W3" 160');
   assert.deepEqual([short.blocks, short.dropped], [long.blocks, []]);

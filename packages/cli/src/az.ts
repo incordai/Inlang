@@ -297,7 +297,7 @@ export const wordsFor = (options: Omit<BuildOptions, 'outDir'>, code = true) => 
 export function build(options: BuildOptions): BuildOutcome {
   const src = options.sourceText ?? readFileSync(options.source, 'utf8');
   const words = wordsFor(options);
-  // A chat's answer presets are judged by the chat server's own parser (chat-block-spec §19.15, AZ1277).
+  // A chat's answer presets are judged by the chat server's own parser (chat-block-spec §19.16, AZ1277).
   const compileOptions = { manifests: words.manifests, lock: lockOption(options.source), readBytes: compileReader(options.source), checkAnswer: checkPreset };
   const { strict, preview } = options.preview
     ? compilePreview(src, compileOptions)
@@ -1118,7 +1118,7 @@ async function runDev(file: string, outDir: string, wordsDir: string, rest: stri
       if (started) return;
       dataAtStart = dataJson;
       const config = outcome.files.find((f) => f.path === 'server/az.config.json');
-      // Each chat's prompt and the context, as the build wrote them (docs/chat-block-spec.md §8.1, §19.15).
+      // Each chat's prompt and the context, as the build wrote them (docs/chat-block-spec.md §8.1, §19.16).
       const prompts = Object.fromEntries(outcome.files.filter((f) => /^server\/chat\/prompt-[0-9]+\.txt$/.test(f.path))
         .map((f) => [f.path.slice('server/chat/'.length), f.content]));
       const context = outcome.files.find((f) => f.path === 'server/chat/context.json')?.content;

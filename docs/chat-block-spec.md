@@ -864,7 +864,7 @@ Capped at 24 000 characters, filled in page order; past the cap a page is
 left out whole and AZ1257 names it. It is public content by construction —
 everything in it is already on a public page.
 
-`server/chat/prompt-<n>.txt` (one per chat since §19.15; `server/chat/prompt.txt`
+`server/chat/prompt-<n>.txt` (one per chat since §19.16; `server/chat/prompt.txt`
 before) holds the fixed instructions: who it is (the site's
 assistant, answering only about this site), the answer grammar of §5.3
 generated from the allowed manifests, the list of quotable blocks, the

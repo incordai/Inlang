@@ -60,7 +60,7 @@ test('one row per UTC day, added to by one statement per answer; counts only', a
     assert.equal(await usage.spent(day), 0);
     await usage.add(day, 100, 20, 0, 0);
     await usage.add(day, 50, 5, 1, 40);
-    // §19.15: the part of the input the provider read from its prompt cache, added up the same way.
+    // §19.16: the part of the input the provider read from its prompt cache, added up the same way.
     assert.deepEqual(await usage.row(day), { input: 150, cached: 40, output: 25, messages: 2, dropped: 1, blocked: 0 });
     // A blocked question adds to the same row, spending nothing and counting no message.
     await usage.block(day);

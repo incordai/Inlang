@@ -243,7 +243,7 @@ if (config.chat) {
     const { createGeocoder } = await import('./chat-geocode.ts');
     geocoder = createGeocoder({ url: config.chat.geocoder.url, perAddress: config.chat.geocoder.perAddress, windows, log: (line) => process.stderr.write(`backend: ${line}\n`) });
   }
-  // Each chat's own prompt file, as context.json names it (chat-block-spec §19.15): a missing one stops the start.
+  // Each chat's own prompt file, as context.json names it (chat-block-spec §19.16): a missing one stops the start.
   const prompts: Record<string, string> = {};
   for (const file of new Set(Object.values(context.chats).map((c) => c.prompt))) {
     try {

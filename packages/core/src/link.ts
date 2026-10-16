@@ -328,7 +328,7 @@ function describeLine(line: FillLine): string {
 /**
  * A slot whose indented lines are kept as written, not linked (`verbatim`
  * in word.json): chat's `answer <name>`, whose body is one component in the
- * answer forms (chat-block-spec §19.15) — read by the chat server's own
+ * answer forms (chat-block-spec §19.16) — read by the chat server's own
  * parser, never by the words.
  */
 function slotVerbatim(def: unknown): boolean {
@@ -1074,7 +1074,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       const props: Record<string, Arg> = {};
       const children: LinkedWord[] = [];
       const seen = new Set<string>();
-      // A verbatim fill's lines are its body, as written (chat's `answer`, chat-block-spec §19.15): never linked as words.
+      // A verbatim fill's lines are its body, as written (chat's `answer`, chat-block-spec §19.16): never linked as words.
       if (slotVerbatim(parent.slots[s.word])) {
         checkLine(s, slotLine(parent.slots[s.word]));
         const as = [s, ...s.children.flatMap(function all(c: Statement): Statement[] { return [c, ...c.children.flatMap(all)]; })].find((c) => c.as !== null);

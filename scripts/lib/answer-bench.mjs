@@ -39,7 +39,7 @@ export const ANSWER_RULES = {
   quotes: [{ word: 'pricing', route: '/pricing', n: 0 }],
   destinations: ['/', '/contact', '/pricing', '/signup', '/shop'],
   images: ['i1'],
-  /** The author's preset the `use` case shows (chat-block-spec §19.15). */
+  /** The author's preset the `use` case shows (chat-block-spec §19.16). */
   presets: [{ name: 'monthly', text: 'dashboard "This month"\n  stat "Orders" from orders count by placed month\n  chart bar "Orders by status" from orders count by status\n' }],
 };
 
@@ -65,7 +65,7 @@ const PLANS = [
 ];
 
 const q = (s) => JSON.stringify(s);
-/** The one-line forms the model is taught (chat-block-spec §19.15): an item and its text on one line. */
+/** The one-line forms the model is taught (chat-block-spec §19.16): an item and its text on one line. */
 const azFaq = (items) => `faq\n${items.map((i) => `  item ${q(i.q)} ${q(i.a)}`).join('\n')}`;
 const azFeature = (items) => `feature\n${items.map((i) => `  item ${q(i.title)} ${q(i.text)}`).join('\n')}`;
 const mdFaq = (items) => items.map((i) => `**${i.q}**\n\n${i.a}`).join('\n\n');
@@ -182,7 +182,7 @@ function richCases() {
       ].join('\n'),
     },
     {
-      // The same server figures as the author's preset: the model writes one line, the server reads the body (§19.15).
+      // The same server figures as the author's preset: the model writes one line, the server reads the body (§19.16).
       name: 'dashboard (the author\'s preset)', blocks: [preset],
       az: 'use monthly',
       json: json([preset]),
@@ -221,7 +221,7 @@ export function parsedBlocks(az) {
   return events.filter((e) => e.type === 'block').map((e) => e.block);
 }
 
-/** The answer as the model is sent it back on its next question (chat-block-spec §19.15): the parser's own history. */
+/** The answer as the model is sent it back on its next question (chat-block-spec §19.16): the parser's own history. */
 export function historyOf(az) {
   const p = createAnswerParser(ANSWER_RULES);
   p.push(az);

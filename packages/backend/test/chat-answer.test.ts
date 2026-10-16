@@ -111,7 +111,7 @@ test('a line that does not have a component\'s shape is prose — shown as the t
 test('a component that breaks a rule is dropped whole and leaves no text', () => {
   const cases: [string, string][] = [
     ['show auth /login', 'not_shown'],
-    // An faq is quotable since §19.15: one the site does not have is no quote.
+    // An faq is quotable since §19.16: one the site does not have is no quote.
     ['show faq /help', 'no_quote'],
     ['show pricing /nope', 'no_quote'],
     ['show pricing /pricing#2', 'no_quote'],
@@ -130,7 +130,7 @@ test('a component that breaks a rule is dropped whole and leaves no text', () =>
     ['faq\n  item "Q"\n    text "A"\n  img "https://evil.example/x.png"', 'shape'],
     ['cta "Go" /\n  item "x"', 'shape'],
     ['show pricing /pricing\n  plan "Free"', 'shape'],
-    // The one-line form takes one text (§19.15): a third string, or a text line under it too, is no item.
+    // The one-line form takes one text (§19.16): a third string, or a text line under it too, is no item.
     ['faq\n  item "Q" "R" "S"', 'shape'],
     ['faq\n  item "Q" "R"\n    text "S"', 'shape'],
     ['faq\n  item "Q" bare', 'shape'],
@@ -396,7 +396,7 @@ test('a fence opens only at the margin; an unclosed one runs to the end; it clos
   assert.equal(inner.text, '```\n```js\ncta "Go" /contact\n```  \n');
 });
 
-/* ---- the history the model is sent back (§19.15) -------------------------- */
+/* ---- the history the model is sent back (§19.16) -------------------------- */
 
 const ALL: AnswerRules = {
   ...RULES, show: ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'], images: ['i1'],
@@ -409,7 +409,7 @@ function historyOf(answer: string, rules: AnswerRules = ALL): { history: string;
   return { history: p.history(), record: p.record, dropped: [...p.dropped], blocks: events.filter((e) => e.type === 'block').map((e) => (e as { block: unknown }).block) };
 }
 
-test('§19.15 history: each long component a one-line stand-in, prose and ask lines as they are; the record keeps the canonical lines', () => {
+test('§19.16 history: each long component a one-line stand-in, prose and ask lines as they are; the record keeps the canonical lines', () => {
   const answer = [
     'Here is this month.',
     'dashboard "This month"',
@@ -441,7 +441,7 @@ test('§19.15 history: each long component a one-line stand-in, prose and ask li
   assert.ok(r.history.length * 3 < r.record.length * 2, `${r.history.length} against ${r.record.length}`);
 });
 
-test('§19.15 history: every component\'s stand-in names its word, kind, title and where its figures came from — never a row, point or cell', () => {
+test('§19.16 history: every component\'s stand-in names its word, kind, title and where its figures came from — never a row, point or cell', () => {
   const cases: [string, string][] = [
     ['show pricing /plans#2', 'show pricing /plans#2\n'],
     ['cta "Talk to us" /contact', 'cta "Talk to us" /contact\n'],
@@ -464,7 +464,7 @@ test('§19.15 history: every component\'s stand-in names its word, kind, title a
   }
 });
 
-test('§19.15 history: a component dropped whole is one note of its word and reason code — no text the model or a visitor wrote', () => {
+test('§19.16 history: a component dropped whole is one note of its word and reason code — no text the model or a visitor wrote', () => {
   const answer = [
     'Two goes.',
     'chart bar "Orders"',
@@ -511,7 +511,7 @@ test('§19.15 history: a component dropped whole is one note of its word and rea
   assert.equal(historyOf(`faq ${'x'.repeat(ANSWER_LIMITS.line + 10)}`).history, '(dropped: faq, too_long)\n');
 });
 
-test('§19.15 history: the route\'s own drops become notes in place; notes never take the history past the record cap', () => {
+test('§19.16 history: the route\'s own drops become notes in place; notes never take the history past the record cap', () => {
   const p = createAnswerParser(ALL);
   const events = [...p.push('Look.\nchart bar "A" from orders count by status\ncta "Talk" /contact\n'), ...p.end()];
   const chart = events.find((e) => e.type === 'block' && 'chart' in e.block)!;
@@ -531,7 +531,7 @@ test('§19.15 history: the route\'s own drops become notes in place; notes never
   assert.ok((h.match(/\(dropped: cta, destination\)/g) ?? []).length < 400, 'the notes past the cap are left out');
 });
 
-/* ---- quoting the site's own lists (§19.15) -------------------------------- */
+/* ---- quoting the site's own lists (§19.16) -------------------------------- */
 
 const LISTS: AnswerRules = {
   ...RULES,
@@ -543,7 +543,7 @@ const LISTS: AnswerRules = {
   ],
 };
 
-test('§19.15 quotes: show faq or feature quotes the site\'s own list, whole or the one item #n names; its history is the quote\'s line', () => {
+test('§19.16 quotes: show faq or feature quotes the site\'s own list, whole or the one item #n names; its history is the quote\'s line', () => {
   const p = createAnswerParser(LISTS);
   const events = [...p.push('From the site.\nshow faq /help\nshow faq /help #2\nshow feature /\n'), ...p.end()];
   assert.deepEqual(events.filter((e) => e.type === 'block').map((e) => (e as { block: unknown }).block), [
@@ -556,7 +556,7 @@ test('§19.15 quotes: show faq or feature quotes the site\'s own list, whole or 
   assert.equal(p.history(), p.record, 'a quote is its own one line, in the record and the history');
 });
 
-test('§19.15 quotes: no such list or item, an item of a pricing block, an author\'s item past the caps, a word not shown — each dropped by its code', () => {
+test('§19.16 quotes: no such list or item, an item of a pricing block, an author\'s item past the caps, a word not shown — each dropped by its code', () => {
   const cases: [string, string[]][] = [
     ['show faq /help #3', ['no_quote']],
     ['show faq /help #0', ['no_quote']],
@@ -580,9 +580,9 @@ test('§19.15 quotes: no such list or item, an item of a pricing block, an autho
   assert.equal(whole('faq\n  item "Q?"\n    text "A."', LISTS).blocks.length, 1);
 });
 
-/* ---- the one-line forms (§19.15) ------------------------------------------ */
+/* ---- the one-line forms (§19.16) ------------------------------------------ */
 
-test('§19.15 one-line forms: item "title" "text" reads as the long form, under the same caps; the prompt teaches it alone', () => {
+test('§19.16 one-line forms: item "title" "text" reads as the long form, under the same caps; the prompt teaches it alone', () => {
   const long = whole('faq\n  item "Can I switch?"\n    text "Yes."\n  item "Refunds?"\n    text "Within 30 days."\nfeature\n  item "Fast"\n    text "Pre-rendered."\n  item "Small"');
   const short = whole('faq\n  item "Can I switch?" "Yes."\n  item "Refunds?" "Within 30 days."\nfeature\n  item "Fast" "Pre-rendered."\n  item "Small"');
   assert.deepEqual(short.blocks, long.blocks);
@@ -602,7 +602,7 @@ test('§19.15 one-line forms: item "title" "text" reads as the long form, under 
   assert.ok(ANSWER_FORMS.chart.lines.some((l) => /^ {4}points "Nov" 140 "Dec" 180$/.test(l)) && !ANSWER_FORMS.chart.lines.some((l) => /^\s*point /.test(l)));
 });
 
-/* ---- the author's presets (§19.15) ----------------------------------------- */
+/* ---- the author's presets (§19.16) ----------------------------------------- */
 
 const PRESETS: AnswerRules = {
   ...RULES,
@@ -616,7 +616,7 @@ const PRESETS: AnswerRules = {
   ],
 };
 
-test('§19.15 use: the model\'s one line shows the author\'s whole component, read under the page\'s rules; the record and history are that line', () => {
+test('§19.16 use: the model\'s one line shows the author\'s whole component, read under the page\'s rules; the record and history are that line', () => {
   const p = createAnswerParser(PRESETS);
   const events = [...p.push('This month:\nuse monthly\nuse talk\nuse estimate\n'), ...p.end()];
   const blocks = events.filter((e) => e.type === 'block').map((e) => (e as { block: unknown }).block);
@@ -630,7 +630,7 @@ test('§19.15 use: the model\'s one line shows the author\'s whole component, re
   assert.equal(p.history(), p.record);
 });
 
-test('§19.15 use: a name the chat has not, a preset that is not one clean component, the caps — each dropped by its code; without presets the line is prose', () => {
+test('§19.16 use: a name the chat has not, a preset that is not one clean component, the caps — each dropped by its code; without presets the line is prose', () => {
   assert.deepEqual(whole('use nothing', PRESETS).dropped, ['no_quote']);
   assert.deepEqual(whole('use chatty', PRESETS).dropped, ['shape'], 'a preset with prose is not one component');
   assert.equal(whole('use talk now', PRESETS).text, 'use talk now', 'three words are a sentence');

@@ -166,7 +166,7 @@ The chat's prompt lists each preset by name and its first line
 (`use monthly — dashboard "This month"`), never its body; the model answers
 with the one line `use monthly` — about 3 tokens for the whole dashboard —
 and the server reads the body from `context.json` under the page's own
-rules, so its figures are still the site's (chat-block-spec §19.15). A
+rules, so its figures are still the site's (chat-block-spec §19.16). A
 `use` counts as one of an answer's four components. `az check` runs the
 chat server's own parser on each body: a name (AZ1273), each name once
 (AZ1274), exactly one component (AZ1275), one the chat's `show` lists

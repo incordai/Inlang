@@ -542,7 +542,7 @@ export function buildSpec(
       // `chat none` is no chat: it asks nothing of the backend.
       ...[...kids, ...pageWords.flatMap((p) => p.children)].filter((w) => w.word === CHAT_WORD && w.variant !== 'none').map((w) => ({
         props: w.props, pos: w.pos,
-        // Its answer presets (chat-block-spec §19.15), each body as link.ts kept it.
+        // Its answer presets (chat-block-spec §19.16), each body as link.ts kept it.
         presets: w.children.filter((c) => c.word === PRESET_WORD).map((c) => ({ name: c.args[0], body: c.props.body?.value ?? '', pos: c.pos })),
       })),
     ],

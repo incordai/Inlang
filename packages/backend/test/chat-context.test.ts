@@ -217,7 +217,7 @@ test('with show: context.json says what each chat may show, the quotable blocks 
   assert.doesNotMatch(promptOf(prose), /Components:/);
 });
 
-test('§19.15: each chat has its own prompt file, teaching only its own components; chats told the same share one', () => {
+test('§19.16: each chat has its own prompt file, teaching only its own components; chats told the same share one', () => {
   const source = `${SHOW_SITE.replace('    show  pricing faq cta', '    show  pricing faq cta feature chart table stats cards dashboard explore map')}
 page /help
   chat panel
@@ -253,7 +253,7 @@ page /more
   assert.deepEqual(files.filter((f) => f.path.startsWith('server/chat/prompt')).map((f) => f.path), ['server/chat/prompt-1.txt', 'server/chat/prompt-2.txt', 'server/chat/prompt-3.txt']);
 });
 
-test('§19.15 quotes: the site\'s public faq and feature lists are quotable, listed by title and size; their items read from the pages, never written twice', () => {
+test('§19.16 quotes: the site\'s public faq and feature lists are quotable, listed by title and size; their items read from the pages, never written twice', () => {
   const source = `az 1
 site studio
   auth
@@ -352,7 +352,7 @@ page /login
   assert.ok(!JSON.stringify(JSON.parse(chatBackend(compile(SHOW_SITE.replace('    show  pricing faq cta', '    show  pricing cta'), { manifests }).spec!)!.context).answer.quotes).includes('"faq"'));
 });
 
-test('§19.15 presets: each chat\'s presets reach context.json and its own prompt, by name and first line; the server reads them back, and refuses a malformed one', () => {
+test('§19.16 presets: each chat\'s presets reach context.json and its own prompt, by name and first line; the server reads them back, and refuses a malformed one', () => {
   const source = SHOW_SITE.replace('    show  pricing faq cta\n    allow anyone\n', `    show  pricing faq cta stats
     allow anyone
     answer talk
@@ -388,7 +388,7 @@ test('§19.15 presets: each chat\'s presets reach context.json and its own promp
   }
 });
 
-test('§19.15 checkPreset: the chat server\'s parser on a preset — one component, no prose, a from that names a public table, no tool', () => {
+test('§19.16 checkPreset: the chat server\'s parser on a preset — one component, no prose, a from that names a public table, no tool', () => {
   const rules = { show: ['cta', 'chart', 'stats', 'dashboard'], quotes: [], destinations: ['/'], images: [], tables: ['orders'] };
   assert.equal(checkPreset(rules, 'dashboard "M"\n  stat "Orders" from orders count\n  chart bar "By" from orders count by status\n'), null);
   assert.equal(checkPreset(rules, 'chart bar "By" from secrets count by status\n'), 'figures');
@@ -504,7 +504,7 @@ test('the per-request system text names the visitor\'s page and what its compone
   assert.doesNotMatch(quiet, /destinations a cta may use/);
 });
 
-test('§19.15: the system text is ordered for the prompt cache — prompt, site content, page, tools, then the rows; the prefix is the same bytes for every question', () => {
+test('§19.16: the system text is ordered for the prompt cache — prompt, site content, page, tools, then the rows; the prefix is the same bytes for every question', () => {
   const r = compile(SHOW_SITE.replace('    show  pricing faq cta', '    show  pricing faq cta chart map'), { manifests });
   assert.ok(r.ok && r.spec, JSON.stringify(r.diagnostics));
   const a = chatBackend(r.spec)!;

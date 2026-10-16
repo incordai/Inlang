@@ -109,7 +109,7 @@ export interface CompileOptions {
    */
   readonly openRoutes?: boolean;
   /**
-   * The chat server's answer parser (chat-block-spec §19.15), given by the
+   * The chat server's answer parser (chat-block-spec §19.16), given by the
    * CLI: each chat's `answer <name>` preset is judged by it at compile time
    * (AZ1277), so a preset `az check` passes is never dropped at run time.
    * Absent (the Playground), a preset's structure is still checked.

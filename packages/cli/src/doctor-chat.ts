@@ -170,7 +170,7 @@ const chatBudget: Check = {
     }
     const chat = loaded.config.chat;
     const context = await readRegular(join(got.server, 'chat', 'context.json'));
-    // Each chat's own prompt file (chat-block-spec §19.15): the cheapest and the dearest bound one answer.
+    // Each chat's own prompt file (chat-block-spec §19.16): the cheapest and the dearest bound one answer.
     const promptFiles = (() => {
       try {
         const chats = (JSON.parse(context ?? '') as { chats?: unknown }).chats;

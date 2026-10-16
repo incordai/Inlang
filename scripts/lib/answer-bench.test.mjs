@@ -40,7 +40,7 @@ test('every answer is counted in every form and encoding; the chat input is the 
   assert.ok(input.prompt.chars > 1000 && input.context.chars > 500, JSON.stringify(input));
 });
 
-test('§19.15: each answer as history — what later questions pay again — is the parser\'s own, and the long components cost a fraction of their form', async () => {
+test('§19.16: each answer as history — what later questions pay again — is the parser\'s own, and the long components cost a fraction of their form', async () => {
   const { counters } = await loadCounters();
   const answers = measureAnswers(counters);
   for (const a of answers.filter((x) => x.quotable)) assert.ok(a.history.chars > 0 && a.history.tokens[ENCODINGS[0]] > 0, a.name);

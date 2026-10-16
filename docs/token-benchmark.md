@@ -415,7 +415,7 @@ tokens `o200k_base` / `cl100k_base`:
 | `all` | 1 672 / 1 676 | 851 / 853 | 2 075 / 2 064 |
 | `faq` | 598 / 598 | 630 / 632 | 865 / 849 |
 
-After the prompt-cost work (chat-block-spec §19.15), same fixtures —
+After the prompt-cost work (chat-block-spec §19.16), same fixtures —
 `chat-all.az` now also holds one answer preset, so its prompt carries the
 preset listing:
 

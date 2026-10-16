@@ -311,7 +311,7 @@ server/
   src/*.ts            the server, copied verbatim from packages/backend/src/server
                       (data-*.ts only with tables, chat*.ts only with a chat)
   chat/prompt-<n>.txt with a chat: each chat's fixed instructions, teaching only
-                      the components its show lists (chat-block-spec §19.15)
+                      the components its show lists (chat-block-spec §19.16)
   chat/context.json   with a chat: the site's public pages as text (protected
                       pages left out, 24 000 characters at most), the chat
                       pages and their `allow`/`limit`, the routes
