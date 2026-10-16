@@ -1,8 +1,9 @@
 # Chat — an AI chat block that answers in az's own components
 
 **Status** proposed 2026-10-15 · **approved by the owner 2026-10-15, every
-recommendation** (§17) · **C0, C1, C2 and C3 built 2026-10-15** (§19: what was
-built, and where it differs; C3 is §19.7) · C4 not started · **C2b specified and built
+recommendation** (§17) · **C0, C1, C2 and C3 built 2026-10-15, C4 built 2026-10-16 —
+chat is complete** (§19: what was built, and where it differs; C3 is §19.7, C4
+§19.8) · **C2b specified and built
 2026-10-15** (§20: charts, tables, stats, image cards, dashboards and share
 links in answers, on the owner's Q13–Q15; §19.6: as built) · Extends backend-spec.md,
 data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12)
@@ -915,7 +916,7 @@ in the panel, if ever.
 
 | Key | Needed | Meaning |
 |---|---|---|
-| `AZ_CHAT_API` | sites with `chat` | wire shape: `completions` (C1), `messages` (C4) |
+| `AZ_CHAT_API` | sites with `chat` | wire shape: `completions` (C1); `messages` not built — Q2's condition, §19.8 |
 | `AZ_CHAT_URL` | sites with `chat` | the API base URL; https, or http on loopback for a local model server |
 | `AZ_CHAT_KEY` | usually | bearer key (secret); may be empty for a local server |
 | `AZ_CHAT_MODEL` | sites with `chat` | the model id, passed through as text |
@@ -1141,7 +1142,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0, C1, C2, C2b and C3 as built — deviations and findings (2026-10-15)
+## 19. C0, C1, C2, C2b, C3 and C4 as built — deviations and findings (2026-10-15/16)
 
 ### 19.1 Against §14's C1 list
 
@@ -1414,6 +1415,60 @@ backend, no CSP violation; 48 snapshots stable and told apart by scheme),
 value, an owner-only table refused), and `node scripts/lighthouse.mjs chat
 chat.float cta` (100 in every category for each; the chat preview's
 best-practices was 96 before the harness answered the preview backend).
+
+### 19.8 C4 as built (2026-10-16)
+
+Against §14's C4 row — the last phase; with it chat is complete:
+
+| Item | State |
+|---|---|
+| `messages` adapter "(if Q2 says so)" | **not built — by Q2's own condition.** Q2's decision is "add the `messages` shape in C4 only if a real deployment needs it"; no deployment that needs it has been named, and the owner's approval of every phase (§17) approved Q2 as written, condition included. The shape's source, R6, was never fetched (§18), so building it now would mean writing a wire format from memory (owner's rule 1). `AZ_CHAT_API` stays `completions` or `fake`, and §11.1's "`messages` (C4)" row is superseded by this one. Adding it later is one adapter file behind the unchanged `ChatAdapter` interface (§4.3), one value in `env.ts`, and its fake-server test with streaming, read against the provider's fetched documentation first |
+| moderation hook (§6.8, Q7) | built: `server/chat-moderation.ts`, fetch only. `AZ_CHAT_MODERATION_URL` (https, or http on loopback) and `AZ_CHAT_MODERATION_KEY` (secret, a bearer token; a key without a URL is refused at start). POST `{ "text": "…" }`; only an exact `{ "allow": true }` lets a question through, `{ "allow": false }` is **`400 blocked`** (a new code in the closed set, with its own fixed copy in the page: "This question can't be answered here — try asking it another way.", not offered again), and anything else — a network error, a non-2xx, a redirect, no answer within 3 s (one bound for the request and the body), a reply past 4 KB (read through `outbound.ts`'s capped reader), a reply of any other shape — **fails closed** as `503 unavailable`. The model is never asked either way. It runs after the rate limits (so a flood is limited before it reaches the hook) and before the rows, the budget and the queue; the visitor leaving aborts it. Logs: `chat: blocked by moderation`, `chat: moderation failed: <kind>` — never the words, never the key |
+| `az doctor` checks (§11.2) | built (`cli/src/doctor-chat.ts`), between `backend .env` and `build secrets`: **chat .env** — the server's own validation of every `AZ_CHAT_*` key, by name only; the `fake` model (fail, as §11.2 says, even on loopback: a deployment's `.env` must name a real model, and `az dev` uses `fake` without it); a model URL that already ends in `/chat/completions` (the server adds that path); the moderation hook and shares said in the pass line · **chat budget** — fails when `AZ_CHAT_DAILY_TOKENS` cannot pay for one answer by the server's own estimate (prompt and context at 3 characters a token, plus the output cap: every question would be `budget_exhausted`), warns when the default applies or `AZ_CHAT_ENABLED=off`, and says how many answers the budget pays for at their largest (history and known rows included) · **chat context** — the built `context.json` parses; its known tables pass the server's start-up check (`knowsProblems`: public-read, admin-written, no private field); a known table whose rules or fields in the `.az` file changed since the build fails; AZ1257 warns, naming the pages left out |
+| `az audit` checks (§11.2) | built: **server keys** (`audit.ts`) — the exact value of every key the server marks secret (`env.ts` KEYS: the model key, the moderation key, the session secret, …), from `server/.env` and the environment, looked for in every shipped file in the site worker; named by key and file, never by a character · **chat shared page** — `/chat/shared` says `noindex` and carries a strict policy · **chat context** — every table `context.json` names for figures readable signed out with only public, non-image fields, every known table passing `knowsProblems` against the built `data.json`, nothing shaped like a key in it · **chat runtime** — no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `eval` or `Function(` in the page runtime's copies (`src/az/chat*.ts`), comments aside; a copy that differs from az's own is a warning. Backend CSP unchanged (the stream uses `send`'s headers) |
+| usage tile / `az backend usage` (§11.4) | built, both: on a site with data, `/admin` gains a **Chat usage** section (today against the budget, shares kept, a table of the last 30 days: messages, input and output tokens, dropped components, shares made), read from **`GET /admin/chat`** — answered by the data API under the same admin check as every `/admin` route (a verified account listed in `AZ_ADMIN_EMAILS`), 404 on a server without chat. **`az backend usage <server-dir> [--json]`** prints the same report from the server folder (`server/chat-report.ts`, run as the probe is), for every chat site. Both are `usageReport` (`chat-usage.ts`): three bounded reads; a share is counted by the UTC day it was made, never read |
+| README runbook and cost formula | built into the generated server's README: the cost formula with the operator's prices as placeholders, what each answer's input is made of, the moderation hook, the usage view, and a five-step runbook (before going live, the budget ran out, abuse or a runaway bill, a share that must go, rotating the key) |
+| exit check: doctor/audit tests; adapter tests | doctor and audit: each check with a planted bad configuration and its CONTROL, no planted value in the report (`doctor-chat.test.ts`, `audit-chat.test.ts`). No new adapter, so no adapter test; the moderation hook is tested against a local server speaking its shape (`chat-moderation.test.ts`) |
+
+Where the build differs from the text above:
+
+- **The hook judges every visitor turn sent to the model**, joined by a
+  blank line, not only the latest (§6.8 said "a visitor message"): a
+  visitor turn carries no tag (§4.2), so an earlier one is the visitor's to
+  rewrite and would otherwise reach the model unjudged.
+- **A block is its own code, `blocked`**, where §6.8 named only the
+  failure (`unavailable`): a visitor told to "try again" after a block
+  would send the same words again.
+- **A blocked question is not counted** in `az_chat_usage`: it spends no
+  model tokens, and no column was added for it. A moderation hook keeps its
+  own counts; the server's log has one line per block.
+- **`az backend usage` works for every chat site**, not only those without
+  data (§11.4's "otherwise"): an operator with an `/admin` may still want
+  the counts in a terminal.
+- **The chat runtime is judged in its copies**, not in the bundle (§11.2
+  said "the built runtime"): the bundle holds the UI library's own code,
+  which uses `innerHTML` by design, so a scan of it fails every site. The
+  copies are what the bundle is built from; one that differs from az's own
+  is said to.
+- **"The chat key never in the bundle" is every server secret**: the same
+  search costs nothing more per key.
+- **AZ1257 in `az doctor` is computed without text bodies kept in files**
+  (doctor reads no project file into the context); `az build`, which reads
+  them, may leave out more, and says so itself.
+
+What was measured (2026-10-16): `pnpm verify` (2 896 tests), `pnpm lint`,
+`pnpm test:chat` (345 checks, up from 322, in Chromium, Firefox and WebKit:
+a question the hook blocks refused in the fixed copy with no answer drawn
+and the next one answered, the hook asked 192 times and blocking 3, one
+`chat: blocked by moderation` line per engine and no blocked words in the
+log; the /admin Chat usage section to a verified listed admin with today's
+counts and no visitor's or model's words, axe clean; another signed-in
+account refused `GET /admin/chat` with 403), `pnpm test:backend-db` (249
+checks: the usage report's window, order and shares by UTC day on PostgreSQL
+18.6 and MySQL 8.4.11), `pnpm verify:build` (204 checks), `pnpm test:auth`
+(96), `pnpm test:data` (323), `pnpm test:cloud-auth` (17) and `pnpm gate
+--every-variant`. No real model or moderation service was reachable from
+this machine: both were local servers speaking their shapes.
 
 ---
 

@@ -57,8 +57,8 @@ server offers no MCP prompts.
 | `az_check {file}` | no | diagnostics with code, severity, line, column |
 | `az_spec {file}` | no | the resolved Spec, or null with diagnostics |
 | `az_lint {wordsDir?}` | no | theme-token lint over word packs |
-| `az_doctor {file?, out?}` | no | `az doctor`: each check's status, line and fix; `.env` key names only, never values; loads no module from the project |
-| `az_audit {out?, online?}` | no | `az audit` on a build's output: each check's status, line and fix; a secret by file, offset and shape, never its value; the network only with `online: "true"` |
+| `az_doctor {file?, out?}` | no | `az doctor`: each check's status, line and fix — on a chat site also the chat keys, the daily budget against one answer's cost and the built chat context (chat-block-spec §11.2); `.env` key names only, never values; loads no module from the project |
+| `az_audit {out?, online?}` | no | `az audit` on a build's output: each check's status, line and fix — a server key in what ships, and on a chat site the shared-answer page, the chat context and the page runtime (chat-block-spec §11.2); a secret by file, offset and shape, never its value; the network only with `online: "true"` |
 | `az_build {file, out?}` | **yes, and runs project code** | compile to a runnable project (default `.az-build`); the project's own words run, as in any build |
 | `az_migrate {file}` | **yes, rewrites the file** | upgrade the file's grammar version when a step changes it |
 | `az_eject {word}` | **yes, one-way** | copy a word into the project's `words/`; refuses if already there |

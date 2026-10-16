@@ -233,12 +233,32 @@ readable), to the model named in \`.env\`, and streams the answer back. The
   only for a model server on localhost. \`AZ_CHAT_KEY\` stays in \`.env\`.
 - \`AZ_CHAT_API=fake\` replays the answers in \`AZ_CHAT_FAKE_FILE\`; it is
   refused unless \`AZ_BACKEND_PUBLIC_URL\` is on localhost (development).
-- **Cost.** Per answer roughly: input = prompt + context (≤ 24 000
-  characters) + the conversation; output ≤ \`AZ_CHAT_MAX_OUTPUT_TOKENS\`.
-  A day costs at most \`AZ_CHAT_DAILY_TOKENS\` tokens: about
-  \`input tokens × <PRICE_PER_INPUT_TOKEN> + output tokens × <PRICE_PER_OUTPUT_TOKEN>\`
-  at your provider's prices. Past the budget chat answers \`budget_exhausted\`
-  until 00:00 UTC. \`AZ_CHAT_ENABLED=off\` switches it off at once.
+- **Cost.** Per answer: input = \`chat/prompt.txt\` + \`chat/context.json\`
+  (≤ 24 000 characters of pages) + the rows of the tables a chat knows
+  (≤ 12 000 characters each) + the conversation (≤ 12 000 characters);
+  output ≤ \`AZ_CHAT_MAX_OUTPUT_TOKENS\`. When the provider reports no
+  usage the server counts 3 characters a token, which over-counts. A day
+  costs at most
+
+      AZ_CHAT_DAILY_TOKENS × <HIGHER_OF_YOUR_TWO_PRICES_PER_TOKEN>
+
+  and a day's real cost is
+
+      input tokens × <PRICE_PER_INPUT_TOKEN> + output tokens × <PRICE_PER_OUTPUT_TOKEN>
+
+  with the day's counts from \`az backend usage\` and your provider's prices.
+  \`az doctor\` says how many answers the budget pays for at their largest.
+  Past the budget chat answers \`budget_exhausted\` until 00:00 UTC.
+  \`AZ_CHAT_ENABLED=off\` switches it off at once.
+- **Moderation (optional).** Set \`AZ_CHAT_MODERATION_URL\` (and
+  \`AZ_CHAT_MODERATION_KEY\`, sent as a bearer token) to have every
+  question judged before the model sees it: the server POSTs
+  \`{ "text": "…" }\` — the visitor's words in the conversation, nothing
+  about the visitor — and needs \`{ "allow": true }\` or
+  \`{ "allow": false }\` within 3 s. It fails closed: a block answers
+  \`blocked\`, and an error, a late or malformed answer answers
+  \`unavailable\`; the model is not asked either way. Answers are not
+  moderated: what they can show is bounded by the parser above.
 - **Limits.** Per address and per account (\`AZ_CHAT_PER_ADDRESS\`,
   \`AZ_CHAT_PER_ACCOUNT\`), \`AZ_CHAT_CONCURRENCY\` answers at once with four
   times as many waiting up to 10 s, and \`AZ_CHAT_TIMEOUT_SECONDS\` per answer.
@@ -247,8 +267,36 @@ readable), to the model named in \`.env\`, and streams the answer back. The
   once: turn response buffering off for that path (the server sends
   \`x-accel-buffering: no\`).
 - **Nothing is stored** but per-day counts in \`az_chat_usage\` (tokens and
-  messages, no text, no person), kept 400 days. Logs carry an outcome, a
-  duration and token counts — never a message, an address or an account.
+  messages, no text, no person), kept 400 days, and the answers visitors
+  chose to share (\`az_chat_shares\`, until they expire). Logs carry an
+  outcome, a duration and token counts — never a message, an address or an
+  account.
+- **Usage.** \`az backend usage <this folder>\` prints today's spend against
+  the budget, the last 30 days' messages, tokens, dropped components and
+  shares, and the shares kept — counts only, read from the database without
+  changing it. A site with data tables shows the same on \`/admin\` to the
+  addresses in \`AZ_ADMIN_EMAILS\` (\`GET /admin/chat\`, admins only).
+
+### Chat runbook
+
+1. **Before going live**: \`az doctor\` (the chat keys by name, a model URL
+   given with \`/chat/completions\` on it, the fake model left on, a budget
+   that cannot pay for one answer, the known tables against their rules),
+   \`az audit\` after the site's build (no server key in what ships, the
+   shared-answer page's policy and \`noindex\`, \`chat/context.json\` holding
+   public fields only, no HTML sink in the chat's page runtime), then
+   \`az backend probe <this folder>\` against the model you mean to pin.
+2. **The budget ran out** (\`budget_exhausted\`, one log line): chat is off
+   until 00:00 UTC. Raise \`AZ_CHAT_DAILY_TOKENS\` knowingly and restart, or
+   wait.
+3. **Abuse or a runaway bill**: \`AZ_CHAT_ENABLED=off\` and restart — every
+   question answers \`disabled\`. Lower \`AZ_CHAT_PER_ADDRESS\`,
+   \`AZ_CHAT_PER_ACCOUNT\` or the budget, consider a moderation hook, then
+   switch it back on.
+4. **A shared answer must go**: \`DELETE FROM az_chat_shares WHERE id = '<id>'\`
+   (the id is the last part of its link); \`AZ_CHAT_SHARES=off\` stops new ones.
+5. **Rotating the model key**: set the new \`AZ_CHAT_KEY\`, restart; nothing
+   else holds it.
 - What a provider receives is the prompt, the context and the conversation —
   no cookie, address or account. Its terms for that data are yours to accept.
 `;

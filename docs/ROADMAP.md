@@ -464,7 +464,7 @@ Open: gate snapshots of the `from` states; gallery `carousel`, `orbit` and
 `lightbox` with `from` (AZ1214 today).
 
 **Chat (chat-block-spec) — approved 2026-10-15 with every recommendation;
-C0 and C1 built 2026-10-15.** `chat` is the 12th block, the one dated
+complete: C0–C3 built 2026-10-15, C4 built 2026-10-16.** `chat` is the 12th block, the one dated
 exception to the cap (PRD §6.2, §6.8). C1 ships `chat panel` with prose
 answers: `backend … model default`, the `/chat` route (the /data edge, a
 `fetch`-stream SSE answer, per-address and per-account limits, a per-answer
@@ -491,9 +491,21 @@ three public tables only the site fills (AZ1252, AZ1253, AZ1258, AZ1271)
 whose rows the server reads per question through the anonymous list; §9's
 Jump to latest, scroll following and focusable answers; a `text` body kept
 in a file in the context; pixel snapshots of answered states in every theme
-and scheme in `test:chat`. Open: a curl-probe of a real candidate model
-before one is pinned, C4 (doctor/audit checks, moderation, a second adapter
-if wanted).
+and scheme in `test:chat`. C4 (built 2026-10-16, chat-block-spec §19.8):
+an optional input-moderation hook in `.env` that fails closed (a block is
+`blocked`, an error or a late answer `unavailable`, the model never asked);
+`az doctor` checks of the chat keys by name, the budget against one
+answer's cost and the built context against its tables; `az audit` checks
+that no server key ships, that the shared-answer page says `noindex` under a
+strict policy, that the context holds public fields only and the page
+runtime no HTML sink; the operator's usage view — a Chat usage section on
+`/admin` (`GET /admin/chat`, admins only) and `az backend usage
+<server-dir>` — counts only; the server README's cost formula and runbook.
+The `messages` wire shape was not built: Q2 adds it only when a real
+deployment needs it, and none has. Open: a curl-probe of a real candidate
+model before one is pinned; the `messages` shape when a deployment needs it;
+§14's Later row (transcripts, output moderation, the visitor's own data),
+each its own spec section first.
 
 **M5 — not started.**
 
