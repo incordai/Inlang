@@ -2,7 +2,7 @@
  * @az runtime behaviours
  * Purpose: what makes the emitted markup interactive: dialogs, dropdowns, nav scroll, faq, copy, billing, year, lightbox, carousel, reveal.
  * Spec: docs/overlays-spec.md · docs/nav-block-spec.md · docs/faq-block-spec.md
- * Exports: attach
+ * Exports: attach, lockScroll, FOCUSABLE
  * Edit guide: wire by data-az-behaviour; each element once (late content via MutationObserver); attach() returns full cleanup.
  * Tests: packages/overlay/test/fixes.test.ts, scripts/visual/behaviours.mjs
  */
@@ -48,8 +48,8 @@ import { POLICY, isPreset } from './policy.ts';
 type Cleanup = () => void;
 type On = (target: EventTarget, type: string, fn: (e: Event) => void, opts?: AddEventListenerOptions) => void;
 
-/** What a keyboard user can land on inside a modal. */
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), '
+/** What a keyboard user can land on inside a modal (the chat float's sheet traps on the same list). */
+export const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), '
   + 'textarea:not([disabled]), video[controls], [tabindex]:not([tabindex="-1"])';
 
 /**
@@ -172,7 +172,7 @@ function find<T extends Element>(root: ParentNode, selector: string): T[] {
  * offset restored on close. One lock at a time: a second modal on top of the
  * first shares it.
  */
-function lockScroll(doc: Document): Cleanup {
+export function lockScroll(doc: Document): Cleanup {
   const root = doc.documentElement;
   if (root.hasAttribute(SCROLL_LOCK)) return () => undefined;
   const win = doc.defaultView;

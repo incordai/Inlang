@@ -1,10 +1,10 @@
 /**
  * @az runtime chat
  * Purpose: runs a `chat` panel: sends a question to the site's backend, reads the answer's event stream, writes it as text.
- * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9, §20
+ * Spec: docs/chat-block-spec.md §3.2, §4.2, §5.4, §7, §9, §20
  * Exports: attachChat, ChatOptions
  * Edit guide: answers are textContent in copies of the shell's templates, never markup; each shell once (late content via MutationObserver); attachChat() returns full cleanup.
- * Tests: packages/overlay/test/chat.test.ts, scripts/chat-e2e.mjs
+ * Tests: packages/overlay/test/chat.test.ts, packages/overlay/test/chat-float.test.ts, scripts/chat-e2e.mjs
  */
 
 /**
@@ -34,15 +34,27 @@
  * shared-answer page the shell is read-only: it reads one stored answer by
  * the link's fragment and draws it the same way (runShared).
  *
+ * The transcript follows the newest words only while the visitor is at its
+ * end; scrolling up stops it and shows Jump to latest (§9). An answer that
+ * holds components becomes a stop in the Tab order. A `chat float`'s
+ * launcher opens the panel in its dialog: below the shell's narrow width as
+ * the overlay engine's sheet — modal, focus trapped, the page locked — and
+ * above it as a side panel that does not trap; opening moves focus to the
+ * input, Escape stops an answer and then closes, and closing returns focus
+ * to the launcher.
+ *
  * Touches nothing at import time. The returned cleanup aborts every request
  * and timer, removes every listener and puts each shell back as it shipped.
  * Imports only its siblings.
  */
 
 import {
-  ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, blockCopy, blockOf, createEventReader, finishedSentences, leftCopy, linkKind,
+  ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind,
   parseChatConfig, problemCopy, readShareLink, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
 } from './chat-logic.ts';
+import { FOCUSABLE, lockScroll } from './behaviours.ts';
+import { trapIndex } from './logic.ts';
+import { POLICY } from './policy.ts';
 import { drawRich } from './chat-draw.ts';
 import { shareControl } from './chat-shared.ts';
 
@@ -84,6 +96,10 @@ interface Parts {
   readonly status: HTMLElement;
   /** The hidden templates of the components answers may hold; null for a prose-only chat. */
   readonly components: HTMLElement | null;
+  /** §9: Jump to latest, shown once the visitor scrolls up from the end. */
+  readonly latest: HTMLButtonElement | null;
+  /** A float's launcher, its dialog and the dialog's Close; null for a panel. */
+  readonly float: { readonly launcher: HTMLButtonElement; readonly dialog: HTMLDialogElement; readonly close: HTMLButtonElement } | null;
 }
 
 function partsOf(host: HTMLElement): Parts | null {
@@ -104,11 +120,16 @@ function partsOf(host: HTMLElement): Parts | null {
   const siteTemplate = templates?.querySelector<HTMLElement>('.az-chat-message--site') ?? null;
   if (!transcript || !form || !input || !send || !stop || !note || !error || !actions || !retry || !reset || !status
       || !visitorTemplate || !siteTemplate) return null;
+  const launcher = one<HTMLButtonElement>('data-az-chat-launcher');
+  const dialog = host.querySelector('dialog');
+  const close = one<HTMLButtonElement>('data-az-chat-close');
   return {
     host, transcript, visitorTemplate, siteTemplate, form, input, send, stop, note, error, actions, retry, reset, status,
     asks: one<HTMLElement>('data-az-chat-asks'),
     signin: one<HTMLElement>('data-az-chat-signin'),
     components: one<HTMLElement>('data-az-chat-parts'),
+    latest: one<HTMLButtonElement>('data-az-chat-latest'),
+    float: launcher && dialog && close ? { launcher, dialog, close } : null,
   };
 }
 
@@ -269,7 +290,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   const send = options.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const endpoint = `${options.base.replace(/\/+$/, '')}/chat`;
   const hideable: HTMLElement[] = [p.form, p.stop, p.send, p.error, p.actions, p.retry, p.reset,
-    ...(p.asks ? [p.asks] : []), ...(p.signin ? [p.signin] : [])];
+    ...(p.asks ? [p.asks] : []), ...(p.signin ? [p.signin] : []), ...(p.latest ? [p.latest] : []), ...(p.float ? [p.float.launcher] : [])];
   const shipped = new Map(hideable.map((el) => [el, el.hidden] as const));
   const greeting = [...p.transcript.children].map((c) => c.cloneNode(true));
 
@@ -293,6 +314,23 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   const place = (within: HTMLElement): Place => ({ within, base: options.base, observe: resizes });
 
   const setState = (state: string) => p.host.setAttribute('data-az-chat-state', state);
+  const win = doc.defaultView;
+  const reduced = () => win?.matchMedia('(prefers-reduced-motion: reduce)').matches ?? false;
+
+  /* ---- §9: the transcript follows the newest words while the visitor is at its end ---- */
+  let following = true;
+  /** Jump to latest is scrolling there: the positions it passes are not the visitor scrolling up. */
+  let jumping = false;
+  const follow = () => {
+    if (following) p.transcript.scrollTop = p.transcript.scrollHeight;
+  };
+  const onScroll = () => {
+    const end = atEnd(p.transcript.scrollTop, p.transcript.scrollHeight, p.transcript.clientHeight);
+    if (jumping && !end) return;
+    jumping = false;
+    following = end;
+    if (p.latest) p.latest.hidden = end;
+  };
 
   const flushAnnounce = () => {
     announceTimer = null;
@@ -344,6 +382,9 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     const para = item.querySelector('p');
     if (para) para.textContent = text;
     p.transcript.append(item);
+    // A question the visitor sends is one they mean to see answered: the transcript follows again.
+    if (who === 'visitor') following = true;
+    follow();
     return item;
   };
 
@@ -370,11 +411,18 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
           nodes = [...nodes, copy];
         }
         paras.forEach((t, i) => { if (nodes[i].textContent !== t) nodes[i].textContent = t; });
+        follow();
       },
       part(el: HTMLElement) {
         item.append(el);
         piece = '';
         nodes = [];
+        // §9: an answer with components is a stop in the Tab order, named as one.
+        if (!item.hasAttribute('tabindex')) {
+          item.tabIndex = 0;
+          item.setAttribute('aria-label', CHAT_TEXT.region);
+        }
+        follow();
       },
     };
   };
@@ -560,12 +608,103 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
 
   const on = <K extends keyof HTMLElementEventMap>(el: HTMLElement, type: K, fn: (e: HTMLElementEventMap[K]) => void) =>
     el.addEventListener(type, fn as EventListener, { signal });
+  on(p.transcript, 'scroll', onScroll);
+  if (p.latest) {
+    const latest = p.latest;
+    on(latest, 'click', () => {
+      following = true;
+      jumping = true;
+      // Reduced motion: the transcript jumps (§9); otherwise it glides there.
+      p.transcript.scrollTo({ top: p.transcript.scrollHeight, behavior: reduced() ? 'instant' : 'smooth' });
+      latest.hidden = true;
+      p.input.focus({ preventScroll: true });
+    });
+  }
+
+  /* ---- a float: the launcher opens the panel (§3.2, §9) ---- */
+  let unlock: (() => void) | null = null;
+  /** The float is open as the modal sheet (focus held), not the side panel. */
+  let modal = false;
+  /** An Escape the panel already acted on: the dialog's own `cancel` that may follow it is not a second one. */
+  let escaped = false;
+  const isOpen = () => p.float?.dialog.open === true;
+  const settleClosed = () => {
+    unlock?.();
+    unlock = null;
+    modal = false;
+    p.float?.dialog.removeAttribute('data-state');
+    p.float?.launcher.setAttribute('aria-expanded', 'false');
+  };
+  const openFloat = () => {
+    const f = p.float;
+    if (!f || f.dialog.open || !win || config.narrow === null) return;
+    const preset = floatPreset(win.innerWidth, config.narrow);
+    // The sheet below sm is the overlay engine's modal preset: the page inert and locked, focus held (overlays-spec §2).
+    modal = POLICY[preset].modal;
+    if (modal) {
+      f.dialog.showModal();
+      if (POLICY[preset].scroll === 'lock') unlock = lockScroll(doc);
+    } else {
+      f.dialog.show();
+    }
+    f.launcher.setAttribute('aria-expanded', 'true');
+    // A frame later, so the browser has the closed style to move from.
+    win.requestAnimationFrame(() => { if (f.dialog.open) f.dialog.setAttribute('data-state', 'open'); });
+    following = true;
+    follow();
+    (p.form.hidden ? f.close : p.input).focus({ preventScroll: true });
+  };
+  const closeFloat = () => {
+    const f = p.float;
+    if (!f || !f.dialog.open) return;
+    f.dialog.close();
+    settleClosed();
+    f.launcher.focus({ preventScroll: true });
+  };
+  if (p.float) {
+    const { launcher, dialog, close } = p.float;
+    launcher.hidden = false;
+    on(launcher, 'click', () => (dialog.open ? closeFloat() : openFloat()));
+    on(close, 'click', closeFloat);
+    // Escape on a modal dialog arrives as `cancel` too (and alone, from a device's back gesture).
+    on(dialog, 'cancel', (e) => {
+      e.preventDefault();
+      if (escaped) { escaped = false; return; }
+      if (streaming) stopAnswer();
+      else closeFloat();
+    });
+    // Closed by the browser rather than by us: the page is given back all the same.
+    on(dialog, 'close', settleClosed);
+    on(dialog, 'keydown', (e) => {
+      // overlays-spec §2: in the sheet, Tab cycles inside it — the page behind is inert, and the browser's own UI is not the page.
+      if (e.key !== 'Tab' || !modal) return;
+      const stops = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.getClientRects().length > 0);
+      if (stops.length === 0) return;
+      e.preventDefault();
+      stops[trapIndex(stops.indexOf(doc.activeElement as HTMLElement), stops.length, e.shiftKey)].focus();
+    });
+    // The sheet's backdrop is outside the dialog's box: a tap there closes it, as the overlay engine's modals do.
+    on(dialog, 'click', (e) => {
+      if (e.target !== dialog || !modal) return;
+      const r = dialog.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeFloat();
+    });
+  }
+
   on(p.form, 'submit', (e) => { e.preventDefault(); ask(p.input.value); });
   on(p.input, 'keydown', (e) => {
     // Enter sends; Shift+Enter is a new line; an IME composition is never cut short.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(p.input.value); }
   });
-  on(p.host, 'keydown', (e) => { if (e.key === 'Escape' && streaming) { e.preventDefault(); stopAnswer(); } });
+  // §9: Escape stops an answer; with none streaming, it closes a float.
+  on(p.host, 'keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (streaming) { e.preventDefault(); stopAnswer(); }
+    else if (isOpen()) { e.preventDefault(); closeFloat(); }
+    else return;
+    escaped = true;
+    win?.setTimeout(() => { escaped = false; }, 0);
+  });
   on(p.stop, 'click', () => { stopAnswer(); p.input.focus({ preventScroll: true }); });
   on(p.retry, 'click', () => { p.retry.hidden = true; void request(); });
   on(p.reset, 'click', () => { startOver(); p.input.focus({ preventScroll: true }); });
@@ -591,6 +730,8 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     streaming?.abort();
     if (announceTimer !== null) clearTimeout(announceTimer);
     unsubscribe?.();
+    if (p.float?.dialog.open) p.float.dialog.close();
+    settleClosed();
     // Back to the shell as it shipped, so attaching again starts again.
     p.transcript.replaceChildren(...greeting.map((g) => g.cloneNode(true)));
     for (const [el, hidden] of shipped) el.hidden = hidden;

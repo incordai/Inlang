@@ -2,7 +2,7 @@
  * @az runtime chat-logic
  * Purpose: the chat runtime's pure rules: the shell's config, the event-stream reader, a visitor's text, finished sentences, fixed copy.
  * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
- * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, parseChatConfig, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
+ * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, parseChatConfig, atEnd, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
  * Edit guide: no DOM here; every event is checked against its closed shape and an unknown one is dropped, never guessed at.
  * Tests: packages/overlay/test/chat.test.ts
  */
@@ -29,7 +29,28 @@ export interface ChatConfig {
   readonly to: readonly string[];
   /** The build's shared-answer page (§20.7): shows one stored answer, read-only. */
   readonly shared: boolean;
+  /** A float (§3.2): below this viewport width it opens as a sheet, at or above it as a side panel; null for a panel. */
+  readonly narrow: number | null;
 }
+
+/**
+ * How near the end of the transcript still counts as at its end (§9): a
+ * rounding pixel or a line's leading must not stop it following. One line of
+ * body text, in CSS pixels.
+ */
+export const END_SLACK_PX = 24;
+
+/** The transcript is scrolled to its end — the visitor is reading the newest words (§9). */
+export const atEnd = (scrollTop: number, scrollHeight: number, clientHeight: number): boolean =>
+  scrollHeight - scrollTop - clientHeight <= END_SLACK_PX;
+
+/**
+ * The overlay preset a float opens as at this viewport width (chat-block-spec
+ * §3.2): the bottom `sheet` below the float's narrow width — modal, focus
+ * trapped, the page locked (overlays-spec §2) — and above it a side panel,
+ * the `dropdown` policy's non-modal kind, whose focus returns but is not held.
+ */
+export const floatPreset = (width: number, narrow: number): 'sheet' | 'dropdown' => (width < narrow ? 'sheet' : 'dropdown');
 
 /** The closed list `show` takes. */
 export const CHAT_WORDS = ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard'] as const;
@@ -85,6 +106,8 @@ export const CHAT_TEXT = {
   full: 'This chat is full — start a new chat to ask more.',
   stopped: 'Stopped.',
   answered: 'Answer finished.',
+  /** The name an answer holding components takes when it becomes a stop in the Tab order (§9). */
+  region: 'Answer',
   tooLong: `Keep your question under ${VISITOR_MAX.toLocaleString('en-US')} characters.`,
 } as const;
 
@@ -158,7 +181,11 @@ export function parseChatConfig(raw: string | null): ChatConfig | null {
   if (!Array.isArray(show) || !show.every((w) => (CHAT_WORDS as readonly unknown[]).includes(w)) || new Set(show).size !== show.length) return null;
   if (!Array.isArray(to) || !to.every((d) => typeof d === 'string' && linkKind(d) !== null)) return null;
   if (c.shared !== undefined && c.shared !== true) return null;
-  return { page: c.page, allow: c.allow, limit: c.limit, signin: c.signin, show: show as ChatWord[], to: to as string[], shared: c.shared === true };
+  if (c.narrow !== undefined && !(typeof c.narrow === 'number' && Number.isInteger(c.narrow) && c.narrow > 0 && c.narrow <= 10_000)) return null;
+  return {
+    page: c.page, allow: c.allow, limit: c.limit, signin: c.signin, show: show as ChatWord[], to: to as string[], shared: c.shared === true,
+    narrow: typeof c.narrow === 'number' ? c.narrow : null,
+  };
 }
 
 /** A string within `max` characters (and at least one when required). */

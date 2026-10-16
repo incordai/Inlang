@@ -15,7 +15,7 @@ import {
 
 const CONFIG = { page: '/pricing', allow: 'signedin', limit: 20, signin: '/login' };
 /** A prose-only shell's config, as parsed: nothing to show, nowhere to link. */
-const PARSED = { ...CONFIG, show: [], to: [], shared: false };
+const PARSED = { ...CONFIG, show: [], to: [], shared: false, narrow: null };
 
 test('the config the chat word writes parses; anything else is refused, not guessed at', () => {
   assert.deepEqual(parseChatConfig(JSON.stringify(CONFIG)), PARSED);
@@ -80,7 +80,7 @@ test('CONTROL: an event the server never sends, or one of the wrong shape, is dr
 const SHOWN = { ...CONFIG, show: ['pricing', 'faq', 'cta', 'feature'], to: ['/', '/contact', '/pricing#plans', 'https://docs.example.org/start', 'mailto:help@example.org', 'tel:+15550100'] };
 
 test('a shell that shows components lists them and its destinations; a word, scheme or address outside them refuses the config', () => {
-  assert.deepEqual(parseChatConfig(JSON.stringify(SHOWN)), { ...SHOWN, shared: false });
+  assert.deepEqual(parseChatConfig(JSON.stringify(SHOWN)), { ...SHOWN, shared: false, narrow: null });
   for (const bad of [
     { ...SHOWN, show: ['auth'] },
     { ...SHOWN, show: ['faq', 'faq'] },
