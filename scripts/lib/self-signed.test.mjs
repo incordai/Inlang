@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { X509Certificate, createPublicKey } from 'node:crypto';
 import { createServer, request } from 'node:https';
-import { selfSignedCert } from './self-signed.mjs';
+import { derInteger, selfSignedCert } from './self-signed.mjs';
 
 test('selfSignedCert: a v3 certificate for localhost and 127.0.0.1, signed by its own key, valid now for a day', () => {
   const now = Date.now();
@@ -40,4 +40,16 @@ test('selfSignedCert: an https server with it answers a client that trusts it â€
   } finally {
     server.close();
   }
+});
+
+test('derInteger: the minimal DER form â€” leading zeros dropped, one kept before a high bit', () => {
+  const hex = (bytes) => derInteger(Buffer.from(bytes)).toString('hex');
+  assert.equal(hex([2]), '020102');
+  assert.equal(hex([0x80]), '02020080');
+  // A random serial that starts 0x00 then below 0x80 was written as is: OpenSSL refused it ("illegal padding").
+  assert.equal(hex([0x00, 0x05, 0xff]), '020205ff');
+  assert.equal(hex([0x00, 0x7f]), '02017f');
+  assert.equal(hex([0x00, 0x00, 0x90]), '02020090');
+  // Zero itself keeps its one byte.
+  assert.equal(hex([0x00]), '020100');
 });

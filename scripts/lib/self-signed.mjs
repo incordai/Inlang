@@ -29,8 +29,18 @@ const TAG = {
 const tlv = (tag, body) => Buffer.concat([Buffer.from([tag]), derLength(body.length), body]);
 const sequence = (...items) => tlv(TAG.sequence, Buffer.concat(items));
 const set = (...items) => tlv(TAG.set, Buffer.concat(items));
-/** An unsigned integer: a leading zero keeps a high first bit from reading as negative. */
-const integer = (bytes) => tlv(TAG.integer, bytes[0] & 0x80 ? Buffer.concat([Buffer.from([0]), bytes]) : bytes);
+/**
+ * An unsigned integer in DER's minimal form (X.690 §8.3.2): leading zero
+ * bytes dropped — a random serial starting 0x00 then below 0x80 is "illegal
+ * padding" to OpenSSL, once in about 512 certificates — then one zero put
+ * back where a high first bit would otherwise read as negative.
+ */
+export function derInteger(bytes) {
+  let start = 0;
+  while (start < bytes.length - 1 && bytes[start] === 0) start++;
+  const body = bytes.subarray(start);
+  return tlv(TAG.integer, body[0] & 0x80 ? Buffer.concat([Buffer.from([0]), body]) : body);
+}
 const explicit = (n, body) => tlv(TAG.explicit | n, body);
 /** UTCTime, YYMMDDHHMMSSZ — valid for dates before 2050 (RFC 5280 §4.1.2.5). */
 const utcTime = (date) => tlv(TAG.utcTime, Buffer.from(`${date.toISOString().replace(/[-:T]/g, '').slice(2, 14)}Z`, 'ascii'));
@@ -62,8 +72,8 @@ export function selfSignedCert(now = Date.now()) {
   const name = sequence(set(sequence(oid(OID.commonName), tlv(TAG.utf8, Buffer.from(HOST, 'utf8')))));
   const altNames = sequence(tlv(TAG.sanDns, Buffer.from(HOST, 'ascii')), tlv(TAG.sanIp, Buffer.from(LOOPBACK)));
   const tbs = sequence(
-    explicit(0, integer(Buffer.from([2]))), // v3
-    integer(randomBytes(SERIAL_BYTES)),
+    explicit(0, derInteger(Buffer.from([2]))), // v3
+    derInteger(randomBytes(SERIAL_BYTES)),
     algorithm,
     name,
     sequence(utcTime(new Date(now - BACKDATE_MS)), utcTime(new Date(now + LIFETIME_MS))),
