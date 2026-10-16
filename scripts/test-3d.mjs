@@ -455,8 +455,13 @@ for (const [label, path, reducedMotion] of [
   const still = await shot();
   check('CONTROL: without input the orbit view holds its pose', before.equals(still));
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(SETTLE_MS);
-  check('§9: arrow keys turn the object', !before.equals(await shot()));
+  // The turn shows on a later frame; a slow machine needs more than one settle for it. Wait for it, bounded.
+  let turned = false;
+  for (const end = Date.now() + 10_000; !turned && Date.now() < end;) {
+    await page.waitForTimeout(SETTLE_MS);
+    turned = !before.equals(await shot());
+  }
+  check('§9: arrow keys turn the object', turned);
   await context.close();
 }
 
@@ -753,7 +758,8 @@ await checkTextured(browser, `chromium ${browser.version()}`);
   const { page, context } = await open(backdrop, '/?az-probe=off&az-probe-trace');
   await page.evaluate(() => { document.body.style.minHeight = '4000px'; });
   await page.evaluate(() => window.scrollTo({ top: 800, behavior: 'instant' }));
-  await page.waitForTimeout(SETTLE_MS);
+  // The stage publishes the position on a frame after the scroll: wait for it, bounded, not a fixed settle.
+  await page.waitForFunction(() => Number(document.documentElement.getAttribute('data-az3d-backdrop') ?? 'NaN') > 0, null, { timeout: 10_000 }).catch(() => {});
   const target = () => page.evaluate(() => Number(document.documentElement.getAttribute('data-az3d-backdrop') ?? 'NaN'));
   const before = await target();
   check('CONTROL: scrolled down, the backdrop follows the page', before > 0, String(before));

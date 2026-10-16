@@ -965,6 +965,9 @@ async function adminFlow(b, name, owner) {
   await page.keyboard.press('Enter');
   const recovered = await page.waitForFunction(() => document.querySelector('.az-admin-table') !== null
     && ![...document.querySelectorAll('.az-admin button')].some((b) => b.textContent === 'Try again'), null, { timeout: 10_000 }).then(() => true, () => false);
+  // Focus moves to the count once the rows have re-rendered (an effect after the render, not in it): wait
+  // for it, bounded — if it never moves, the check below still fails.
+  await page.waitForFunction(() => document.activeElement?.classList.contains('az-admin-count') === true, null, { timeout: 5_000 }).catch(() => {});
   const afterRetry = await page.evaluate(() => ({ count: document.activeElement?.classList.contains('az-admin-count') ?? false, editor: document.querySelector('#az-admin-editor-title') !== null }));
   check(`${name} admin: Try again recovers the rows; focus moves to the count, the editor is still open`,
     recovered && afterRetry.count && afterRetry.editor, JSON.stringify(afterRetry));

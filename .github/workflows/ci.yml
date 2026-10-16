@@ -81,8 +81,9 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm gate --self-test
-      # All 12 gate items for every word; runs the browser checks itself.
-      - run: pnpm gate
+      # All 12 gate items for every word; runs the browser checks itself. Under
+      # xvfb-run: Firefox on Linux has WebGL only with a display (scenes, maps).
+      - run: xvfb-run -a pnpm gate
 
   visual:
     name: visual, auth, dev, 3D, thumbnails and palette
@@ -111,7 +112,8 @@ jobs:
       # model is self-hosted, orbit answers the keyboard, context loss falls
       # back to the posters (scene-spec §5–§9). Software WebGL, so no frame
       # time from here is device evidence.
-      - run: pnpm test:3d
+      # Under xvfb-run, so Firefox has WebGL for the textured-model check.
+      - run: xvfb-run -a pnpm test:3d
       - run: pnpm thumbnails --verify
       # The az palette gallery: policy, axe, keyboard and copy in three
       # engines, and a screenshot per theme rendered twice (theme-spec §14).
