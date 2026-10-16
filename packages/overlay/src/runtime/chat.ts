@@ -52,7 +52,7 @@ import {
   ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind,
   parseChatConfig, problemCopy, readShareLink, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
 } from './chat-logic.ts';
-import { FOCUSABLE, lockScroll } from './behaviours.ts';
+import { FOCUSABLE, lockScroll, wireSheetDrag } from './behaviours.ts';
 import { trapIndex } from './logic.ts';
 import { POLICY } from './policy.ts';
 import { drawRich } from './chat-draw.ts';
@@ -683,6 +683,13 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
       e.preventDefault();
       stops[trapIndex(stops.indexOf(doc.activeElement as HTMLElement), stops.length, e.shiftKey)].focus();
     });
+    // overlays-spec §2: the sheet's handle (shown below sm only) drags it down to dismiss, through the engine's own wiring.
+    const dragUndo: (() => void)[] = [];
+    wireSheetDrag({
+      on: (target, type, fn) => target.addEventListener(type, fn, { signal }),
+      undo: dragUndo,
+    }, dialog, () => closeFloat());
+    signal.addEventListener('abort', () => { for (const u of dragUndo) u(); }, { once: true });
     // The sheet's backdrop is outside the dialog's box: a tap there closes it, as the overlay engine's modals do.
     on(dialog, 'click', (e) => {
       if (e.target !== dialog || !modal) return;

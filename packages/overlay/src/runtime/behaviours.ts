@@ -2,7 +2,7 @@
  * @az runtime behaviours
  * Purpose: what makes the emitted markup interactive: dialogs, dropdowns, nav scroll, faq, copy, billing, year, lightbox, carousel, reveal.
  * Spec: docs/overlays-spec.md · docs/nav-block-spec.md · docs/faq-block-spec.md
- * Exports: attach, lockScroll, FOCUSABLE
+ * Exports: attach, lockScroll, wireSheetDrag, FOCUSABLE
  * Edit guide: wire by data-az-behaviour; each element once (late content via MutationObserver); attach() returns full cleanup.
  * Tests: packages/overlay/test/fixes.test.ts, scripts/visual/behaviours.mjs
  */
@@ -353,8 +353,8 @@ function wireDialogs(ctx: Ctx, root: ParentNode): void {
  * exit continues from where it is), otherwise it springs back. Esc and the
  * close button remain for everyone who does not drag.
  */
-function wireSheetDrag(
-  ctx: Ctx, dialog: HTMLDialogElement, close: (d: HTMLDialogElement) => void,
+export function wireSheetDrag(
+  ctx: Pick<Ctx, 'on' | 'undo'>, dialog: HTMLDialogElement, close: (d: HTMLDialogElement) => void,
 ): void {
   const handle = dialog.querySelector<HTMLElement>('[data-az-drag]');
   if (!handle) return;

@@ -327,6 +327,10 @@ test('the float holds the whole panel: transcript, Jump to latest, form, status 
   assert.equal(dialog.below?.sm?.width, '100%');
   assert.equal(dialog.states?.open?.opacity, 1, 'it enters by its open state (reduced motion: the target\'s net keeps only opacity)');
   assert.equal(dialog.style?.display, undefined, '§2: an overlay never sets display — the closed dialog stays hidden');
+  assert.equal(root.style?.display, 'contents', 'the float takes no place in the page\'s flow or its frame');
+  const handle = one(dialog, 'data-az-drag');
+  assert.deepEqual([handle.attrs?.['aria-hidden'], handle.style?.display, handle.below?.sm?.display], ['true', 'none', 'flex'],
+    'the sheet\'s drag handle: below sm only, hidden from assistive tech (Close and Escape serve everyone)');
 });
 
 test('§9: the transcript scrolls on its own and is a keyboard stop; Jump to latest ships hidden, a real button', () => {

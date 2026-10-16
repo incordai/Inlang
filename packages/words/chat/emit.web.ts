@@ -4,7 +4,7 @@
  * Spec: docs/chat-block-spec.md · terms: az explain chat
  * Renders: section.az-chat.az-chat--panel[data-az-chat=<config>][data-az-chat-state] > h2.az-chat-title#az-chat-title ·
  *   (float: div.az-chat.az-chat--float[data-az-chat] > button.az-chat-launcher[data-az-chat-launcher][hidden] (the title) +
- *     dialog.az-chat-dialog#az-chat-dialog[data-az-overlay=sheet] > div.az-chat-sheet > div.az-chat-head (the h2 + Close
+ *     dialog.az-chat-dialog#az-chat-dialog[data-az-overlay=sheet] > div.az-chat-sheet > div.az-chat-sheet-handle[data-az-drag] (below sm) + div.az-chat-head (the h2 + Close
  *     [data-az-chat-close]) + the same panel) ·
  *   div.az-chat-panel > ol.az-chat-transcript[data-az-chat-transcript][tabindex=0] (scrolls) > li.az-chat-message.az-chat-message--site (the greeting) > p.az-chat-text ·
  *     button[data-az-chat-latest][hidden] (Jump to latest) ·
@@ -479,6 +479,8 @@ function floatShell(block: SpecBlock, ctx: EmitContext): EmittedNode {
   return {
     tag: 'div',
     attrs: { class: 'az-chat az-chat--float', 'data-az-chat': config(block, ctx), 'data-az-chat-state': 'idle' },
+    // It holds only things fixed to the viewport, so it takes no place in the page's flow (nor its frame).
+    style: { display: 'contents' },
     children: [
       {
         ...launcher,
@@ -523,8 +525,20 @@ function floatShell(block: SpecBlock, ctx: EmitContext): EmittedNode {
             display: 'flex', flexDirection: 'column', gap: px(t.space[12]),
             maxHeight: `calc(100svh - ${px(t.space[48])})`, padding: px(t.space[16]),
           },
-          below: { sm: { maxHeight: '85svh' } },
+          // A sheet keeps one height while an answer streams in, rather than growing under the reader: 60–85 svh.
+          below: { sm: { minHeight: '60svh', maxHeight: '85svh' } },
           children: [
+            // The sheet's drag handle (overlays-spec §2), below sm only: a grip for the pointer; Close and Escape for everyone else.
+            {
+              tag: 'div',
+              attrs: { 'data-az-drag': '', 'aria-hidden': 'true', class: 'az-chat-sheet-handle' },
+              style: { display: 'none', justifyContent: 'center', paddingBlock: px(t.space[4]), cursor: 'grab', touchAction: 'none' },
+              below: { sm: { display: 'flex' } },
+              children: [{
+                tag: 'span',
+                style: { display: 'block', width: px(t.space[32]), height: px(t.space[4]), borderRadius: px(t.radius.full), background: t.color['border-strong'] },
+              }],
+            },
             {
               tag: 'div',
               attrs: { class: 'az-chat-head' },

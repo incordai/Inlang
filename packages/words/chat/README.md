@@ -1,6 +1,6 @@
 # `chat`
 
-A panel where a visitor asks the site's AI a question and reads the answer as it streams. The answer comes from the site's own backend, which asks the model the operator chose in the server's `.env` — the `.az` file never names a provider or a model.
+A panel — on a page, or opened from a launcher in the corner of every page — where a visitor asks the site's AI a question and reads the answer as it streams. The answer comes from the site's own backend, which asks the model the operator chose in the server's `.env` — the `.az` file never names a provider or a model.
 
 Full specification: [`docs/chat-block-spec.md`](../../../docs/chat-block-spec.md). This page summarises it; the spec is authoritative.
 
@@ -39,9 +39,23 @@ every stranger spends the operator's model budget.
 | Variant | Use when |
 |---|---|
 | `panel` | default: a section on one page — heading, transcript, suggested questions, input |
+| `float` | a launcher fixed to the inline-end bottom corner that opens the same panel: a bottom sheet below `sm` (focus held there, the page locked), a side panel above it (the page stays usable). Declared under `site` it is on every page |
+| `none` | on a page, leaves the site's float out of it |
 
-`float` (a launcher fixed to the corner that opens the panel over any page,
-declared under `site` and inherited) comes with phase C3 of the spec.
+```
+site aurora
+  chat float
+    title "Ask Aurora"
+    allow anyone
+
+page /checkout
+  chat none
+```
+
+A page shows one chat: a page's own `chat panel` replaces the site's float
+there, and a page's own `chat float` under the site's is AZ2229. The
+launcher ships hidden and the runtime shows it, so with JavaScript off there
+is nothing to open. [`preview.float.az`](preview.float.az) shows a float.
 
 ## Modifiers
 
@@ -56,6 +70,7 @@ None in this release.
 | `allow` | enum | `signedin` / `anyone` | `signedin` |  | who may send a message; a signed-out visitor sees **Sign in to ask** |
 | `limit` | int | 1–50 | `20` |  | questions per conversation before the panel says to start a new chat |
 | `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` |  | at most 9 | what an answer may hold besides text (below); a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270 |
+| `knows` | list | table names |  | at most 3 | tables whose rows the answers draw on (below): each must be `allow anyone read` (AZ1252) and filled only by the site's admins (AZ1253); named twice or a fourth is AZ1258, not a table AZ1271 |
 
 ## Children
 
@@ -112,6 +127,31 @@ declare, a value past its length, deeper nesting — is dropped and leaves no
 trace. No image, no markup, no style and no link the file did not declare
 can appear in an answer.
 
+## Answers from the site's tables (`knows`)
+
+```
+site aurora
+  data questions
+    question text     required search
+    answer   longtext required search
+    allow anyone read
+
+  chat float
+    knows questions
+```
+
+With each question the server reads rows of the tables a chat `knows`
+exactly as a signed-out visitor reads `GET /data/<table>`: only fields that
+are not `private`, never an image, never who owns a row. When the table has
+`search` fields the visitor's words are looked for in them; otherwise (or
+when nothing matches) the newest rows. At most 20 rows, 2 000 characters a
+row and 12 000 a table, cached for a minute, are sent after the site's pages,
+marked as data the model must not take instructions from. A table that
+strangers can add rows to or change (`allow anyone create`, `allow signedin
+create`, any `edit` rule) is refused: a row a stranger wrote would be
+instructions to the model dressed as data. The server checks the same again
+when it starts.
+
 ## How an answer reaches the page
 
 The page posts the question and the conversation so far to the backend's
@@ -130,31 +170,37 @@ earlier answers carry a server tag so they cannot be forged.
 - the heading is an `<h2>`; the form has a visible label; Send, Stop, Try again, New chat are real buttons
 - the transcript is a plain list, not a live region; a separate polite status region hears whole sentences, at most one update every 1.5 seconds
 - an answer is `aria-busy` while it streams; focus stays in the input when a question is sent
-- Enter sends, Shift+Enter is a new line, Escape stops an answer
+- Enter sends, Shift+Enter is a new line, Escape stops an answer — and then closes a float
+- a float's launcher is named by the title; opening moves focus to the input, closing returns it to the launcher; below `sm` focus stays in the sheet
+- the transcript scrolls on its own, follows the newest words only while you are at its end, and offers **Jump to latest** once you scroll up; it is a keyboard stop, and an answer that holds components is one too
+- with reduced motion the panel appears without sliding and the transcript jumps rather than glides
 - colours are theme tokens only: visitor messages on `color.surface-alt`, answers on `color.surface`, errors in `color.danger`
 
 The full floor is in the spec (§9).
 
 ## Status
 
-C1, C2 and C2b of the spec: a `panel` whose answers are prose and the
+C1, C2, C2b and C3 of the spec: a `panel` or a `float` (on every page from
+`site`, left out with `chat none`) whose answers are prose and the
 components `show` lists — the site's own blocks, and charts, tables, stats,
-image cards and dashboards — with share links. Before going live, `az backend probe server` asks the configured
+image cards and dashboards — with share links, grounded on the site's pages
+(a `text` body kept in a file included, as plain text) and on the public
+tables it `knows`. Before going live, `az backend probe server` asks the configured
 model the real prompt, one question per component, and reports what it streamed
 and what the filter dropped.
 
 Known gaps:
 
-- `float`, a site-level `chat` and `chat none` (C3); `knows` tables (C3)
 - a quote is of `pricing` only; `faq`, `cta` and `feature` are composed, never quoted
-- "Jump to latest" and the rest of §9's scroll polish (C3)
+- the operations of C4 (a second wire shape, the moderation hook, `az doctor` checks) are not built
 
 ## Tested
 
 What is automated today:
 
 - `packages/words/test/props.test.ts`, `variants.test.ts`, `structure.test.ts` and `conformance.test.ts` run every word; `chat-shell.test.ts` holds the shell to §5.4, §7 and §9
-- `packages/core/test/chat-decl.test.ts` triggers every code the block raises; `packages/overlay/test/chat.test.ts` the runtime's event reader, copy and a source scan for markup sinks
+- `packages/core/test/chat-decl.test.ts` and `chat-float-decl.test.ts` trigger every code the block raises; `packages/overlay/test/chat.test.ts` the runtime's event reader, copy and a source scan for markup sinks, `chat-float.test.ts` the float's preset and the transcript's end
+- `packages/backend/test/chat-knows.test.ts` reads `knows` rows through the anonymous list on SQLite and holds the exact bytes the model is given; `pnpm test:backend-db` does the same on PostgreSQL and MySQL
 - `words.test.ts` runs the theme lint over the emitter (also `az lint`)
-- `pnpm test:chat` runs the real generated server with the `fake` adapter in Chromium, Firefox and WebKit, components and the injection corpus included
+- `pnpm test:chat` runs the real generated server with the `fake` adapter in Chromium, Firefox and WebKit, components and the injection corpus included — and the float on every page, its keyboard and focus, Jump to latest, reduced motion, answers grounded on a `knows` table, and pixel snapshots of answered states in every theme and scheme
 - `packages/backend/test/chat-answer.test.ts` and `chat-attacks.test.ts` hold the answer parser to every form, cap and split, and to the injection corpus (`packages/backend/test/fixtures/chat-attacks/`)
