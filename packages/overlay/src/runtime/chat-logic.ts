@@ -75,6 +75,8 @@ export type ChatBlock =
   | { readonly kind: 'faq'; readonly items: readonly { readonly q: string; readonly a: string }[] }
   | { readonly kind: 'cta'; readonly label: string; readonly to: string }
   | { readonly kind: 'feature'; readonly items: readonly { readonly title: string; readonly text: string }[] }
+  /** A follow-up question (§21.1.2): a button that asks it, drawn after the rest of the answer. */
+  | { readonly kind: 'ask'; readonly q: string }
   | { readonly kind: 'rich'; readonly word: string; readonly data: unknown };
 
 /** The share tags a finished answer carries when the server makes share links (§20.7). */
@@ -92,7 +94,7 @@ export type ChatEvent =
  * same, chat-block-spec §5.3): one past them is not a component the server
  * sends, so it is dropped.
  */
-export const BLOCK_LIMITS = { items: 6, question: 160, answer: 600, title: 80, text: 300, label: 40, record: 12_000 } as const;
+export const BLOCK_LIMITS = { items: 6, question: 160, answer: 600, title: 80, text: 300, label: 40, record: 12_000, components: 4, asks: 3, ask: 80 } as const;
 
 /** One turn as the request carries it; a site turn carries its server tag. */
 export interface ChatTurn {
@@ -119,6 +121,12 @@ export const CHAT_TEXT = {
   /** The name an answer holding components takes when it becomes a stop in the Tab order (§9). */
   region: 'Answer',
   tooLong: `Keep your question under ${VISITOR_MAX.toLocaleString('en-US')} characters.`,
+  /** C5 (§21.1.4, §21.1.6): the history kept in this browser, and the code blocks' Copy. */
+  restored: 'Your earlier chat is restored.',
+  cleared: 'History cleared.',
+  copied: 'Code copied.',
+  copyFailed: 'Copy did not work — select the code to copy it.',
+  follows: (n: number) => (n === 1 ? '1 follow-up question.' : `${n} follow-up questions.`),
 } as const;
 
 /** One fixed line per refusal or failure (§7); an unknown code reads as the generic one. */
@@ -132,6 +140,8 @@ const PROBLEMS: Readonly<Record<string, string>> = {
   /** The site's moderation hook refused the question (chat-block-spec §6.8). */
   blocked: 'This question can\u2019t be answered here — try asking it another way.',
   too_long: CHAT_TEXT.tooLong,
+  /** A kept conversation the server no longer accepts — its key was rotated (§21.1.4). */
+  tampered: 'This saved chat can\u2019t be continued — it was cleared. Ask your question again.',
   conversation_full: CHAT_TEXT.full,
   unknown: 'Something went wrong — start a new chat.',
 };
@@ -229,6 +239,10 @@ function toBlock(d: Record<string, unknown>): ChatBlock | null {
     if (!exactly(c, ['label', 'to']) || !text(c.label, L.label) || typeof c.to !== 'string' || linkKind(c.to) === null) return null;
     return { kind: 'cta', label: c.label, to: c.to };
   }
+  if (exactly(d, ['ask'])) {
+    const q = d.ask;
+    return text(q, L.ask) && !q.includes('\n') ? { kind: 'ask', q } : null;
+  }
   if (exactly(d, ['feature'])) {
     const list = d.feature;
     if (!items(list, ['title', 'text']) || !list.every((i) => text(i.title, L.title) && text(i.text, L.text, false))) return null;
@@ -264,6 +278,7 @@ export function blockCopy(block: ChatBlock, plans = 0): string {
     case 'faq': return block.items.length === 1 ? '1 question and answer.' : `${block.items.length} questions and answers.`;
     case 'cta': return `Link: ${block.label}.`;
     case 'feature': return block.items.length === 1 ? 'A list of 1 item.' : `A list of ${block.items.length} items.`;
+    case 'ask': return '';
     case 'rich': return '';
   }
 }

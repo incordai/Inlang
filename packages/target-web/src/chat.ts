@@ -27,7 +27,7 @@ export { SHARED_ROUTE };
 export const CHAT_FILE = 'src/chat/runtime.tsx';
 
 /** The behaviour runtime's files that only a site with a chat block ships. */
-export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'rows-logic.ts'];
+export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'rows-logic.ts'];
 
 /** Every page's chat — its own, or the site's float, as blocksFor resolves it (chat-block-spec §3.1). */
 const chatsOf = (spec: Spec): SpecBlock[] => spec.pages.flatMap((p) => blocksFor(spec, p).filter((b) => b.word === 'chat'));

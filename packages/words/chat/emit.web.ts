@@ -14,6 +14,10 @@
  *       marks parked as [data-az-chat-behaviour]), an faq or feature item list as those
  *       words render a `from` template (markers where the text goes), a call to action per kind of destination ·
  *       and (C2b, figures.ts) the paint, figure, table, stats, cards, dashboard, unavailable, asset and share parts ·
+ *     div.az-chat-prose[hidden][data-az-chat-prose] (C5) > the prose elements, each marked [data-az-chat-slot] — strong, em, code,
+ *       ul > li, ol, div.az-chat-code > div.az-chat-code-bar (the language + Copy code [data-az-chat-copy]) + pre[tabindex=0] > code,
+ *       ul.az-chat-follows > li.az-chat-follow-item > button ·
+ *     div.az-chat-history[hidden][data-az-chat-history] > p.az-chat-privacy + Clear history [data-az-chat-clear] ·
  *     (the shared-answer page, chat.shared: the title an h1) p.az-chat-note + h2.az-chat-shared-heading + the transcript, templates and parts + p.az-chat-error +
  *       button.az-chat-delete[data-az-chat-delete] (hidden; shown for the delete link) — no form, no suggestions ·
  *     ul.az-chat-asks[hidden][data-az-chat-asks] > li.az-chat-ask-item > button.az-action[data-az-chat-ask] ·
@@ -82,6 +86,11 @@ export const CHAT_COPY = {
   /** §9: shown when the visitor has scrolled up from the newest words. */
   latest: 'Jump to latest',
   close: 'Close',
+  /** C5 (chat-block-spec §21.1): the code block's Copy, the follow-ups' list, the history kept in this browser. */
+  copy: 'Copy code',
+  follows: 'Follow-up questions',
+  clear: 'Clear history',
+  privacy: 'This chat is kept in this browser for 7 days. On a shared computer, clear it when you are done.',
 } as const;
 
 /** The float's dialog: the launcher's aria-controls points here. */
@@ -255,6 +264,73 @@ function message(who: 'visitor' | 'site', text: string, ctx: EmitContext): Emitt
   };
 }
 
+/**
+ * The elements an answer's prose may be drawn in (chat-block-spec §21.1.3):
+ * one hidden template per element the markdown subset's tree holds, and the
+ * follow-up questions' list. The runtime (overlay chat-prose.ts) clones these
+ * — never creating an element — and writes text only, so every class here is
+ * in the generated sheet. A paragraph is the answer template's own.
+ */
+function proseParts(ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const slot = (name: string, tag: string, style: EmittedNode['style'], children: (EmittedNode | string)[] = [], attrs: Record<string, string> = {}): EmittedNode =>
+    ({ tag, attrs: { 'data-az-chat-slot': name, ...attrs }, style, children });
+  const list = { margin: 0, paddingInlineStart: px(t.space[24]), display: 'grid', gap: px(t.space[4]), fontSize: t.typeSize.base, lineHeight: t.type['leading-body'] };
+  const mono = { fontFamily: t.type.mono, fontSize: t.typeSize.sm };
+  const copy = control(CHAT_COPY.copy, 'data-az-chat-copy', ctx, false);
+  const follow = control('', 'data-az-chat-follow', ctx, false);
+  return {
+    tag: 'div',
+    attrs: { class: 'az-chat-prose', hidden: 'hidden', 'data-az-chat-prose': '' },
+    children: [
+      slot('strong', 'strong', { fontWeight: t.type['weight-bold'] }),
+      slot('em', 'em', { fontStyle: 'italic' }),
+      slot('code', 'code', { ...mono, padding: `0 ${px(t.space[4])}`, borderRadius: px(t.radius.sm), background: t.color['surface-alt'], color: t.color.text, overflowWrap: 'anywhere' }),
+      slot('ul', 'ul', list, [slot('li', 'li', { overflowWrap: 'anywhere' })]),
+      slot('ol', 'ol', list),
+      slot('code-block', 'div', { display: 'grid', gap: px(t.space[4]), minWidth: 0 }, [
+        {
+          tag: 'div', attrs: { class: 'az-chat-code-bar' },
+          style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: px(t.space[8]) },
+          children: [
+            slot('lang', 'span', { fontSize: t.typeSize.sm, color: t.color.muted }),
+            { ...copy, attrs: { ...copy.attrs, 'data-az-chat-slot': 'copy' } },
+          ],
+        },
+        {
+          // A scroll region the keyboard reaches (§21.1.6), ringed like the transcript when focused.
+          ...slot('pre', 'pre', {
+            margin: 0, padding: px(t.space[12]), maxWidth: '100%', overflowX: 'auto',
+            background: t.color.bg, color: t.color.text, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.sm),
+          }, [slot('code-text', 'code', { ...mono, whiteSpace: 'pre' })], { tabindex: '0' }),
+          states: { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } },
+        },
+      ], { class: 'az-chat-code' }),
+      slot('follows', 'ul', { display: 'flex', flexWrap: 'wrap', gap: px(t.space[8]), margin: 0, padding: 0 }, [{
+        tag: 'li', attrs: { class: 'az-chat-follow-item' }, style: { listStyle: 'none' },
+        children: [{ ...follow, attrs: { ...follow.attrs, 'data-az-chat-slot': 'follow' } }],
+      }], { class: 'az-chat-follows', 'aria-label': CHAT_COPY.follows }),
+    ],
+  };
+}
+
+/**
+ * The line that says the chat is kept in this browser, and Clear history
+ * (§21.1.4) — hidden until the runtime finds it can keep anything.
+ */
+function historyLine(ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  return {
+    tag: 'div',
+    attrs: { class: 'az-chat-history', hidden: 'hidden', 'data-az-chat-history': '' },
+    style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: px(t.space[8]) },
+    children: [
+      { tag: 'p', attrs: { class: 'az-chat-privacy' }, style: { margin: 0, fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'], color: t.color.muted }, children: [CHAT_COPY.privacy] },
+      control(CHAT_COPY.clear, 'data-az-chat-clear', ctx, false),
+    ],
+  };
+}
+
 /** A control the runtime wires: a styled button that is never a form submit. */
 function control(label: string, attr: string, ctx: EmitContext, hidden = true): EmittedNode {
   const b = ctx.submit(label, { hierarchy: 'secondary' });
@@ -392,6 +468,7 @@ function sharedShell(ctx: EmitContext, components: EmittedNode | null): EmittedN
       children: [message('visitor', '', ctx), message('site', '', ctx)],
     },
     ...(components ? [components] : []),
+    proseParts(ctx),
     { tag: 'p', attrs: { class: 'az-chat-error', hidden: 'hidden', 'data-az-chat-error': '' }, style: { ...line, color: t.color.danger } },
     del,
     { ...visuallyHidden(''), tag: 'p', attrs: { class: 'az-visually-hidden az-chat-status', role: 'status', 'data-az-chat-status': '' }, children: [] },
@@ -434,8 +511,10 @@ function panelBody(block: SpecBlock, ctx: EmitContext, float: boolean): EmittedN
       children: [message('visitor', '', ctx), message('site', '', ctx)],
     },
     ...(components ? [components] : []),
+    proseParts(ctx),
     ...(suggested ? [suggested] : []),
     form(ctx),
+    historyLine(ctx),
     ...notes(block, ctx),
   ];
 }

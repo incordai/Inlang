@@ -174,7 +174,7 @@ test('chat runtime: an HTML sink planted in a runtime copy fails by file and sin
   const b = built();
   const good = await check('chat-runtime', b);
   assert.equal(good.status, 'pass', good.line);
-  assert.equal(good.line, 'chat runtime: 7 files, none with innerHTML, insertAdjacentHTML, outerHTML, document.write, eval or Function');
+  assert.equal(good.line, 'chat runtime: 10 files, none with innerHTML, insertAdjacentHTML, outerHTML, document.write, eval or Function');
 
   const logic = join(b.out, 'src/az/chat-logic.ts');
   const original = readFileSync(logic, 'utf8');

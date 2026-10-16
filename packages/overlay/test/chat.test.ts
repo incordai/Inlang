@@ -210,8 +210,10 @@ test('every refusal reads as fixed copy — never the server\'s text', () => {
 
 /* ---- §5.4 rule 3: no way from a string to markup or code ---------------- */
 
-const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts']
+const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts']
   .map((f) => [f, readFileSync(new URL(`../src/runtime/${f}`, import.meta.url), 'utf8')] as const);
+/** chat-history.ts's one way to the browser's storage (§21.1.4): the property read, inside try. */
+const STORAGE_FN = /export function browserStorage\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
 /** chat-draw.ts's one image write (§20.6): a row's image, at the backend's own path, checked in the same function. */
 const ROW_IMAGE_FN = /function rowImage\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
 /** Every sink that would parse a string as HTML or run it, write a style, or keep the conversation. */
@@ -242,10 +244,25 @@ test('a row image is the one image address an answer writes, after the backend-p
   assert.equal(/setAttribute\(\s*['"](?:src|srcset|href)/.test(rest), false, 'nowhere else in chat-draw.ts');
 });
 
+test('storage is reached in one place: chat-history.ts browserStorage, inside try — every call after it through one try/catch', () => {
+  const [, src] = SOURCES.find(([f]) => f === 'chat-history.ts')!;
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const fn = STORAGE_FN.exec(code)?.[1] ?? '';
+  assert.match(fn, /try \{\s*return win\.localStorage \?\? null;\s*\} catch \{\s*return null;/, 'the read is inside try');
+  assert.equal(/\blocalStorage\b/.test(code.replace(STORAGE_FN, '')), false, 'nowhere else in chat-history.ts');
+  // Every getItem/setItem/removeItem goes through `access`, whose call is inside try.
+  assert.match(code, /const access = [\s\S]*?try \{\s*return \{ ok: true, value: fn\(storage\) \};\s*\} catch \{/);
+  // …so every call is on `s`, and `s` is only ever the parameter `access` hands its callback.
+  const receivers = [...code.matchAll(/(\w+)\.(?:getItem|setItem|removeItem)\(/g)].map((m) => m[1]);
+  assert.ok(receivers.length > 0 && receivers.every((r) => r === 's'), receivers.join(','));
+  const bindings = code.match(/\(s\) =>/g)?.length ?? 0;
+  assert.equal(code.match(/access\(\(s\) =>/g)?.length ?? 0, bindings, 'every (s) => is access\'s callback');
+});
+
 test('the chat runtime has no sink: no HTML parsing, no eval, no style or URL written, no storage', () => {
   for (const [file, raw] of SOURCES) {
-    // The row-image write is held to its own test above.
-    const src = file === 'chat-draw.ts' ? raw.replace(ROW_IMAGE_FN, '') : raw;
+    // The row-image write and the storage read are each held to their own test.
+    const src = file === 'chat-draw.ts' ? raw.replace(ROW_IMAGE_FN, '') : file === 'chat-history.ts' ? raw.replace(STORAGE_FN, '') : raw;
     // Comments may name what the code never does.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     for (const sink of SINKS) assert.equal(sink.test(code), false, `${file} uses ${sink}`);
@@ -257,4 +274,25 @@ test('CONTROL: the scan finds a sink when one is there', () => {
     'el.setAttribute("src", u);', 'el.setAttribute("onclick", u);', 'a.href = u;', 'img.src = u;', 'localStorage.setItem("chat", s);', 'document.createElement("img")']) {
     assert.ok(SINKS.some((s) => s.test(line)), line);
   }
+});
+
+/* ---- C5 (chat-block-spec §21.1.2): a follow-up question's event ---------- */
+
+test('a follow-up question is a block of one string within its cap; anything else is dropped', () => {
+  const at = 'q'.repeat(BLOCK_LIMITS.ask);
+  const events = read([
+    `event: block\ndata: ${JSON.stringify({ ask: 'How do I cancel?' })}\n\n`,
+    `event: block\ndata: ${JSON.stringify({ ask: at })}\n\n`,
+    `event: block\ndata: ${JSON.stringify({ ask: `${at}q` })}\n\n`,
+    `event: block\ndata: ${JSON.stringify({ ask: 'two\nlines' })}\n\n`,
+    `event: block\ndata: ${JSON.stringify({ ask: '   ' })}\n\n`,
+    `event: block\ndata: ${JSON.stringify({ ask: ['a'] })}\n\n`,
+    `event: block\ndata: ${JSON.stringify({ ask: 'x', to: '/elsewhere' })}\n\n`,
+  ]);
+  assert.deepEqual(events.map((e) => (e.type === 'block' ? e.block : e)), [{ kind: 'ask', q: 'How do I cancel?' }, { kind: 'ask', q: at }]);
+  assert.equal(blockCopy({ kind: 'ask', q: 'x' }), '');
+  assert.equal(CHAT_TEXT.follows(1), '1 follow-up question.');
+  assert.equal(CHAT_TEXT.follows(3), '3 follow-up questions.');
+  // A kept chat the server refuses (its key rotated) is told so in fixed copy.
+  assert.match(problemCopy('tampered'), /saved chat can’t be continued/);
 });

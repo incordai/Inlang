@@ -162,8 +162,19 @@ of a template this word rendered — never parsed as markup, never linkified.
 Each component is a copy of a hidden template the build rendered with that
 word's own emitter, filled with text; a call to action's destination is
 checked against the shell's own allow-list before it is written.
-The conversation lives in the page's memory only; nothing is stored, and
-earlier answers carry a server tag so they cannot be forged.
+Prose may use a small markdown subset — **bold**, *italic*, `inline code`,
+bullet and numbered lists, and fenced code blocks with a **Copy code**
+button — read in the page into a fixed set of elements whose text is set
+with `textContent`; anything else (HTML, links, images, headings) stays the
+text it is. An answer may end with up to three **follow-up questions**:
+buttons that ask exactly their words as the visitor's next question.
+
+The conversation is kept in the visitor's own browser (`localStorage`) for
+7 days, so a reload — or the next page, under a float — carries on; the
+panel says so and offers **Clear history**, and a signed-in chat forgets it
+at sign-out. Nothing is stored on the server, and earlier answers carry a
+server tag so an edited one is refused. Where storage is blocked the chat
+works as before, keeping nothing.
 
 ## Accessibility
 
@@ -173,6 +184,7 @@ earlier answers carry a server tag so they cannot be forged.
 - Enter sends, Shift+Enter is a new line, Escape stops an answer — and then closes a float
 - a float's launcher is named by the title; opening moves focus to the input, closing returns it to the launcher; below `sm` focus stays in the sheet
 - the transcript scrolls on its own, follows the newest words only while you are at its end, and offers **Jump to latest** once you scroll up; it is a keyboard stop, and an answer that holds components is one too
+- follow-up questions are real buttons in a list named "Follow-up questions"; a code block is a focusable, named scroll region with a **Copy code** button whose result is announced; formatting marks are never read aloud
 - with reduced motion the panel appears without sliding and the transcript jumps rather than glides
 - colours are theme tokens only: visitor messages on `color.surface-alt`, answers on `color.surface`, errors in `color.danger`
 
@@ -185,7 +197,8 @@ C1, C2, C2b and C3 of the spec: a `panel` or a `float` (on every page from
 components `show` lists — the site's own blocks, and charts, tables, stats,
 image cards and dashboards — with share links, grounded on the site's pages
 (a `text` body kept in a file included, as plain text) and on the public
-tables it `knows`. Before going live, `az backend probe server` asks the configured
+tables it `knows`; and C5 — formatted prose, follow-up questions, and the
+conversation kept in the visitor's browser (spec §21.1). Before going live, `az backend probe server` asks the configured
 model the real prompt, one question per component, and reports what it streamed
 and what the filter dropped.
 
@@ -200,6 +213,7 @@ What is automated today:
 
 - `packages/words/test/props.test.ts`, `variants.test.ts`, `structure.test.ts` and `conformance.test.ts` run every word; `chat-shell.test.ts` holds the shell to §5.4, §7 and §9
 - `packages/core/test/chat-decl.test.ts` and `chat-float-decl.test.ts` trigger every code the block raises; `packages/overlay/test/chat.test.ts` the runtime's event reader, copy and a source scan for markup sinks, `chat-float.test.ts` the float's preset and the transcript's end
+- `packages/overlay/test/chat-markdown.test.ts` holds the prose subset (every hostile form literal, linear cost); `chat-history.test.ts` the kept conversation's caps, expiry, Clear and corrupt or refused storage
 - `packages/backend/test/chat-knows.test.ts` reads `knows` rows through the anonymous list on SQLite and holds the exact bytes the model is given; `pnpm test:backend-db` does the same on PostgreSQL and MySQL
 - `words.test.ts` runs the theme lint over the emitter (also `az lint`)
 - `pnpm test:chat` runs the real generated server with the `fake` adapter in Chromium, Firefox and WebKit, components and the injection corpus included — and the float on every page, its keyboard and focus, Jump to latest, reduced motion, answers grounded on a `knows` table, and pixel snapshots of answered states in every theme and scheme

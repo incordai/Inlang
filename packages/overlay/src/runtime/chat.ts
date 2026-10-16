@@ -1,7 +1,7 @@
 /**
  * @az runtime chat
  * Purpose: runs a `chat` panel: sends a question to the site's backend, reads the answer's event stream, writes it as text.
- * Spec: docs/chat-block-spec.md §3.2, §4.2, §5.4, §7, §9, §20
+ * Spec: docs/chat-block-spec.md §3.2, §4.2, §5.4, §7, §9, §20, §21.1
  * Exports: attachChat, ChatOptions
  * Edit guide: answers are textContent in copies of the shell's templates, never markup; each shell once (late content via MutationObserver); attachChat() returns full cleanup.
  * Tests: packages/overlay/test/chat.test.ts, packages/overlay/test/chat-float.test.ts, scripts/chat-e2e.mjs
@@ -23,8 +23,13 @@
  *   - reads the response body as server-sent events (chat-logic.ts) and
  *     writes each piece of prose with `textContent` into a copy of the
  *     answer template — nothing from the network is ever parsed as markup;
- *   - keeps the conversation in memory only (never storage): a reload, or
- *     another tab, starts fresh;
+ *   - keeps the conversation in the visitor's own browser (C5,
+ *     chat-history.ts): capped, expiring after 7 days, restored on the next
+ *     visit and offered with a visible Clear history; where storage is
+ *     refused it is kept in memory only, as before;
+ *   - draws prose through the markdown subset (chat-markdown.ts read,
+ *     chat-prose.ts drawn — fixed elements, text leaves) and an answer's
+ *     follow-up questions as buttons that ask them;
  *   - gives the status region whole sentences, at most one update every
  *     1.5 s, never tokens; the transcript itself is not a live region.
  *
@@ -49,14 +54,17 @@
  */
 
 import {
-  ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind, mayFollow,
-  parseChatConfig, problemCopy, readShareLink, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
+  ANSWER_MAX, BLOCK_LIMITS, CHAT_TEXT, RETRYABLE, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind, mayFollow,
+  mergeText, parseChatConfig, problemCopy, readShareLink, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
 } from './chat-logic.ts';
 import { FOCUSABLE, lockScroll, wireSheetDrag } from './behaviours.ts';
 import { trapIndex } from './logic.ts';
 import { POLICY } from './policy.ts';
 import { drawRich } from './chat-draw.ts';
 import { shareControl } from './chat-shared.ts';
+import { spokenText } from './chat-markdown.ts';
+import { followUps, proseTemplatesOf, proseWriter, type ProseTemplates } from './chat-prose.ts';
+import { browserStorage, createHistory, historyKeyOf, turnsOf, type StoredTurn } from './chat-history.ts';
 
 export interface ChatOptions {
   /** The backend's base URL (AZ_PUBLIC_BACKEND_URL); the panel posts to `<base>/chat`. */
@@ -98,6 +106,9 @@ interface Parts {
   readonly components: HTMLElement | null;
   /** §9: Jump to latest, shown once the visitor scrolls up from the end. */
   readonly latest: HTMLButtonElement | null;
+  /** C5: the prose templates (null in a shell from before C5), and the history line — its note and Clear history. */
+  readonly prose: ProseTemplates | null;
+  readonly history: { readonly box: HTMLElement; readonly clear: HTMLButtonElement } | null;
   /** A float's launcher, its dialog and the dialog's Close; null for a panel. */
   readonly float: { readonly launcher: HTMLButtonElement; readonly dialog: HTMLDialogElement; readonly close: HTMLButtonElement } | null;
 }
@@ -123,19 +134,75 @@ function partsOf(host: HTMLElement): Parts | null {
   const launcher = one<HTMLButtonElement>('data-az-chat-launcher');
   const dialog = host.querySelector('dialog');
   const close = one<HTMLButtonElement>('data-az-chat-close');
+  const historyBox = one<HTMLElement>('data-az-chat-history');
+  const clear = historyBox?.querySelector<HTMLButtonElement>('[data-az-chat-clear]') ?? null;
   return {
     host, transcript, visitorTemplate, siteTemplate, form, input, send, stop, note, error, actions, retry, reset, status,
     asks: one<HTMLElement>('data-az-chat-asks'),
     signin: one<HTMLElement>('data-az-chat-signin'),
     components: one<HTMLElement>('data-az-chat-parts'),
     latest: one<HTMLButtonElement>('data-az-chat-latest'),
+    prose: proseTemplatesOf(host),
+    history: historyBox && clear ? { box: historyBox, clear } : null,
     float: launcher && dialog && close ? { launcher, dialog, close } : null,
   };
 }
 
-/** The paragraphs of a piece of an answer's text: split at blank lines; an empty one (a break at an edge) is not drawn. */
-function paragraphsOf(text: string): string[] {
-  return text.split(/\n{2,}/).map((p) => p.replace(/^\n+|\n+$/g, '')).filter((p) => p !== '');
+/** An answer as it is drawn (live, restored or shared): prose and components in the order they came, then its follow-ups. */
+interface AnswerDraw {
+  text(s: string): void;
+  part(el: HTMLElement): void;
+  ask(q: string): void;
+  /** The answer is whole: its follow-up questions are drawn last, and how many there are is returned. */
+  finish(): number;
+}
+
+/**
+ * The drawing of one answer into `item`, a copy of the answer template. The
+ * prose after the last component is the open piece, redrawn as it grows
+ * through the markdown subset (chat-prose.ts); a component closes it.
+ * `asking` is what a follow-up's button does — none on the shared page, which
+ * has no conversation to continue. `focusable` makes an answer that holds
+ * components a stop in the Tab order (§9).
+ */
+function answerDrawer(
+  doc: Document, item: HTMLElement, prose: ProseTemplates | null, copy: (code: Element) => void, signal: AbortSignal,
+  asking: ((q: string) => void) | null, after: () => void, focusable: boolean,
+): AnswerDraw {
+  const model = item.querySelector(':scope > p')?.cloneNode(false) as HTMLElement | undefined;
+  // The template's empty paragraph goes: an answer that opens with a component has no prose before it.
+  item.replaceChildren();
+  let piece = '';
+  let writer = proseWriter(doc, item, model, prose, copy, signal);
+  const asks: string[] = [];
+  return {
+    text(s) {
+      piece += s;
+      writer.update(piece);
+      after();
+    },
+    part(el) {
+      item.append(el);
+      piece = '';
+      writer = proseWriter(doc, item, model, prose, copy, signal);
+      // §9: an answer with components is a stop in the Tab order, named as one.
+      if (focusable && !item.hasAttribute('tabindex')) {
+        item.tabIndex = 0;
+        item.setAttribute('aria-label', CHAT_TEXT.region);
+      }
+      after();
+    },
+    ask(q) {
+      if (asks.length < BLOCK_LIMITS.asks && !asks.includes(q)) asks.push(q);
+    },
+    finish() {
+      const list = asking ? followUps(prose, asks, asking, signal) : null;
+      if (!list) return 0;
+      item.append(list);
+      after();
+      return asks.length;
+    },
+  };
 }
 
 /** The marker the chat word's templates carry where a value goes (core emit-contract fromMark). */
@@ -234,6 +301,8 @@ interface Place { readonly within: HTMLElement; readonly base: string; readonly 
 
 function drawBlock(doc: Document, p: Pick<Parts, 'components'>, config: ChatConfig, block: ChatBlock, suffix: string, place: Place): { el: HTMLElement; said: string } | null {
   const shows = (w: string) => (config.show as readonly string[]).includes(w);
+  // A follow-up question is the answer's, drawn by its caller after the rest (answerDrawer).
+  if (block.kind === 'ask') return null;
   if (block.kind === 'rich') {
     // A rich component the page shows (its note is the server's, for any of them); checked and drawn by chat-draw.ts.
     const shown = block.word === 'unavailable' ? config.show.some((w) => ['chart', 'table', 'stats', 'cards', 'dashboard'].includes(w)) : shows(block.word);
@@ -290,12 +359,19 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   const send = options.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const endpoint = `${options.base.replace(/\/+$/, '')}/chat`;
   const hideable: HTMLElement[] = [p.form, p.stop, p.send, p.error, p.actions, p.retry, p.reset,
-    ...(p.asks ? [p.asks] : []), ...(p.signin ? [p.signin] : []), ...(p.latest ? [p.latest] : []), ...(p.float ? [p.float.launcher] : [])];
+    ...(p.asks ? [p.asks] : []), ...(p.signin ? [p.signin] : []), ...(p.latest ? [p.latest] : []), ...(p.float ? [p.float.launcher] : []),
+    ...(p.history ? [p.history.box] : [])];
   const shipped = new Map(hideable.map((el) => [el, el.hidden] as const));
   const greeting = [...p.transcript.children].map((c) => c.cloneNode(true));
 
   let mode: Mode = 'checking';
   let history: ChatTurn[] = [];
+  /** C5 (§21.1.4): the conversation as kept in this browser — each answer with its events, to draw it again. */
+  const kept = createHistory(browserStorage(p.host.ownerDocument.defaultView));
+  const keptKey = historyKeyOf(config);
+  let stored: StoredTurn[] = [];
+  /** The kept conversation is read once, when the panel first lets the visitor ask. */
+  let restoreDue = true;
   let conversation: string | null = null;
   /** The question being answered, until a tagged answer joins it to the history. */
   let pending: string | null = null;
@@ -387,6 +463,17 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     else p.host.removeAttribute('aria-busy');
   };
 
+  /** A code block's Copy (§21.1.3): its text, never markup, to the clipboard; the status region says how it went. */
+  const copyCode = (code: Element) => {
+    const clip = win?.navigator.clipboard;
+    const text = code.textContent ?? '';
+    if (!clip) { announce(CHAT_TEXT.copyFailed, true); return; }
+    clip.writeText(text).then(() => { if (live) announce(CHAT_TEXT.copied, true); }, () => { if (live) announce(CHAT_TEXT.copyFailed, true); });
+  };
+  /** A follow-up question's button: the same as typing it and pressing Send. */
+  const askFollowUp = (q: string) => ask(q);
+  const drawerFor = (item: HTMLElement) => answerDrawer(doc, item, p.prose, copyCode, signal, askFollowUp, follow, true);
+
   const addMessage = (who: 'visitor' | 'site', text: string): HTMLElement => {
     const item = (who === 'visitor' ? p.visitorTemplate : p.siteTemplate).cloneNode(true) as HTMLElement;
     const para = item.querySelector('p');
@@ -396,45 +483,6 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     if (who === 'visitor') resume();
     follow();
     return item;
-  };
-
-  /**
-   * An answer as it is drawn: prose and components in the order they came.
-   * The prose after the last component is the open piece; its paragraphs
-   * are copies of the template's paragraph, each filled as text, always at
-   * the end of the answer — a component closes the piece before it.
-   */
-  const answerOf = (item: HTMLElement) => {
-    const model = item.querySelector(':scope > p')?.cloneNode(false) as HTMLElement | undefined;
-    // The template's empty paragraph goes: an answer that opens with a component has no prose before it.
-    item.replaceChildren();
-    let piece = '';
-    let nodes: HTMLElement[] = [];
-    return {
-      text(s: string) {
-        piece += s;
-        if (!model) return;
-        const paras = paragraphsOf(piece);
-        while (nodes.length < paras.length) {
-          const copy = model.cloneNode(false) as HTMLElement;
-          item.append(copy);
-          nodes = [...nodes, copy];
-        }
-        paras.forEach((t, i) => { if (nodes[i].textContent !== t) nodes[i].textContent = t; });
-        follow();
-      },
-      part(el: HTMLElement) {
-        item.append(el);
-        piece = '';
-        nodes = [];
-        // §9: an answer with components is a stop in the Tab order, named as one.
-        if (!item.hasAttribute('tabindex')) {
-          item.tabIndex = 0;
-          item.setAttribute('aria-label', CHAT_TEXT.region);
-        }
-        follow();
-      },
-    };
   };
 
   const settle = () => {
@@ -449,6 +497,14 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     settle();
     if (code === 'signin_required') { pending = null; setMode('signin'); showError(''); announce(CHAT_TEXT.signin, true); return; }
     if (code === 'conversation_full') { pending = null; setMode('full'); showError(''); announce(CHAT_TEXT.full, true); return; }
+    // A kept conversation the server no longer accepts (its key was rotated, §21.1.4): it goes, and the panel starts over.
+    if (code === 'tampered') {
+      kept.remove(keptKey);
+      forget();
+      setState(mode === 'ready' ? 'idle' : mode);
+      showError(problemCopy(code), { reset: false });
+      return;
+    }
     const retryable = RETRYABLE.has(code);
     if (!retryable) pending = null;
     setState(mode === 'ready' ? 'idle' : mode);
@@ -504,7 +560,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
       }
       answer = addMessage('site', '');
       answer.setAttribute('aria-busy', 'true');
-      const drawn = answerOf(answer);
+      const drawn = drawerFor(answer);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       const events = createEventReader();
@@ -521,14 +577,16 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
             drawn.text(e.s);
             const s = finishedSentences(text, said);
             said = s.next;
-            announce(s.said);
+            announce(spokenText(s.said));
           } else if (e.type === 'block') {
             received.push({ type: 'block', block: e.raw });
+            // A follow-up question waits for the end of the answer (§21.1.3).
+            if (e.block.kind === 'ask') { drawn.ask(e.block.q); continue; }
             // A component the shell has no template for, or does not show, is not drawn.
             const made = drawBlock(doc, p, config, e.block, `c${++copies}`, place(answer));
             if (!made) continue;
             // The prose before it is finished: its last words are said first, then the component, once.
-            announce(finishedSentences(text, said, true).said);
+            announce(spokenText(finishedSentences(text, said, true).said));
             said = text.length;
             drawn.part(made.el);
             announce(made.said);
@@ -537,6 +595,11 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
             // What the server tagged — prose and the components' lines — is what goes back as history.
             history = [...history, { role: 'visitor', text: question }, { role: 'site', text: e.text, tag: e.tag }];
             conversation = e.conversation;
+            // C5 (§21.1.4): kept in this browser, with the events to draw it again — consecutive text joined, as a share
+            // holds them, so a model that streams word by word keeps one event per run; where storage is refused, nothing is.
+            stored = [...stored, { role: 'visitor', text: question }, { role: 'site', text: e.text, tag: e.tag, events: mergeText(received) }];
+            kept.save(keptKey, e.conversation, stored);
+            const follows = drawn.finish();
             // §20.7: the server makes share links — this answer may be kept under one if the visitor asks.
             const shareTemplate = p.components ? partFor(p.components, 'share')?.firstElementChild as HTMLElement | null : null;
             if (e.share && shareTemplate && received.length > 0) {
@@ -548,7 +611,8 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
             }
             pending = null;
             answer.setAttribute('aria-busy', 'false');
-            announce(finishedSentences(text, said, true).said || CHAT_TEXT.answered, true);
+            announce(spokenText(finishedSentences(text, said, true).said) || CHAT_TEXT.answered, true);
+            if (follows > 0) announce(CHAT_TEXT.follows(follows), true);
             settle();
             const left = leftCopy(e.left);
             if (e.left <= 0) setMode('full');
@@ -602,18 +666,60 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     streaming.abort();
   };
 
-  const startOver = () => {
+  /** The conversation gone from the panel and from memory: the greeting alone, nothing pending. */
+  function forget(): void {
     // The answer in flight, if any, is abandoned: its request sees a new generation and leaves the panel alone.
     generation++;
     streaming?.abort();
     settle();
     history = [];
+    stored = [];
     conversation = null;
     pending = null;
+    restoreDue = false;
     p.transcript.replaceChildren(...greeting.map((g) => g.cloneNode(true)));
     p.note.textContent = '';
+    if (p.asks) p.asks.hidden = mode !== 'ready';
+  }
+
+  /** New chat: a new conversation, and this chat's kept one forgotten (§21.1.4). */
+  const startOver = () => {
+    kept.remove(keptKey);
+    forget();
     showError('');
     void begin();
+  };
+
+  /**
+   * The conversation this browser kept for this chat (§21.1.4), drawn again
+   * from its events exactly as it was first drawn — or nothing, when there is
+   * none, it fails a check, or the visitor has already asked here.
+   */
+  const restore = () => {
+    restoreDue = false;
+    const chat = kept.load(keptKey);
+    if (!chat || history.length > 0 || pending !== null) return;
+    stored = [...chat.turns];
+    history = turnsOf(chat.turns);
+    conversation = chat.conversation;
+    for (const t of chat.turns) {
+      if (t.role === 'visitor') { addMessage('visitor', t.text); continue; }
+      const item = addMessage('site', '');
+      item.setAttribute('aria-busy', 'false');
+      const d = drawerFor(item);
+      for (const e of t.events) {
+        if (e.type === 'text' && typeof e.s === 'string') { d.text(e.s); continue; }
+        const block = blockOf(e.block as Record<string, unknown>);
+        if (!block) continue;
+        if (block.kind === 'ask') { d.ask(block.q); continue; }
+        const made = drawBlock(doc, p, config, block, `c${++copies}`, place(item));
+        if (made) d.part(made.el);
+      }
+      d.finish();
+    }
+    if (p.asks) p.asks.hidden = true;
+    announce(CHAT_TEXT.restored, true);
+    if (chat.turns.length / 2 >= config.limit) setMode('full');
   };
 
   const on = <K extends keyof HTMLElementEventMap>(el: HTMLElement, type: K, fn: (e: HTMLElementEventMap[K]) => void) =>
@@ -725,20 +831,38 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   on(p.stop, 'click', () => { stopAnswer(); p.input.focus({ preventScroll: true }); });
   on(p.retry, 'click', () => { p.retry.hidden = true; void request(); });
   on(p.reset, 'click', () => { startOver(); p.input.focus({ preventScroll: true }); });
+  // §21.1.4: shown only where this browser can keep the chat; it forgets every chat on the site and starts over.
+  if (p.history) {
+    p.history.box.hidden = !kept.available;
+    on(p.history.clear, 'click', () => {
+      kept.clear();
+      forget();
+      showError('');
+      void begin();
+      announce(CHAT_TEXT.cleared, true);
+      p.input.focus({ preventScroll: true });
+    });
+  }
   for (const b of p.asks?.querySelectorAll<HTMLButtonElement>('[data-az-chat-ask]') ?? []) {
     on(b, 'click', () => ask(b.textContent ?? ''));
   }
 
+  /** Ready to ask: the kept conversation is drawn the first time. Signed out: what this browser kept goes (§21.1.4). */
+  const decided = (ok: boolean) => {
+    if (!ok) kept.clear();
+    setMode(ok ? 'ready' : 'signin');
+    if (ok && restoreDue) restore();
+  };
   /** Who may ask, decided once the session is known (signed-in visitors only, by default). */
   const begin = async () => {
-    if (config.allow === 'anyone' || !options.signedIn) { setMode('ready'); return; }
+    if (config.allow === 'anyone' || !options.signedIn) { decided(true); return; }
     setMode('checking');
     let ok = false;
     try { ok = await options.signedIn(); } catch { ok = false; }
-    if (live) setMode(ok ? 'ready' : 'signin');
+    if (live) decided(ok);
   };
   const unsubscribe = config.allow === 'signedin' && options.onSession
-    ? options.onSession((ok) => { if (live && mode !== 'full' && !streaming) setMode(ok ? 'ready' : 'signin'); })
+    ? options.onSession((ok) => { if (live && mode !== 'full' && !streaming) decided(ok); })
     : null;
   void begin();
 
@@ -827,32 +951,26 @@ function runShared(host: HTMLElement, config: ChatConfig, options: ChatOptions, 
       transcript.append(q);
     }
     const answer = siteTemplate.cloneNode(true) as HTMLElement;
-    const model = answer.querySelector(':scope > p')?.cloneNode(false) as HTMLElement | undefined;
-    answer.replaceChildren();
     transcript.append(answer);
-    let piece = '';
-    let nodes: HTMLElement[] = [];
+    // The same drawing as the live panel's (§21.1.3), with no follow-ups: there is no conversation to continue here.
+    const copy = (code: Element) => {
+      const clip = doc.defaultView?.navigator.clipboard;
+      if (!clip) { say(CHAT_TEXT.copyFailed); return; }
+      clip.writeText(code.textContent ?? '').then(() => say(CHAT_TEXT.copied), () => say(CHAT_TEXT.copyFailed));
+    };
+    const drawn = answerDrawer(doc, answer, proseTemplatesOf(host), copy, signal, null, () => undefined, false);
     const said: string[] = [];
     let n = 0;
     for (const raw of body.events.slice(0, 16)) {
       if (!raw || typeof raw !== 'object') continue;
       const e = raw as Record<string, unknown>;
-      if (e.type === 'text' && typeof e.s === 'string' && model) {
-        piece += e.s;
-        for (const t of paragraphsOf(piece).slice(nodes.length)) {
-          const copy = model.cloneNode(false) as HTMLElement;
-          copy.textContent = t;
-          answer.append(copy);
-          nodes = [...nodes, copy];
-        }
-        paragraphsOf(piece).forEach((t, i) => { if (nodes[i].textContent !== t) nodes[i].textContent = t; });
+      if (e.type === 'text' && typeof e.s === 'string') {
+        drawn.text(e.s);
       } else if (e.type === 'block' && e.block && typeof e.block === 'object' && !Array.isArray(e.block)) {
         const block = blockOf(e.block as Record<string, unknown>);
         const made = block && drawBlock(doc, { components }, config, block, `shared${++n}`, { within: answer, base: options.base, ...(resizes ? { observe: resizes } : {}) });
         if (!made) continue;
-        answer.append(made.el);
-        piece = '';
-        nodes = [];
+        drawn.part(made.el);
         said.push(made.said);
       }
     }
