@@ -2,7 +2,7 @@
  * @az module image-srcset
  * Purpose: writes srcset on every <img> whose word asked for one (a `sizes` hint) and whose file the build resized.
  * Spec: docs/gallery-block-spec.md §7 rule 3
- * Exports: srcsetImages, srcsetWidths, SRCSET_WIDTHS, Resize, Variant; coverSizes and COVER_ATTR from overlay runtime cover-sizes.ts
+ * Exports: srcsetImages, srcsetWidths, SRCSET_WIDTHS, Resize, Variant, coverSizes, COVER_ATTR
  * Edit guide: never upscale; a `sizes` with no srcset is removed; without a resizer the output is exactly as before;
  *   a cover hint (COVER_ATTR) widens each clause by the file's aspect over the box's, never past the largest file.
  * Tests: packages/target-web/test/image-srcset.test.ts
