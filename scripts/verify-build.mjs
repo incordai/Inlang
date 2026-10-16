@@ -709,6 +709,20 @@ try {
     };
     shippedBuild(chatProj, serverKeys);
     shippedBuild(plainProj, serverKeys);
+    // chat-block-spec §19.11: the generated client code type-checks as written — under its own tsconfig.json, with
+    // the bundler's real client declarations from the project's install and React's types from this repository's
+    // lockfile (@types/react, @types/react-dom, and @types/three for the fixture's 3D view), linked in beside them.
+    mkdirSync(join(proj, 'node_modules/@types'), { recursive: true });
+    for (const t of ['react', 'react-dom', 'three']) {
+      if (!existsSync(join(proj, 'node_modules/@types', t))) symlinkSync(join(ROOT, 'node_modules/@types', t), join(proj, 'node_modules/@types', t), 'dir');
+    }
+    for (const [name, dir] of [['the GRAMMAR §8 fixture', proj], ['the chat site', chatProj], ['the chat site without its chat', plainProj]]) {
+      const tsc = spawnSync(process.execPath, [join(dir, 'node_modules/typescript/bin/tsc'), '--noEmit', '-p', 'tsconfig.json'], {
+        cwd: dir, encoding: 'utf8', timeout: COMMAND_MS, killSignal: 'SIGKILL',
+      });
+      check(`generated code type-checks: ${name} under its tsconfig.json, strict, with the real bundler types`,
+        tsc.status === 0 && !tsc.error && !tsc.signal, `${tsc.status ?? tsc.signal ?? tsc.error?.message} ${(tsc.stdout + tsc.stderr).trim().split('\n').slice(0, 6).join(' | ')}`);
+    }
     const shipped = readdirSync(join(chatProj, 'dist'), { recursive: true, withFileTypes: true })
       .filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name));
     const leaked = shipped.filter((f) => {

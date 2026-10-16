@@ -1235,6 +1235,10 @@ export default defineConfig({
           jsx: 'react-jsx',
           strict: true,
           noEmit: true,
+          // The generated modules import each other by their real file names (`./client.ts`), as Vite resolves them.
+          allowImportingTsExtensions: true,
+          // `import.meta.env` (the public backend URL) is typed by the bundler's own declarations.
+          types: ['vite/client'],
           skipLibCheck: true,
         },
         include: ['src'],
