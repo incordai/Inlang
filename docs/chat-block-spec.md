@@ -754,9 +754,11 @@ All defaults are safe without configuration; every one is an `.env` key.
   The budget is checked before a request is sent: a request whose maximum
   cost would cross the budget is refused, so the budget is a ceiling, not a
   target.
-- Stated limits, as backend-spec §5 states them: limiters are per process;
-  behind several instances the budget table is shared but the rate limits
-  are not — limit at the proxy as well.
+- Stated limits: since §19.11 (item 8) the chat's windows — messages per
+  address and account, share creates, tool calls — are counted in the
+  database (`az_chat_limits`), so every instance shares them as it shares
+  the budget; the answer queue, a share's anonymous read and delete limits,
+  and the caches stay per process.
 
 ### 6.6 Who may chat
 
@@ -777,7 +779,7 @@ never sent to the provider and never selects grounding in v1.
 |---|---|---|---|
 | message and answer text | **no** (v1) | — | — |
 | per-day counters | yes | `az_chat_usage` | 400 days, swept daily |
-| limiter state | memory only | per process | the window |
+| limiter state | the chat's windows in `az_chat_limits` (§19.11): a keyed hash of window, slot and subject, and a count — never an address or account | the database | until the slot can no longer count, swept every 10 minutes |
 | server log | route, outcome code, provider HTTP status, duration, token counts — **never text, address or account** | stderr (`app.ts:193`) | the operator's log policy |
 | what the provider receives | prompt, context, the trimmed conversation; **no** cookie, address, account id, email or user agent; no per-user field | the provider | the provider's terms — the operator's responsibility, said in the generated README |
 
@@ -1171,7 +1173,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0, C1, C2, C2b, C3, C4, C5 and C6 as built — deviations and findings (2026-10-15/16)
+## 19. C0, C1, C2, C2b, C3, C4, C5 and C6 as built — deviations and findings (2026-10-15/16), and the limits fixed after them (§19.11)
 
 ### 19.1 Against §14's C1 list
 
@@ -1328,10 +1330,10 @@ Where the build differs from §20:
   "Include my question", unticked → Create link → the two links in
   read-only fields), not the overlay engine's modal preset: nothing traps
   focus, and the panel follows the answer it shares.
-- **No admin delete route.** `AZ_ADMIN_EMAILS` belongs to sites with data;
-  a chat site may have none. The operator deletes a share with one SQL
-  statement (`DELETE FROM az_chat_shares WHERE id = …`) or stops new ones
-  with `AZ_CHAT_SHARES=off`; every share is gone at its expiry anyway.
+- ~~**No admin delete route.**~~ **Superseded (§19.11, item 6):**
+  `DELETE /admin/chat/shares/<id>` for a listed admin, a delete form on
+  /admin, and `az backend shares <server-dir> --delete <id>` for any chat
+  site; `AZ_CHAT_SHARES=off` still stops new ones.
 - **The create answer is `{ id, expires, deleteToken }`**, not a URL: the
   server does not know which of `AZ_ALLOWED_ORIGINS` the page is on, so the
   page builds both links from its own origin.
@@ -1468,9 +1470,9 @@ Where the build differs from the text above:
 - **A block is its own code, `blocked`**, where §6.8 named only the
   failure (`unavailable`): a visitor told to "try again" after a block
   would send the same words again.
-- **A blocked question is not counted** in `az_chat_usage`: it spends no
-  model tokens, and no column was added for it. A moderation hook keeps its
-  own counts; the server's log has one line per block.
+- ~~**A blocked question is not counted**~~ **Superseded (§19.11, item
+  4):** `az_chat_usage.blocked` counts each, in the usage view and
+  `az backend usage`; the server's log still has one line per block.
 - **`az backend usage` works for every chat site**, not only those without
   data (§11.4's "otherwise"): an operator with an `/admin` may still want
   the counts in a terminal.
@@ -1481,9 +1483,9 @@ Where the build differs from the text above:
   is said to.
 - **"The chat key never in the bundle" is every server secret**: the same
   search costs nothing more per key.
-- **AZ1257 in `az doctor` is computed without text bodies kept in files**
-  (doctor reads no project file into the context); `az build`, which reads
-  them, may leave out more, and says so itself.
+- ~~**AZ1257 in `az doctor` is computed without text bodies kept in
+  files**~~ **Superseded (§19.11, item 12):** doctor uses az build's own
+  context builder, bodies in files read through the same sandbox.
 
 What was measured (2026-10-16): `pnpm verify` (2 896 tests), `pnpm lint`,
 `pnpm test:chat` (345 checks, up from 322, in Chromium, Firefox and WebKit:
@@ -1584,11 +1586,12 @@ Where the build differs from §21.2:
 
 - **`from tool` is always a tool request.** A site table named `tool` can
   no longer be asked `from tool …` as a table; the grammar of §21.2.3 reads
-  that word first.
+  that word first — and since §19.11 (item 9) such a table, where a chat
+  shows a component with `from`, is refused at build: AZ1272.
 - **Names.** Parameter and field names are `[a-z][a-z0-9_]{0,31}` (§21.2.2
-  named none); `count`, `sum`, `avg`, `min`, `max`, `columns`, `by`,
-  `from` and `tool` cannot be parameter names, or a request would read two
-  ways.
+  named none); `count`, `sum`, `avg`, `min`, `max`, `columns`, `title`
+  (since `cards from tool`, §19.11), `by`, `from` and `tool` cannot be
+  parameter names, or a request would read two ways.
 - **`_PARAMS`, `_ABOUT` and `_SAMPLE` are optional**: no `_PARAMS` is a tool
   without parameters; `az doctor` warns and the probe fails when a tool that
   requires parameters has no sample.
@@ -1619,8 +1622,9 @@ Where the build differs from §21.2:
   server trusting the run's certificate through `NODE_EXTRA_CA_CERTS`; the
   unit tests use loopback http (the node test runner has no way to trust a
   certificate for `fetch` without a dependency).
-- **`cards from tool` is not built** — §21.2.3 names charts, tables and
-  stats.
+- ~~**`cards from tool` is not built**~~ **Superseded (§19.11, item 10):**
+  built, a tool's card carrying its source, an image only by the site's own
+  key.
 
 What was measured (2026-10-16): `pnpm verify` (2 946 tests), `pnpm lint`, `pnpm test:chat` (440 checks, up from 412, in Chromium, Firefox and WebKit: a tool chart, table and stat with "From Race results service · <date>, <time> UTC" and no AI label, a row holding `<img …>` and an instruction drawn as cell text with no element made, the next question answered as if no row had been seen (the fake model says "LEAKED" when a row is in its system text), a slow loopback-http tool and one answering the wrong shape each the "could not be loaded" note, an invented tool nothing, axe in each state, no request off the site and its backend, no CSP violation; the https tool behind this run's self-signed certificate POSTed `{ season, series }` with its bearer key, the invented tool never called, the log holding `chat: tool standings ok`, `slowpoke timeout`, `broken shape` and no parameter, row or key), `pnpm verify:build` (204 checks) and `pnpm gate words/chat` (all 12 points). Every new unit test was run
 against the C5 code (`1cd3af6`) first: `chat-tools.test.ts` and
@@ -1629,6 +1633,32 @@ the probe's tool test fails (no tool line), the doctor's fails (no `chat
 tools` check), the audit's fails (the tool key is not looked for), the
 overlay's fails (`src: tool` is refused), and the env test fails (no
 `tools` in the config).
+
+### 19.11 Limits fixed after C6 (2026-10-16)
+
+Fourteen limitations the reports of C4–C6 left (§19.6, §19.8, §19.9,
+§19.10), each fixed at its source with a test that fails on the code before
+it (run against `e601b30`, the C6 docs commit). Where a line above says
+otherwise, this section supersedes it; the superseded lines say so.
+
+| # | Limitation | Fixed | Test (every unit test named fails on `e601b30`; the browser and database checks are new) |
+|---|---|---|---|
+| 1 | Two tabs on one chat: the last save won | **fixed.** Every kept conversation carries a revision each save raises by one (`chat-history.ts`). A save names the revision it last drew or saved: one that finds a newer revision whose turns are not the start of its own keeps nothing and says `conflict`; one that finds the conversation gone says `cleared` (never brought back). The page tells the visitor in its note — "This chat went on in another tab, so this answer is not kept in this browser." — and the other tab's turns stand whole. A tab hears the other through `storage` events: idle, it draws the newer revision ("This chat went on in another tab — it is shown as it is now."); busy, its next save finds it; a clear there empties it here ("This chat was cleared in another tab.") | `chat-history.test.ts` (revisions; a conflict refused and the other's turns intact; a clear never undone; an extension of the kept turns saved); `test:chat` in three engines (the idle tab draws the other's answer; two overlapping answers — the overtaken tab says so and storage holds the other's turns; a clear in one tab empties the other) |
+| 2 | A shared browser showed the previous person's kept chat | **fixed.** The key is bound to whoever read the session: `a:` and the base64url SHA-256 of a random per-browser salt and the account id (`bind`), or `browser` for nobody signed in — the raw id is never stored. Nothing is read back before `bind` resolves; when the key is bound to anyone else, everything kept goes first. So another account, a signed-out read, and a sign-in over a stranger's (`allow anyone`) chat each start empty, before anything is drawn. The page now reads the session on every chat (`ChatOptions.account`, the account id, replacing `signedIn`), and an in-page session change clears the panel at once. Two tabs binding at once hash with one salt (the second re-hashes with the key the first made). The v1 key (unbound) is dropped on the first read. Notes: "This chat is kept in this browser for 7 days, for your account only; signing out clears it." (signed-in chats) and "…; signing in clears it. On a shared computer, clear it when you are done." (`allow anyone`) | `chat-history.test.ts` (salted, never the id; another account, sign-out and sign-in clear; one salt for two tabs; no Web Crypto shows nothing); `test:chat` (another account never sees the last one's chat — a MutationObserver from the first script on finds no frame of it; signed out and signed in each clear; no account id or address in storage) |
+| 3 | Restored answers offered no Share | **fixed.** The history tag covers the record, not the events, and holds no time, so it cannot prove what a share stores; the share tags `done` already carries do. The page now keeps each answer's share tags with it (`StoredTurn.share`) and offers Share on a restored answer while its tag is good; the server accepts a share tag for the history's 7 days (`SHARE_LIMITS.tagMaxAgeMs`, was 24 h). A tag is spent once: `az_chat_shares.proof`, the hash of the tag, under a unique index (chat migration 5); the same tag again while its share lives is `409 already_shared` ("This answer is already shared — use the link made for it, or delete that link to make a new one."); deleting the share frees it | `chat-share-route.test.ts` (7 days exactly; 1 ms past and future-dated `tampered`; spent once, the question tag once; replayed onto another turn or conversation `tampered`; freed by the delete); `test:backend-db` (two racing replays both refused on PostgreSQL and MySQL); `test:chat` (a restored answer's link opens signed out; sharing it again says it is already shared) |
+| 4 | Blocked questions were not counted | **fixed.** `az_chat_usage.blocked` (chat migration 3, `ALTER TABLE … ADD COLUMN … DEFAULT 0` on all three engines through the claim machinery): one upsert per block, no tokens, no message; in the usage report, the /admin view ("Blocked by moderation") and `az backend usage` (`blocked`) | `chat-usage.test.ts` (an upgrade in place from steps 1–2 keeps its days at 0), `chat-moderation.test.ts`, `data-admin.test.ts`, CLI `backend.test.ts`, `test:backend-db`, `test:chat` (today's row counts the block) |
+| 5 | /admin counts followed the browser's locale | **fixed.** No site-level locale exists (GRAMMAR's `locale` is the pricing block's own; pages are `lang="en"`), so the usage view formats every count with one documented `Intl.NumberFormat("en-US")`, as `az backend usage` already did | target-web `data-admin.test.ts` (the formatter, no `toLocaleString` in the view); `test:chat` under an `en-IN` browser locale, where the old code showed 10,00,00,000: 100,000,000 in three engines |
+| 6 | No admin delete for shares | **fixed.** `DELETE /admin/chat/shares/<id>` for a verified, listed admin (the data API's admin check), audited in `az_data_audit` as `chat_shares` by id, logged `data: an admin deleted shared chat answer <id>` — never the answer; /admin's Chat usage section has a "Delete a shared answer" form (its link or id, then a confirm naming it); the audit list says "deleted shared chat answer <id>". `az backend shares <server-dir> --delete <id \| link>` runs the server's `src/chat-shares.ts`: one audit line on stdout (id, outcome, time); a delete link's token is never printed. §20.7's admin delete was planned on `DELETE /chat/share/<id>`; it lives under `/admin` because the admin check is the data API's | `data-admin.test.ts` (401/403/404/400, the audit row, the log), CLI `backend.test.ts`, `test:chat` (through the /admin page in three engines) |
+| 7 | Long conversations hit the 16 KB request cap | **fixed.** The page sends the latest whole exchanges that fit the cap (`requestBody`), with `from`, the position of the first message sent; the server proves each answer sent at its own position (`from + i`), tags the new one at `from + messages`, and counts what was left out against `limit`. The cap is unchanged. The visitor is told once, in the status region and the note: "Earlier messages in this chat are no longer sent with new questions." (The server's model view, the last 8 turns, was already narrower.) | `chat-text.test.ts`, `chat-route.test.ts` (a moved tag refused; the limit counts what was left out; a 17 KB body still `bad_request`), overlay `chat.test.ts` (`requestBody`); `test:chat` (seven 3 000-character answers: every request ≤ 16 KB, the seventh from its latest exchanges, answered; told once) |
+| 8 | Tool and chat rate limits were per process | **fixed.** The chat's windows — messages per address and per account, share creates, tool calls per address — are counted in `az_chat_limits` (chat migration 4), which every instance on the database shares. A window is six slots; an attempt counts every slot overlapping the window, the oldest whole (so no window ever holds more than the limit; an address may wait one slot longer than an exact window would make it), and takes the current slot with one `UPDATE … SET n = n + 1 WHERE id = ? AND n < ?` — atomic on all three engines. Row ids are HMACs of the window, slot and subject under a key derived from `AZ_SESSION_SECRET`: no address or account is stored. Swept with the other prunes. Bounded: past 500 000 rows (`WINDOW_ROWS_MAX`, about 75 MB) a subject new to its slot is refused until the sweep frees room — a flood of addresses fails closed instead of filling the disk; each process counts the table at every sweep and every 10 000 rows it made. **Per process still:** the answer queue (it bounds this process's streams); a shared answer's anonymous reads and deletes (the bounded in-memory limiter the data reads use — a GET flood writes no row and cannot fill the table chat's own limits are in); and the caches — figures and knows (60 s) and the tool cache (60 s): a second instance asks its own once | `chat-limits.test.ts`, `chat-tools.test.ts` (a second instance is limited too); `test:backend-db` (30 attempts at once over two connections let exactly 10 through; two server instances refuse the 4th message whichever answers it) |
+| 9 | A table named `tool` could not be used with `from` | **fixed: refused.** AZ1272 at the chat's `show` line, where a chat shows a component with `from` and a table named `tool` could give figures: `chat: answers read "from tool" as the server's data tools, so the table 'tool' could never give figures — rename it, then run: az backend schema <file.az> --rename tool=<new name>` | `chat-rich-decl.test.ts` (each component, and the CONTROLs) |
+| 10 | `cards from tool` was not built | **built.** `cards from tool <name> {param value} title <field> [text <field>] [image <field>]`, all text fields: the first 4 rows with a title, in the endpoint's order; each card carries `src: tool`, the operator's label and the minute, drawn as a source line ("From <label> · <date, time> UTC"); an image only when the row's value is exactly one of the site's own image keys (§20.6) — an address in a row is text at most, never an image. `title` is now a reserved parameter name. Chats whose `show` has cards may use the tools; the model is taught the form; `az doctor` counts cards among the components a tool can fill | `chat-tools.test.ts`, overlay `chat-figures.test.ts` (a card claiming a source any other way is refused); `test:chat` (four cards with the source line; one image, the build's own, for the row naming `i1`) |
+| 11 | No week buckets | **built.** `by <date field> week` is the ISO 8601 week (`2026-W53`), computed in the server's own code (`isoWeek`, `weekGroups`) from the engine's day buckets — the newest 7 × 24 + 1 days, which hold the newest 24 weeks whole — since SQLite has no ISO week and the other two spell it differently. Sums of sums, extremes of the days', averages of the days' sums over their counts | `chat-query.test.ts` (against an independent ISO calendar: 2020-W53, 2025-W01, 2026-W53, a leap day); `test:backend-db` (identical on SQLite, PostgreSQL 18.6 and MySQL 8.4.11 across the 2026/2027 boundary) |
+| 12 | `az doctor` AZ1257 ignored text bodies kept in files | **fixed.** One builder, `chatContextFor` (cli `az.ts`), for `az build` and `az doctor`: the same sandbox, the same markdown-to-text, the same pages named. A body whose path leaves the project fails the check, as the build refuses it | `doctor-chat.test.ts` (bodies in files: build and doctor both name /c and /d; a climbing path fails both) |
+| 13 | The generated admin.tsx was never type-checked | **fixed.** No React types were in the root lockfile (only `spike-m0`'s, a separate project), so `@types/react` **19.2.18** and `@types/react-dom` **19.2.7** are devDependencies — MIT; the latest of the 19.2 line, matching the pinned `react` 19.2.8 (19.3.0 describes React 19.3); `@types/react` brings `csstype` 3.2.3 (MIT); nothing else in the lockfile moved. The generated tsconfig gains `allowImportingTsExtensions` and `types: ["vite/client"]` — it could not check its own project before. `generated-types.test.ts` builds four kinds of site and type-checks every generated `src/` file under the generated tsconfig, strict; `verify:build` does the same with the real bundler types. Its first run found a real error: the admin audit list compared a table name with `"chat_shares"`, fixed in `AuditEntry.table` | `generated-types.test.ts` (the old tsconfig fails it: TS5097 on every `.ts` import); `verify:build` |
+| 14 | No committed baseline for the answered-state snapshots | **kept as self-comparison — decided by evidence.** The 48 PNGs of three `test:chat` runs on this machine (Chromium 153, one day) were compared byte for byte: all 48 identical in all three — determinism across runs here is proven. A committed baseline would still be flaky: the dashboard state draws the server's read day ("From the site's data · Oct 16, 2026", the stat's date), which the server's clock sets, so tomorrow's picture differs whatever the machine; and the pixels are bound to the machine's fonts and rasterizer, which the gate's own screenshots avoid for the same reason. So the snapshots stay as built in C3: each state rendered twice from a fresh page and byte-compared, light and dark told apart; a committed baseline would need the server's clock fixed for the run first | the three runs' comparison, above |
+
+What was measured (2026-10-16, rebased on `a1e22bb`): `pnpm verify` (3 033 tests), `pnpm lint`, `pnpm verify:build` (207 checks, the three generated type-checks among them), `pnpm test:chat` (533 checks, up from 440, in Chromium, Firefox and WebKit), `pnpm test:backend-db` (269 checks on PostgreSQL 18.6 and MySQL 8.4.11, up from 249) and `pnpm gate words/chat` (all 12 points). Every new or changed unit test file was run against `e601b30` first and fails there — most at import, since the code they test did not exist; the rest on the behaviour (the blocked column, `from`, 7-day tags, replays, the en-US formatter, the account id, AZ1272, doctor's file bodies, the generated type-check).
 
 ---
 
@@ -1916,7 +1946,7 @@ types):
 | `count` | — | one number, or one per group |
 | `sum f`, `avg f`, `min f`, `max f` | `number`, `money` | the same; money in major units with its currency |
 | `by f` | `choice` (labels are the author's declared choices), `flag` (fixed copy "Yes"/"No") | ≤ 6 groups for pie/donut, ≤ 24 otherwise, largest first; `more: true` when there were more |
-| `by f day\|month\|year` | `date`, `datetime` (UTC) | the **latest** 24 buckets, oldest first; empty buckets are not invented |
+| `by f day\|week\|month\|year` | `date`, `datetime` (UTC) | the **latest** 24 buckets, oldest first; empty buckets are not invented; `week` is the ISO 8601 week (`2026-W53`), built by the server from day buckets (§19.11) |
 | `where f v` | `choice` (a declared choice), `flag` (`yes`/`no`) | one equality filter |
 | rows: `columns f…` `sort f [desc]` | any non-private, non-`image` field; `sort` on `SORTABLE` (`data-query.ts:49`) | ≤ 20 rows |
 | cards: `title f` `text f` `image f` | `text`/`longtext` (clamped); `image` | ≤ 4 rows |
@@ -2044,7 +2074,9 @@ server stores only events it produced itself:
 2. `POST /chat/share` sends `{ conversation, index, at, events, tag }`, plus
    `question` when included (then `tag` must be `shareq`'s). The server
    recomputes the tag from the received values and compares in constant
-   time (`crypto.ts:78`); refuses a tag older than 24 h; **re-validates every
+   time (`crypto.ts:78`); refuses a tag older than 24 h (7 days since §19.11,
+   the history's retention, so a restored answer can be shared — and each
+   tag makes one live share); **re-validates every
    event with the same validator the stream used** (shape, caps, clamps,
    destinations, image keys), so even a bug in the tag path cannot store an
    invalid event; then stores the events exactly as received.
@@ -2068,7 +2100,7 @@ server stores only events it produced itself:
   the create response, which the page shows as a "delete link" to copy; the
   server keeps only its SHA-256 (a 256-bit random token needs no slow hash)
   and compares in constant time.
-- **Rate limits** (in memory, `createLimiter`/`rateKey`, `http.ts:285`,
+- **Rate limits** (creates in the database since §19.11 — `az_chat_limits`, shared by every instance; reads and deletes in memory, `createLimiter`/`rateKey`, `http.ts:285`,
   `:303`): creates 10 / hour and 30 / day per address, 30 / day per account
   (`AZ_CHAT_SHARES_PER_ADDRESS`, `AZ_CHAT_SHARES_PER_ACCOUNT`); reads 600 /
   10 min per address (the data read limit); deletes 30 / hour per address.
@@ -2405,7 +2437,9 @@ stopped, failed or refused one — the page saves the conversation: its id,
 and each turn — the visitor's words; the answer's tagged record and tag
 (what the server needs back, §4.2) and its events as received (what the
 page needs to draw it again). Nothing else: no share tag (they last 24 h,
-§20.7, and a restored answer offers no Share), no session, no account, no
+§20.7, and a restored answer offers no Share — **superseded by §19.11**: the
+share tags are kept, good for 7 days, and a restored answer offers Share), no
+session, no account (since §19.11 the key is bound to a salted hash of it), no
 time but the save's.
 
 | Rule | Value |
@@ -2417,12 +2451,18 @@ time but the save's.
 | restore | at attach, before the greeting's first question; every turn re-checked by the page's own rules (alternation, `visitorText`, the record cap, the tag's shape, each event through the stream's own shape check) — **one bad turn and the whole saved conversation is dropped**, never half-restored |
 | Clear history | a visible button under the input; it removes the key (every chat on this site), starts the panel over and says "History cleared." |
 | New chat | starts over and removes this chat's saved conversation |
-| sign-out | on a `signedin` chat, when the auth adapter reports the visitor signed out, the key is removed; a signed-in chat restores only once the session says signed in |
+| sign-out | on a `signedin` chat, when the auth adapter reports the visitor signed out, the key is removed; a signed-in chat restores only once the session says signed in. **Since §19.11** the key is bound to who read the session (a salted hash of the account, or the browser): another account, a signed-out read, or a sign-in over a stranger's `allow anyone` chat clears it before anything is drawn |
+| two tabs | **since §19.11:** each save raises the conversation's revision; a save that finds a newer one it has not seen keeps nothing and the tab says so; an idle tab draws the other's newer revision; a clear in one tab empties the other |
 | storage refused | private windows, blocked site data, a full quota, a throwing accessor: every read and write is in `try`/`catch`; the panel works exactly as C4's, and the note and Clear control stay hidden |
 
 **The privacy note** (shown with Clear history, only when storage works):
 "This chat is kept in this browser for 7 days. On a shared computer, clear
-it when you are done." It is fixed copy, one line, `color.muted`.
+it when you are done." It is fixed copy, one line, `color.muted`. **Since
+§19.11** it says what the binding does: "This chat is kept in this browser
+for 7 days, for your account only; signing out clears it." on a signed-in
+chat, and "This chat is kept in this browser for 7 days; signing in clears
+it. On a shared computer, clear it when you are done." on an `allow anyone`
+one.
 
 **The tags.** A history tag is HMAC(conversation, turn index, record)
 under `AZ_SESSION_SECRET` (§4.2) — no time in it — so a saved conversation
@@ -2498,7 +2538,7 @@ Each test must fail on the C4 code (run against `78c6b45` first).
 |---|---|---|
 | O1 | Should the author be able to switch history off per chat (`history off`)? | **Not in C5.** One key would be cheap, but the note and Clear already give the visitor the choice; add it if an author asks |
 | O2 | 7 days, 256 KB, 8 conversations? | **Yes** — a week covers "come back tomorrow"; 256 KB is under every engine's per-origin quota with room for the site's own use; revisit with real usage |
-| O3 | Keep a restored answer's Share? | **No** — the share tag's 24 h would have to be stored, and a share is for the answer just given |
+| O3 | Keep a restored answer's Share? | **No** — the share tag's 24 h would have to be stored, and a share is for the answer just given. **Reversed by the owner, built in §19.11:** the tags are kept and good for 7 days |
 | O4 | Headings and tables in prose? | **No** — tables are the `table` component (§20), whose cells are validated; headings would compete with the panel's own outline |
 
 ### 21.2 C6 — operator data tools

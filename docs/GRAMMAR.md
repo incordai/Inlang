@@ -566,7 +566,9 @@ model · AZ1258 — a table named twice, or more than three · AZ1271 — a name
 that is no table. C2b adds AZ1259 — an author's page at `/chat/shared`, the
 shared-answer page a chat site generates, in any case — and AZ1270, `show
 dashboard` with none of `chart`, `table`, `stats`, `cards` to hold
-(chat-block-spec §20.10). Its own rows are AZ2220–AZ2229 (§7.5).
+(chat-block-spec §20.10). AZ1272: a public table named `tool` where a chat
+shows a component that takes `from` — in an answer, `from tool` is always
+the operator's data tools (chat-block-spec §19.11); rename the table. Its own rows are AZ2220–AZ2229 (§7.5).
 `from <table>` in a block is AZ1260–AZ1269 (data-spec §10, §12): a gallery's
 `alt` maps only to a `required` field (AZ1262), and a site with data owns
 `/admin`, so a page there is AZ1268 (§5.5).

@@ -515,7 +515,14 @@ of computations; C8 maps (library set and backend-served tiles decided 2026-10-1
 Q19a–Q19h). C5 measured in `pnpm verify`, `pnpm test:chat` (412 checks,
 three engines), `pnpm verify:build` and `pnpm gate words/chat`. C6
 measured in `pnpm verify`, `pnpm test:chat` (440 checks, three
-engines), `pnpm verify:build` and `pnpm gate words/chat`. Open: C7, C8.
+engines), `pnpm verify:build` and `pnpm gate words/chat`. The fourteen
+limits C4–C6 left are fixed (2026-10-16, chat-block-spec §19.11): two tabs
+kept in step, the kept chat bound to who reads it, restored answers
+shareable, blocked questions counted, one number format on /admin, an
+admin and CLI share delete, long chats under the request cap, rate limits
+shared across instances, AZ1272, `cards from tool`, ISO weeks, doctor's
+AZ1257 from the build's builder, the generated client type-checked; the
+answer snapshots stay self-compared. Open: C7, C8.
 
 **M5 — not started.**
 
