@@ -57,6 +57,30 @@ const NAMED_MIN_LENGTH = 16;
  * or counted value (`abc123abc123abc123`, 2.6) does not reach it.
  */
 const NAMED_MIN_BITS = 3.0;
+/**
+ * A named value of hex digits in one case. Hex carries 4 bits per character
+ * at most, so the floor above misses random hex keys: of 10 000 random ones
+ * a length, 14% of 16-character, 3% of 20 and 0.5% of 24 measure under 3.0
+ * bits. A named hex value is judged by hex's own measure instead.
+ */
+const HEX_VALUE = /^(?:[0-9a-f]+|[0-9A-F]+)$/;
+/** Hex this long set to a credential's name is a key whatever its entropy. */
+const HEX_KEY_LENGTH = 24;
+/**
+ * Bits per character a named hex value of 16 to 23 characters needs, by
+ * length from 16: the 0.5th percentile of 10 000 random hex values of that
+ * length, rounded down to 0.05. Measured 2.608, 2.660, 2.732, 2.774, 2.839,
+ * 2.879, 2.932, 2.947 (medians 3.20 at 16 to 3.46 at 23); a fresh 10 000 a
+ * length were then found 99.49% to 99.81%. A few digits repeated
+ * (`00000000deadbeef`, 2.08) do not reach it.
+ */
+const HEX_MIN_BITS: readonly number[] = [2.6, 2.65, 2.7, 2.75, 2.8, 2.85, 2.9, 2.9];
+/**
+ * The share of neighbouring digits one apart (`0123…`, `fedc…`) from which a
+ * hex value is counted, not random: each step of random hex is one apart
+ * with odds 1 in 8, and 10 000 random 16-character values reach 0.53 at most.
+ */
+const HEX_COUNTED_SHARE = 0.75;
 
 export interface SecretFinding {
   /**
@@ -239,7 +263,7 @@ export function scanText(text: string, allow: ReadonlySet<string> = new Set()): 
     // path — which has a `/` — is still judged.
     if (text[at - 1] === '.' && IDENTIFIER.test(value)) continue;
     if (EXTENSION_NAME.test(value)) continue;
-    if (keyLike(text, at, value, allow, ENTROPY_MIN_LENGTH, ENTROPY_MIN_BITS)) {
+    if (keyLike(text, at, value, allow, ENTROPY_MIN_LENGTH, runIsDense)) {
       judged.add(at);
       add('entropy', at, value);
     }
@@ -253,7 +277,7 @@ export function scanText(text: string, allow: ReadonlySet<string> = new Set()): 
     if (!CREDENTIAL_NAME.test(m[1]) || judged.has(at)) continue;
     while (span < jwtSpans.length && jwtSpans[span][1] <= at) span++;
     if (span < jwtSpans.length && jwtSpans[span][0] <= at) continue;
-    if (keyLike(text, at, value, allow, NAMED_MIN_LENGTH, NAMED_MIN_BITS)) add('entropy', at, value);
+    if (keyLike(text, at, value, allow, NAMED_MIN_LENGTH, namedIsDense)) add('entropy', at, value);
   }
   return found;
 }
@@ -266,12 +290,57 @@ export function scanText(text: string, allow: ReadonlySet<string> = new Set()): 
 const PLAIN_SEGMENT = /^(?:[0-9]*|[a-z][a-z-]*)$/;
 
 /**
+ * A key-shaped run with no name before it: ENTROPY_MIN_BITS per character.
+ * Hex, 4 bits a character at most, does not reach it (no one of 10 000
+ * random 32-, 40- or 64-character values did), so a bare content hash passes.
+ */
+const runIsDense = (value: string) => entropy(value) >= ENTROPY_MIN_BITS;
+
+/**
+ * A value a credential's name is set to: hex by hex's own measure — not a
+ * unit repeated, not counted, then a key from HEX_KEY_LENGTH characters or
+ * by HEX_MIN_BITS below it — and anything else by NAMED_MIN_BITS.
+ */
+function namedIsDense(value: string): boolean {
+  if (!HEX_VALUE.test(value)) return entropy(value) >= NAMED_MIN_BITS;
+  if (repeats(value) || counted(value)) return false;
+  return value.length >= HEX_KEY_LENGTH || entropy(value) >= HEX_MIN_BITS[value.length - NAMED_MIN_LENGTH];
+}
+
+/**
+ * A shorter unit repeated (`deadbeefdeadbeef`, `a1a1…`, a partial last copy
+ * too): the value's shortest period is half its length or less. Read in one
+ * pass by the prefix function, so a long value costs its length.
+ */
+function repeats(value: string): boolean {
+  const border: number[] = new Array<number>(value.length).fill(0);
+  for (let i = 1; i < value.length; i++) {
+    let k = border[i - 1];
+    while (k > 0 && value[i] !== value[k]) k = border[k - 1];
+    border[i] = value[i] === value[k] ? k + 1 : k;
+  }
+  return value.length - border[value.length - 1] <= value.length / 2;
+}
+
+/** Hex digits counted up or down (`0123456789abcdef`): HEX_COUNTED_SHARE of neighbours one apart. */
+function counted(value: string): boolean {
+  let steps = 0;
+  for (let i = 1; i < value.length; i++) {
+    const d = (parseInt(value[i], 16) - parseInt(value[i - 1], 16) + 16) % 16;
+    if (d === 1 || d === 15) steps++;
+  }
+  return steps >= HEX_COUNTED_SHARE * (value.length - 1);
+}
+
+/**
  * Whether a value found at `at` in `text` reads as a key: at least
- * `minLength` characters, its pad counted, and `minBits` per character,
- * mixing letters and digits — unless it is a public value (`allow`), inlined
+ * `minLength` characters, its pad counted, mixing letters and digits, and
+ * dense enough by `dense` — unless it is a public value (`allow`), inlined
  * data, or a path of plain words.
  */
-function keyLike(text: string, at: number, value: string, allow: ReadonlySet<string>, minLength: number, minBits: number): boolean {
+function keyLike(
+  text: string, at: number, value: string, allow: ReadonlySet<string>, minLength: number, dense: (value: string) => boolean,
+): boolean {
   if (value.length < minLength || allow.has(value)) return false;
   // Inlined assets are base64 by design (a small image in a data: URL).
   if (/(?:data:[^,]{0,64},|base64,)$/.test(text.slice(Math.max(0, at - 72), at))) return false;
@@ -279,7 +348,7 @@ function keyLike(text: string, at: number, value: string, allow: ReadonlySet<str
   // A path of plain words (`com/org/project/issues/2907`, a link in a library's message). A key in a path is a
   // segment that is not plain, and the whole path is then judged.
   if (value.includes('/') && value.split('/').every((s) => PLAIN_SEGMENT.test(s))) return false;
-  return entropy(value) >= minBits;
+  return dense(value);
 }
 
 /**

@@ -3,7 +3,8 @@
  * compares the scanner against: the JWT rule as its old regular expression
  * with every span searched per run (legacy-secrets.ts), the key-shaped run
  * cut out of the text by hand, and a credential's named value read by one
- * regular expression that backtracks freely. Slow on long inputs by design;
+ * regular expression that backtracks freely, a hex value's period found by
+ * trying every one. Slow on long inputs by design;
  * only the tests use it.
  */
 
@@ -65,12 +66,37 @@ function withPad(text: string, end: number): number {
   return (pads === 1 || pads === 2) && !isRunChar(text[end + pads]) ? end + pads : end;
 }
 
-function keyLike(text: string, at: number, value: string, allow: ReadonlySet<string>, minLength: number, minBits: number): boolean {
+function keyLike(text: string, at: number, value: string, allow: ReadonlySet<string>, minLength: number, dense: (value: string) => boolean): boolean {
   if (value.length < minLength || allow.has(value)) return false;
   if (/(?:data:[^,]{0,64},|base64,)$/.test(text.slice(Math.max(0, at - 72), at))) return false;
   if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) return false;
   if (value.includes('/') && value.split('/').every((s) => /^(?:[0-9]*|[a-z][a-z-]*)$/.test(s))) return false;
-  return entropy(value) >= minBits;
+  return dense(value);
+}
+
+const HEX_DIGITS = '0123456789abcdef';
+/** Bits a named hex value of 16 to 23 characters needs, by length from 16 (secrets.ts HEX_MIN_BITS, as measured). */
+const HEX_BITS = [2.6, 2.65, 2.7, 2.75, 2.8, 2.85, 2.9, 2.9];
+
+/**
+ * A named value: hex in one case is not a unit repeated (every period up to
+ * half its length tried), not counted (three in four neighbours one apart,
+ * up or down), then a key from 24 characters or by its length's bits;
+ * anything else needs 3.0 bits.
+ */
+function namedDense(value: string): boolean {
+  if (!/^[0-9a-f]+$/.test(value) && !/^[0-9A-F]+$/.test(value)) return entropy(value) >= 3.0;
+  for (let p = 1; p <= value.length / 2; p++) {
+    if (value.slice(0, p).repeat(Math.ceil(value.length / p)).slice(0, value.length) === value) return false;
+  }
+  const digits = value.toLowerCase();
+  let apart = 0;
+  for (let i = 1; i < digits.length; i++) {
+    const step = (HEX_DIGITS.indexOf(digits[i]) - HEX_DIGITS.indexOf(digits[i - 1]) + 16) % 16;
+    if (step === 1 || step === 15) apart++;
+  }
+  if (apart / (digits.length - 1) >= 0.75) return false;
+  return value.length >= 24 || entropy(value) >= HEX_BITS[value.length - 16];
 }
 
 export function referenceScanText(text: string, allow: ReadonlySet<string> = new Set()): SecretFinding[] {
@@ -91,7 +117,7 @@ export function referenceScanText(text: string, allow: ReadonlySet<string> = new
     if (inJwt(at)) continue;
     if (text[at - 1] === '.' && IDENTIFIER.test(value)) continue;
     if (EXTENSION_NAME.test(value)) continue;
-    if (keyLike(text, at, value, allow, 32, 4.0)) {
+    if (keyLike(text, at, value, allow, 32, (v) => entropy(v) >= 4.0)) {
       judged.add(at);
       add('entropy', at, value);
     }
@@ -100,7 +126,7 @@ export function referenceScanText(text: string, allow: ReadonlySet<string> = new
     const at = (m.index ?? 0) + m[0].length - m[2].length;
     const value = text.slice(at, withPad(text, at + m[2].length));
     if (judged.has(at) || inJwt(at)) continue;
-    if (keyLike(text, at, value, allow, 16, 3.0)) add('entropy', at, value);
+    if (keyLike(text, at, value, allow, 16, namedDense)) add('entropy', at, value);
   }
   return found;
 }

@@ -675,7 +675,14 @@ high-entropy strings (32+ characters, base64 padding counted, ≥4.0 bits per
 character, letters and digits), and a shorter value (16+ characters, ≥3.0
 bits, letters and digits) set to a name that says credential — `key`, `token`,
 `secret`, `sig`, `password`, `auth` — in a query string, a config line or a
-cookie. Inlined `data:` assets, a path every segment of which is all digits or
+cookie. A named value of hex digits is judged by hex's own measure, since hex
+carries at most 4 bits a character: a unit repeated (`deadbeefdeadbeef`) or a
+count (`0123…`) is not a key; 24+ characters is one whatever its entropy; 16
+to 23 characters need the 0.5th percentile of 10 000 random hex values of that
+length (2.60 bits at 16 to 2.90 at 23, so ≥99% of random keys are found). A
+bare hex run — a content hash, an asset's hash — is judged only by the 4.0-bit
+rule, which no one of 10 000 random hex values of 32, 40 or 64 characters
+reaches. Inlined `data:` assets, a path every segment of which is all digits or
 lowercase words, the site's own public values, the names of the files the
 bundler emitted and the digests a page's own policy pins are allowed; the build
 guard, the page scan after the pre-render and `az audit` share that one scan

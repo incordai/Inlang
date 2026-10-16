@@ -308,6 +308,64 @@ test('env: nothing about chat is public — AZ_PUBLIC_CHAT_* fails the site buil
   assert.deepEqual(scanEnv({ AZ_CHAT_KEY: 'k-123', AZ_CHAT_URL: 'https://models.example.org/v1' }), []);
 });
 
+/* ---- a hex key a credential's name is set to: hex's own measure, never a bare hex run ---- */
+
+/** A seeded source of fake values, so every case and failure reproduces. */
+function seeded(seed: number): () => number {
+  let s = seed;
+  return () => { s = (Math.imul(s, 1103515245) + 12345) >>> 0; return s / 2 ** 32; };
+}
+const HEX = '0123456789abcdef';
+/** `count` fake hex values of `length`, drawn from `digits` (all sixteen by default). */
+function fakeHex(seed: number, count: number, length: number, digits = HEX): string[] {
+  const next = seeded(seed);
+  return Array.from({ length: count }, () => Array.from({ length }, () => digits[Math.floor(next() * digits.length)]).join(''));
+}
+/** The floor a named value had before hex was judged by its own measure — what each case below fell under. */
+const OLD_NAMED_BITS = 3.0;
+
+test('SECURITY: a random hex key of 16 to 64 characters set to a credential\'s name is found', () => {
+  // 16, 20 and 24 characters: random draws that measure under the old 3.0-bit floor (14%, 3% and 0.5% of them do).
+  // 32, 40 and 64: random hex over seven of its digits — every such draw is under the old floor.
+  const keys = [
+    ...[16, 20, 24].map((n) => fakeHex(16 + n, 2_000, n).find((k) => entropy(k) < OLD_NAMED_BITS && /[a-f]/.test(k) && /[0-9]/.test(k))),
+    ...[32, 40, 64].map((n) => fakeHex(n, 1, n, '03579bd')[0]),
+  ];
+  for (const key of keys) {
+    assert.ok(key !== undefined && entropy(key) < OLD_NAMED_BITS, `CONTROL: ${key?.length}-character key is under the old floor`);
+    for (const text of [`fetch("/v1/tiles?api_key=${key}&lang=en")`, `AUTH_TOKEN=${key.toUpperCase()}\n`, `document.cookie="session_secret=${key}; path=/"`, `x?sig=${key}`]) {
+      assert.deepEqual(scanText(text).map((f) => f.rule), ['entropy'], `${key.length}: ${text}`);
+      assert.equal(scanText(text)[0].excerpt, redact(key), 'the finding names the length only');
+    }
+  }
+});
+
+test('the hex threshold, as measured: 99% or more of 10 000 random hex keys a length are found by name', () => {
+  for (const n of [16, 17, 18, 19, 20, 21, 22, 23, 24, 32, 40, 64]) {
+    const keys = fakeHex(1_000 + n, 10_000, n);
+    const found = keys.filter((k) => scanText(`?token=${k}`).length === 1).length;
+    assert.ok(found >= 9_900, `${n} characters: ${found} of 10 000 found`);
+    if (n >= 24) assert.equal(found, keys.filter((k) => /[a-f]/.test(k) && /[0-9]/.test(k)).length, `${n}: from 24 every key mixing letters and digits`);
+  }
+});
+
+test('CONTROL: an id, zeros, a version, a unit repeated or counted, and a bare hex hash are not keys', () => {
+  for (const text of [
+    '?id=deadbeefdeadbeef', 'token=0000000000000000', '?version=1a2b3c', '?token=deadbeefdeadbeef', '?token=00000000deadbeef',
+    '?token=0123456789abcdef', '?key=fedcba9876543210', '?key=0123456789abcdef0123456789', `?token=${'a1b2c3d4'.repeat(4)}`, `?sig=${'cafe1234'.repeat(8)}`,
+  ]) {
+    assert.deepEqual(scanText(text), [], text);
+  }
+  // A content hash, an asset's hash and a commit id are hex in every bundle: with no credential's name before them, never judged as one.
+  for (const n of [32, 40, 64]) {
+    for (const h of fakeHex(2_000 + n, 200, n)) {
+      for (const text of [`const h="${h}"`, `{"hash":"${h}","size":12}`, `u="/assets/chunk.${h}.js"`, `commit ${h}\n`, `?v=${h}`]) {
+        assert.deepEqual(scanText(text), [], text);
+      }
+    }
+  }
+});
+
 /* ---- the JWT rule: one pass, exactly the old regular expression's finds ---- */
 
 /** CPU milliseconds `f` takes: the least of `runs` (process.cpuUsage, so a loaded machine cannot fail it). */
@@ -351,20 +409,28 @@ test('QUADRATIC (old code): a run of `eyJ` — eight times the input costs far m
   assert.ok(tBig > (big.length * NS_PER_CHAR) / 1e6, `CONTROL: ${tBig.toFixed(1)}ms CPU for ${big.length} characters is past the bound`);
 });
 
-test('LINEAR: 5MB of names never set, and one 5MB run with a pad that is not one — under the bound', () => {
-  for (const big of [' apiKeyName'.repeat(Math.ceil((5 * 1024 * 1024) / 11)), `?token=${'A1'.repeat(2.5 * 1024 * 1024)}==x`]) {
+test('LINEAR: 5MB of names never set, one 5MB run with a pad that is not one, 5MB named hex values — under the bound', () => {
+  const MB5 = 5 * 1024 * 1024;
+  for (const big of [
+    ' apiKeyName'.repeat(Math.ceil(MB5 / 11)), `?token=${'A1'.repeat(MB5 / 2)}==x`,
+    // Hex values its period and its count are read from: a random one, one a near repeat, and many short ones.
+    `?api_key=${fakeHex(5, 1, MB5)[0]}`, `?api_key=${'a1'.repeat(MB5 / 2)}b`, `&token=${fakeHex(6, 1, 20)[0]}`.repeat(MB5 / 27),
+  ]) {
     const t = cpuMs(() => scanText(big), 1);
     assert.ok(t <= (big.length * NS_PER_CHAR) / 1e6, `${t.toFixed(1)}ms CPU for ${big.length} characters`);
   }
 });
 
-test('EQUIVALENCE: every finding exactly the plain rules\' — real tokens, near-misses, and 4 000 generated texts', () => {
+test('EQUIVALENCE: every finding exactly the plain rules\' — real tokens, near-misses, and 8 000 generated texts', () => {
   const service = jwt('service_role');
   const anon = jwt('anon');
   const fixed = [
     `t="${service}"`, `a ${anon} b ${service}.x`, `x${service}`, `eyJ${service}`, `${service}.${anon}`,
     `eyJabcdefgh.abcdefgh.abcdefg`, `eyJabcdefg.abcdefgh.abcdefgh`, `eyJabcdefgh.abcdefgh.abcdefgh`, `eyJeyJabcdefgh.abcdefgh.abcdefgh`,
     `abcdeyJ12345678.12345678.12345678.12345678`, `eyJ1234567eyJ12345678.12345678.12345678`, `${RANDOMISH} ${anon} ${RANDOMISH}`,
+    // Named hex at and around each edge: 15, 16, 23 and 24 characters, a repeat with a partial copy, a count that wraps, two cases.
+    ...[15, 16, 23, 24].flatMap((n) => fakeHex(30 + n, 3, n).map((h) => `?key=${h}&token=${h.toUpperCase()}`)),
+    '?key=deadbeefdeadbeefdead', '?key=deadbeefdeadbeefdeadb', '?sig=cdef0123456789abcdef01', '?sig=cdef0123456789abcdef01x', '?key=9F3Ac07E5b1D42e8aB6c',
   ];
   for (const text of fixed) assert.deepEqual(scanText(text), referenceScanText(text), text);
   // Seeded, so a failure reproduces: texts made of the pieces the rule reads.
@@ -375,15 +441,28 @@ test('EQUIVALENCE: every finding exactly the plain rules\' — real tokens, near
     // Pads, paths and query strings: what the run's pad, the path rule and a credential's named value read.
     '=', '==', '/', '/', 'issues', '2907', 'AbCdEfGh', '?', '&', ';', '#', '\n', 'api_key=', 'token=', 'page=', 'sk_live_', 'Xk9vQ2mZr7Lp4sBw',
   ];
+  // Named hex: random, repeated, counted and over few digits — what a named hex value's measure reads.
+  const hexPieces = [
+    '?', '&', ' ', 'x', '=', 'key=', 'token=', 'sig=', 'id=', '9f3a', 'c07e5b1d', '0123', '4567', '89ab', 'cdef', 'deadbeef', 'D41A', '0000',
+    ...fakeHex(8, 6, 12), ...fakeHex(9, 3, 8, '0359bd'), ...fakeHex(10, 3, 6).map((h) => h.toUpperCase()),
+  ];
   let found = 0;
+  const hexNamed = { found: 0, passed: 0 };
   const rulesSeen = new Set<string>();
-  for (let i = 0; i < 4_000; i++) {
-    const text = Array.from({ length: 4 + Math.floor(next() * 24) }, () => pieces[Math.floor(next() * pieces.length)]).join('');
+  for (let i = 0; i < 8_000; i++) {
+    const from = i < 4_000 ? pieces : hexPieces;
+    const text = Array.from({ length: 4 + Math.floor(next() * 24) }, () => from[Math.floor(next() * from.length)]).join('');
     const want = referenceScanText(text);
     assert.deepEqual(scanText(text), want, text);
     found += want.length;
     for (const f of want) rulesSeen.add(f.rule);
+    for (const m of text.matchAll(/(?:^|[?&#;\s"'`])\w*(?:key|token|sig)=([0-9a-f]{16,}|[0-9A-F]{16,})(?![A-Za-z0-9+/_=-])/g)) {
+      const at = (m.index ?? 0) + m[0].length - m[1].length;
+      if (want.some((f) => f.where === `@${at}`)) hexNamed.found++;
+      else hexNamed.passed++;
+    }
   }
   assert.ok(found > 1_000, `CONTROL: the generated texts hold findings (${found})`);
+  assert.ok(hexNamed.found > 100 && hexNamed.passed > 5, `CONTROL: named hex values both found and passed (${JSON.stringify(hexNamed)})`);
   assert.deepEqual([...rulesSeen].sort(), ['entropy', 'jwt-privileged', 'secret-prefix'], 'CONTROL: the texts exercise every rule their pieces can make');
 });
