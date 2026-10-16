@@ -41,7 +41,7 @@ function built(options: PromptOptions = {}, input: PromptInput = INPUT): Prompt 
   return r.prompt;
 }
 
-/** The compact size bound: a small context window's share, stated here and in the README. */
+/** The compact size bound: a small context window's share, stated here and in docs/USAGE.md §6. */
 const COMPACT_MAX_CHARS = 12_000;
 
 /** One word's section of the prompt: from its heading to the next heading. */
