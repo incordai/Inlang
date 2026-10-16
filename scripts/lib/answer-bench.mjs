@@ -12,6 +12,12 @@
  * different answers. Markdown cannot quote a block, so where the `.az`
  * form quotes the site's pricing, the markdown form must spell the table out.
  *
+ * C2b's rich components (chat-block-spec §20.3) are measured the same way:
+ * a dashboard with server and model charts, a two-series model chart, a
+ * server table and a model table, model and server cards. A `from …` is one
+ * line however many figures it yields; markdown has to write the figures
+ * out (the table a server chart would draw), so it is counted that way.
+ *
  * Also measured: what the model is sent besides the conversation — the
  * generated prompt.txt and context.json of the chat e2e site — and the
  * characters per token of prose, against the server's estimate of 3.
@@ -29,10 +35,15 @@ export const ANSWER_FORMS = ['az', 'json', 'markdown'];
 
 /** The rules the `.az` answers are parsed under: every component, the e2e site's quote and destinations. */
 export const ANSWER_RULES = {
-  show: ['pricing', 'faq', 'cta', 'feature'],
+  show: ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard'],
   quotes: [{ word: 'pricing', route: '/pricing', n: 0 }],
-  destinations: ['/', '/contact', '/pricing', '/signup'],
+  destinations: ['/', '/contact', '/pricing', '/signup', '/shop'],
+  images: ['i1'],
 };
+
+/** What the server's figures would be for the rich samples' `from` lines — what markdown has to write out. */
+const ORDERS_BY_STATUS = [['paid', 3], ['open', 1], ['cancelled', 1]];
+const ORDERS_BY_MONTH = [['2026-08', 2], ['2026-09', 1], ['2026-10', 4]];
 
 const PROSE = 'For five people, Studio fits: every lamp in one account, billed monthly or yearly.';
 const FAQ = [
@@ -97,11 +108,91 @@ export function answerCases() {
       json: json([{ text: PROSE }, { faq: FAQ.slice(0, 2) }, cta]),
       markdown: `${PROSE}\n\n${mdFaq(FAQ.slice(0, 2))}\n\n[Talk to us](/contact)`,
     },
+    ...richCases(),
     {
       name: 'composed pricing (refused)', blocks: null,
       az: ['pricing cards', ...PLANS.flatMap((p) => [`  plan ${q(p.name)}`, `    monthly ${p.monthly.slice(1, -3)}`, `    annual ${p.annual.slice(1, -3)}`, `    cta ${q(p.action)} ${p.to}`])].join('\n'),
       json: JSON.stringify({ answer: [{ type: 'pricing', variant: 'cards', plans: PLANS.map((p) => ({ name: p.name, monthly: p.monthly, annual: p.annual, cta: { label: p.action, to: p.to } })) }] }),
       markdown: mdPricing(),
+    },
+  ];
+}
+
+/** C2b (§20.3): the rich components in the three forms; `blocks` are what the parser reads, `from` requests still unfilled. */
+function richCases() {
+  const mdTable = (head, rows) => [`| ${head.join(' | ')} |`, `|${head.map(() => '---').join('|')}|`, ...rows.map((r) => `| ${r.join(' | ')} |`)].join('\n');
+  const expected = { name: 'Expected next quarter', points: [['Nov', 140], ['Dec', 180], ['Jan', 120]] };
+  const dashboard = {
+    dashboard: {
+      title: 'Orders this month',
+      tiles: [
+        { stat: { label: 'Orders', from: ['orders', 'count', 'by', 'placed', 'month'] } },
+        { chart: { kind: 'bar', title: 'Orders by status', from: ['orders', 'count', 'by', 'status'] } },
+        { chart: { kind: 'line', title: 'Orders per month', from: ['orders', 'count', 'by', 'placed', 'month'] } },
+        { chart: { kind: 'line', title: 'Expected next quarter', unit: null, src: 'model', series: [expected] } },
+      ],
+    },
+  };
+  const signups = {
+    chart: {
+      kind: 'bar', title: 'Signups by plan', unit: null, src: 'model',
+      series: [
+        { name: '2025', points: [['Free', 120], ['Team', 45], ['Business', 12]] },
+        { name: '2026', points: [['Free', 160], ['Team', 70], ['Business', 20]] },
+      ],
+    },
+  };
+  const tables = [
+    { table: { title: 'Our newest products', sortable: false, from: ['products', 'columns', 'name', 'price', 'stock', 'sort', 'created', 'desc'] } },
+    { table: { title: 'Plan comparison', sortable: true, src: 'model', columns: [{ label: 'Plan', type: 'text' }, { label: 'Seats', type: 'number' }], rows: [['Team', 10], ['Business', 50]] } },
+  ];
+  const cards = [
+    { cards: [{ title: 'Linen shirt', text: 'Breathable, for hot days.', image: { asset: 'i1' }, link: { label: 'See the shirts', to: '/shop' } }] },
+    { cards: { from: ['products', 'title', 'name', 'text', 'summary', 'image', 'photo'] } },
+  ];
+  return [
+    {
+      name: 'dashboard (2 server charts, a model chart)', blocks: [dashboard],
+      az: [
+        'dashboard "Orders this month"',
+        '  stat "Orders" from orders count by placed month',
+        '  chart bar "Orders by status" from orders count by status',
+        '  chart line "Orders per month" from orders count by placed month',
+        '  chart line "Expected next quarter"',
+        '    point "Nov" 140',
+        '    point "Dec" 180',
+        '    point "Jan" 120',
+      ].join('\n'),
+      json: json([dashboard]),
+      markdown: [
+        '**Orders this month**', '', 'Orders: 4 (up 3 on September)', '',
+        '**Orders by status**', '', mdTable(['Status', 'Orders'], ORDERS_BY_STATUS), '',
+        '**Orders per month**', '', mdTable(['Month', 'Orders'], ORDERS_BY_MONTH), '',
+        '**Expected next quarter** (my estimate)', '', mdTable(['Month', 'Orders'], expected.points),
+      ].join('\n'),
+    },
+    {
+      name: 'model chart (2 series of 3)', blocks: [signups],
+      az: ['chart bar "Signups by plan"', '  series "2025"', '    point "Free" 120', '    point "Team" 45', '    point "Business" 12',
+        '  series "2026"', '    point "Free" 160', '    point "Team" 70', '    point "Business" 20'].join('\n'),
+      json: json([signups]),
+      markdown: ['**Signups by plan**', '', mdTable(['Plan', '2025', '2026'], [['Free', 120, 160], ['Team', 45, 70], ['Business', 12, 20]])].join('\n'),
+    },
+    {
+      name: 'tables (server + model)', blocks: tables,
+      az: ['table "Our newest products" from products columns name price stock sort created desc',
+        'table "Plan comparison" sortable', '  columns "Plan" "Seats"', '  row "Team" 10', '  row "Business" 50'].join('\n'),
+      json: json(tables),
+      markdown: ['**Our newest products**', '', mdTable(['Name', 'Price', 'Stock'], [['Linen shirt', '$49.00', 12], ['Wool scarf', '$35.00', 4], ['Canvas bag', '$29.00', 30]]),
+        '', '**Plan comparison**', '', mdTable(['Plan', 'Seats'], [['Team', 10], ['Business', 50]])].join('\n'),
+    },
+    {
+      name: 'cards (model + server)', blocks: cards,
+      az: ['cards', '  card "Linen shirt"', '    image i1', '    text "Breathable, for hot days."', '    link "See the shirts" /shop',
+        'cards from products title name text summary image photo'].join('\n'),
+      json: json(cards),
+      markdown: ['![A linen shirt](/assets/linen.webp)', '**Linen shirt** — Breathable, for hot days. [See the shirts](/shop)', '',
+        '![](/data/products/1/photo) **Wool scarf** — Soft and warm.', '![](/data/products/2/photo) **Canvas bag** — Carries a laptop.'].join('\n'),
     },
   ];
 }

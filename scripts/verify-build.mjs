@@ -36,6 +36,8 @@ import { watchCsp, cspResult } from './visual/csp.mjs';
 import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
 import { startTags } from '../packages/target-web/src/html-scan.ts';
 import { DEFAULT_THEME, THEMES } from '../packages/theme/src/themes.ts';
+import { CHAT_RUNTIME_FILES } from '../packages/target-web/src/chat.ts';
+import { ROWS_RUNTIME_FILES } from '../packages/target-web/src/data-rows.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 /** PRD §9: "Bundle, non-3D pages < 150KB gz". */
@@ -237,8 +239,9 @@ try {
   // has none of.
   {
     const runtimeDir = join(ROOT, 'packages/overlay/src/runtime');
-    const ROWS = ['rows.ts', 'rows-logic.ts'];
-    const CHAT = ['chat.ts', 'chat-logic.ts'];
+    // The build's own lists: rows-logic.ts is on both (a row image's srcset, chat-block-spec §20.6).
+    const ROWS = ROWS_RUNTIME_FILES;
+    const CHAT = CHAT_RUNTIME_FILES;
     const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts') && !ROWS.includes(f) && !CHAT.includes(f));
     check('behaviour runtime shipped verbatim into src/az/',
       shipped.length > 0 && shipped.every((f) =>
@@ -687,7 +690,7 @@ try {
       + '    model    default\n\npage /\n  hero center\n    title "Chat check"\n'
       + '  pricing cards\n    title    "Plans"\n    currency usd\n    plan "Home"\n      monthly 9\n      annual  90\n      cta     "Start" /\n'
       + '  chat panel\n    title    "Ask us"\n'
-      + '    greeting "Ask about anything on this site."\n    show     pricing faq cta feature\n    allow    anyone\n';
+      + '    greeting "Ask about anything on this site."\n    show     pricing faq cta feature chart table stats cards dashboard\n    allow    anyone\n';
     const PLAIN_SITE = CHAT_SITE.replace('    model    default\n', '').replace(/ {2}chat panel\n(?: {4}.*\n)*/, '');
     const buildSite = (name, source) => {
       const file = join(work, `${name}.az`);
@@ -723,9 +726,18 @@ try {
         && /connect-src 'self' https:\/\/api\.example\.org(;|$)/.test(policyOf(chatPage).replace(/&#x27;/g, "'"))
         && !/unsafe-(inline|eval)/.test(policyOf(chatPage)),
       unhashed(policyOf(chatPage)));
+    // C2b (§20.7): the shared-answer page is a page like the chat's, its policy the same, and kept out of search.
+    const sharedPage = existsSync(join(chatProj, 'dist/chat/shared/index.html')) ? readFileSync(join(chatProj, 'dist/chat/shared/index.html'), 'utf8') : '';
+    check('chat §20.7: the shared-answer page\'s policy is the plain page\'s, hashes aside — no new origin — and it is noindex',
+      policyOf(sharedPage) !== null && unhashed(policyOf(sharedPage)) === unhashed(policyOf(plainPage))
+        && /<meta name="robots" content="noindex, nofollow" \/>/.test(sharedPage) && !/<meta name="robots"/.test(chatPage),
+      unhashed(policyOf(sharedPage)));
+    check('chat §20.4: the chart site\'s stylesheet declares the six series colours; the plain site\'s none',
+      [1, 2, 3, 4, 5, 6].every((n) => readdirSync(join(chatProj, 'dist/assets')).some((f) => f.endsWith('.css') && readFileSync(join(chatProj, 'dist/assets', f), 'utf8').includes(`--az-color-series-${n}:`)))
+        && !readdirSync(join(plainProj, 'dist/assets')).some((f) => f.endsWith('.css') && readFileSync(join(plainProj, 'dist/assets', f), 'utf8').includes('--az-color-series-')));
     const runtimeDir = join(ROOT, 'packages/overlay/src/runtime');
     check('chat: the chat runtime ships verbatim with a chat panel, beside its generated module',
-      ['chat.ts', 'chat-logic.ts'].every((f) => readFileSync(join(chatProj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8'))
+      CHAT_RUNTIME_FILES.every((f) => readFileSync(join(chatProj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8'))
         && existsSync(join(chatProj, 'src/chat/runtime.tsx')));
     check('chat §7: the page ships the shell — the greeting as text, the form hidden until the runtime runs, a noscript line',
       /data-az-chat="/.test(chatPage) && chatPage.includes('Ask about anything on this site.')
@@ -740,7 +752,10 @@ try {
       /<div[^>]*class="az-chat-parts"[^>]*hidden=""|<div[^>]*hidden=""[^>]*class="az-chat-parts"/.test(chatPage)
         && ['data-az-chat-part="quote"', 'data-az-chat-part="faq"', 'data-az-chat-part="feature"', 'data-az-chat-part="cta-route"'].every((p) => parts.includes(p))
         && parts.includes('class="az-pricing') && parts.includes('data-az-chat-behaviour="billing"') && !/data-az-behaviour=/.test(parts)
-        && !/<(script|img|iframe)\b|\son[a-z]+=|\sstyle=/.test(parts),
+        && !/<(script|iframe)\b|\son[a-z]+=|\sstyle=/.test(parts)
+        // C2b (§20.6): the one image template on a site without gallery images is the row image's, with no address.
+        && (parts.match(/<img\b[^>]*>/g) ?? []).every((tag) => !/\ssrc=/.test(tag))
+        && ['paint', 'figure', 'table', 'stats', 'cards', 'dashboard', 'unavailable', 'row-image', 'share'].every((k) => parts.includes(`data-az-chat-part="${k}"`)),
       parts.slice(0, 200) || 'no parts');
     const publicKey = failing(process.execPath, [join(chatProj, 'node_modules/vite/bin/vite.js'), 'build'], chatProj,
       { ...serverKeys, AZ_PUBLIC_CHAT_KEY: chatKey });
