@@ -762,6 +762,30 @@ try {
     check('chat §6.4: a chat key given a public name (AZ_PUBLIC_CHAT_KEY) fails the build, its value never printed',
       publicKey !== null && publicKey.includes('AZ_PUBLIC_CHAT_KEY') && !publicKey.includes(chatKey),
       publicKey?.split('\n').find((l) => l.includes('AZ_PUBLIC_CHAT_KEY')) ?? 'the build passed');
+
+    // C3 (§3.1, §3.2): a float under site ships on every page — its launcher
+    // hidden until the runtime runs, its dialog closed, asking from that page —
+    // except where the page says `chat none`; every page's policy is still the
+    // plain page's, hashes aside.
+    const FLOAT_SITE = 'az 1\n\nsite floatcheck\n  auth\n    adapter azbackend\n  backend\n    database sqlite\n    email    smtp\n'
+      + '    model    default\n  chat float\n    title "Ask us"\n    allow anyone\n\npage /\n  hero center\n    title "Float check"\n'
+      + 'page /about\n  hero center\n    title "About"\npage /quiet\n  chat none\n  hero center\n    title "Quiet"\n';
+    const floatProj = buildSite('chat-float', FLOAT_SITE);
+    shippedBuild(floatProj, serverKeys);
+    const floatPage = (route) => readFileSync(join(floatProj, 'dist', route === '/' ? 'index.html' : `${route.slice(1)}/index.html`), 'utf8');
+    const shell = (html) => html.slice(html.indexOf('data-az-chat='), html.indexOf('</dialog>'));
+    const floats = ['/', '/about'].map((route) => {
+      const html = floatPage(route);
+      return /<button[^>]*data-az-chat-launcher[^>]*>/.exec(html)?.[0].includes('hidden=""') === true
+        && /<dialog[^>]*class="az-chat-dialog[ "][^>]*>/.exec(html)?.[0].includes(' open') === false
+        && html.includes(`&quot;page&quot;:&quot;${route}&quot;`) && !/\sstyle=|\son[a-z]+=/.test(shell(html));
+    });
+    check('chat §3.1: the site\'s float ships on every page — launcher hidden, dialog closed, asking from that page, no inline style or handler',
+      floats.every(Boolean), floats.join(' '));
+    check('chat §3.1: chat none leaves it out of its page', !floatPage('/quiet').includes('data-az-chat'));
+    check('chat §6.3: a float page\'s policy is the plain page\'s, hashes aside',
+      ['/', '/about', '/quiet'].every((route) => unhashed(policyOf(floatPage(route))) === unhashed(policyOf(plainPage))),
+      unhashed(policyOf(floatPage('/about'))));
   }
 
   /* ---- M4: the login page's form is wired, and marked up per §6 ------- */

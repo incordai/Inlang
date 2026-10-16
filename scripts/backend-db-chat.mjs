@@ -5,8 +5,11 @@
  * connections both land; the UTC day rolls over; old days are swept; and a
  * chat answered through the route on this engine is counted. C2b
  * (§20.5, §20.7): shared answers through their whole lifecycle, and every
- * aggregation form equal to SQLite's, buckets in UTC. Run by backend-db.mjs
- * inside its containers.
+ * aggregation form equal to SQLite's, buckets in UTC. C3 (§8.2): the rows a
+ * chat knows, read through the anonymous list on this engine — the search,
+ * the newest rows, money in major units, no private value — and a table the
+ * server would refuse never read. Run by backend-db.mjs inside its
+ * containers.
  */
 
 import { createServer } from 'node:http';
@@ -18,6 +21,7 @@ import { dataSteps } from '../packages/backend/src/data-ddl.ts';
 import { migrateData } from '../packages/backend/src/server/data-migrate.ts';
 import { loadTables } from '../packages/backend/src/server/data-values.ts';
 import { createQueries, parseFigures, parseRows } from '../packages/backend/src/server/chat-query.ts';
+import { createKnows, knowsProblems, rowsSection } from '../packages/backend/src/server/chat-knows.ts';
 import { createShareStore, SHARE_LIMITS } from '../packages/backend/src/server/chat-share.ts';
 import { createApp } from '../packages/backend/src/server/app.ts';
 import { createFakeAdapter } from '../packages/backend/src/server/chat-adapters.ts';
@@ -127,6 +131,68 @@ export async function figureChecks(engine, db, check) {
     listed.ok && JSON.stringify(listed.result.rows) === JSON.stringify([['paid', 10], ['paid', 25], ['open', 9.99], ['cancelled', 0.01]]), JSON.stringify(listed));
 }
 
+const KNOWS_TABLES = `  data chatguides
+    title    text     required search
+    body     longtext required search
+    price    money    eur
+    secret   text     private
+    allow anyone read
+  data chatnotes
+    body     text     required
+    allow owner read
+    allow signedin create
+`;
+
+/**
+ * chat-block-spec §8.2 on this engine: the rows a chat knows are the
+ * anonymous list's — searched in the `search` fields (case-insensitively,
+ * LIKE's wildcards literal), else the newest — public fields only, money in
+ * major units; a private value never; an owner-only table never read.
+ */
+export async function knowsChecks(engine, db, check) {
+  const words = new Map();
+  for (const n of readdirSync(WORDS)) {
+    const f = new URL(`${n}/word.json`, WORDS);
+    if (existsSync(f)) {
+      const m = JSON.parse(readFileSync(f, 'utf8'));
+      words.set(m.name, m);
+    }
+  }
+  const r = compile(SITE_SOURCE(KNOWS_TABLES), { manifests: words });
+  if (!r.ok) throw new Error(`fixture: ${JSON.stringify(r.diagnostics)}`);
+  const ops = plan([], r.spec.site.data, { rename: [], drop: [], unique: [] }).ops;
+  // Versions far from the data and figure suites', which share this database.
+  await migrateData(db, dataSteps([{ version: 950, ops }]), { confirm: Infinity });
+  const tables = loadTables(JSON.parse(JSON.stringify({ tables: r.spec.site.data })));
+  const rows = [
+    ['Warranty', 'Every lamp has a LIFETIME warranty.', 4900, 'secret-one'],
+    ['Bulbs', 'Any E27 bulb, 100% fits.', null, 'secret-two'],
+    ['Shipping', 'Ships in a week.', 1250, null],
+  ];
+  for (const [i, [title, body, price, secret]] of rows.entries()) {
+    await db.run('INSERT INTO azd_chatguides (id, owner, created, updated, title, body, price, secret) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), i + 1, i + 1, title, body, price, secret]);
+  }
+  await db.run('INSERT INTO azd_chatnotes (id, owner, created, updated, body) VALUES (?, NULL, 1, 1, ?)', [randomUUID(), 'owner-only-note']);
+  const known = [{ name: 'chatguides', fields: [
+    { name: 'title', type: 'text', search: true }, { name: 'body', type: 'longtext', search: true }, { name: 'price', type: 'money', currency: 'eur', digits: 2 },
+  ] }];
+  check(`${engine} chat knows: the start-up check passes the build's table`, knowsProblems(known, tables).length === 0);
+  const knows = createKnows({ db, database: engine, tables, known });
+  const line = (title, body, price) => JSON.stringify({ title, body, price });
+  check(`${engine} chat knows: the search finds a row whatever its case`,
+    (await knows(['chatguides'], 'lifetime')) === rowsSection('chatguides', [line('Warranty', 'Every lamp has a LIFETIME warranty.', '49.00 EUR')]));
+  const newest = await knows(['chatguides'], 'nothing holds these words');
+  check(`${engine} chat knows: words no row holds give the newest rows, newest first`,
+    newest === rowsSection('chatguides', [line('Shipping', 'Ships in a week.', '12.50 EUR'), line('Bulbs', 'Any E27 bulb, 100% fits.', null), line('Warranty', 'Every lamp has a LIFETIME warranty.', '49.00 EUR')]), newest);
+  // As a wildcard, 'E%7' would match 'E27'; as the literal it is, no row holds it, so the newest rows come.
+  check(`${engine} chat knows: a % in the words is a literal %, not a wildcard`, (await knows(['chatguides'], 'E%7')) === newest);
+  check(`${engine} chat knows: no private value is ever read into a section`, !newest.includes('secret-'));
+  const forged = [{ name: 'chatnotes', fields: [{ name: 'body', type: 'text' }] }];
+  check(`${engine} chat knows: an owner-only table is refused at start and never read`,
+    knowsProblems(forged, tables).length > 0 && (await createKnows({ db, database: engine, tables, known: forged })(['chatnotes'], 'note')) === '');
+}
+
 export async function chatSuite(engine, db, openAgain, check, url) {
   check(`${engine} chat: the usage and share migrations apply`, (await migrateChat(db)).join() === '1,2');
   check(`${engine} chat: …and is a no-op the second time`, (await migrateChat(db)).length === 0);
@@ -164,6 +230,7 @@ export async function chatSuite(engine, db, openAgain, check, url) {
 
   await shareChecks(engine, db, check);
   await figureChecks(engine, db, check);
+  await knowsChecks(engine, db, check);
 
   // Through the route on this engine: an answer is counted in today's row.
   const loaded = loadConfig({

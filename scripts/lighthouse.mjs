@@ -29,6 +29,14 @@
  * target is reported, not failed — synthetic sites are evidence, not the
  * M5 verdict. `--json <file>` also writes the results as JSON, and
  * `--reports <dir>` each site's full Lighthouse report as <dir>/<site>.json.
+ *
+ * A site on the built-in backend is built against the pipeline's preview
+ * backend (`https://backend.invalid`, which never resolves); as in every other
+ * browser check, its requests there are answered as a backend with nobody
+ * signed in would answer them (pipeline.mjs answerPreviewBackend), through a
+ * Playwright connection to the same browser — so the page's session read
+ * succeeds instead of logging a failed load. Sites without a backend are
+ * audited with no connection at all.
  */
 
 import { spawn, execFileSync } from 'node:child_process';
@@ -38,7 +46,7 @@ import { tmpdir, loadavg, availableParallelism } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import lighthouse from 'lighthouse';
-import { ROOT, WORDS, buildSites, firstRoute } from './visual/pipeline.mjs';
+import { ROOT, WORDS, answerPreviewBackend, buildSites, firstRoute } from './visual/pipeline.mjs';
 import { startServer } from './visual/serve.mjs';
 import { Overdue, within, closeWithin, stopChild, watchdog, human } from './lib/bounded.mjs';
 
@@ -243,12 +251,21 @@ function offenders(audit) {
   return items.slice(0, 5).map((it) => it.url ?? it.sourceLocation?.url ?? it.source?.url ?? it.node?.snippet ?? it.description ?? it.label ?? JSON.stringify(it).slice(0, 200));
 }
 
+/** A site that talks to the built-in backend — so to the preview backend, in a preview build (auth-spec §3.4). */
+const onBackend = (source) => /^ {2}backend$/m.test(source) || /^ {4}adapter azbackend$/m.test(source);
+
 /** One Lighthouse run on a site's first page, in a fresh browser. */
 async function audit(site, server, children) {
   const url = new URL(firstRoute(site.source), server.url).href;
   const browser = await launch(children);
   const load = loadavg()[0];
+  // The preview backend answered in this browser's default context, where Lighthouse opens its page.
+  let answering = null;
   try {
+    if (onBackend(site.source)) {
+      answering = await within(LAUNCH_MS, 'connect to answer the preview backend', () => chromium.connectOverCDP(`http://127.0.0.1:${browser.port}`));
+      await answerPreviewBackend(answering.contexts()[0]);
+    }
     const result = await within(AUDIT_MS, `lighthouse ${site.name}`, () => lighthouse(url, {
       port: browser.port, output: 'json', logLevel: 'error', onlyCategories: CATEGORIES,
     }));
@@ -263,6 +280,7 @@ async function audit(site, server, children) {
       version: lhr.lighthouseVersion, agent: lhr.environment.hostUserAgent, report: result.report,
     };
   } finally {
+    if (answering) await closeWithin(answering, CLOSE_MS, 'preview backend connection close');
     await stopChild(browser.child);
     rmSync(browser.profile, { recursive: true, force: true });
   }

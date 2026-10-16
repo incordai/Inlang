@@ -35,8 +35,27 @@
  * share link made from an answer, opened signed out in a fresh context with
  * the same components and labels and `noindex`, gone after its delete link
  * is used and after it expires.
+ *
+ * C3 (§14, §9): a `chat float` under `site` with `knows guides` (a public
+ * table only the site fills, with a private column): the launcher on every
+ * page that has no chat of its own and on none that says `chat none`; by
+ * keyboard, it opens a side panel above `sm` that does not hold focus and a
+ * bottom sheet below it that does (Tab and Shift+Tab stay inside), the input
+ * focused on opening and the launcher on closing; Escape stops an answer,
+ * then closes; the answer is the one the model gives only when the guides
+ * row reached it and the private column did not; the transcript stops
+ * following when scrolled up and offers Jump to latest, which brings it back
+ * to the end; under reduced motion the panel only fades and the jump is
+ * instant; an answer with components is a stop in the Tab order; axe in
+ * every float state. Then, in Chromium, pixel snapshots of the answered
+ * states — the float wide and as a sheet, an answer with the site's
+ * components, a dashboard — in every theme and both schemes: each rendered
+ * twice from a fresh page and byte-compared (the fake adapter makes them
+ * deterministic), light and dark told apart, the PNGs written to
+ * .visual-out/chat/ for review.
  */
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { request as httpRequest } from 'node:http';
@@ -55,9 +74,14 @@ import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 import { selfSignedCert } from './lib/self-signed.mjs';
 import { chunksOf, corpusCases, corpusRules } from '../packages/backend/test/chat-corpus.ts';
+import { THEMES, DEFAULT_THEME } from '../packages/theme/src/index.ts';
 
-/* Deadlines (lib/bounded.mjs): a normal run takes about a minute. */
-const RUN_MS = 10 * 60_000;
+/*
+ * Deadlines (lib/bounded.mjs): a normal run takes a few minutes — six theme
+ * builds and the snapshots (C3) are most of it; 25 minutes is several times
+ * the slowest measured, so only a stuck engine reaches it.
+ */
+const RUN_MS = 25 * 60_000;
 const CLOSE_MS = 15_000;
 const CONTROL_MS = 10_000;
 /** The longest any one UI state is waited for. */
@@ -121,6 +145,8 @@ page /ask
     limit    50
 
 page /pricing
+  hero center
+    title "Pricing"
   pricing cards
     title    "Plans"
     currency usd
@@ -139,6 +165,7 @@ page /contact
     body  "Write to us."
 
 page /signup
+  chat none
   auth signup
     terms /terms
     alt   "Sign in instead" /login
@@ -174,6 +201,11 @@ page /figures
 
 /** The public table the server counts (chat-block-spec §20.5): a private note it must never read. */
 const DATA = `
+  data guides
+    title    text     required search
+    body     longtext required search
+    secret   text     private
+    allow anyone read
   data orders
     item     text     required
     status   choice   paid open cancelled required
@@ -183,6 +215,23 @@ const DATA = `
     allow anyone read
     allow anyone create
 `;
+/** C3 (§3.1, §8.2): the float every page without a chat of its own shows, grounded on the guides table. */
+const FLOAT = `
+  chat float
+    title    "Ask Lantern"
+    greeting "Hi! Ask me anything about Lantern."
+    allow    anyone
+    limit    50
+    knows    guides
+`;
+/** The guides rows, written as the site's admin writes them: a private column the model must never be given. */
+const GUIDE_SECRET = `guide-secret-${randomBytes(4).toString('hex')}`;
+const GUIDES = [
+  { title: 'Warranty', body: 'Every Lantern lamp has a lifetime warranty on the frame.' },
+  { title: 'Bulbs', body: 'Lantern takes any E27 bulb up to 12 watts.' },
+];
+/** The paragraphs of the long answer the transcript must stop following when scrolled up. */
+const SCROLL_PARAGRAPHS = 40;
 const ORDERS = [
   { item: 'Lamp', status: 'paid', total: 4500, placed: Date.UTC(2026, 8, 3), note: 'private-mark-one' },
   { item: 'Desk lamp', status: 'paid', total: 6900, placed: Date.UTC(2026, 9, 1), note: 'private-mark-two' },
@@ -242,6 +291,11 @@ const RULES = corpusRules();
 const FAKE = {
   answers: [
     ...CORPUS.map((c) => ({ when: c.ask, chunks: chunksOf(c.answer), delayMs: 5 })),
+    // §8.2: the grounded answer comes only when the guides row is in what the model was given — and the probe first, should the private column ever be.
+    { when: 'warranty', system: GUIDE_SECRET, chunks: ['LEAKED the private column.'] },
+    { when: 'warranty', system: 'lifetime warranty on the frame', chunks: ['Every lamp has a lifetime ', 'warranty on its frame.'], delayMs: 10 },
+    { when: 'warranty', chunks: ['NOT GROUNDED.'] },
+    { when: 'scroll please', chunks: Array.from({ length: SCROLL_PARAGRAPHS }, (_, i) => `Paragraph ${i + 1} of the long answer.\n\n`), delayMs: 40 },
     { when: 'figures-dashboard', chunks: chunksOf(RICH.dashboard), delayMs: 5 },
     { when: 'figures-mix', chunks: chunksOf(RICH.mix), delayMs: 5 },
     { when: 'figures-attack', chunks: chunksOf(RICH.attack), delayMs: 5 },
@@ -339,14 +393,26 @@ const serverPort = await freePort();
 const proxy = await startTlsProxy(serverPort);
 process.env.AZ_PUBLIC_BACKEND_URL = proxy.url;
 // A site with tables builds with its schema lock, written by the real `az backend schema` (data-spec §6).
-const SOURCE = `${SITE.replace('    model    default\n', `    model    default\n${DATA}`)}${FIGURES}`;
-const site = { dir: join(work, 'lantern'), source: SOURCE, assetsFrom: join(ROOT, 'packages/words/gallery/preview-assets') };
-mkdirSync(site.dir, { recursive: true });
-writeFileSync(join(site.dir, 'site.az'), SOURCE);
-execFileSync(process.execPath, [CLI, 'backend', 'schema', join(site.dir, 'site.az')], { cwd: site.dir, env: { ...process.env, AZ_PUBLIC_BACKEND_URL: proxy.url }, stdio: 'pipe' });
-await buildSites([site], work);
+const SOURCE = `${SITE.replace('    model    default\n', `    model    default\n${DATA}${FLOAT}`)}${FIGURES}`;
+const ASSETS = join(ROOT, 'packages/words/gallery/preview-assets');
+const site = { dir: join(work, 'lantern'), source: SOURCE, assetsFrom: ASSETS };
+/*
+ * C3's snapshots (§12): the same site in every other theme, so each answered
+ * state is drawn by each theme. Same pages, same chats, same tables — the one
+ * server below answers all of them; only `theme` differs.
+ */
+const themed = Object.keys(THEMES).filter((t) => t !== DEFAULT_THEME).map((theme) => ({
+  theme, dir: join(work, `lantern-${theme}`), source: SOURCE.replace('site lantern\n', `site lantern\n  theme ${theme}\n`), assetsFrom: ASSETS,
+}));
+for (const s of [site, ...themed]) {
+  mkdirSync(s.dir, { recursive: true });
+  writeFileSync(join(s.dir, 'site.az'), s.source);
+  execFileSync(process.execPath, [CLI, 'backend', 'schema', join(s.dir, 'site.az')], { cwd: s.dir, env: { ...process.env, AZ_PUBLIC_BACKEND_URL: proxy.url }, stdio: 'pipe' });
+}
+await buildSites([site, ...themed], work);
 check('the chat site compiles and builds', Boolean(site.compiled && site.dist), site.error ?? '');
-if (!site.dist) {
+check(`the same site builds in the other ${themed.length} themes`, themed.every((s) => s.compiled && s.dist), themed.filter((s) => !s.dist).map((s) => `${s.theme}: ${s.error ?? 'no dist'}`).join(' | '));
+if (!site.dist || !themed.every((s) => s.dist)) {
   console.log(`\n1 CHECK(S) FAILED — work dir kept: ${work}`);
   run.clear();
   process.exit(1);
@@ -354,6 +420,9 @@ if (!site.dist) {
 
 const smtp = await startSmtpSink();
 const host = await startSite(normalize(site.dist));
+/** Each theme's copy on its own origin, the default theme's being the main site. */
+const themeHosts = [{ theme: DEFAULT_THEME, url: host.url, close: host.close }];
+for (const s of themed) themeHosts.push({ theme: s.theme, ...(await startSite(normalize(s.dist))) });
 const serverDir = join(site.proj, 'server');
 mkdirSync(join(serverDir, 'node_modules'), { recursive: true });
 symlinkSync(realpathSync(join(ROOT, 'node_modules/nodemailer')), join(serverDir, 'node_modules/nodemailer'), 'dir');
@@ -372,7 +441,7 @@ const child = spawn(process.execPath, ['src/main.ts'], {
   env: {
     PATH: process.env.PATH,
     AZ_SESSION_SECRET: randomBytes(32).toString('base64url'),
-    AZ_BACKEND_PUBLIC_URL: proxy.url, AZ_PORT: String(serverPort), AZ_ALLOWED_ORIGINS: host.url, AZ_TRUST_PROXY: 'true',
+    AZ_BACKEND_PUBLIC_URL: proxy.url, AZ_PORT: String(serverPort), AZ_ALLOWED_ORIGINS: themeHosts.map((h) => h.url).join(','), AZ_TRUST_PROXY: 'true',
     AZ_SQLITE_PATH: join(serverDir, 'data/test.db'),
     AZ_EMAIL_FROM: 'Lantern <no-reply@lantern.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(smtp.port),
     AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: fakeFile,
@@ -394,10 +463,20 @@ const up = await new Promise((done) => {
 check('the generated server starts with the fake model adapter', up, serverLog.trim().split('\n').slice(0, 4).join(' / '));
 if (!up) {
   child.kill('SIGTERM');
-  proxy.close(); host.close(); smtp.close();
+  proxy.close(); smtp.close();
+  for (const h of themeHosts) h.close();
   console.log(`\n1 CHECK(S) FAILED — work dir kept: ${work}`);
   run.clear();
   process.exit(1);
+}
+
+// The guides a chat knows (§8.2): only the site's admins fill that table, so they are written into its database as an admin's would be.
+{
+  const db = new DatabaseSync(join(serverDir, 'data/test.db'));
+  try {
+    const insert = db.prepare('INSERT INTO azd_guides (id, owner, created, updated, title, body, secret) VALUES (?, NULL, ?, ?, ?, ?, ?)');
+    GUIDES.forEach((g, i) => insert.run(`00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, i + 1, i + 1, g.title, g.body, GUIDE_SECRET));
+  } finally { db.close(); }
 }
 
 // The orders the server's figures count, made as any visitor makes rows (allow anyone create).
@@ -464,7 +543,7 @@ async function ask(page, text) {
 /** axe on the page as it is: zero violations. */
 async function axe(page, label) {
   const r = await new AxeBuilder({ page }).analyze();
-  check(`${label}: axe finds no violation`, r.violations.length === 0, r.violations.map((v) => `${v.id} (${v.nodes.length})`).join(', '));
+  check(`${label}: axe finds no violation`, r.violations.length === 0, r.violations.map((v) => `${v.id} (${v.nodes.length}: ${v.nodes.slice(0, 2).map((n) => `${n.target.join(' ')} ${n.any[0]?.message ?? ''}`.slice(0, 220)).join(' | ')})`).join(', '));
 }
 /** Count what the status region is told while `work` runs. */
 async function announcements(page, work) {
@@ -682,6 +761,10 @@ async function componentsFlow(b, name, origins) {
     check(`${name}: the composed FAQ starts closed and opens`, closed === 'false' && await toggle.getAttribute('aria-expanded') === 'true'
       && await answer.locator('.az-faq-answer').first().isVisible());
     await axe(page, `${name} answered with components`);
+    // §9: an answer holding components is a stop in the Tab order, named as one; prose alone is not.
+    check(`${name}: an answer with components is a keyboard stop named Answer; the greeting is not`,
+      await answer.getAttribute('tabindex') === '0' && await answer.getAttribute('aria-label') === 'Answer'
+      && await page.locator('[data-az-chat-transcript] > .az-chat-message--site').first().getAttribute('tabindex') === null);
 
     // The corpus: each hostile answer becomes exactly its expected parts — nothing else is drawn.
     for (const c of CORPUS.filter((x) => x.name !== 'legal')) {
@@ -865,6 +948,276 @@ async function richFlow(b, name, origins) {
   }
 }
 
+/* ---- C3: the float, §9's polish, answers from a table it knows ---- */
+
+const launcher = (page) => page.locator('[data-az-chat-launcher]');
+const floatDialog = (page) => page.locator('dialog.az-chat-dialog');
+const isFocused = (locator) => locator.evaluate((el) => el === document.activeElement);
+/** The float's state as the page has it: open, modal, the launcher's aria-expanded, where focus is, the page's scroll lock. */
+const floatState = (page) => page.evaluate(() => {
+  const d = document.querySelector('dialog.az-chat-dialog');
+  const a = document.activeElement;
+  return {
+    open: d?.open === true, modal: d?.matches(':modal') === true,
+    expanded: document.querySelector('[data-az-chat-launcher]')?.getAttribute('aria-expanded'),
+    input: a?.hasAttribute('data-az-chat-input') === true, launcher: a?.hasAttribute('data-az-chat-launcher') === true,
+    inside: Boolean(d && a && d.contains(a)), locked: document.documentElement.hasAttribute('data-az-scroll-lock'),
+  };
+});
+/** The float's dialog has finished moving in: axe and a screenshot see it as a visitor does, not mid-fade. */
+const settled = (page) => page.waitForFunction(() => {
+  const d = document.querySelector('dialog.az-chat-dialog');
+  return d?.getAttribute('data-state') === 'open' && d.getAnimations({ subtree: true }).every((a) => a.playState !== 'running');
+}, null, { timeout: STATE_MS });
+/** Press Tab until `locator` has focus, at most `max` times. */
+async function tabTo(page, locator, max = 60) {
+  for (let i = 0; i < max; i++) {
+    if (await isFocused(locator)) return true;
+    await page.keyboard.press('Tab');
+  }
+  return isFocused(locator);
+}
+/** The transcript is scrolled to its end (overlay chat-logic.ts atEnd, the same slack). */
+const transcriptAtEnd = (page) => page.evaluate(() => {
+  const t = document.querySelector('[data-az-chat-transcript]');
+  return t.scrollHeight - t.scrollTop - t.clientHeight <= 24;
+});
+/** Scroll the long answer up while it streams: the transcript must stop following and offer Jump to latest. */
+async function scrolledUpWhileStreaming(page) {
+  const input = panel(page).locator('[data-az-chat-input]');
+  await input.fill('scroll please');
+  await input.press('Enter');
+  await page.waitForFunction(() => {
+    const t = document.querySelector('[data-az-chat-transcript]');
+    return t.scrollHeight > t.clientHeight + 200;
+  }, null, { timeout: STATE_MS });
+  await page.evaluate(() => { document.querySelector('[data-az-chat-transcript]').scrollTop = 0; });
+  await panel(page).locator('[data-az-chat-latest]').waitFor({ state: 'visible', timeout: STATE_MS });
+  const before = await page.evaluate(() => document.querySelectorAll('[data-az-chat-transcript] > li:last-child > p').length);
+  await page.waitForFunction((n) => document.querySelectorAll('[data-az-chat-transcript] > li:last-child > p').length >= n + 3, before, { timeout: STATE_MS });
+  const stayed = await page.evaluate(() => document.querySelector('[data-az-chat-transcript]').scrollTop <= 24);
+  await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] > li:last-child')?.getAttribute('aria-busy') === 'false', null, { timeout: STATE_MS });
+  return stayed;
+}
+
+async function floatFlow(b, name, origins) {
+  const wide = await watchedContext(b, csp, { ...CONTEXT, viewport: { width: 1280, height: 800 } });
+  try {
+    const page = await wide.newPage();
+    recordRequests(page, origins);
+    page.on('dialog', (d) => { check(`${name}: no browser dialog ever opens`, false, d.message()); void d.dismiss(); });
+
+    // §3.1: the site's float is on every page without a chat of its own, asking from that page.
+    const seen = [];
+    for (const route of ['/pricing', '/contact', '/terms', '/login']) {
+      await page.goto(`${host.url}${route}`);
+      await ready(page);
+      const named = await page.getByRole('button', { name: 'Ask Lantern' }).isVisible();
+      const asks = JSON.parse(await panel(page).getAttribute('data-az-chat')).page;
+      seen.push(`${route}:${named && asks === route}`);
+    }
+    check(`${name}: the site's float is on every page without a chat of its own, named by its title, asking from that page`,
+      seen.every((x) => x.endsWith(':true')), seen.join(' '));
+    await page.goto(`${host.url}/signup`);
+    await page.waitForFunction(() => document.documentElement.hasAttribute('data-az-ready'), null, { timeout: STATE_MS });
+    check(`${name}: chat none leaves it out of /signup`, await page.locator('[data-az-chat]').count() === 0);
+    await page.goto(`${host.url}/`);
+    await ready(page, 'signin');
+    check(`${name}: a page's own panel replaces the float there — one chat`,
+      await page.locator('[data-az-chat]').count() === 1 && await launcher(page).count() === 0 && await page.locator('.az-chat--panel').count() === 1);
+
+    // Wide: by keyboard, a side panel that does not hold focus; Escape closes; focus returns to the launcher.
+    await page.goto(`${host.url}/pricing`);
+    await ready(page);
+    await axe(page, `${name} float closed`);
+    const reached = await tabTo(page, launcher(page));
+    // WebKit's default keyboard setting leaves buttons out of Tab (the browser's choice, not the page's): there the
+    // launcher must be a real button in the Tab order, and it is focused directly.
+    const inOrder = await launcher(page).evaluate((el) => el.tagName === 'BUTTON' && el.tabIndex === 0);
+    check(`${name}: ${name === 'webkit' ? 'the launcher is a button in the Tab order (WebKit\'s default Tab skips buttons)' : 'Tab reaches the launcher'}`,
+      name === 'webkit' ? inOrder : reached);
+    if (!reached) await launcher(page).focus();
+    await page.keyboard.press('Enter');
+    await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
+    const opened = await floatState(page);
+    check(`${name}: wide, the launcher opens a side panel — not modal, aria-expanded, focus in the input`,
+      opened.open && !opened.modal && opened.expanded === 'true' && opened.input && !opened.locked, JSON.stringify(opened));
+    check(`${name}: CONTROL: with motion allowed the panel moves as it fades`,
+      /transform/.test(await floatDialog(page).evaluate((d) => getComputedStyle(d).transitionProperty)));
+    // Backwards: the launcher comes before the panel, so Shift+Tab reaches the page (forwards, past the panel, is the browser's own UI).
+    let left = false;
+    for (let i = 0; i < 40 && !left; i++) {
+      await page.keyboard.press('Shift+Tab');
+      left = !(await floatState(page)).inside;
+    }
+    check(`${name}: wide, Shift+Tab may leave the side panel for the page (it holds nothing)`, left);
+    await panel(page).locator('[data-az-chat-input]').focus();
+    await settled(page);
+    await axe(page, `${name} float open`);
+    await page.keyboard.press('Escape');
+    const shut = await floatState(page);
+    check(`${name}: Escape closes the panel and focus returns to the launcher`, !shut.open && shut.launcher && shut.expanded === 'false', JSON.stringify(shut));
+
+    // §8.2: the answer the model gives only when the guides row reached it — and the private column did not.
+    await launcher(page).click();
+    await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
+    const before = await answerCount(page);
+    const said = await announcements(page, async () => {
+      const input = panel(page).locator('[data-az-chat-input]');
+      await input.fill('What is the warranty?');
+      await input.press('Enter');
+      const grounded = await nextAnswer(page, before);
+      check(`${name}: an answer from the knows table — given the guides row, never its private column`,
+        JSON.stringify(grounded.paragraphs) === JSON.stringify(['Every lamp has a lifetime warranty on its frame.']), JSON.stringify(grounded.paragraphs));
+    });
+    check(`${name}: in the float, the status region hears the finished sentence`, said.length > 0 && said.every((x) => /[.!?]$/.test(x)), JSON.stringify(said));
+    await settled(page);
+    await axe(page, `${name} float answered`);
+
+    // §9: Escape stops an answer first; only the next Escape closes.
+    const input = panel(page).locator('[data-az-chat-input]');
+    await input.fill('stall please');
+    await input.press('Enter');
+    await panel(page).locator('[data-az-chat-stop]').waitFor({ state: 'visible', timeout: STATE_MS });
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('[data-az-chat-note]')?.textContent === 'Stopped.', null, { timeout: STATE_MS });
+    check(`${name}: Escape stops the answer and leaves the panel open`, (await floatState(page)).open);
+    await page.keyboard.press('Escape');
+    const after = await floatState(page);
+    check(`${name}: the next Escape closes it, focus back on the launcher`, !after.open && after.launcher, JSON.stringify(after));
+
+    // §9: scrolled up, the transcript stops following and offers Jump to latest; that goes back to the end.
+    await launcher(page).click();
+    await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
+    const stayed = await scrolledUpWhileStreaming(page);
+    check(`${name}: scrolled up while an answer streams, the transcript stays where the visitor put it`, stayed);
+    const jump = panel(page).locator('[data-az-chat-latest]');
+    check(`${name}: Jump to latest is offered, a real button`, await jump.isVisible() && (await jump.textContent()).trim() === 'Jump to latest');
+    await settled(page);
+    await axe(page, `${name} float scrolled up`);
+    await jump.click();
+    await page.waitForFunction(() => {
+      const t = document.querySelector('[data-az-chat-transcript]');
+      return t.scrollHeight - t.scrollTop - t.clientHeight <= 24;
+    }, null, { timeout: STATE_MS });
+    check(`${name}: Jump to latest goes to the newest words, hides itself and leaves focus in the input`,
+      await transcriptAtEnd(page) && !(await jump.isVisible()) && await isFocused(panel(page).locator('[data-az-chat-input]')));
+  } finally {
+    closed = (await closeWithin(wide, CLOSE_MS, `${name} float context close`)) && closed;
+  }
+
+  // Below sm: the overlay engine's sheet — modal, the page locked, Tab and Shift+Tab held inside.
+  const narrow = await watchedContext(b, csp, { ...CONTEXT, viewport: { width: 390, height: 844 } });
+  try {
+    const page = await narrow.newPage();
+    recordRequests(page, origins);
+    await page.goto(`${host.url}/contact`);
+    await ready(page);
+    await launcher(page).focus();
+    await page.keyboard.press('Enter');
+    await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
+    const sheet = await floatState(page);
+    check(`${name}: narrow, the launcher opens a modal sheet, the page locked, focus in the input`,
+      sheet.open && sheet.modal && sheet.locked && sheet.input, JSON.stringify(sheet));
+    let held = true;
+    for (let i = 0; i < 25 && held; i++) { await page.keyboard.press('Tab'); held = (await floatState(page)).inside; }
+    for (let i = 0; i < 25 && held; i++) { await page.keyboard.press('Shift+Tab'); held = (await floatState(page)).inside; }
+    check(`${name}: in the sheet, Tab and Shift+Tab never leave it`, held);
+    await settled(page);
+    await axe(page, `${name} float sheet`);
+    await page.keyboard.press('Escape');
+    const back = await floatState(page);
+    check(`${name}: Escape closes the sheet, unlocks the page and returns focus to the launcher`, !back.open && !back.locked && back.launcher, JSON.stringify(back));
+  } finally {
+    closed = (await closeWithin(narrow, CLOSE_MS, `${name} sheet context close`)) && closed;
+  }
+
+  // Reduced motion: the panel only fades (no slide), and Jump to latest jumps rather than glides.
+  const still = await watchedContext(b, csp, { ...CONTEXT, viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' });
+  try {
+    const page = await still.newPage();
+    recordRequests(page, origins);
+    await page.goto(`${host.url}/terms`);
+    await ready(page);
+    await launcher(page).click();
+    await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
+    check(`${name}: reduced motion, the panel only fades — no slide`,
+      (await floatDialog(page).evaluate((d) => getComputedStyle(d).transitionProperty)) === 'opacity');
+    await scrolledUpWhileStreaming(page);
+    const instant = await page.evaluate(() => {
+      document.querySelector('[data-az-chat-latest]').click();
+      const t = document.querySelector('[data-az-chat-transcript]');
+      return t.scrollHeight - t.scrollTop - t.clientHeight <= 24;
+    });
+    check(`${name}: reduced motion, Jump to latest is at the end at once — no smooth scroll`, instant);
+  } finally {
+    closed = (await closeWithin(still, CLOSE_MS, `${name} reduced-motion context close`)) && closed;
+  }
+}
+
+/* ---- C3: snapshots of the answered states, every theme, both schemes (§12, gate item 3's method) ---- */
+
+const SNAP_OUT = join(ROOT, '.visual-out/chat');
+const SNAP_STATES = [
+  { name: 'float-wide', viewport: { width: 1280, height: 800 }, route: '/pricing', ask: 'What is the warranty?', float: true, whole: false },
+  { name: 'float-sheet', viewport: { width: 390, height: 844 }, route: '/pricing', ask: 'What is the warranty?', float: true, whole: true },
+  { name: 'components', viewport: { width: 1280, height: 2200 }, route: '/ask', ask: CORPUS.find((c) => c.name === 'legal').ask, float: false, whole: false },
+  { name: 'dashboard', viewport: { width: 1280, height: 2200 }, route: '/figures', ask: 'figures-dashboard', float: false, whole: false },
+];
+
+/** One answered state as a PNG, from a fresh page: nothing moving, fonts loaded, the caret hidden. */
+async function snapshot(b, url, scheme, state) {
+  const ctx = await watchedContext(b, csp, { ...CONTEXT, viewport: state.viewport, colorScheme: scheme, reducedMotion: 'reduce' });
+  try {
+    const page = await ctx.newPage();
+    await page.goto(`${url}${state.route}`);
+    await ready(page);
+    if (state.float) {
+      await launcher(page).click();
+      await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
+      await settled(page);
+    }
+    await ask(page, state.ask);
+    await page.evaluate(() => document.fonts.ready);
+    // The pointer away from everything (no hover state), nothing running, and two frames painted since.
+    await page.mouse.move(0, 0);
+    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, { timeout: STATE_MS });
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    const target = state.whole ? page : state.float ? floatDialog(page) : page.locator('[data-az-chat-transcript] > .az-chat-message--site').last();
+    return await target.screenshot({ animations: 'disabled', caret: 'hide' });
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `snapshot ${state.name} close`)) && closed;
+  }
+}
+
+async function snapshotFlow(b) {
+  mkdirSync(SNAP_OUT, { recursive: true });
+  const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+  for (const { theme, url } of themeHosts) {
+    const unstable = [];
+    const alike = [];
+    for (const state of SNAP_STATES) {
+      const byScheme = {};
+      for (const scheme of ['light', 'dark']) {
+        const first = await snapshot(b, url, scheme, state);
+        const second = await snapshot(b, url, scheme, state);
+        if (sha(first) !== sha(second)) {
+          unstable.push(`${state.name} ${scheme}`);
+          // Both kept, so the difference can be looked at.
+          writeFileSync(join(SNAP_OUT, `${theme}-${scheme}-${state.name}.second.png`), second);
+        }
+        writeFileSync(join(SNAP_OUT, `${theme}-${scheme}-${state.name}.png`), first);
+        byScheme[scheme] = sha(first);
+      }
+      if (byScheme.light === byScheme.dark) alike.push(state.name);
+    }
+    check(`snapshots, ${theme}: every answered state (${SNAP_STATES.map((x) => x.name).join(', ')}) renders byte-identically twice in each scheme`,
+      unstable.length === 0, unstable.join(', '));
+    check(`snapshots, ${theme}: light and dark differ in every answered state`, alike.length === 0, alike.join(', '));
+  }
+  console.log(`snapshots: ${themeHosts.length * SNAP_STATES.length * 2} PNGs in ${SNAP_OUT}`);
+}
+
 const errors = [];
 try {
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
@@ -877,8 +1230,11 @@ try {
       await signedInFlow(b, name, origins);
       await componentsFlow(b, name, origins);
       await richFlow(b, name, origins);
+      await floatFlow(b, name, origins);
       const others = [...origins].filter((o) => o !== host.url && o !== backendOrigin);
       check(`${name}: every request went to the site or its backend — nothing else`, others.length === 0 && origins.has(backendOrigin), [...origins].join(' '));
+      // Gate item 3's method, in the engine the gate's screenshots use.
+      if (name === 'chromium') await snapshotFlow(b);
     } catch (e) {
       errors.push(`${name}: ${e.message.split('\n')[0]}`);
       check(`${name}: the flows ran to the end`, false, e.message.split('\n')[0]);
@@ -893,12 +1249,13 @@ try {
   check('the server logged answers (so the log was read)', /chat/i.test(serverLog), serverLog.split('\n').filter((l) => /chat/i.test(l)).slice(0, 2).join(' / '));
   check("the server's log holds no visitor's words and no model's words", !serverLog.includes(VISITOR_MARK) && !serverLog.includes(ANSWER_MARK)
     && !serverLog.includes('evil.example') && !serverLog.includes(PASSWORD) && !serverLog.includes('lumens') && !serverLog.includes('attack ')
-    && !serverLog.includes('private-mark') && !serverLog.includes('Expected next quarter'));
+    && !serverLog.includes('private-mark') && !serverLog.includes('Expected next quarter') && !serverLog.includes(GUIDE_SECRET)
+    && !serverLog.includes('lifetime warranty'));
   check('the server logged the corpus\'s drops as counts and reasons only', /dropped \d+ \([a-z_,]+\)/.test(serverLog));
 } finally {
   child.kill('SIGTERM');
   proxy.close();
-  host.close();
+  for (const h of themeHosts) h.close();
   smtp.close();
 }
 
