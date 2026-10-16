@@ -195,8 +195,8 @@ lockfile still surfaces) and on demand. The workflow's default permission is
 
 | Job | What it runs | Extra permissions |
 |---|---|---|
-| `codeql (javascript-typescript)`, `codeql (actions)` | CodeQL init + analyze, `security-extended` queries, `build-mode: none`; results go to code scanning | `security-events: write`, `actions: read` |
-| `dependency review` | on pull requests only; fails on a new dependency with a moderate or higher advisory | — |
+| `codeql (javascript-typescript)`, `codeql (actions)` | CodeQL init + analyze, `security-extended` queries, `build-mode: none`; results go to code scanning. **Public repository only** — code scanning on a private repository needs a paid security plan, so on a private repository run §2.1 locally | `security-events: write`, `actions: read` |
+| `dependency review` | on pull requests only; fails on a new dependency with a moderate or higher advisory. **Public repository only**, for the same reason | — |
 | `secret scan (full history)` | `pnpm scan:secrets` on a full-depth checkout | — |
 | `dependency vulnerabilities` | `pnpm scan:deps` | — |
 | `workflow lint` | `pnpm scan:actions` (shellcheck is on the runner image) | — |
@@ -212,7 +212,14 @@ GitHub Actions updates weekly, with a seven-day cooldown to match
 `minimumReleaseAge` in `pnpm-workspace.yaml`.
 
 The workflows were checked locally with actionlint and the CodeQL actions
-queries; neither reported anything. They have not run on GitHub yet.
+queries; neither reported anything. Every job runs on `ubuntu-24.04`, pinned
+rather than `ubuntu-latest`, so a runner-image change cannot alter a run
+unannounced.
+
+*2026-10-17:* no job has run on GitHub yet. On `incordai/inlang` every run
+was refused before it started — "recent account payments have failed or your
+spending limit needs to be increased" — which is an account billing setting,
+not a failure of the code.
 Dependency review needs the dependency graph enabled on the repository, and
 on a private repository both it and CodeQL upload need code security
 enabled.
