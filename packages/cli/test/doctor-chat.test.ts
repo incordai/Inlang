@@ -58,10 +58,11 @@ const JUDGE_KEY = `planted-judge-key-${'j7'.repeat(10)}`;
 const az = (cwd: string, ...args: string[]) =>
   spawnSync(process.execPath, [BIN, ...args], { cwd, encoding: 'utf8', env: { ...process.env, AZ_WORDS: WORDS }, timeout: 60_000 });
 
-/** A real build of a chat site, its schema recorded, its server's .env written from `az backend init` and filled. */
-function built(source = CHAT_SITE()) {
+/** A real build of a chat site (and `files` beside it), its schema recorded, its server's .env written from `az backend init` and filled. */
+function built(source = CHAT_SITE(), files: Readonly<Record<string, string>> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'az-doctor-chat-'));
   writeFileSync(join(dir, 'site.az'), source);
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   assert.equal(az(dir, 'backend', 'schema', 'site.az').status, 0);
   const b = az(dir, 'build', 'site.az');
   assert.equal(b.status, 0, b.stderr);
@@ -187,7 +188,7 @@ test('chat tools: each declaration and its sample by key name; refused keys fail
   const q = built();
   q.setEnv(TOOL);
   const unusable = await check('chat-tools', q);
-  assert.deepEqual([unusable.status, unusable.line], ['warn', 'chat tools: no chat shows a chart, a table or stats, so no answer can use a tool']);
+  assert.deepEqual([unusable.status, unusable.line], ['warn', 'chat tools: no chat shows a chart, a table, stats or cards, so no answer can use a tool']);
 });
 
 test('chat budget: a budget that cannot pay for one answer fails; the default and the kill switch warn; CONTROL passes with the answers it pays for', async () => {
@@ -264,4 +265,26 @@ test('chat context: AZ1257 — a page the context\'s cap leaves out is a warning
   const warned = az(p.dir, 'build', 'site.az');
   assert.match(warned.stderr, /AZ1257 chat: the site context is over 24000 characters — \/c is left out/);
   assert.match(warned.stderr, /AZ1257 chat: the site context is over 24000 characters — \/d is left out/);
+});
+
+test('chat context: AZ1257 counts text bodies kept in files, as az build does — the same pages named; a body outside the project fails', async () => {
+  // The bodies are files: only a reader of them knows the pages are long (doctor once read none, and said nothing).
+  const long = (route: string) => `\npage ${route}\n  text\n    title "Notes"\n    body .${route}.md\n`;
+  const notes = Object.fromEntries(['a', 'b', 'c', 'd'].map((n) => [`${n}.md`, `## Notes\n\n${'Plain words. '.repeat(615)}\n`]));
+  const p = built(CHAT_SITE(undefined, ['/a', '/b', '/c', '/d'].map(long).join('')), notes);
+  const warned = az(p.dir, 'build', 'site.az');
+  assert.equal(warned.status, 0, warned.stderr);
+  const left = [...warned.stderr.matchAll(/AZ1257 chat: the site context is over 24000 characters — (\/\w) is left out/g)].map((m) => m[1]);
+  assert.deepEqual(left, ['/c', '/d'], warned.stderr);
+  const r = await check('chat-context', p);
+  assert.equal(r.status, 'warn', r.line);
+  assert.equal(r.line, `chat context: AZ1257 — 2 pages left out of what the model is told (${left.join(', ')}): the context is past its cap`);
+  // A body whose path climbs out of the project (refused by its path alone): the build refuses it, and doctor does not pass it.
+  writeFileSync(join(p.dir, 'site.az'), readFileSync(join(p.dir, 'site.az'), 'utf8').replace('body ./a.md', 'body ./notes/../../outside.md'));
+  const escaped = await check('chat-context', p);
+  assert.equal(escaped.status, 'fail', escaped.line);
+  assert.equal(escaped.line, 'chat context: a text body kept in a file cannot be read into the context — az build refuses it too');
+  const refused = az(p.dir, 'build', 'site.az');
+  assert.notEqual(refused.status, 0, 'the build refuses the same body');
+  assert.match(refused.stderr, /points outside the project/);
 });

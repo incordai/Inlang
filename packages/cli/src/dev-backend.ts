@@ -39,6 +39,7 @@ import { createChat, parseChatContext } from '../../backend/src/server/chat.ts';
 import { createQueries, figuresRun } from '../../backend/src/server/chat-query.ts';
 import { createKnows, knowsProblems } from '../../backend/src/server/chat-knows.ts';
 import { migrateChat, usageReport } from '../../backend/src/server/chat-usage.ts';
+import { createShareStore } from '../../backend/src/server/chat-share.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
 import { createData, parseAdminEmails } from '../../backend/src/server/data-api.ts';
 import { migrateData, type DataStep } from '../../backend/src/server/data-migrate.ts';
@@ -335,7 +336,10 @@ export async function startDevBackend(
     const chatConfig = chat ? config.chat : null;
     data = createData({
       db, tables, admins: admins.emails,
-      ...(chatConfig ? { chatUsage: () => usageReport(db, { dailyTokens: chatConfig.dailyTokens, sharesEnabled: chatConfig.shares.enabled }, Date.now()) } : {}),
+      ...(chatConfig ? {
+        chatUsage: () => usageReport(db, { dailyTokens: chatConfig.dailyTokens, sharesEnabled: chatConfig.shares.enabled }, Date.now()),
+        removeChatShare: (id: string) => createShareStore({ db, days: chatConfig.shares.days, max: chatConfig.shares.max }).removeAny(id),
+      } : {}),
     });
   }
   let chatRoutes: ChatRoutes | undefined;

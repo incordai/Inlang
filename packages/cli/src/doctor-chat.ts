@@ -30,11 +30,12 @@
  *   visitor may read and only admins write (the start-up check,
  *   chat-knows.ts knowsProblems), and their rules must be the ones the .az
  *   file has now — a table changed since the build is a rebuild away. A page
- *   the context cap leaves out (AZ1257) is a warning.
+ *   the context cap leaves out (AZ1257) is a warning, judged by az build's own
+ *   context builder (az.ts chatContextFor), text bodies kept in files read.
  */
 
 import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parseEnv } from 'node:util';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { loadConfig, toolKey, type Setup } from '../../backend/src/server/env.ts';
@@ -249,9 +250,23 @@ const chatContext: Check = {
         fix: [...problems.slice(1), 'rebuild with az build — the server refuses to start when a known table is not public-read and admin-written, and reads the rules it was built with'],
       };
     }
-    // AZ1257: a page the context's cap leaves out. Text bodies kept in files are not read here, so az build may leave out more.
+    // AZ1257: a page the context's cap leaves out — judged by az build's own builder, text bodies kept in files read
+    // through the same sandbox, so doctor and the build name the same pages.
     let omitted: readonly string[] = [];
-    if (spec) omitted = (await import('../../backend/src/chat-context.ts')).chatBackend(spec)?.omitted ?? [];
+    if (spec && ctx.source) {
+      const { chatContextFor } = await import('./az.ts');
+      const { PathEscapeError } = await import('../../target-web/src/emit.ts');
+      const { MarkdownError } = await import('../../target-web/src/markdown.ts');
+      try {
+        omitted = chatContextFor(spec, dirname(ctx.source))?.omitted ?? [];
+      } catch (e) {
+        // The build refuses the same file, and says why; doctor names the check it could not finish.
+        if (e instanceof PathEscapeError || e instanceof MarkdownError) {
+          return { status: 'fail', line: 'chat context: a text body kept in a file cannot be read into the context — az build refuses it too', fix: ['run: az build, and fix what it names'] };
+        }
+        throw e;
+      }
+    }
     if (omitted.length > 0) {
       return {
         status: 'warn',
@@ -268,7 +283,7 @@ const chatContext: Check = {
  * load them: each declaration and its `_SAMPLE`, by key name only. Names
  * what the server refuses, a tool `az backend probe` cannot call (required
  * parameters and no sample), and tools no chat can use (no `show` with a
- * chart, a table or stats).
+ * chart, a table, stats or cards).
  */
 export function chatToolsProblems(setup: ChatServer, env: Readonly<Record<string, string>>): { refused: string[]; unsampled: string[]; tools: string[] } {
   const loaded = loadConfig(env, { database: setup.database, email: setup.email, ...(setup.images === true ? { images: true } : {}), chat: true }, 'site');
@@ -295,17 +310,17 @@ const chatToolsCheck: Check = {
         fix: ['each tool needs _URL (https, or http on localhost), _FIELDS and _LABEL; _PARAMS, _SAMPLE and _TIMEOUT_MS as .env.example says', 'names checked, no value printed'],
       };
     }
-    // context.json says which chats show a chart, a table or stats: only those may use a tool (§21.2.8 O5).
+    // context.json says which chats show a chart, a table, stats or cards: only those may use a tool (§21.2.8 O5, §19.11).
     const context = await readRegular(join(got.server, 'chat', 'context.json'));
     let usable = true;
     if (context !== null) {
       const { parseChatContext } = await import('../../backend/src/server/chat.ts');
       const c = parseChatContext(context);
-      if (typeof c !== 'string') usable = Object.values(c.chats).some((x) => x.show.some((w) => w === 'chart' || w === 'table' || w === 'stats'));
+      if (typeof c !== 'string') usable = Object.values(c.chats).some((x) => x.show.some((w) => w === 'chart' || w === 'table' || w === 'stats' || w === 'cards'));
     }
     const notes = [
       ...(unsampled.length > 0 ? [`${unsampled.join(', ')} ${unsampled.length === 1 ? 'is' : 'are'} not set — az backend probe can't call ${unsampled.length === 1 ? 'that tool' : 'those tools'} (${unsampled.length === 1 ? 'it requires' : 'they require'} parameters)`] : []),
-      ...(usable ? [] : ['no chat shows a chart, a table or stats, so no answer can use a tool']),
+      ...(usable ? [] : ['no chat shows a chart, a table, stats or cards, so no answer can use a tool']),
     ];
     const line = `${count(tools.length, 'tool')} declared (${tools.join(', ')}), each URL, parameter shape, field shape, label and sample valid`;
     if (notes.length > 0) return { status: 'warn', line: `chat tools: ${notes.join('; ')}`, fix: [line, 'set a _SAMPLE the endpoint answers, then run az backend probe'] };

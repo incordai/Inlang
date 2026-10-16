@@ -187,19 +187,74 @@ test('az backend usage (chat-block-spec §11.4): the built server\'s daily count
     await migrate(db);
     await migrateChat(db);
     await createUsage(db).add(utcDay(Date.now()), 4_200, 310, 1);
+    await createUsage(db).block(utcDay(Date.now()));
     await createShareStore({ db, days: 30, max: 10, now: Date.now }).create(JSON.stringify([{ type: 'text', s: words }]), words);
   } finally { await db.close(); }
 
   const text = az('backend', 'usage', server);
   assert.equal(text.status, 0, text.stderr);
   assert.match(text.stdout, /^chat usage — today is \d{4}-\d{2}-\d{2} \(UTC\)\n {2}budget 300,000 tokens a day · spent today 4,510 · left 295,490\n {2}shared answers: on · 1 kept now\n/);
-  assert.match(text.stdout, / {2}\d{4}-\d{2}-\d{2} +1 +4,200 +310 +1 +1\n$/);
+  assert.match(text.stdout, / {2}day +messages +input tokens +output tokens +dropped +blocked +shares\n {2}\d{4}-\d{2}-\d{2} +1 +4,200 +310 +1 +1 +1\n$/);
   const json = az('backend', 'usage', server, '--json');
   assert.equal(json.status, 0, json.stderr);
-  const r = JSON.parse(json.stdout) as { budget: { spent: number }; days: { messages: number; shares: number }[]; shares: { kept: number } };
-  assert.deepEqual([r.budget.spent, r.days[0].messages, r.days[0].shares, r.shares.kept], [4_510, 1, 1, 1]);
+  const r = JSON.parse(json.stdout) as { budget: { spent: number }; days: { messages: number; blocked: number; shares: number }[]; shares: { kept: number } };
+  assert.deepEqual([r.budget.spent, r.days[0].messages, r.days[0].blocked, r.days[0].shares, r.shares.kept], [4_510, 1, 1, 1, 1]);
   for (const out of [text.stdout + text.stderr, json.stdout + json.stderr]) {
     assert.ok(!out.includes(key), 'the model key is never printed');
     assert.ok(!out.includes(words), 'no message text');
   }
+});
+
+test('az backend shares --delete (chat-block-spec §20.7): the operator deletes one shared answer by id or link — an audit line, never the answer', async () => {
+  // Refused: a folder that is no chat server, a missing or malformed id, any other flag.
+  const empty = az('backend', 'shares', mkdtempSync(join(tmpdir(), 'az-be-empty-')), '--delete', 'AAAAAAAAAAAAAAAAAAAAAA');
+  assert.equal(empty.status, 1);
+  assert.match(empty.stderr, /no built server with a chat in .* — point at the server\/ folder az build wrote/);
+  assert.equal(az('backend', 'shares', mkdtempSync(join(tmpdir(), 'az-be-empty-'))).status, 2);
+  assert.equal(az('backend', 'shares', mkdtempSync(join(tmpdir(), 'az-be-empty-')), '--list').status, 2);
+
+  const p = project(SITE(`${BACKEND}    model default\n`).replace('    title "Hi"\n', '    title "Hi"\n  chat panel\n    allow anyone\n    show cta\n'));
+  assert.equal(az('build', p.file, '--out', p.out).status, 0);
+  const server = join(p.out, 'server');
+  assert.equal(az('backend', 'init', server).status, 0);
+  const envFile = join(server, '.env');
+  writeFileSync(envFile, readFileSync(envFile, 'utf8')
+    .replace(/^AZ_SMTP_HOST=$/m, 'AZ_SMTP_HOST=smtp.invalid')
+    .replace(/^AZ_CHAT_URL=$/m, 'AZ_CHAT_URL=https://models.example.test/v1')
+    .replace(/^AZ_CHAT_MODEL=$/m, 'AZ_CHAT_MODEL=model-a')
+    .replace(/^AZ_CHAT_KEY=$/m, 'AZ_CHAT_KEY=planted-model-key'));
+  const { openSqlite, migrate } = await import('../../backend/src/server/db.ts');
+  const { migrateChat } = await import('../../backend/src/server/chat-usage.ts');
+  const { createShareStore } = await import('../../backend/src/server/chat-share.ts');
+  const db = await openSqlite(join(server, 'data/app.db'));
+  const words = 'a-shared-answer-never-printed';
+  let ids: string[] = [];
+  try {
+    await migrate(db);
+    await migrateChat(db);
+    const store = createShareStore({ db, days: 30, max: 10, now: Date.now });
+    for (let i = 0; i < 2; i++) {
+      const made = await store.create(JSON.stringify([{ type: 'text', s: words }]), words);
+      if (made === 'full') throw new Error('full');
+      ids = [...ids, made.id];
+    }
+  } finally { await db.close(); }
+
+  assert.equal(az('backend', 'shares', server, '--delete', 'not-a-share-id').status, 2, 'no share id in it');
+  const byId = az('backend', 'shares', server, '--delete', ids[0]);
+  assert.equal(byId.status, 0, byId.stderr);
+  assert.match(byId.stdout, new RegExp(`^backend: shared answer ${ids[0]} deleted by the operator at \\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z\\n$`));
+  // A delete link pasted whole: its id is used, its token never printed.
+  const token = 'T'.repeat(43);
+  const byLink = az('backend', 'shares', server, '--delete', `https://shop.example/chat/shared#${ids[1]}&${token}`);
+  assert.equal(byLink.status, 0, byLink.stderr);
+  assert.ok(byLink.stdout.includes(ids[1]) && !byLink.stdout.includes(token));
+  const again = az('backend', 'shares', server, '--delete', ids[0]);
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /no shared answer .* already gone/);
+  for (const r of [byId, byLink, again]) assert.ok(!(r.stdout + r.stderr).includes(words) && !(r.stdout + r.stderr).includes('planted-model-key'));
+  const check = await openSqlite(join(server, 'data/app.db'));
+  try {
+    assert.equal(Number((await check.get('SELECT COUNT(*) AS n FROM az_chat_shares'))?.n), 0, 'both gone');
+  } finally { await check.close(); }
 });

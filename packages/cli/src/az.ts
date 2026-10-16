@@ -42,7 +42,7 @@ import { MarkdownError, markdownText } from '../../target-web/src/markdown.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
 import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
-import { CONTEXT_MAX, chatBackend } from '../../backend/src/chat-context.ts';
+import { CONTEXT_MAX, chatBackend, type BackendChat } from '../../backend/src/chat-context.ts';
 import type { Served } from './serve.ts';
 import { BUNDLED_WORDS, eject, loadWords, wordExamples } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
@@ -154,6 +154,23 @@ function readProjectText(projectDir: string, path: string): string | null {
   if (found.sources.length === 1) return readFileSync(found.sources[0], 'utf8');
   if (!existsSync(resolve(realpathSync(projectDir), path))) return null;
   throw new PathEscapeError(found.problems[0]);
+}
+
+/**
+ * What the chat server is told (chat-block-spec §8.1) for `spec`, whose
+ * file is in `projectDir`: az build writes it as server/chat/context.json,
+ * and az doctor judges AZ1257 by it — one builder, so the two never disagree.
+ * A `text` body kept in a file is read too, as the plain text of its
+ * markdown, through the same sandbox as the page (a path outside the project
+ * throws PathEscapeError, a body that is not markdown MarkdownError).
+ */
+export function chatContextFor(spec: Spec, projectDir: string): BackendChat | undefined {
+  return chatBackend(spec, {
+    bodyText: (path) => {
+      const source = readProjectText(projectDir, safeAssetPath(path));
+      return source === null ? null : markdownText(source);
+    },
+  });
 }
 
 /** How much of a file readProjectHead reads: an icon's header, an SVG's root. */
@@ -319,10 +336,7 @@ export function build(options: BuildOptions): BuildOutcome {
   const { assets, modules } = project;
   const tables = result.spec.site.data;
   // What the chat server is told (chat-block-spec §8.1), only for a site with a chat panel and a backend.
-  // A `text` body kept in a file is read for it too, as the plain text of its markdown, through the same sandbox.
-  const chat = project.chat && result.spec.site.backend
-    ? chatBackend(result.spec, { bodyText: (path) => { const source = readProjectText(projectDir, safeAssetPath(path)); return source === null ? null : markdownText(source); } })
-    : undefined;
+  const chat = project.chat && result.spec.site.backend ? chatContextFor(result.spec, projectDir) : undefined;
   // The behaviour runtime ships with every site, copied verbatim from the
   // overlay package into RUNTIME_DIR — part of the output, so it is written
   // and checked like any emitted file. The build guard's scanner and the
@@ -498,6 +512,9 @@ const USAGE = `az — words to a website
   az backend usage <server-dir> [--json]
                                    the chat's daily counts and budget left;
                                    reads only, never a message
+  az backend shares <server-dir> --delete <id>
+                                   delete one shared chat answer by its id or
+                                   link; prints an audit line, never the answer
   az mcp  [--root dir]            serve these tools to an AI agent (MCP, stdio)
   az explain <term...>             one line per term: az explain hero center
   az palette [--theme t] [--accent h] [--out dir]
@@ -554,8 +571,9 @@ function runBackend(sub: string, rest: string[]): number {
   if (sub === 'images' && rest[0]) return runBackendImages(resolve(rest[0]), rest.slice(1));
   if (sub === 'probe' && rest[0]) return runBackendProbe(resolve(rest[0]), rest.slice(1));
   if (sub === 'usage' && rest[0]) return runBackendUsage(resolve(rest[0]), rest.slice(1));
+  if (sub === 'shares' && rest[0]) return runBackendShares(resolve(rest[0]), rest.slice(1));
   if (sub !== 'init' || !rest[0]) {
-    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az, az backend schema site.az, az backend images <server-dir>, az backend probe <server-dir> or az backend usage <server-dir>\n');
+    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az, az backend schema site.az, az backend images <server-dir>, az backend probe <server-dir>, az backend usage <server-dir> or az backend shares <server-dir> --delete <id>\n');
     return EXIT.config;
   }
   const r = initBackendEnv(resolve(rest[0]));
@@ -658,6 +676,34 @@ function runBackendUsage(dir: string, flags: readonly string[]): number {
     return EXIT.missing;
   }
   return r.status === 0 ? EXIT.ok : EXIT.missing;
+}
+
+/** One share delete is one bounded statement; past this its database did not answer, and the child is killed. */
+export const SHARES_CHILD_MS = 60 * 1000;
+
+/**
+ * `az backend shares <server-dir> --delete <id | link>` (chat-block-spec
+ * §20.7): the operator deletes one shared answer, run in the built server's
+ * folder so it reads its `.env` and its database. The child prints one audit
+ * line — the id, the outcome, the time — and never the answer.
+ */
+function runBackendShares(dir: string, flags: readonly string[]): number {
+  if (flags.length !== 2 || flags[0] !== '--delete') {
+    process.stderr.write('az: try: az backend shares <server-dir> --delete <share id or link>\n');
+    return EXIT.config;
+  }
+  if (!existsSync(join(dir, 'az.config.json')) || !existsSync(join(dir, 'src/chat-shares.ts'))) {
+    process.stderr.write(`az: no built server with a chat in ${dir} — point at the server/ folder az build wrote for a site that shows chat\n`);
+    return EXIT.missing;
+  }
+  const r = spawnSync(process.execPath, ['src/chat-shares.ts', ...flags], {
+    cwd: dir, stdio: 'inherit', timeout: SHARES_CHILD_MS, killSignal: 'SIGKILL',
+  });
+  if (r.error || r.signal) {
+    process.stderr.write(`az: the share delete stopped (${r.signal ?? r.error?.name}) after ${SHARES_CHILD_MS / 1000} s at most — check the database is reachable\n`);
+    return EXIT.missing;
+  }
+  return r.status === 0 ? EXIT.ok : r.status === 2 ? EXIT.config : EXIT.missing;
 }
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
