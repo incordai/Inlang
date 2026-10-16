@@ -504,8 +504,68 @@ stays the fallback. The same eight previews, each given a site-level
 `description` for the run only, all score SEO 100 (`pnpm test:lighthouse
 footer footer.columns footer.mega gallery.orbit nav nav.full nav.mega
 nav.sheet`; perf 100 on every median, a11y 100, best practices 100). The
-committed previews are left without one: a preview shows its word, and its
-lead-copy-less page is the honest case the derived fallback is measured on.
+committed previews were at first left without one, as the case with no
+description; that is superseded below.
+
+### Thresholds enforced (2026-10-16): every site meets M5 — still not the M5 verdict
+
+The eight previews with no lead copy now each write a site-level
+`description` (GRAMMAR §4.4) that says what the preview shows, 119–134
+characters: `footer/preview.az`, `preview.columns.az`, `preview.mega.az`,
+`gallery/preview.orbit.az`, `nav/preview.az`, `preview.full.az`,
+`preview.mega.az`, `preview.sheet.az`. A real site writes one, so a preview
+that does not was keeping the nightly job from enforcing thresholds. It is
+head-only: every thumbnail of footer, nav and gallery is byte-identical to
+the render before the change, and `pnpm thumbnails --verify` passes.
+
+`pnpm test:lighthouse --fail-under m5` now fails the run on any site below
+an M5 target (`scripts/lib/lighthouse-targets.mjs`): perf ≥ 85 on the
+median of three runs, and a11y 100, best practices 100 and SEO ≥ 95 on
+every run. Best practices is 100 because every site has scored 100 since
+the 2026-10-07 fixes. The nightly CI job runs with it (VERIFICATION §7).
+
+Same machine and setup as above (Lighthouse 13.5.0, HeadlessChrome 153,
+mobile, simulated throttling, three runs per site, quiet machine), 31 sites.
+Before is `main` at 6938204; after is this change, run with
+`--fail-under m5`, which printed `THRESHOLDS MET on 31 audited sites` and
+exited 0. a11y and best practices were 100 on every site both times.
+
+| site | perf runs (before / after) | perf | SEO |
+|---|---|---|---|
+| auth, auth.signup, chat, chat.float, cta, cta.split, faq, faq.columns, feature, feature.rows, gallery, gallery.carousel, hero, hero.split, nav.bar, pricing, pricing.table, text, text.columns | 100 100 100 / 100 100 100 | 100 | 100 |
+| footer, footer.columns, footer.mega, nav.mega | 100 100 100 / 100 100 100 | 100 | 90 → 100 |
+| nav, nav.full, nav.sheet | 100 100 100 / 100 100 100 | 100 | 91 → 100 |
+| gallery.orbit | 100 100 99 / 99 100 97 | 100 → 99 | 91 → 100 |
+| hero.full | 97 98 97 / 99 99 99 | 97 → 99 | 100 |
+| scene | 96 99 100 / 98 100 99 | 99 | 100 |
+| grammar-fixture | 98 97 94 / 96 98 95 | 97 → 96 | 100 |
+| combined | 97 98 98 / 98 99 98 | 98 | 100 |
+
+Controls, showing the threshold fails on a low score:
+
+- The pre-change `nav/preview.az` restored for the run only:
+  `--fail-under m5 --runs 1 nav nav.bar` printed `BELOW nav: seo 91 < 95
+  (run 1)` and `1 SITE(S) BELOW THRESHOLD`, and exited 1. nav.bar (SEO 100)
+  was not named.
+- `--fail-under perf=99 grammar-fixture` printed `BELOW grammar-fixture:
+  perf 95 < 99 (median of 95 92 96)` and exited 1. The median is what gets
+  judged, not the best run.
+- A threshold that is not well formed (`seo=101`, an unknown category, a
+  repeat) is refused before anything is built. Unit tests:
+  `scripts/lib/lighthouse-targets.test.mjs`.
+
+**The lead-copy fallback's coverage.** The derived description is still what
+23 of the 31 sites ship, the GRAMMAR fixture and `combined` included, and
+they score SEO 100 with it. So Lighthouse still measures the fallback. What
+it no longer measures is a page with **neither** a written description nor
+lead copy, which gets no tag: no Lighthouse site has that shape now. That
+case stays covered by unit tests (`packages/target-web/test/head.test.ts`:
+"a page with no lead paragraph gets no description", "CONTROL: no heading, or
+no paragraph after it, is no description", and the site-description
+precedence tests).
+
+Status stays `UNVERIFIED`. These are this repository's sites on a laptop,
+not a real client site on a real host (M5).
 
 What this does and does not show:
 

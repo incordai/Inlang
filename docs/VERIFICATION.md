@@ -236,12 +236,22 @@ the nightly run (the concurrency group holds the event):
   pinned server image and its database in the runner's Docker
   (auth-block-spec §3.5).
 - **lighthouse** (Lighthouse on every preview; nightly and on demand only) —
-  after installing Chromium: `pnpm test:lighthouse --json … --reports …`,
-  alone on its runner. Scores move with load, so the job fails only when a
-  site cannot be built or audited — the script has no score threshold: a
-  score below the M5 target (perf ≥ 85, a11y 100, SEO ≥ 95) is printed with
-  a `!`, not failed. The summary, the JSON and every site's full report are
-  kept as the `lighthouse-results` artifact for 30 days, pass or fail.
+  after installing Chromium:
+  `pnpm test:lighthouse --fail-under m5 --json … --reports …`, alone on its
+  runner. It fails when a site cannot be built or audited, or when any site
+  is below an M5 target (`scripts/lib/lighthouse-targets.mjs`): perf ≥ 85,
+  a11y 100, best practices 100, SEO ≥ 95. Perf moves with the runner's
+  load, so it is judged on the median of the site's three runs; the other
+  three do not, so they are judged on every run. Each score below target is
+  printed as `BELOW <site>: <category> <score> < <target>` (the run named),
+  and the table, which shows each site's median run, marks it with `!`. Without `--fail-under` (a local
+  run) scores are reported, not failed; `--fail-under perf=90,seo=100`
+  enforces only the scores it names. The summary, the JSON and every site's
+  full report are kept as the `lighthouse-results` artifact for 30 days,
+  pass or fail. Local run (2026-10-16, ASSUMPTIONS A6): all 31 sites
+  meet the thresholds. Perf medians were 96–100, and a11y, best practices
+  and SEO were 100 on every run. Restoring one preview to SEO 91 fails the
+  run, naming it.
 
 Every job is bounded by `timeout-minutes`. When chat, data or cloud-auth
 fails, its log (and chat's pixel snapshots, `.visual-out/chat/`) is kept as

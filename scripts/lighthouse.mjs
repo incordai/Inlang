@@ -24,10 +24,13 @@
  * performance score is reported, with the spread and the machine's load.
  *
  * Prints perf, a11y, best-practices and SEO per site against the M5
- * targets, then the failing audits ranked by how many sites fail them.
- * Exits non-zero when a site could not be built or audited; a score below
- * target is reported, not failed — synthetic sites are evidence, not the
- * M5 verdict. `--json <file>` also writes the results as JSON, and
+ * targets (lib/lighthouse-targets.mjs), then the failing audits ranked by
+ * how many sites fail them. Exits non-zero when a site could not be built
+ * or audited. A score below target is reported ("!") and, without
+ * `--fail-under`, not failed. `--fail-under m5` also fails the run when any
+ * site is below an M5 target — perf on the median run, the other categories
+ * on every run — and `--fail-under perf=90,seo=100` enforces only the
+ * scores it names. `--json <file>` also writes the results as JSON, and
  * `--reports <dir>` each site's full Lighthouse report as <dir>/<site>.json.
  *
  * A site on the built-in backend is built against the pipeline's preview
@@ -49,11 +52,9 @@ import lighthouse from 'lighthouse';
 import { ROOT, WORDS, answerPreviewBackend, buildSites, firstRoute } from './visual/pipeline.mjs';
 import { startServer } from './visual/serve.mjs';
 import { Overdue, within, closeWithin, stopChild, watchdog, human } from './lib/bounded.mjs';
+import { M5_TARGETS, SHORT, belowTargets, parseFailUnder } from './lib/lighthouse-targets.mjs';
 
-/** ROADMAP M5 exit (ASSUMPTIONS A6), as Lighthouse scores 0–100. */
-const TARGETS = { performance: 85, accessibility: 100, 'best-practices': null, seo: 95 };
-const CATEGORIES = Object.keys(TARGETS);
-const SHORT = { performance: 'perf', accessibility: 'a11y', 'best-practices': 'bp', seo: 'seo' };
+const CATEGORIES = Object.keys(M5_TARGETS);
 
 /*
  * Deadlines (lib/bounded.mjs). One audit takes 10–30s; one past AUDIT_MS
@@ -287,19 +288,19 @@ async function audit(site, server, children) {
 }
 
 const pad = (s, n) => String(s).padEnd(n);
-const cell = (score, target) => score === null ? 'n/a' : target !== null && score < target ? `${score}!` : String(score);
+const cell = (score, target) => score === null ? 'n/a' : score < target ? `${score}!` : String(score);
 
 function report(results) {
   const width = Math.max(...results.map((r) => r.name.length), 4) + 2;
   console.log(`\n${pad('site', width)}${CATEGORIES.map((c) => pad(SHORT[c], 7)).join('')}${pad('perf runs', 14)}${pad('load', 6)}LCP      TBT      CLS`);
   for (const r of results) {
     if (r.error) { console.log(`${pad(r.name, width)}FAIL  ${r.error}`); continue; }
-    console.log(pad(r.name, width) + CATEGORIES.map((c) => pad(cell(r.scores[c], TARGETS[c]), 7)).join('') +
+    console.log(pad(r.name, width) + CATEGORIES.map((c) => pad(cell(r.scores[c], M5_TARGETS[c]), 7)).join('') +
       pad(r.perfRuns.join(' '), 14) + pad(r.load.toFixed(1), 6) +
       `${pad(r.metrics['largest-contentful-paint'], 9)}${pad(r.metrics['total-blocking-time'], 9)}${r.metrics['cumulative-layout-shift']}`);
   }
   console.log(`load: the 1-minute load average when the reported run started (${availableParallelism()} cores)`);
-  console.log(`targets (M5): ${CATEGORIES.filter((c) => TARGETS[c] !== null).map((c) => `${SHORT[c]} ≥ ${TARGETS[c]}`).join(', ')} — "!" marks a score below target`);
+  console.log(`targets (M5): ${CATEGORIES.map((c) => `${SHORT[c]} ≥ ${M5_TARGETS[c]}`).join(', ')} — "!" marks a score below target`);
 
   const byAudit = new Map();
   for (const r of results.filter((x) => !x.error)) {
@@ -325,11 +326,13 @@ async function main(argv) {
   const json = option('--json');
   const reports = option('--reports');
   const runsOpt = option('--runs');
+  const failUnder = option('--fail-under');
+  const thresholds = failUnder.value === null ? null : parseFailUnder(failUnder.value);
   const runs = runsOpt.value === null ? DEFAULT_RUNS : Number(runsOpt.value);
   if (!Number.isInteger(runs) || runs < 1 || runs > MAX_RUNS) throw new Error(`lighthouse: --runs takes 1–${MAX_RUNS}`);
   const jsonOut = json.value;
   if (reports.value) mkdirSync(reports.value, { recursive: true });
-  const values = new Set([json, reports, runsOpt].filter((o) => o.at >= 0).map((o) => o.at + 1));
+  const values = new Set([json, reports, runsOpt, failUnder].filter((o) => o.at >= 0).map((o) => o.at + 1));
   const names = argv.filter((a, i) => !a.startsWith('--') && !values.has(i));
   const all = catalogue();
   const unknown = names.filter((n) => !all.some((s) => s.name === n));
@@ -373,7 +376,7 @@ async function main(argv) {
         const ranked = [...done].sort((a, b) => a.scores.performance - b.scores.performance);
         const { report: lhJson, ...median } = ranked[Math.floor((ranked.length - 1) / 2)];
         if (reports.value) writeFileSync(join(reports.value, `${s.name}.json`), lhJson);
-        results.push({ name: s.name, ...median, perfRuns: done.map((d) => d.scores.performance) });
+        results.push({ name: s.name, ...median, perfRuns: done.map((d) => d.scores.performance), runs: done.map((d) => d.scores) });
       } catch (e) {
         results.push({ name: s.name, error: e.message });
       }
@@ -391,8 +394,20 @@ async function main(argv) {
   if (jsonOut) writeFileSync(jsonOut, `${JSON.stringify(results, null, 2)}\n`);
   const failed = results.filter((r) => r.error).length;
   console.log(failed === 0 ? `\nLIGHTHOUSE RAN on ${results.length} sites` : `\n${failed} SITE(S) NOT AUDITED`);
+  let below = [];
+  if (thresholds) {
+    below = belowTargets(results, thresholds);
+    const named = Object.entries(thresholds).map(([c, t]) => `${SHORT[c]} ≥ ${t}`).join(', ');
+    for (const b of below) {
+      console.log(`  BELOW ${b.site}: ${SHORT[b.category]} ${b.score ?? 'n/a'} < ${b.target}${b.run === null ? ` (median of ${results.find((r) => r.name === b.site).perfRuns.join(' ')})` : ` (run ${b.run})`}`);
+    }
+    const sites = new Set(below.map((b) => b.site)).size;
+    console.log(below.length === 0
+      ? `THRESHOLDS MET on ${results.length - failed} audited sites (${named})`
+      : `${sites} SITE(S) BELOW THRESHOLD (${named})`);
+  }
   run.clear();
-  return failed === 0 ? 0 : 1;
+  return failed === 0 && below.length === 0 ? 0 : 1;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) process.exitCode = await main(process.argv.slice(2));
