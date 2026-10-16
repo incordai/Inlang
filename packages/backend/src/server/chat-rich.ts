@@ -1,10 +1,10 @@
 /**
  * @az server chat-rich
- * Purpose: an answer's charts, tables, stat cards, image cards and dashboards — read from the model's lines, checked and clamped, and their `from` figures filled by the server.
- * Spec: docs/chat-block-spec.md §20.2, §20.3, §20.5, §20.6, §21.2.3
+ * Purpose: an answer's charts, tables, stat cards, image cards, dashboards and explores — read from the model's lines, checked and clamped, and their `from` figures filled by the server.
+ * Spec: docs/chat-block-spec.md §20.2, §20.3, §20.5, §20.6, §21.2.3, §21.3
  * Exports: RICH_WORDS, RichWord, RICH_LIMITS, RICH_FORMS, RichLine, RichBlock, RichChart, RichTable, RichStat, RichCard, RichCards,
  *   RichDashboard, RichTile, RichRules, RichRead, Resolved, FiguresRun, ToolRequest, ToolShape, ToolsRun, ToolAnswer, richBlock,
- *   resolveRich, clampText, parseNumber, richLines
+ *   resolveRich, clampText, parseNumber, richLines, linesCap
  * Edit guide: the model's numbers are numbers or the component goes; its words never reach SQL (a `from` is resolved by
  *   chat-query.ts against the public schema) nor a URL (a `from tool` names a declared tool and typed values, called by
  *   chat-tools.ts); `src` is set here and nowhere else; an image is a build key, never a URL.
@@ -32,6 +32,15 @@
  *     dashboard "This month"
  *       stat "Orders" from orders count
  *       chart bar "By status" from orders count by status
+ *     explore "Plan cost"
+ *       columns "Plan" "Seats" "Price"
+ *       row "Team" 10 29
+ *       slider seats "Team size" 1 50
+ *       view table where Seats >= $seats
+ *
+ * An explore (§21.3) is read by chat-explore.ts with this reader's own
+ * rules for strings, numbers and requests; its data, controls and views go
+ * to the page, which recomputes the views as the visitor moves a control.
  *
  * Numbers the model wrote are figures it wrote: they get `src: model`, and
  * the page shows them with the "AI-generated figures" label. A `from …` is
@@ -55,8 +64,9 @@
 import type { LineToken } from './chat-answer.ts';
 import type { CardsResult, Figures, RowsResult } from './chat-query.ts';
 import { isDay, paramValueOk, type ChatToolShape, type ToolParam } from './env.ts';
+import { bindExplore, EXPLORE_LIMITS, exploreLines, readExplore, type ExploreCell, type ExploreColumn, type RichExplore } from './chat-explore.ts';
 
-export const RICH_WORDS = ['chart', 'table', 'stats', 'cards', 'dashboard'] as const;
+export const RICH_WORDS = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore'] as const;
 export type RichWord = (typeof RICH_WORDS)[number];
 
 /** chat-block-spec §20.2. The page holds the same (overlay chat-chart.ts, chat-figures.ts). */
@@ -118,6 +128,22 @@ export const RICH_FORMS: Readonly<Record<RichWord, { readonly lines: readonly st
     lines: ['dashboard "A title"', '  stat "A label" from orders count', '  chart bar "A title" from orders count by status', '  card "A title"', '    text "Its text"'],
     about: `2 to ${RICH_LIMITS.tiles} stats, charts, tables or cards under one title; a chart inside one has one series`,
   },
+  explore: {
+    lines: [
+      'explore "A title"',
+      '  columns "Plan" "Seats" "Price"',
+      '  row "Team" 10 29',
+      '  slider seats "Team size" 1 50 step 1 value 5',
+      '  date since "From" 2026-01-01 2026-12-31',
+      '  toggle period "Billing" "Monthly" "Annual"',
+      '  field budget "Budget" number 0 500',
+      '  form "Find a plan" send "Which plan fits {budget} a month?"',
+      '  view table where Seats >= $seats',
+      '  view stat "Cheapest that fits" min Price where Seats >= $seats unit usd',
+      '  view chart bar "Price by plan" sum Price by Plan where Seats >= $seats',
+    ],
+    about: `a data set the visitor explores with controls, every line one level in: first its rows — your own columns and up to ${EXPLORE_LIMITS.rows} rows (text in quotes, at most ${EXPLORE_LIMITS.cell} characters; numbers bare; dates bare as YYYY-MM-DD), or one line "from" a table's columns, or "from tool" a tool's columns; then up to ${EXPLORE_LIMITS.controls} controls — slider (min, max, optional step and value), date (from, to, optional value), toggle (${EXPLORE_LIMITS.toggleMin} to ${EXPLORE_LIMITS.toggleMax} options), and field lines (number min max, or choice and its options) each followed by a form that applies them or sends a question built from them ({name} for a field's value); then 1 to ${EXPLORE_LIMITS.views} views — a table, a stat or a chart — each optionally "where" one column, one of = != < <= > >=, and one value or a $control; a stat or chart counts, or sums, averages, or takes the min or max of a number column; nothing else is computed, so never write a formula`,
+  },
 };
 
 /** A child line of a held component: its depth (1 or 2) and tokens. */
@@ -174,7 +200,9 @@ export type RichBlock =
   | { readonly table: RichTable }
   | { readonly stats: readonly RichStat[] }
   | { readonly cards: RichCards }
-  | { readonly dashboard: RichDashboard };
+  | { readonly dashboard: RichDashboard }
+  /** §21.3: the rows, controls and views; a tool's rows by a checked request. */
+  | { readonly explore: RichExplore<ToolRequest> };
 
 /** What a chat page lets its rich components use (from context.json). */
 export interface RichRules {
@@ -188,7 +216,7 @@ export interface RichRules {
 
 /** One component read, or why it was dropped; how many points and requests it holds; images it lost. */
 export type RichRead =
-  | { readonly ok: true; readonly block: RichBlock; readonly points: number; readonly queries: number; readonly calls: number; readonly lostImages: number }
+  | { readonly ok: true; readonly block: RichBlock; readonly points: number; readonly queries: number; readonly calls: number; readonly lostImages: number; readonly lostViews: number }
   | { readonly ok: false; readonly why: 'shape' | 'not_shown' | 'destination' | 'too_many' | 'empty' | 'number' | 'tool' };
 
 const KINDS: ReadonlySet<string> = new Set(['bar', 'line', 'area', 'pie', 'donut']);
@@ -213,14 +241,28 @@ export function parseNumber(s: string): number | null {
 /** Strip and normalise as the parser does for every string (chat-answer.ts cleanText), then trim. */
 type Clean = (s: string) => string;
 
+let segmenter: Intl.Segmenter | null = null;
+
 /**
- * `s` cut to `max` user-perceived characters, ending in `…` when cut — at a
- * grapheme boundary, so an emoji or a combining mark is never split.
+ * `s` within `max` code points — the unit the page counts every label in
+ * (overlay chat-chart.ts, chat-figures.ts, chat-explore.ts) — ending in `…`
+ * when cut, and cut at a grapheme boundary, so an emoji or a combining mark
+ * is never split and the server never sends a label the page refuses (a
+ * label of flags is two code points a character: counted by graphemes it
+ * passed here and was refused there).
  */
 export function clampText(s: string, max: number): string {
-  const graphemes = [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(s)].map((g) => g.segment);
-  if (graphemes.length <= max) return s;
-  return `${graphemes.slice(0, max - 1).join('').trimEnd()}…`;
+  if ([...s].length <= max) return s;
+  segmenter ??= new Intl.Segmenter('en', { granularity: 'grapheme' });
+  let out = '';
+  let n = 0;
+  for (const { segment } of segmenter.segment(s)) {
+    const k = [...segment].length;
+    if (n + k > max - 1) break;
+    out += segment;
+    n += k;
+  }
+  return `${out.trimEnd()}…`;
 }
 
 const quoted = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
@@ -239,9 +281,12 @@ const fail = (why: Extract<RichRead, { ok: false }>['why']): never => { throw ne
 
 interface Node { readonly tokens: readonly LineToken[]; readonly children: Node[] }
 
+/** The child lines a component whose head is `word` may hold: an explore's rows are more than any other's (§21.3.3). */
+export const linesCap = (word: string): number => (word === 'explore' ? EXPLORE_LIMITS.lines : RICH_LIMITS.lines);
+
 /** The held lines as a tree two levels deep, or a drop: depth 1 under the head, depth 2 under the last depth-1 line. */
-function treeOf(lines: readonly RichLine[]): Node[] {
-  if (lines.length > RICH_LIMITS.lines) fail('too_many');
+function treeOf(lines: readonly RichLine[], cap: number): Node[] {
+  if (lines.length > cap) fail('too_many');
   const top: Node[] = [];
   for (const l of lines) {
     if (l.tokens.length === 0) fail('shape');
@@ -258,6 +303,7 @@ function reader(rules: RichRules, clean: Clean) {
   let queries = 0;
   let calls = 0;
   let lostImages = 0;
+  let lostViews = 0;
   const bare = (t: LineToken | undefined, v?: string) => t?.kind === 'bare' && (v === undefined || t.value === v);
   const str = (t: LineToken | undefined): t is LineToken => t?.kind === 'string';
   /** A string token as shown text: cleaned, clamped, never empty. */
@@ -315,7 +361,7 @@ function reader(rules: RichRules, clean: Clean) {
    * the component can show: a chart groups, a stat is one figure or the
    * latest of a date grouping, a table either groups or lists rows.
    */
-  const toolOf = (tokens: readonly LineToken[], i: number, want: 'chart' | 'stat' | 'table' | 'cards'): ToolRequest => {
+  const toolOf = (tokens: readonly LineToken[], i: number, want: 'chart' | 'stat' | 'table' | 'cards' | 'explore'): ToolRequest => {
     const w = tokens.slice(i + 2);
     const nameT = w.shift();
     const decl = bare(nameT) ? (rules.tools ?? []).find((x) => x.name === nameT!.value) : undefined;
@@ -350,13 +396,14 @@ function reader(rules: RichRules, clean: Clean) {
       shape = { kind: 'cards', title, text, image };
       words.push('title', title, ...(text ? ['text', text] : []), ...(image ? ['image', image] : []));
     } else if (bare(head, 'columns')) {
-      if (want !== 'table') fail('tool');
+      if (want !== 'table' && want !== 'explore') fail('tool');
       const columns = w.splice(0).map((t) => field(t, ['text', 'number', 'date', 'bool']));
       if (columns.length < 1 || columns.length > RICH_LIMITS.columns || new Set(columns).size !== columns.length) fail('tool');
       shape = { kind: 'rows', columns };
       words.push('columns', ...columns);
     } else {
-      if (!bare(head) || !TOOL_FNS.has(head!.value)) return fail('tool');
+      // An explore's rows are columns of rows: it computes its own figures (§21.3).
+      if (want === 'explore' || !bare(head) || !TOOL_FNS.has(head!.value)) return fail('tool');
       const fn = head!.value as Extract<ToolShape, { kind: 'figures' }>['fn'];
       const measure = fn === 'count' ? null : field(w.shift(), ['number']);
       let by: string | null = null;
@@ -511,9 +558,33 @@ function reader(rules: RichRules, clean: Clean) {
     return { title, ...(text !== undefined ? { text } : {}), ...(image ? { image } : {}), ...(link ? { link } : {}) };
   }
 
+  /** `explore "title"` and its lines, all one level in (§21.3.2): read by chat-explore.ts with this reader's rules. */
+  function explore(head: readonly LineToken[], tree: readonly Node[]): RichExplore<ToolRequest> {
+    shown('explore');
+    if (tree.some((n) => n.children.length > 0)) fail('shape');
+    const e = readExplore<ToolRequest>(head, tree.map((n) => n.tokens), {
+      bare, str, num, parseNumber, clean, clampText, fail,
+      from: (tokens, i) => from(tokens, i),
+      isTool: (tokens, i) => isTool(tokens, i),
+      tool: (tokens, i) => toolOf(tokens, i, 'explore'),
+      toolColumns: (t) => (t.shape.kind === 'rows' ? t.shape.columns : []),
+    });
+    // A view whose words are none of the three forms goes by itself; the model's own rows bind now, so the record holds only views that stand.
+    let views = e.views.filter((v) => v.words !== '');
+    lostViews += e.views.length - views.length;
+    if (e.source.kind === 'rows') {
+      const s = e.source;
+      const kept = views.filter((v) => bindExplore(s.columns, s.rows, e.controls, [v]).views.length === 1);
+      lostViews += views.length - kept.length;
+      views = kept;
+    }
+    if (views.length === 0) fail('empty');
+    return { ...e, views };
+  }
+
   function read(head: readonly LineToken[], lines: readonly RichLine[]): RichBlock {
     const word = head[0].value as RichWord;
-    const tree = treeOf(lines);
+    const tree = treeOf(lines, linesCap(word));
     switch (word) {
       case 'chart': return { chart: chart(head, tree, false) };
       case 'table': return { table: table(head, tree) };
@@ -557,9 +628,10 @@ function reader(rules: RichRules, clean: Clean) {
         if (tiles.filter((t) => 'chart' in t || 'table' in t).length > RICH_LIMITS.heavyTiles) fail('too_many');
         return { dashboard: { title, tiles } };
       }
+      case 'explore': return { explore: explore(head, tree) };
     }
   }
-  return { read, counts: () => ({ points, queries, calls, lostImages }) };
+  return { read, counts: () => ({ points, queries, calls, lostImages, lostViews }) };
 }
 
 /**
@@ -617,6 +689,8 @@ export function richLines(block: RichBlock): string {
     if ('from' in block.cards) out.push(`cards from ${block.cards.from.join(' ')}`);
     else if ('tool' in block.cards) out.push(`cards from ${block.cards.tool.words}`);
     else { out.push('cards'); for (const c of block.cards) cardLines(c, '  '); }
+  } else if ('explore' in block) {
+    out.push(...exploreLines(block.explore, (t) => t.words));
   } else {
     out.push(`dashboard ${quoted(block.dashboard.title)}`);
     for (const t of block.dashboard.tiles) {
@@ -664,10 +738,12 @@ const figureColumns = (by: string, measure: string, unit: string | null) => [
  * not parse (an unknown table or field, a private one, a grouping that does
  * not fit) drops the component (null); a read that timed out or overflowed,
  * or a tool that failed or answered rows of the wrong shape, becomes the
- * unavailable note.
+ * unavailable note. An explore's views are bound to the rows it got; a view
+ * that does not bind is dropped by itself and told to `lost` (§21.3).
  */
 export async function resolveRich(
   block: RichBlock, run: FiguresRun | null, day: string, tools: ToolsRun | null = null, images: readonly string[] = [],
+  lost: (why: 'view') => void = () => undefined,
 ): Promise<Resolved | null> {
   const site = { src: 'site', asOf: day };
   type Out = Resolved | null | 'unavailable';
@@ -710,7 +786,8 @@ export async function resolveRich(
       if (r.rows.length === 0) return 'unavailable';
       return {
         title: t.title, sortable: t.sortable, ...got.meta,
-        columns: r.columns.map((c) => ({ label: clampText(c.label, RICH_LIMITS.header), type: c.type, unit: c.unit })),
+        // A table shows a day as the text it is; only an explore compares days (§21.3).
+        columns: r.columns.map((c) => ({ label: clampText(c.label, RICH_LIMITS.header), type: c.type === 'number' ? 'number' : 'text', unit: c.unit })),
         rows: r.rows,
       };
     }
@@ -766,10 +843,49 @@ export async function resolveRich(
   };
   const cardOut = (c: RichCard): Resolved => ({ ...c });
 
+  /**
+   * An explore (§21.3): the model's rows as written (src model), or the
+   * server's — a site table's as the anonymous list pages through them, a
+   * tool's checked rows — with their provenance; the views bound to them.
+   * No rows, or more than one answer can carry, is the unavailable note.
+   */
+  const explore = async (x: RichExplore<ToolRequest>): Promise<Out> => {
+    let columns: readonly ExploreColumn[];
+    let rows: readonly (readonly ExploreCell[])[];
+    let meta: Resolved;
+    if (x.source.kind === 'rows') {
+      ({ columns, rows } = x.source);
+      meta = { src: 'model' };
+    } else {
+      const got = await ask(x.source.kind === 'from' ? { from: x.source.from } : { tool: x.source.tool }, 'rows', EXPLORE_LIMITS.rows);
+      if (got === 'unavailable') return 'unavailable';
+      const r = got.r;
+      if (!r || r.kind !== 'rows') return null;
+      if (r.rows.length === 0) return 'unavailable';
+      const cols = r.columns.map((c): ExploreColumn => ({ label: c.label, type: c.type, unit: c.unit }));
+      columns = cols;
+      // Text a view groups or filters by is a category: a chart label's length. A day that is not one is no value.
+      rows = r.rows.slice(0, EXPLORE_LIMITS.rows).map((row) => row.map((cell, i): ExploreCell => {
+        if (cell === null) return null;
+        if (cols[i].type === 'date') return isDay(cell) ? cell : null;
+        return typeof cell === 'string' ? clampText(cell, EXPLORE_LIMITS.cell) : cell;
+      }));
+      meta = got.meta;
+    }
+    const bound = bindExplore(columns, rows, x.controls, x.views);
+    for (let i = 0; i < bound.lost; i++) lost('view');
+    if (bound.views.length === 0) return null;
+    const out: Resolved = { title: x.title, ...meta, columns, rows, controls: x.controls, views: bound.views };
+    // One answer's events are at most 48 KB (§20.7): an explore that would crowd it out is the note — never cut rows, which would change its figures.
+    if (Buffer.byteLength(JSON.stringify({ explore: out }), 'utf8') > EXPLORE_LIMITS.bytes) return x.source.kind === 'rows' ? null : 'unavailable';
+    return out;
+  };
+
   const titleOf = (b: RichBlock): string => {
     if ('chart' in b) return b.chart.title;
     if ('table' in b) return b.table.title;
     if ('dashboard' in b) return b.dashboard.title;
+    if ('explore' in b) return b.explore.title;
     return 'Figures';
   };
   let out: Out;
@@ -785,6 +901,7 @@ export async function resolveRich(
     }
     out = failed === null && items.length === block.stats.length ? { stats: items } : failed;
   } else if ('cards' in block) { const c = await cards(block.cards); out = c && c !== 'unavailable' ? { cards: c } : c; }
+  else if ('explore' in block) { const x = await explore(block.explore); out = x && x !== 'unavailable' ? { explore: x } : x; }
   else {
     const tiles: Resolved[] = [];
     for (const t of block.dashboard.tiles) {

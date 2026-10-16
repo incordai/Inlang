@@ -29,7 +29,7 @@
  */
 
 import { grant, LIST_DEADLINE_MS } from './data-api.ts';
-import { AGGREGATE_FILTER, AGGREGATE_GROUP, AGGREGATE_MEASURE, LIMIT_MAX, parseQuery, selectAggregate, selectList, SORTABLE, type Aggregate } from './data-query.ts';
+import { AGGREGATE_FILTER, AGGREGATE_GROUP, AGGREGATE_MEASURE, cursorOf, LIMIT_MAX, parseQuery, selectAggregate, selectList, SORTABLE, type Aggregate } from './data-query.ts';
 import { outRow, type Field, type Table } from './data-values.ts';
 import { QueryTimeout, type Db, type Value } from './db.ts';
 import type { Database } from './env.ts';
@@ -43,6 +43,8 @@ export const QUERY_LIMITS = {
   /** Slices a pie or donut shows. */
   slices: 6,
   rows: 20,
+  /** The rows an explore holds (§21.3.3): two of the list route's pages. */
+  exploreRows: 200,
   columns: 6,
   cards: 4,
   label: 24,
@@ -64,7 +66,7 @@ export interface QueryTable {
 export type QueryRequest =
   /** `week`: the ISO weeks asked for — `agg` reads days, combined into weeks here with `week.fn` (§19.11). */
   | { readonly kind: 'figures'; readonly table: QueryTable; readonly agg: Aggregate; readonly key: string; readonly week?: { readonly fn: Aggregate['fn']; readonly cap: number } }
-  | { readonly kind: 'rows'; readonly table: QueryTable; readonly columns: readonly Field[]; readonly sort: string; readonly key: string }
+  | { readonly kind: 'rows'; readonly table: QueryTable; readonly columns: readonly Field[]; readonly sort: string; readonly limit: number; readonly key: string }
   | { readonly kind: 'cards'; readonly table: QueryTable; readonly title: Field; readonly text: Field | null; readonly image: Field | null; readonly sort: string; readonly key: string };
 
 /** One number, or groups in display order, with the unit the measure carries. */
@@ -81,7 +83,8 @@ export interface Figures {
 
 export interface RowsResult {
   readonly kind: 'rows';
-  readonly columns: readonly { readonly label: string; readonly type: 'text' | 'number'; readonly unit: string | null }[];
+  /** `date`: a `YYYY-MM-DD` day (a date, or a datetime's UTC day) — an explore compares them (§21.3); a table shows them as text. */
+  readonly columns: readonly { readonly label: string; readonly type: 'text' | 'number' | 'date'; readonly unit: string | null }[];
   readonly rows: readonly (readonly (string | number | null)[])[];
 }
 
@@ -197,8 +200,9 @@ function sortOf(t: Table, w: string[]): string | null {
   return `${desc ? '-' : ''}${f.name}`;
 }
 
-/** `<table> columns f … [sort f [desc]]` — the words after `from` — or null. */
-export function parseRows(words: readonly string[], tables: readonly QueryTable[]): QueryRequest | null {
+/** `<table> columns f … [sort f [desc]]` — the words after `from` — or null. `limit` is the rows wanted: a table's 20, an explore's 200. */
+export function parseRows(words: readonly string[], tables: readonly QueryTable[], limit: number = QUERY_LIMITS.rows): QueryRequest | null {
+  if (!Number.isInteger(limit) || limit < 1 || limit > QUERY_LIMITS.exploreRows) return null;
   const w = [...words];
   const qt = tableOf(tables, w.shift());
   if (!qt || w.shift() !== 'columns') return null;
@@ -211,8 +215,8 @@ export function parseRows(words: readonly string[], tables: readonly QueryTable[
   if (columns.length < 1 || columns.length > QUERY_LIMITS.columns) return null;
   const sort = sortOf(qt.table, w);
   if (sort === null || w.length > 0) return null;
-  const key = JSON.stringify(['rows', qt.table.name, columns.map((c) => c.name), sort]);
-  return { kind: 'rows', table: qt, columns, sort, key };
+  const key = JSON.stringify(['rows', qt.table.name, columns.map((c) => c.name), sort, limit]);
+  return { kind: 'rows', table: qt, columns, sort, limit, key };
 }
 
 /** `<table> title f [text f] [image f] [sort f [desc]]` — the words after `from` — or null. */
@@ -383,21 +387,37 @@ export function createQueries(o: QueriesOptions): Queries {
     return { kind: 'figures', unit, value: null, groups, more: rows.length > shown.length, dated };
   }
 
+  /**
+   * The first `limit` rows a signed-out visitor's list gives, page after page
+   * as the list route pages them (at most LIMIT_MAX a page, keyset by the
+   * last row's cursor), each page under the public list's deadline.
+   */
   async function list(table: QueryTable, sort: string, limit: number): Promise<Record<string, unknown>[] | null> {
-    const lq = parseQuery(table.table, new URLSearchParams({ sort, limit: String(Math.min(limit, LIMIT_MAX)) }), false);
-    const s = selectList(o.database, table.table, lq, null, false);
-    const rows = await read(s.sql, s.params);
-    return rows === null ? null : rows.slice(0, lq.limit).map((r) => outRow(table.table, r, null, o.publicBase));
+    const out: Record<string, unknown>[] = [];
+    let after: string | null = null;
+    while (out.length < limit) {
+      const params = new URLSearchParams({ sort, limit: String(Math.min(limit - out.length, LIMIT_MAX)) });
+      if (after !== null) params.set('after', after);
+      const lq = parseQuery(table.table, params, false);
+      const s = selectList(o.database, table.table, lq, null, false);
+      const rows = await read(s.sql, s.params);
+      if (rows === null) return null;
+      const page = rows.slice(0, lq.limit);
+      out.push(...page.map((r) => outRow(table.table, r, null, o.publicBase)));
+      if (rows.length <= lq.limit || page.length === 0) break;
+      after = cursorOf(lq.sort, page[page.length - 1]);
+    }
+    return out;
   }
 
   async function rows(req: Extract<QueryRequest, { kind: 'rows' }>): Promise<RowsResult | null> {
-    const items = await list(req.table, req.sort, QUERY_LIMITS.rows);
+    const items = await list(req.table, req.sort, req.limit);
     if (items === null) return null;
     return {
       kind: 'rows',
       columns: req.columns.map((f) => ({
         label: f.name,
-        type: f.type === 'number' || f.type === 'money' ? 'number' as const : 'text' as const,
+        type: f.type === 'number' || f.type === 'money' ? 'number' as const : f.type === 'date' || f.type === 'datetime' ? 'date' as const : 'text' as const,
         unit: f.type === 'money' ? f.currency ?? null : null,
       })),
       rows: items.map((r) => req.columns.map((f) => cell(f, r[f.name], req.table.digits))),
@@ -455,7 +475,7 @@ export function figuresRun(queries: Queries, tables: readonly Table[], context: 
   };
   const known = tables.map((table): QueryTable => ({ table, digits: digits(table) }));
   return async (kind, words, cap) => {
-    const req = kind === 'figures' ? parseFigures(words, known, cap) : kind === 'rows' ? parseRows(words, known) : parseCards(words, known);
+    const req = kind === 'figures' ? parseFigures(words, known, cap) : kind === 'rows' ? parseRows(words, known, cap) : parseCards(words, known);
     if (!req) return null;
     const r = await queries.run(req);
     return r.ok ? r.result : 'unavailable';

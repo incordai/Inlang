@@ -54,10 +54,9 @@ export const TOOL_RESULT = {
   value: 1e15,
   cacheMs: 60_000,
   cacheEntries: 200,
-  /** Groups a chart shows, and a group's label; a table's rows and a cell (§20.2). */
+  /** Groups a chart shows, and a group's label; a cell (§20.2). The rows shown are the component's: a table's 20, an explore's 200. */
   groups: 24,
   label: 24,
-  rowsShown: 20,
   cell: 120,
 } as const;
 
@@ -192,7 +191,7 @@ const cellOf = (type: ToolFieldType, v: string | number | boolean): string | num
  * The figures a component shows, from checked rows, by the server's own
  * arithmetic (§21.2.3): one figure; groups by a text field (largest first,
  * at most `cap`, `more` when there were more) or a date field (the latest
- * `cap` days, oldest first); or the first 20 rows' columns. Null when the
+ * `cap` days, oldest first); or the first `cap` rows' columns. Null when the
  * rows cannot be shown so: a figure past 10¹⁵, or two groups whose labels
  * are the same once clamped.
  */
@@ -211,8 +210,9 @@ export function aggregateTool(rows: readonly ToolRow[], shape: ToolShape, fields
   if (shape.kind === 'rows') {
     return {
       kind: 'rows',
-      columns: shape.columns.map((c) => ({ label: c, type: fields[c] === 'number' ? 'number' as const : 'text' as const, unit: null })),
-      rows: rows.slice(0, TOOL_RESULT.rowsShown).map((r) => shape.columns.map((c) => cellOf(fields[c], r[c]))),
+      columns: shape.columns.map((c) => ({ label: c, type: fields[c] === 'number' ? 'number' as const : fields[c] === 'date' ? 'date' as const : 'text' as const, unit: null })),
+      // `cap` rows: a table's 20, an explore's 200 (§21.3) — every row a reply may hold.
+      rows: rows.slice(0, Math.min(cap, TOOL_RESULT.rows)).map((r) => shape.columns.map((c) => cellOf(fields[c], r[c]))),
     };
   }
   if (shape.by === null) {

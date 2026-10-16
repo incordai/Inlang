@@ -46,14 +46,15 @@
  * Caps per answer: ANSWER_LIMITS. Past the prose cap or the component cap
  * the parser ends (`ended`), and the route stops reading the model.
  *
- * The rich components — chart, table, stats, cards, dashboard (§20) — are
- * held the same way and read whole by chat-rich.ts; their `from` figures are
- * filled by the route (chat.ts) before the page sees them.
+ * The rich components — chart, table, stats, cards, dashboard (§20), and
+ * explore (§21.3) — are held the same way and read whole by chat-rich.ts;
+ * their `from` figures and rows are filled by the route (chat.ts) before the
+ * page sees them.
  *
  * Copied into a generated server; imports chat-rich.ts, and env.ts's tool types.
  */
 
-import { RICH_FORMS, RICH_LIMITS, RICH_WORDS, richBlock, richLines, type RichBlock, type RichLine, type RichWord } from './chat-rich.ts';
+import { linesCap, RICH_FORMS, RICH_LIMITS, RICH_WORDS, richBlock, richLines, type RichBlock, type RichLine, type RichWord } from './chat-rich.ts';
 import type { ChatToolShape } from './env.ts';
 
 /** Every cap the parser holds (chat-block-spec §5.3, §6.1). The prompt is generated from these too. */
@@ -117,7 +118,9 @@ export type AnswerEvent =
 /** Why a component was dropped — counted and logged by kind, never with its text. */
 export type DropReason =
   | 'not_shown' | 'no_quote' | 'composed_pricing' | 'destination' | 'shape'
-  | 'too_long' | 'too_many' | 'empty' | 'components' | 'record' | 'number' | 'image' | 'figures' | 'tool';
+  | 'too_long' | 'too_many' | 'empty' | 'components' | 'record' | 'number' | 'image' | 'figures' | 'tool'
+  /** One view of an explore that names a column, a variable or a type that does not fit; the rest of it stands (§21.3). */
+  | 'view';
 
 /**
  * Each form the model is taught, in the order the prompt lists them: what
@@ -390,6 +393,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       const read = richBlock(b.head, b.lines, { show: rules.show, destinations: rules.destinations, images: rules.images ?? [], tools: rules.tools ?? [] }, cleanText);
       if (!read.ok) { drop(read.why); return; }
       for (let i = 0; i < read.lostImages; i++) drop('image');
+      for (let i = 0; i < read.lostViews; i++) drop('view');
       // The answer's own caps: points across its components, requests the server will run.
       if (points + read.points > RICH_LIMITS.answerPoints || queries + read.queries > RICH_LIMITS.answerQueries
         || calls + read.calls > RICH_LIMITS.answerCalls) { drop('too_many'); return; }
@@ -465,7 +469,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       // Two levels under the head, two spaces each; the lines are read whole when the block ends.
       const lexed = lineTokens(raw.slice(indent));
       if ((indent !== 2 && indent !== 4) || lexed === null || lexed.length === 0) { b.broken = 'shape'; return; }
-      if (b.lines.length >= RICH_LIMITS.lines) { b.broken = 'too_many'; return; }
+      if (b.lines.length >= linesCap(b.head[0].value)) { b.broken = 'too_many'; return; }
       b.lines.push({ depth: indent / 2, tokens: lexed });
       return;
     }
@@ -528,7 +532,8 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       case 'table':
       case 'stats':
       case 'cards':
-      case 'dashboard': {
+      case 'dashboard':
+      case 'explore': {
         // A line with a rich component's first-line shape is held as one; any other is a sentence that starts with the word.
         const shaped: Record<RichWord, boolean> = {
           chart: bare(0) && CHART_KINDS.includes(rest[0].value) && str(1),
@@ -536,6 +541,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
           stats: rest.length === 0,
           cards: rest.length === 0 || (bare(0) && rest[0].value === 'from'),
           dashboard: rest.length === 1 && str(0),
+          explore: rest.length === 1 && str(0),
         };
         if (shaped[first.value as RichWord]) open = { kind: 'rich', head: t, items: [], lines: [], broken: null };
         else asProse();

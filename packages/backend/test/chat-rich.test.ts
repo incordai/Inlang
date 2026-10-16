@@ -72,7 +72,9 @@ test('labels are clamped at a grapheme boundary; past the line cap the component
   assert.ok(c.title.endsWith('…'));
   assert.equal([...c.series[0].points[0][0]].length, RICH_LIMITS.label);
   const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';
-  assert.equal(clampText(family.repeat(3), 2), `${family}…`);
+  // Kept within the cap in code points, as the page counts, never split: a family is five of them.
+  assert.equal(clampText(family.repeat(3), 11), `${family}${family}…`);
+  assert.equal(clampText(family.repeat(3), 2), '…');
 });
 
 test('caps: series, points, slices, mismatched labels, negative slices', () => {

@@ -308,7 +308,7 @@ test('aggregation: the server\'s own count, sum, avg, min, max; by text largest 
   assert.equal((aggregateTool([], { kind: 'figures', fn: 'avg', field: 'points', by: null }, FIELDS, 2) as { value: unknown }).value, null, 'nothing to average');
   assert.deepEqual(aggregateTool(toolRows(FIELDS, ROWS)!, { kind: 'rows', columns: ['driver', 'points', 'podium', 'day'] }, FIELDS, 20), {
     kind: 'rows',
-    columns: [{ label: 'driver', type: 'text', unit: null }, { label: 'points', type: 'number', unit: null }, { label: 'podium', type: 'text', unit: null }, { label: 'day', type: 'text', unit: null }],
+    columns: [{ label: 'driver', type: 'text', unit: null }, { label: 'points', type: 'number', unit: null }, { label: 'podium', type: 'text', unit: null }, { label: 'day', type: 'date', unit: null }],
     rows: ROWS.map((r) => [r.driver, r.points, r.podium ? 'Yes' : 'No', r.day]),
   });
   // Past 10^15, or two labels the same once clamped: not shown at all.

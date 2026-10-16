@@ -193,10 +193,10 @@ export function parseChatContext(text: string): ChatContext | string {
   return { chats, quotes: quotes as AnswerQuote[], destinations: destinations as string[], images, tables, knows, content: { site: r.site, pages: r.pages } };
 }
 
-/** The components a tool may fill (§21.2.8 O5; cards since §19.11): a chat whose `show` has one of them may use the tools. */
-const TOOL_WORDS: readonly AnswerWord[] = ['chart', 'table', 'stats', 'cards'];
+/** The components a tool may fill (§21.2.8 O5; cards since §19.11; an explore's rows, §21.3): a chat whose `show` has one of them may use the tools. */
+const TOOL_WORDS: readonly AnswerWord[] = ['chart', 'table', 'stats', 'cards', 'explore'];
 
-/** Whether a page's chat may use the operator's tools: its `show` has a chart, a table, stats or cards. */
+/** Whether a page's chat may use the operator's tools: its `show` has a chart, a table, stats, cards or an explore. */
 const usesTools = (show: readonly AnswerWord[]) => show.some((w) => TOOL_WORDS.includes(w));
 
 /** What one chat page's answers may show: its own `show`, the site's quotes and destinations, and the tools when it may use them. */
@@ -335,7 +335,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
         let out: Sent;
         if (e.type === 'text') out = e;
         else if (isRich(e.block)) {
-          const r = await resolveRich(e.block, o.figures ?? null, day, toolRun, o.context.images.map((i) => i.key));
+          const r = await resolveRich(e.block, o.figures ?? null, day, toolRun, o.context.images.map((i) => i.key), (why) => resolvedDrops.push(why));
           if (r === null) { resolvedDrops.push('figures'); continue; }
           out = { type: 'block', block: r };
         } else out = { type: 'block', block: e.block as unknown as Record<string, unknown> };

@@ -256,6 +256,35 @@ test('rows and cards are the anonymous list exactly; a private value never appea
   }
 });
 
+test('an explore\'s rows (§21.3): up to 200, page after page of the anonymous list; days typed as days; the limit in the cache key', async () => {
+  const { h, tables } = await shop();
+  try {
+    // 130 more orders, written as the table's own rows are: past one page of the list route (100), short of the explore's 200.
+    for (let i = 0; i < 130; i++) {
+      const id = `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`;
+      await h.db.run('INSERT INTO azd_orders (id, owner, created, updated, item, status, total, placed) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)',
+        [id, T0 + i, T0 + i, `Item ${i}`, 'open', 100 + i, T0 + (i + 100) * DAY]);
+    }
+    const q = createQueries({ db: h.db, database: 'sqlite', publicBase: h.url });
+    const all = must(parseRows(words('orders columns item placed shipped sort placed'), tables, QUERY_LIMITS.exploreRows));
+    const r = await q.run(all);
+    assert.ok(r.ok && r.result.kind === 'rows');
+    const anon = (await anonymousRows(h, 'orders')).sort((a, b) => Number(a.placed) - Number(b.placed));
+    assert.equal(r.result.rows.length, 135);
+    assert.deepEqual(r.result.rows, anon.map((x) => [x.item, new Date(Number(x.placed)).toISOString().slice(0, 10), x.shipped ?? null]));
+    assert.deepEqual(r.result.columns.map((col) => col.type), ['text', 'date', 'date'], 'a datetime and a date are days');
+    // A table's 20 is its own request: the same words with another limit are another cache entry.
+    const twenty = must(parseRows(words('orders columns item placed shipped sort placed'), tables));
+    assert.notEqual(twenty.key, all.key);
+    const t = await q.run(twenty);
+    assert.ok(t.ok && t.result.kind === 'rows' && t.result.rows.length === QUERY_LIMITS.rows);
+    for (const bad of [0, 201, 1.5]) assert.equal(parseRows(words('orders columns item'), tables, bad), null, String(bad));
+    assert.ok(!JSON.stringify(r).includes('call Ana'), 'no private value');
+  } finally {
+    await h.close();
+  }
+});
+
 test('the database deadline gives unavailable, never a guess', async () => {
   const { h, tables } = await shop();
   try {
@@ -328,10 +357,19 @@ test('no word the model wrote reaches SQL text: values are parameters, names com
   }
 });
 
-test('clampText: at a grapheme boundary, ending in an ellipsis', () => {
+test('clampText: within its cap in code points — what the page counts — cut at a grapheme boundary, ending in an ellipsis', () => {
   assert.equal(clampText('short', 24), 'short');
   assert.equal(clampText('abcdefghij', 5), 'abcd…');
+  // Flags are two code points each: 24 of them are 48, so a 24-label keeps 11 and the ellipsis — the page's own count passes it.
+  const kept = clampText('\u{1F1EF}\u{1F1F5}'.repeat(24), 24);
+  assert.equal(kept, `${'\u{1F1EF}\u{1F1F5}'.repeat(11)}…`);
+  assert.ok([...kept].length <= 24);
+  // A combining mark stays on its letter.
+  assert.equal(clampText('é'.repeat(20), 24), `${'é'.repeat(11)}…`);
   const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';
-  assert.equal(clampText(`${family}${family}${family}`, 2), `${family}…`);
-  assert.equal(clampText('ééé', 2), 'é…');
+  // A family is one grapheme of five code points: kept whole, or not at all.
+  assert.equal(clampText(`${family}${family}${family}`, 12), `${family}${family}…`);
+  assert.equal(clampText(`${family}${family}`, 2), '…');
+  // A decomposed é is two code points: a cap of 3 keeps one and the ellipsis.
+  assert.equal(clampText('ééé', 3), 'é…');
 });
