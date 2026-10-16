@@ -14,13 +14,15 @@
  *     show pricing /pricing          the site's own pricing block, quoted
  *     show faq /help #2              the site's own questions (or one of them), quoted
  *     faq                            questions and answers, composed
- *       item "Can I switch plans?"
- *         text "Yes, at any time."
+ *       item "Can I switch plans?" "Yes, at any time."
  *     cta "Talk to us" /contact      one call to action
  *     feature                        a short list, composed
- *       item "Fast"
- *         text "Pages are pre-rendered."
+ *       item "Fast" "Pages are pre-rendered."
  *     ask "How do I cancel?"         a follow-up question, a button (C5)
+ *
+ * An item's text may also be its own line under it (`    text "…"`), the
+ * long form; the model is taught the one-line form only (§19.14), and both
+ * read the same, under the same caps.
  *
  * The model is an untrusted author, so its text is read here, on the
  * server, and the page only ever receives the typed events below:
@@ -159,16 +161,16 @@ export const ANSWER_FORMS: Readonly<Record<AnswerWord, { readonly lines: readonl
     about: `the site's own pricing block of a page, exactly as the site shows it, #2 after the page for its second one; never write a price or a plan yourself — a pricing block you write is not shown`,
   },
   faq: {
-    lines: ['faq', `  item "A question, at most ${ANSWER_LIMITS.question} characters"`, `    text "Its answer, at most ${ANSWER_LIMITS.answer} characters"`],
-    about: `questions and answers, 1 to ${ANSWER_LIMITS.items} items, each item with its text`,
+    lines: ['faq', `  item "A question, at most ${ANSWER_LIMITS.question} characters" "Its answer, at most ${ANSWER_LIMITS.answer} characters"`],
+    about: `questions and answers, 1 to ${ANSWER_LIMITS.items} items, each a question and its answer`,
   },
   cta: {
     lines: [`cta "A label, at most ${ANSWER_LIMITS.label} characters" /contact`],
     about: 'one button to a destination from the list at the end, written exactly as listed; any other destination is not shown',
   },
   feature: {
-    lines: ['feature', `  item "A title, at most ${ANSWER_LIMITS.title} characters"`, `    text "One or two sentences, at most ${ANSWER_LIMITS.text} characters"`],
-    about: `a short list, 1 to ${ANSWER_LIMITS.items} items; the text line is optional`,
+    lines: ['feature', `  item "A title, at most ${ANSWER_LIMITS.title} characters" "One or two sentences, at most ${ANSWER_LIMITS.text} characters"`],
+    about: `a short list, 1 to ${ANSWER_LIMITS.items} items; an item's sentences are optional`,
   },
   ...RICH_FORMS,
 };
@@ -583,9 +585,11 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     if (b.kind !== 'faq' && b.kind !== 'feature') { b.broken = 'shape'; return; }
     const tokens = lineTokens(raw.slice(indent));
     const one = tokens !== null && tokens.length === 2 && tokens[0].kind === 'bare' && tokens[1].kind === 'string';
-    if (indent === 2 && one && tokens![0].value === 'item') {
+    // The one-line form (§19.14): `item "title" "text"`, the text in the same line.
+    const both = tokens !== null && tokens.length === 3 && tokens[0].kind === 'bare' && tokens[1].kind === 'string' && tokens[2].kind === 'string';
+    if (indent === 2 && (one || both) && tokens![0].value === 'item') {
       if (b.items.length >= ANSWER_LIMITS.items) { b.broken = 'too_many'; return; }
-      b.items.push({ title: tokens![1].value, text: null });
+      b.items.push({ title: tokens![1].value, text: both ? tokens![2].value : null });
       return;
     }
     if (indent === 4 && one && tokens![0].value === 'text' && b.items.length > 0 && b.items.at(-1)!.text === null) {

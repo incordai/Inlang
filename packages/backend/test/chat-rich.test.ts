@@ -211,3 +211,32 @@ test('resolveRich: table from figures and from rows; cards from rows carry the s
     async () => ({ kind: 'cards', items: [{ title: 'Chair', text: null, image, row }] }), DAY);
   assert.deepEqual(c, { cards: [{ title: 'Chair', image: { row, ...image } }] });
 });
+
+test('§19.14 one-line points: points "label" n … reads as one point a line — in a chart, a series and a dashboard tile — under the same caps', () => {
+  const long = run('chart line "Visitors"\n  point "W1" 120\n  point "W2" 180\n  point "W3" 160');
+  const short = run('chart line "Visitors"\n  points "W1" 120 "W2" 180 "W3" 160');
+  assert.deepEqual([short.blocks, short.dropped], [long.blocks, []]);
+  assert.equal(short.record, long.record, 'one record whichever form was written');
+  // Split over lines, or mixed with point lines: the same points, in order.
+  assert.deepEqual(run('chart line "Visitors"\n  points "W1" 120 "W2" 180\n  point "W3" 160').blocks, long.blocks);
+  // Series, and a dashboard's chart.
+  const series = run('chart bar "Signups"\n  series "2025"\n    points "Free" 120 "Team" 45\n  series "2026"\n    points "Free" 160 "Team" 70');
+  assert.deepEqual((series.blocks[0] as { chart: { series: unknown } }).chart.series, [
+    { name: '2025', points: [['Free', 120], ['Team', 45]] }, { name: '2026', points: [['Free', 160], ['Team', 70]] },
+  ]);
+  const tile = run('dashboard "Month"\n  stat "Orders" 4\n  chart line "Expected"\n    points "Nov" 140 "Dec" 180');
+  assert.equal(tile.blocks.length, 1, tile.dropped.join(','));
+  // The caps and the number rule, as for point lines.
+  const many = (n: number) => `chart line "Many"\n  points ${Array.from({ length: n }, (_, i) => `"P${i}" ${i}`).join(' ')}`;
+  assert.equal(run(many(RICH_LIMITS.points)).blocks.length, 1);
+  assert.deepEqual(run(many(RICH_LIMITS.points + 1)).dropped, ['too_many']);
+  assert.deepEqual(run(`chart pie "Slices"\n  points ${Array.from({ length: RICH_LIMITS.slices + 1 }, (_, i) => `"S${i}" 1`).join(' ')}`).dropped, ['too_many']);
+  assert.deepEqual(run('chart line "Bad"\n  points "W1" NaN "W2" 3').dropped, ['number']);
+  assert.deepEqual(run('chart line "Bad"\n  points "W1" 1e9 "W2" 3').dropped, ['number']);
+  assert.deepEqual(run('chart line "Odd"\n  points "W1" 1 "W2"').dropped, ['shape']);
+  assert.deepEqual(run('chart line "Swapped"\n  points 1 "W1" 2 "W2"').dropped, ['shape']);
+  assert.deepEqual(run('chart line "Empty"\n  points').dropped, ['shape']);
+  assert.deepEqual(run('chart line "Nested"\n  points "W1" 1 "W2" 2\n    point "W3" 3').dropped, ['shape']);
+  // Duplicate labels across points lines are refused as for point lines.
+  assert.deepEqual(run('chart bar "Dup"\n  points "A" 1\n  points "A" 2').dropped, ['shape']);
+});

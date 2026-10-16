@@ -63,8 +63,9 @@ const PLANS = [
 ];
 
 const q = (s) => JSON.stringify(s);
-const azFaq = (items) => `faq\n${items.map((i) => `  item ${q(i.q)}\n    text ${q(i.a)}`).join('\n')}`;
-const azFeature = (items) => `feature\n${items.map((i) => `  item ${q(i.title)}\n    text ${q(i.text)}`).join('\n')}`;
+/** The one-line forms the model is taught (chat-block-spec §19.14): an item and its text on one line. */
+const azFaq = (items) => `faq\n${items.map((i) => `  item ${q(i.q)} ${q(i.a)}`).join('\n')}`;
+const azFeature = (items) => `feature\n${items.map((i) => `  item ${q(i.title)} ${q(i.text)}`).join('\n')}`;
 const mdFaq = (items) => items.map((i) => `**${i.q}**\n\n${i.a}`).join('\n\n');
 const mdFeature = (items) => items.map((i) => `- **${i.title}**: ${i.text}`).join('\n');
 const mdPricing = () => ['| Plan | Monthly | Yearly | |', '|---|---|---|---|', ...PLANS.map((p) => `| ${p.name} | ${p.monthly} | ${p.annual} | [${p.action}](${p.to}) |`)].join('\n');
@@ -159,9 +160,7 @@ function richCases() {
         '  chart bar "Orders by status" from orders count by status',
         '  chart line "Orders per month" from orders count by placed month',
         '  chart line "Expected next quarter"',
-        '    point "Nov" 140',
-        '    point "Dec" 180',
-        '    point "Jan" 120',
+        '    points "Nov" 140 "Dec" 180 "Jan" 120',
       ].join('\n'),
       json: json([dashboard]),
       markdown: [
@@ -173,8 +172,8 @@ function richCases() {
     },
     {
       name: 'model chart (2 series of 3)', blocks: [signups],
-      az: ['chart bar "Signups by plan"', '  series "2025"', '    point "Free" 120', '    point "Team" 45', '    point "Business" 12',
-        '  series "2026"', '    point "Free" 160', '    point "Team" 70', '    point "Business" 20'].join('\n'),
+      az: ['chart bar "Signups by plan"', '  series "2025"', '    points "Free" 120 "Team" 45 "Business" 12',
+        '  series "2026"', '    points "Free" 160 "Team" 70 "Business" 20'].join('\n'),
       json: json([signups]),
       markdown: ['**Signups by plan**', '', mdTable(['Plan', '2025', '2026'], [['Free', 120, 160], ['Team', 45, 70], ['Business', 12, 20]])].join('\n'),
     },

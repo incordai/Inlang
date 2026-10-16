@@ -2211,6 +2211,21 @@ items themselves are not listed: they are in the site content already. A
 quote costs about 6 output tokens; the composed three-item faq it replaces,
 87.
 
+**One-line forms (§5.3, §20.3 changed).** An faq or feature item may carry
+its text on its own line — `item "Can I switch plans later?" "Yes, at any
+time."` — and a chart's points may share one line — `points "W1" 120 "W2"
+180 "W3" 160`, under a chart, a series or a dashboard's chart. The prompt
+teaches these forms only; the parser reads the long ones as before, and
+both mixed, into the same blocks and the same record, under the same caps
+(six items, the length caps, 24 points or six slices, the number rule, the
+same labels across series). A third string, a text line under a one-line
+item, an odd count of values or a value in a label's place is `shape`.
+Measured over token-benchmark §7's answers (`o200k_base`), written in the
+taught forms: 514 → 480 tokens (faq of three 87 → 81, feature 58 → 52, the
+dashboard 78 → 72, the two-series chart 67 → 55). The prompts barely move
+(the all-components prompt +1, the faq prompt −1): the saving is in what the
+model writes.
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links

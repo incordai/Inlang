@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ANSWER_LIMITS, createAnswerParser, lineTokens, type AnswerEvent, type AnswerRules,
+  ANSWER_FORMS, ANSWER_LIMITS, createAnswerParser, lineTokens, type AnswerEvent, type AnswerRules,
 } from '../src/server/chat-answer.ts';
 import { createSseReader } from '../src/server/chat-sse.ts';
 
@@ -130,7 +130,10 @@ test('a component that breaks a rule is dropped whole and leaves no text', () =>
     ['faq\n  item "Q"\n    text "A"\n  img "https://evil.example/x.png"', 'shape'],
     ['cta "Go" /\n  item "x"', 'shape'],
     ['show pricing /pricing\n  plan "Free"', 'shape'],
-    ['faq\n  item "Q" "R"', 'shape'],
+    // The one-line form takes one text (§19.14): a third string, or a text line under it too, is no item.
+    ['faq\n  item "Q" "R" "S"', 'shape'],
+    ['faq\n  item "Q" "R"\n    text "S"', 'shape'],
+    ['faq\n  item "Q" bare', 'shape'],
     ['faq\n  item "Q\n    text "A"', 'shape'],
   ];
   for (const [answer, reason] of cases) {
@@ -575,4 +578,26 @@ test('§19.14 quotes: no such list or item, an item of a pricing block, an autho
   assert.deepEqual(whole('show faq /help', { ...LISTS, show: ['pricing'] }).dropped, ['not_shown']);
   // CONTROL: the composed form still stands beside the quote.
   assert.equal(whole('faq\n  item "Q?"\n    text "A."', LISTS).blocks.length, 1);
+});
+
+/* ---- the one-line forms (§19.14) ------------------------------------------ */
+
+test('§19.14 one-line forms: item "title" "text" reads as the long form, under the same caps; the prompt teaches it alone', () => {
+  const long = whole('faq\n  item "Can I switch?"\n    text "Yes."\n  item "Refunds?"\n    text "Within 30 days."\nfeature\n  item "Fast"\n    text "Pre-rendered."\n  item "Small"');
+  const short = whole('faq\n  item "Can I switch?" "Yes."\n  item "Refunds?" "Within 30 days."\nfeature\n  item "Fast" "Pre-rendered."\n  item "Small"');
+  assert.deepEqual(short.blocks, long.blocks);
+  assert.deepEqual([short.dropped, short.record], [[], long.record], 'one record whichever form was written');
+  // Both forms mixed in one list read the same.
+  assert.deepEqual(whole('faq\n  item "Can I switch?" "Yes."\n  item "Refunds?"\n    text "Within 30 days."').blocks, [long.blocks[0]]);
+  // The caps: a seventh item, an over-long text, an empty answer — each as for the long form.
+  const seven = `faq\n${Array.from({ length: 7 }, (_, i) => `  item "Q${i}?" "A."`).join('\n')}`;
+  assert.deepEqual(whole(seven).dropped, ['too_many']);
+  assert.deepEqual(whole(`faq\n  item "Q?" "${'a'.repeat(ANSWER_LIMITS.answer + 1)}"`).dropped, ['too_long']);
+  assert.deepEqual(whole(`feature\n  item "T" "${'t'.repeat(ANSWER_LIMITS.text + 1)}"`).dropped, ['too_long']);
+  assert.deepEqual(whole('faq\n  item "Q?" ""').dropped, ['empty']);
+  assert.deepEqual(whole('faq\n  item "Q?" "<script>alert(1)</script>"').blocks, [{ faq: [{ q: 'Q?', a: '<script>alert(1)</script>' }] }], 'text, never markup');
+  // The prompt's forms are the one-line ones.
+  assert.deepEqual(ANSWER_FORMS.faq.lines, ['faq', '  item "A question, at most 160 characters" "Its answer, at most 600 characters"']);
+  assert.deepEqual(ANSWER_FORMS.feature.lines, ['feature', '  item "A title, at most 80 characters" "One or two sentences, at most 300 characters"']);
+  assert.ok(ANSWER_FORMS.chart.lines.some((l) => /^ {4}points "Nov" 140 "Dec" 180$/.test(l)) && !ANSWER_FORMS.chart.lines.some((l) => /^\s*point /.test(l)));
 });

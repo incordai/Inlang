@@ -17,7 +17,8 @@
  *
  *     chart bar "Orders by status" from orders count by status
  *     chart line "Expected"
- *       point "Nov" 140
+ *       points "Nov" 140 "Dec" 180
+ *       point "Jan" 120               (the long form, one point a line)
  *     table "Plans" sortable
  *       columns "Plan" "Seats"
  *       row "Team" 10
@@ -114,7 +115,7 @@ export const RICH_FORMS: Readonly<Record<RichWord, { readonly lines: readonly st
       'chart line "A title"',
       '  unit percent',
       '  series "A series name"',
-      '    point "A label" 140',
+      '    points "Nov" 140 "Dec" 180',
     ],
     about: `a chart: bar, line, area, pie or donut. Best with "from" — the site counts its own data exactly (the tables are listed at the end). Your own numbers are shown labelled as AI-generated; then write points (2 to ${RICH_LIMITS.points}, at most ${RICH_LIMITS.slices} for a pie), or up to ${RICH_LIMITS.series} series of the same labels; "unit" is optional (percent, or a currency code such as usd)`,
   },
@@ -467,21 +468,27 @@ function reader(rules: RichRules, clean: Clean) {
     const round = kind === 'pie' || kind === 'donut';
     let u: Unit = null;
     const series: { name: string; points: [string, number][] }[] = [];
-    const pointOf = (n: Node): [string, number] => {
-      if (!bare(n.tokens[0], 'point') || n.tokens.length !== 3 || n.children.length > 0) fail('shape');
-      return [label(n.tokens[1], RICH_LIMITS.label), num(n.tokens[2])];
+    /** `point "label" n`, or the one-line form `points "label" n "label" n …` (§19.14): the same labels, numbers and caps. */
+    const pointsOf = (n: Node): [string, number][] => {
+      if (n.children.length > 0) fail('shape');
+      if (bare(n.tokens[0], 'point') && n.tokens.length === 3) return [[label(n.tokens[1], RICH_LIMITS.label), num(n.tokens[2])]];
+      if (!bare(n.tokens[0], 'points') || n.tokens.length < 3 || n.tokens.length % 2 === 0) fail('shape');
+      if ((n.tokens.length - 1) / 2 > RICH_LIMITS.points) fail('too_many');
+      const out: [string, number][] = [];
+      for (let i = 1; i < n.tokens.length; i += 2) out.push([label(n.tokens[i], RICH_LIMITS.label), num(n.tokens[i + 1])]);
+      return out;
     };
     children.forEach((n, i) => {
       if (bare(n.tokens[0], 'unit') && i === 0 && n.tokens.length === 2 && n.children.length === 0) { u = unit(n.tokens[1]); return; }
       if (bare(n.tokens[0], 'series') && !inTile && n.tokens.length === 2) {
         if (series.length > 0 && series[0].name === '') fail('shape');
-        series.push({ name: label(n.tokens[1], RICH_LIMITS.label), points: n.children.map(pointOf) });
+        series.push({ name: label(n.tokens[1], RICH_LIMITS.label), points: n.children.flatMap(pointsOf) });
         return;
       }
-      if (bare(n.tokens[0], 'point')) {
+      if (bare(n.tokens[0], 'point') || bare(n.tokens[0], 'points')) {
         if (series.length > 0 && series[0].name !== '') fail('shape');
         if (series.length === 0) series.push({ name: '', points: [] });
-        series[0].points.push(pointOf(n));
+        series[0].points.push(...pointsOf(n));
         return;
       }
       fail('shape');

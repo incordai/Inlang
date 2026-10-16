@@ -1,0 +1,25 @@
+{
+  "name": "short-forms",
+  "threat": "The one-line forms (chat-block-spec §19.14) abused: a third string, a text line under a one-line item, a seventh item, points with a bad number, an odd count or too many — each dropped whole, as the long forms are",
+  "ask": "attack short-forms",
+  "answer": "Short.\nfaq\n  item \"Q?\" \"A.\" \"<script>alert(1)</script>\"\nfaq\n  item \"Q?\" \"A.\"\n    text \"B.\"\nfeature\n  item \"1\" \"x\"\n  item \"2\" \"x\"\n  item \"3\" \"x\"\n  item \"4\" \"x\"\n  item \"5\" \"x\"\n  item \"6\" \"x\"\n  item \"7\" \"x\"\nfaq\n  item \"Fine?\" \"Yes.\"",
+  "expect": {
+    "text": "Short.\n",
+    "blocks": [
+      {
+        "faq": [
+          {
+            "q": "Fine?",
+            "a": "Yes."
+          }
+        ]
+      }
+    ],
+    "dropped": [
+      "shape",
+      "shape",
+      "too_many"
+    ],
+    "history": "Short.\n(dropped: faq, shape)\n(dropped: faq, shape)\n(dropped: feature, too_many)\n[shown: faq \"Fine?\"]\n"
+  }
+}
