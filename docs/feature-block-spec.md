@@ -146,6 +146,12 @@ At emit the SVG is **inlined and sanitised**, unconditionally:
 - strip `width`/`height`, set `aria-hidden="true"` and `focusable="false"`
 - force `fill="currentColor"` / `stroke="currentColor"` so the icon inherits
   theme colour instead of shipping a hard-coded hex into the output
+- refuse a file no XML parser accepts — the build fails naming it: a DOCTYPE,
+  entity, CDATA or processing instruction, and any character outside XML 1.0's
+  Char production (NUL and the other C0 controls but tab, line feed and
+  carriage return; a lone surrogate; U+FFFE, U+FFFF), whether written as a
+  reference (`&#0;`) or literally in the raw text, a comment included
+  (`has a character XML does not allow (U+0000, line 1, column 44)`)
 
 The icon is **always decorative**: the item title carries the meaning, so the
 icon never gets an accessible name — an `aria-label` produces a duplicate

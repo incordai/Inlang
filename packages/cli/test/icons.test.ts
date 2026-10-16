@@ -95,6 +95,17 @@ test('an icon with a character reference XML does not allow (&#xD800;, &#0;) fai
   }
 });
 
+test('an icon with a character XML does not allow written literally (NUL, U+001F, U+FFFF) fails the build with its path — no crash, nothing written', () => {
+  for (const [ch, name] of [['\u0000', 'U+0000'], ['\u001f', 'U+001F'], ['\uffff', 'U+FFFF']] as const) {
+    const p = project(`<svg viewBox="0 0 1 1"><path d="M0 0" id="a${ch}"/></svg>`);
+    const r = run(p);
+    assert.equal(r.ok, false, name);
+    assert.equal(r.exit, 1, name);
+    assert.ok(r.report.includes(`icon: './icons/knife.svg' has a character XML does not allow (${name}, line 1, column 44)`), r.report);
+    assert.ok(!existsSync(join(p.out, 'src/App.tsx')), 'a failed build writes nothing');
+  }
+});
+
 test('SECURITY: an icon with a DOCTYPE (entity tricks) fails the build, it is not guessed at', () => {
   const p = project('<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg viewBox="0 0 1 1"><path d="&x;"/></svg>');
   const r = run(p);

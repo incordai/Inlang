@@ -99,6 +99,29 @@ function isXmlChar(n: number): boolean {
   return n === 0x9 || n === 0xa || n === 0xd || (n >= 0x20 && n <= 0xd7ff) || (n >= 0xe000 && n <= 0xfffd) || (n >= 0x10000 && n <= 0x10ffff);
 }
 
+const XML_CHARS = 'only tab, line feed, carriage return and U+0020–U+D7FF, U+E000–U+FFFD, U+10000–U+10FFFF';
+
+/**
+ * The first character of the raw text outside XML's Char (above), written
+ * literally rather than as a reference — a C0 control, a NUL, a lone
+ * surrogate, U+FFFE or U+FFFF — or an SvgError naming it and where it is.
+ * Checked before anything is stripped: one inside a comment makes the file
+ * not well-formed too. Iterating by code point keeps a valid pair whole and
+ * yields a lone surrogate as itself.
+ */
+function refuseRawNonChars(source: string, file: string): void {
+  let line = 1;
+  let col = 1;
+  for (const ch of source) {
+    const n = ch.codePointAt(0)!;
+    if (!isXmlChar(n)) {
+      const name = `U+${n.toString(16).toUpperCase().padStart(4, '0')}`;
+      throw new SvgError(`icon: '${file}' has a character XML does not allow (${name}, line ${line}, column ${col}) — ${XML_CHARS}`);
+    }
+    if (n === 0xa) { line++; col = 1; } else col++;
+  }
+}
+
 /** A numeric character reference, or an SvgError naming the file — never a RangeError. */
 function codePoint(digits: string, radix: number, file: string): string {
   const n = parseInt(digits, radix);
@@ -107,8 +130,7 @@ function codePoint(digits: string, radix: number, file: string): string {
     throw new SvgError(`icon: '${file}' has a character reference beyond Unicode (${ref})`);
   }
   if (!isXmlChar(n)) {
-    throw new SvgError(`icon: '${file}' has a character reference to a character XML does not allow (${ref}) — `
-      + 'only tab, line feed, carriage return and U+0020–U+D7FF, U+E000–U+FFFD, U+10000–U+10FFFF');
+    throw new SvgError(`icon: '${file}' has a character reference to a character XML does not allow (${ref}) — ${XML_CHARS}`);
   }
   return String.fromCodePoint(n);
 }
@@ -140,6 +162,7 @@ export function sanitizeSvg(source: string, file: string, prefix = ''): EmittedN
   if (new TextEncoder().encode(source).length > MAX_SVG_BYTES) {
     throw new SvgError(`icon: '${file}' is over ${MAX_SVG_BYTES} bytes — an icon is a few shapes`);
   }
+  refuseRawNonChars(source, file);
   let text = source.replace(/^\uFEFF/, '').replace(/^\s*<\?xml\s[^?]*\?>/, '').replace(/<!--[\s\S]*?-->/g, '');
   if (/<!DOCTYPE|<!ENTITY|<!\[CDATA\[|<\?/i.test(text)) {
     throw new SvgError(`icon: '${file}' has a DOCTYPE, entity, CDATA or processing instruction — export it as plain SVG`);

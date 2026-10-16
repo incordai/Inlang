@@ -183,6 +183,39 @@ for (const [range, [first, last]] of Object.entries(NOT_XML_CHARS)) {
   });
 }
 
+for (const [range, [first, last]] of Object.entries(NOT_XML_CHARS)) {
+  test(`${range} (U+${first.toString(16).toUpperCase()}–U+${last.toString(16).toUpperCase()}) written literally is an SvgError naming the file, the character and where it is`, () => {
+    for (const n of new Set([first, first + 1, (first + last) >> 1, last])) {
+      if (n > last) continue;
+      const ch = String.fromCharCode(n);
+      const name = `U+${n.toString(16).toUpperCase().padStart(4, '0')}`;
+      // In an attribute, in the whitespace between elements, and inside a
+      // comment (stripped before parsing, but no XML parser accepts it).
+      const places: Readonly<Record<string, readonly [string, string]>> = {
+        attribute: [`<svg viewBox="0 0 1 1">\n<g id="a${ch}"/></svg>`, 'line 2, column 9'],
+        'text between elements': [`<svg viewBox="0 0 1 1">${ch}<g/></svg>`, 'line 1, column 24'],
+        comment: [`<!-- ${ch} --><svg viewBox="0 0 1 1"><g/></svg>`, 'line 1, column 6'],
+      };
+      for (const [place, [svg, at]] of Object.entries(places)) {
+        assert.throws(() => sanitizeSvg(svg, './i.svg'),
+          (e: unknown) => e instanceof SvgError && e.message.includes("'./i.svg'")
+            && e.message.includes(`has a character XML does not allow (${name}, ${at})`), `${name} in ${place}`);
+      }
+    }
+  });
+}
+
+test('CONTROL: every edge of XML\'s characters written literally is kept, and a pair stays one character', () => {
+  for (const n of [0x9, 0xa, 0xd, 0x20, 0xd7ff, 0xe000, 0xfffd, 0x10000, 0x10ffff]) {
+    const ch = String.fromCodePoint(n);
+    const svg = sanitizeSvg(`<svg viewBox="0 0 1 1"><g id="a${ch}"/></svg>`, './i.svg');
+    assert.equal(walk(svg).find((x) => x.tag === 'g')?.attrs?.id, `a${ch}`, n.toString(16));
+  }
+  // A file read from disk: invalid UTF-8 is decoded to U+FFFD, a character.
+  const fromBytes = Buffer.from([...Buffer.from('<svg viewBox="0 0 1 1"><g id="a'), 0xff, ...Buffer.from('"/></svg>')]).toString('utf8');
+  assert.equal(walk(sanitizeSvg(fromBytes, './i.svg')).find((x) => x.tag === 'g')?.attrs?.id, 'a�');
+});
+
 test('CONTROL: a character reference at each edge of XML\'s characters is decoded', () => {
   for (const n of [0x9, 0xa, 0xd, 0x20, 0xd7ff, 0xe000, 0xfffd, 0x10000, 0x10ffff]) {
     const svg = sanitizeSvg(`<svg viewBox="0 0 1 1"><g id="a&#x${n.toString(16)};"/></svg>`, './i.svg');
