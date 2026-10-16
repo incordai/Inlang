@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { compile, type Manifest } from '../src/index.ts';
-import { isSecretLiteral, redact, scanEnv, scanText } from '../src/secrets.ts';
+import { isSecretLiteral, ownNames, redact, scanEnv, scanText } from '../src/secrets.ts';
 import { legacyScanText } from './legacy-secrets.ts';
 
 const b64url = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -112,6 +112,40 @@ test('SECURITY: the exemptions do not open a hole for real keys', () => {
   ]) {
     assert.equal(scanText(text).length, 1, text);
   }
+});
+
+/* ---- a map library's bundle is not a leak (chat-block-spec §21.4, stack-evaluation §19) ---- */
+
+test('code and links in a bundled map library are not keys: NAME=value runs, a path of words, the build\'s own file names', () => {
+  // As measured in the map library's minified bundle: an assignment in a shader, a property set, a constant, a link in a message.
+  const library = [
+    'const float ATMOSPHERE_HEIGHT_TO_GLOBE_RADIUS=100000.0/6371000.0;',
+    'this._globeViewProjMatrixF64Inverted=ot(),this._globeProjMatrixInverted=ot()',
+    'static{this.MAX_TEXTURE_POOL_SIZE_PER_BUCKET=50}',
+    'warnOnce(`See https://github.com/org/project-gl-js/issues/2907`)',
+  ].join(';\n');
+  assert.deepEqual(scanText(library), []);
+  // The worker file's own hashed name, as a chunk names it, is allowed — exactly that name, no other.
+  const chunk = 'var e=`/assets/maplibre-gl-worker-VaXr2Fck.mjs`;export{e as default};';
+  const names = ownNames(['assets/maplibre-gl-worker-VaXr2Fck.mjs', 'assets/main-B6rAErZn.js', 'index.html']);
+  assert.deepEqual(scanText(chunk, new Set(names)), []);
+  assert.equal(scanText(chunk).length, 1, 'CONTROL: without the build\'s names the hashed path reads as a key');
+  assert.equal(scanText('var e=`/assets/maplibre-gl-worker-WbYs3Gdl.mjs`;', new Set(names)).length, 1, 'another hash is not the build\'s file');
+});
+
+test('SECURITY: a key is still found inside each of those shapes — after =, with padding, in a path segment', () => {
+  const key = 'Xk9vQ2mZr7Lp4sBw8TnC3yHd6JfA1gKe';
+  for (const text of [
+    `const API_TOKEN_FOR_THE_SERVICE_ACCOUNT=${key}`,
+    `k="${key}=="`,
+    `fetch("https://hooks.example.com/services/T00/${key}")`,
+    `fetch("https://example.com/org/project/issues/${key}")`,
+    `a=b=c=${key}`,
+  ]) {
+    assert.equal(scanText(text).length, 1, text);
+  }
+  // Base64 padding stays part of the key it ends.
+  assert.equal(scanText(`k="${key}=="`)[0].excerpt, redact(`${key}==`));
 });
 
 test('env: a backend server setting given a public name fails the site build (backend-spec §4)', () => {

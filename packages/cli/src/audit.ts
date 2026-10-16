@@ -30,7 +30,7 @@
 import { stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts';
+import { ownNames, PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { KEYS, toolSecretKeys } from '../../backend/src/server/env.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
@@ -642,7 +642,8 @@ const newTabLinks: Check<AuditContext> = {
 export async function analyseSite(outDir: string, allow: readonly string[], keys: readonly ServerKey[] = []): Promise<SiteReport> {
   const site = await walkSite(outDir);
   if (site.kind === 'missing') return site;
-  const allowed = new Set(allow);
+  // The public values the build inlined, and the site's own file names as its bundle names them (the build guard's allow).
+  const allowed = new Set([...allow, ...ownNames(site.files.map((f) => f.path))]);
   // A file a package published is judged by key shape only (shipped.ts).
   const scan = (text: string) => {
     const own = ownDigests(text);

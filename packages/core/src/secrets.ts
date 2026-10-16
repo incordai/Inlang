@@ -2,7 +2,7 @@
  * @az module secrets
  * Purpose: secret detection for env, bundles and literals — never prints a value.
  * Spec: docs/auth-block-spec.md §4 · docs/word-quality-gate.md §4
- * Exports: scanText, scanEnv, redact, envMessage, bundleMessage, ShippedPlace
+ * Exports: scanText, scanEnv, redact, envMessage, bundleMessage, ownNames, ShippedPlace
  * Edit guide: patterns stay vendor-neutral; findings report name/offset and length only.
  * Tests: packages/core/test/secrets.test.ts, packages/cli/test/secrets.test.ts
  */
@@ -146,7 +146,12 @@ function jwts(text: string): { readonly at: number; readonly value: string }[] {
 const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
 const SECRET_PREFIX = /\b(?:sk|rk)_(?:live|test)?_?[A-Za-z0-9]{16,}/g;
 const SERVICE_ROLE = /\bservice_role\b/g;
-const HIGH_ENTROPY = /[A-Za-z0-9+/_=-]{32,}/g;
+/**
+ * A key-shaped run: the base64 and base64url alphabets, `=` only as a
+ * trailing pad — a key never holds one inside it, so `NAME=value` in code is
+ * two runs, each judged by itself.
+ */
+const HIGH_ENTROPY = /[A-Za-z0-9+/_-]{32,}={0,2}/g;
 
 /** A whole JS identifier — a name in code, which can never carry a value. */
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -198,9 +203,24 @@ export function scanText(text: string, allow: ReadonlySet<string> = new Set()): 
     // path — which has a `/` — is still judged.
     if (text[at - 1] === '.' && IDENTIFIER.test(value)) continue;
     if (EXTENSION_NAME.test(value)) continue;
+    // A path of plain words (`com/org/project/issues/2907`, a link in a library's message): no segment of it
+    // mixes letters and digits, as a key's would. A key in a path is a segment that does, and is still judged.
+    if (value.includes('/') && value.split('/').every((s) => !/[0-9]/.test(s) || !/[A-Za-z]/.test(s))) continue;
     if (value.length >= ENTROPY_MIN_LENGTH && entropy(value) >= ENTROPY_MIN_BITS) add('entropy', at, value);
   }
   return found;
+}
+
+/**
+ * The build's own file names as the bundle writes them (`/assets/x-Ab12cD34.mjs`
+ * names the file Vite emitted, its content hash and all), each run of them a
+ * scan would read — the values `allow` takes so that a file's name in the
+ * bundle is never judged as a key. Only exact names: anything else is judged.
+ */
+export function ownNames(paths: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const p of paths) for (const form of [p, `/${p}`]) for (const m of form.matchAll(HIGH_ENTROPY)) out.add(m[0]);
+  return [...out];
 }
 
 /**
