@@ -3,13 +3,13 @@
   "fixtures": {
     "all": {
       "prompt": { "o200k_base": 1690, "cl100k_base": 1694 },
-      "context": { "o200k_base": 861, "cl100k_base": 863 },
-      "system": { "o200k_base": 2056, "cl100k_base": 2044 }
+      "context": { "o200k_base": 933, "cl100k_base": 935 },
+      "system": { "o200k_base": 2117, "cl100k_base": 2108 }
     },
     "faq": {
       "prompt": { "o200k_base": 616, "cl100k_base": 616 },
-      "context": { "o200k_base": 640, "cl100k_base": 642 },
-      "system": { "o200k_base": 867, "cl100k_base": 850 }
+      "context": { "o200k_base": 674, "cl100k_base": 676 },
+      "system": { "o200k_base": 919, "cl100k_base": 905 }
     }
   }
 }

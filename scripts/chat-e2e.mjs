@@ -795,7 +795,7 @@ writeFileSync(fakeFile, JSON.stringify(FAKE));
 {
   const context = JSON.parse(await readFile(join(serverDir, 'chat/context.json'), 'utf8'));
   const { destinations, quotes } = context.answer ?? {};
-  const same = JSON.stringify({ destinations, quotes }) === JSON.stringify({ destinations: RULES.destinations, quotes: RULES.quotes.map(({ n, route, word }) => ({ n, route, word })) })
+  const same = JSON.stringify({ destinations, quotes }) === JSON.stringify({ destinations: RULES.destinations, quotes: RULES.quotes.map(({ label, n, route, word }) => ({ label, n, route, word })) })
     && JSON.stringify(context.chats['/ask']?.show) === JSON.stringify(RULES.show);
   check('the built server\'s chat context is the corpus\'s rules (show, quotes, destinations)', same, JSON.stringify({ answer: context.answer, show: context.chats['/ask']?.show }));
 }

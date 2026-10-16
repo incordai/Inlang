@@ -183,6 +183,25 @@ function blockContent(b: SpecBlock, o: ChatBackendOptions): Json | null {
 }
 
 /**
+ * Each faq or feature list on a public page, as an answer quotes it: its
+ * page, its place there among the page's lists of its word, its title. Its
+ * items are the page's own in `pages`, which the server reads them from —
+ * never written twice.
+ */
+function listQuotes(spec: Spec, protect: ReadonlySet<string>, words: readonly ('faq' | 'feature')[]): Json[] {
+  const out: Json[] = [];
+  for (const page of spec.pages) {
+    if (protect.has(page.route)) continue;
+    for (const word of words) {
+      page.blocks.filter((b) => b.word === word).forEach((b, n) => {
+        if (fills(b, 'item').length > 0) out.push(given({ word, route: page.route, n, label: b.props.title }));
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * The chat files for a site, or undefined when no page shows a chat — a
  * site without one gets none of this (§10).
  */
@@ -207,7 +226,7 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
     const show = (answer?.show ?? []).filter((w): w is AnswerWord => (ANSWER_WORDS as readonly string[]).includes(w));
     for (const w of show) shown.add(w);
     // The site's quotes and destinations are the same for every chat; a chat carries those its show uses.
-    if (answer && answer.quotes.length > 0) quotes = answer.quotes.map((q) => ({ word: 'pricing', route: q.route, n: q.n }));
+    if (answer && answer.quotes.length > 0) quotes = answer.quotes.map((q) => given({ word: 'pricing', route: q.route, n: q.n, label: q.block.props.title }));
     if (answer && answer.destinations.length > 0) destinations = [...answer.destinations];
     if (answer?.tables) tables = answer.tables.map((t) => ({ name: t.name, fields: t.fields.map((f) => given({ ...f, choices: f.choices ? [...f.choices] : undefined })) }));
     // The key and the author's alt: the file itself is the build's, never the model's to name.
@@ -228,6 +247,9 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
   if (Object.keys(chats).length === 0) return undefined;
 
   const protect = new Set((spec.site.scoped.auth?.protect ?? '').split(',').map((r) => r.trim()).filter(Boolean));
+  // The site's faq and feature lists an answer may quote (§19.14): on public pages, numbered per page, the author's items.
+  const lists = (['faq', 'feature'] as const).filter((w) => shown.has(w));
+  if (lists.length > 0) quotes = [...quotes, ...listQuotes(spec, protect, lists)];
   const pages: Json[] = [];
   const omitted: string[] = [];
   let size = 0;
@@ -243,6 +265,8 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
     size += length;
     pages.push(entry);
   }
+  // A list on a page the cap left out has no items to quote.
+  quotes = quotes.filter((q) => !omitted.includes((q as { route: string }).route) || (q as { word: string }).word === 'pricing');
 
   const context = sorted({
     _generated: generatedJson('what a chat answers from: the site\'s public pages as text, the chat pages and their settings'),

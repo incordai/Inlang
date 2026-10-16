@@ -88,7 +88,7 @@ test('a model that answers every question in the forms passes: streamed, timed, 
     const system = m.seen[0].body.messages[0];
     assert.equal(system.role, 'system');
     assert.match(system.content, /You answer about Shop\.\n\n<site-content>/);
-    assert.match(system.content, /The pricing blocks you may show: show pricing \/plans\./);
+    assert.match(system.content, /quote it rather than write your own:\nshow pricing \/plans\n/);
     assert.equal(m.seen[0].body.model, 'candidate-model');
     assert.equal(m.seen[0].body.max_tokens, 600);
     assert.equal(m.seen[0].auth, `Bearer ${KEY}`);

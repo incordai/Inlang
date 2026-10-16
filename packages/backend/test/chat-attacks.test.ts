@@ -40,7 +40,7 @@ function outcome(events: readonly AnswerEvent[]): { text: string; blocks: unknow
 
 test('the corpus covers every threat of §6.1 the filter answers for', () => {
   const names = CASES.map((c) => c.name);
-  for (const n of ['legal', 'forbidden-words', 'scripts', 'schemes', 'hosts', 'markdown', 'entities', 'unicode', 'nesting', 'long-line', 'composed-pricing', 'css', 'too-many', 'over-long', 'unterminated', 'forged-notes']) {
+  for (const n of ['legal', 'forbidden-words', 'scripts', 'schemes', 'hosts', 'markdown', 'entities', 'unicode', 'nesting', 'long-line', 'composed-pricing', 'css', 'too-many', 'over-long', 'unterminated', 'forged-notes', 'forged-quote']) {
     assert.ok(names.includes(n), n);
   }
   // CONTROL: the legal case shows every component; every other case refuses or neutralises something.

@@ -111,7 +111,8 @@ test('a line that does not have a component\'s shape is prose — shown as the t
 test('a component that breaks a rule is dropped whole and leaves no text', () => {
   const cases: [string, string][] = [
     ['show auth /login', 'not_shown'],
-    ['show faq /help', 'not_shown'],
+    // An faq is quotable since §19.14: one the site does not have is no quote.
+    ['show faq /help', 'no_quote'],
     ['show pricing /nope', 'no_quote'],
     ['show pricing /pricing#2', 'no_quote'],
     ['show pricing /pricing#plans', 'no_quote'],
@@ -525,4 +526,53 @@ test('§19.14 history: the route\'s own drops become notes in place; notes never
   assert.ok(h.length <= ANSWER_LIMITS.record && h.length > ANSWER_LIMITS.record - 1_000, String(h.length));
   assert.ok(h.startsWith(prose.slice(0, 3_000)), 'the prose whole');
   assert.ok((h.match(/\(dropped: cta, destination\)/g) ?? []).length < 400, 'the notes past the cap are left out');
+});
+
+/* ---- quoting the site's own lists (§19.14) -------------------------------- */
+
+const LISTS: AnswerRules = {
+  ...RULES,
+  quotes: [
+    ...RULES.quotes,
+    { word: 'faq', route: '/help', n: 0, label: 'Questions', items: [{ title: 'Do you ship abroad?', text: 'Yes, to most countries.' }, { title: 'Is there a warranty?', text: 'Two years.' }] },
+    { word: 'faq', route: '/help', n: 1, items: [{ title: 'Long?', text: 'x'.repeat(ANSWER_LIMITS.answer + 1) }, { title: 'Short?', text: 'Yes.' }] },
+    { word: 'feature', route: '/', n: 0, label: 'Why us', items: [{ title: 'Bright', text: '800 lumens.' }, { title: 'Quiet', text: '' }] },
+  ],
+};
+
+test('§19.14 quotes: show faq or feature quotes the site\'s own list, whole or the one item #n names; its history is the quote\'s line', () => {
+  const p = createAnswerParser(LISTS);
+  const events = [...p.push('From the site.\nshow faq /help\nshow faq /help #2\nshow feature /\n'), ...p.end()];
+  assert.deepEqual(events.filter((e) => e.type === 'block').map((e) => (e as { block: unknown }).block), [
+    { faq: [{ q: 'Do you ship abroad?', a: 'Yes, to most countries.' }, { q: 'Is there a warranty?', a: 'Two years.' }] },
+    { faq: [{ q: 'Is there a warranty?', a: 'Two years.' }] },
+    { feature: [{ title: 'Bright', text: '800 lumens.' }, { title: 'Quiet', text: '' }] },
+  ]);
+  assert.deepEqual([...p.dropped], []);
+  assert.equal(p.record, 'From the site.\nshow faq /help\nshow faq /help #2\nshow feature /\n');
+  assert.equal(p.history(), p.record, 'a quote is its own one line, in the record and the history');
+});
+
+test('§19.14 quotes: no such list or item, an item of a pricing block, an author\'s item past the caps, a word not shown — each dropped by its code', () => {
+  const cases: [string, string[]][] = [
+    ['show faq /help #3', ['no_quote']],
+    ['show faq /help #0', ['no_quote']],
+    ['show faq /help #x', ['no_quote']],
+    ['show faq /help#3', ['no_quote']],
+    ['show faq /nowhere', ['no_quote']],
+    ['show faq /help#2', ['too_long']],
+    ['show pricing /pricing #1', ['shape']],
+    ['show feature /help', ['no_quote']],
+    ['show gallery /help', ['not_shown']],
+  ];
+  for (const [answer, dropped] of cases) {
+    const r = whole(answer, LISTS);
+    assert.deepEqual([r.blocks, r.dropped], [[], dropped], answer);
+  }
+  // One item of a list whose other item is past the caps is fine: only what is quoted is judged.
+  assert.deepEqual(whole('show faq /help#2 #2', LISTS).blocks, [{ faq: [{ q: 'Short?', a: 'Yes.' }] }]);
+  // A chat that does not show faq cannot quote one.
+  assert.deepEqual(whole('show faq /help', { ...LISTS, show: ['pricing'] }).dropped, ['not_shown']);
+  // CONTROL: the composed form still stands beside the quote.
+  assert.equal(whole('faq\n  item "Q?"\n    text "A."', LISTS).blocks.length, 1);
 });

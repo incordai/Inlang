@@ -10,7 +10,8 @@ import { compile, type Spec, type SpecBlock } from '../../core/src/index.ts';
 import { chatBackend, CONTEXT_MAX, type BackendChat } from '../src/chat-context.ts';
 import { backendFiles, envExample } from '../src/emit.ts';
 import { KEYS, loadConfig } from '../src/server/env.ts';
-import { parseChatContext, ROWS_HEADING, systemText } from '../src/server/chat.ts';
+import { parseChatContext, ROWS_HEADING, rulesFor, systemText } from '../src/server/chat.ts';
+import { createAnswerParser } from '../src/server/chat-answer.ts';
 import { manifests } from './data-fixture.ts';
 
 const SITE = `az 1
@@ -196,7 +197,7 @@ test('with show: context.json says what each chat may show, the quotable blocks 
   assert.deepEqual(ctx.chats, {
     '/': { allow: 'anyone', limit: 20, show: ['pricing', 'faq', 'cta'], prompt: 'prompt-1.txt' }, '/quiet': { allow: 'anyone', limit: 20, prompt: 'prompt-2.txt' },
   });
-  assert.deepEqual(ctx.answer, { destinations: ['/', '/plans', '/quiet', 'https://docs.studio.example/start'], quotes: [{ n: 0, route: '/plans', word: 'pricing' }] });
+  assert.deepEqual(ctx.answer, { destinations: ['/', '/plans', '/quiet', 'https://docs.studio.example/start'], quotes: [{ label: 'Plans', n: 0, route: '/plans', word: 'pricing' }] });
   // The forms come from the answer parser's table, with its caps.
   assert.match(promptOf(a), /show pricing \/pricing/);
   assert.match(promptOf(a), /item "A question, at most 160 characters"/);
@@ -250,6 +251,105 @@ page /more
   assert.equal(ctx.chats['/help'].prompt, 'prompt-3.txt');
   const files = backendFiles('Studio', { database: 'sqlite', email: 'smtp' }, undefined, a);
   assert.deepEqual(files.filter((f) => f.path.startsWith('server/chat/prompt')).map((f) => f.path), ['server/chat/prompt-1.txt', 'server/chat/prompt-2.txt', 'server/chat/prompt-3.txt']);
+});
+
+test('§19.14 quotes: the site\'s public faq and feature lists are quotable, listed by title and size; their items read from the pages, never written twice', () => {
+  const source = `az 1
+site studio
+  auth
+    adapter azbackend
+    protect /secret
+  backend
+    database sqlite
+    email    smtp
+    model    default
+
+page /
+  faq
+    title "Questions"
+    item "How long does a pair take?"
+      text "Four to six weeks."
+    item "Can I order two?"
+      text "Yes."
+    item "Do you resole?"
+      text "Yes, any pair."
+
+page /help
+  faq
+    title "Shipping"
+    item "Do you ship abroad?"
+      text "Yes, to most countries."
+    item "How long does it take?"
+      text "Five to ten working days."
+    item "Can I track it?"
+      text "Yes, by email."
+  faq
+    title "Care"
+    schema off
+    item "Is there a warranty?"
+      text "Two years."
+    item "Can I wash them?"
+      text "By hand only."
+    item "What polish?"
+      text "Any neutral wax."
+  feature
+    title "Why us"
+    item "Handmade"
+      text "Each pair by one maker."
+    item "Mended"
+      text "We resole for life."
+  chat panel
+    show  faq feature
+    allow anyone
+
+page /secret
+  faq
+    title "Members"
+    item "A members-only question?"
+      text "A members-only answer."
+    item "Another?"
+      text "Yes."
+    item "A third?"
+      text "Yes."
+
+page /login
+  auth login
+    redirect /
+`;
+  const r = compile(source, { manifests });
+  assert.ok(r.ok && r.spec, JSON.stringify(r.diagnostics));
+  const a = chatBackend(r.spec)!;
+  const raw = JSON.parse(a.context);
+  assert.deepEqual(raw.answer.quotes, [
+    { label: 'Questions', n: 0, route: '/', word: 'faq' },
+    { label: 'Shipping', n: 0, route: '/help', word: 'faq' },
+    { label: 'Care', n: 1, route: '/help', word: 'faq' },
+    { label: 'Why us', n: 0, route: '/help', word: 'feature' },
+  ], 'the protected page\'s list is not quotable; no item is written twice');
+  assert.ok(!a.context.includes('members-only'));
+  const ctx = parseChatContext(a.context);
+  assert.ok(typeof ctx === 'object', String(ctx));
+  assert.deepEqual(ctx.quotes.find((q) => q.route === '/help' && q.n === 1)!.items, [
+    { title: 'Is there a warranty?', text: 'Two years.' }, { title: 'Can I wash them?', text: 'By hand only.' }, { title: 'What polish?', text: 'Any neutral wax.' },
+  ]);
+  const system = systemText(promptOf(a, '/help'), ctx, '/help');
+  assert.match(system, /quote it rather than write your own:\nshow faq \/ — "Questions", 3 items\nshow faq \/help — "Shipping", 3 items\nshow faq \/help#2 — "Care", 3 items\nshow feature \/help — "Why us", 2 items\nOne item of a list, by its place in the site content: show faq \/help #2\.\n/);
+  // The parser quotes them under the page's rules: whole, or one item; the page draws the author's own words.
+  const p = createAnswerParser(rulesFor(ctx, '/help'));
+  const events = [...p.push('show faq /help #2\nshow faq /help#2\nshow feature /help\n'), ...p.end()];
+  assert.deepEqual(events.filter((e) => e.type === 'block').map((e) => (e as { block: unknown }).block), [
+    { faq: [{ q: 'How long does it take?', a: 'Five to ten working days.' }] },
+    { faq: [{ q: 'Is there a warranty?', a: 'Two years.' }, { q: 'Can I wash them?', a: 'By hand only.' }, { q: 'What polish?', a: 'Any neutral wax.' }] },
+    { feature: [{ title: 'Handmade', text: 'Each pair by one maker.' }, { title: 'Mended', text: 'We resole for life.' }] },
+  ]);
+  // A context whose quote names a list the pages do not hold was not written by the build: the server refuses it.
+  const forged = JSON.parse(a.context);
+  forged.answer.quotes.push({ n: 4, route: '/help', word: 'faq' });
+  assert.equal(parseChatContext(JSON.stringify(forged)), 'answer.quotes names faq /help#5, which the pages do not hold');
+  forged.answer.quotes = [{ n: 0, route: '/help', word: 'faq', items: [{ title: 'Injected?', text: 'Yes.' }] }];
+  assert.match(String(parseChatContext(JSON.stringify(forged))), /^answer\.quotes is not a list/);
+  // CONTROL: a chat that shows no list quotes none; pricing alone is as before.
+  assert.ok(!JSON.stringify(JSON.parse(chatBackend(compile(SHOW_SITE.replace('    show  pricing faq cta', '    show  pricing cta'), { manifests }).spec!)!.context).answer.quotes).includes('"faq"'));
 });
 
 test('C7 (§21.3): a chat that shows explore is taught its form — data, controls, views, no formula — and its page is told the tables', () => {
@@ -349,7 +449,7 @@ test('the per-request system text names the visitor\'s page and what its compone
   const home = systemText(promptOf(a), ctx, '/');
   assert.match(home, /The visitor is on the page "\/"\./);
   assert.match(home, /Use only these components\./);
-  assert.match(home, /The pricing blocks you may show: show pricing \/plans\./);
+  assert.match(home, /The site's own blocks to quote; when one answers, quote it rather than write your own:\nshow pricing \/plans — "Plans"\n/);
   assert.match(home, /written exactly so: \/ \/plans \/quiet https:\/\/docs\.studio\.example\/start\./);
   const quiet = systemText(promptOf(a, '/quiet'), ctx, '/quiet');
   assert.doesNotMatch(quiet, /Components:/);
@@ -374,7 +474,7 @@ test('§19.14: the system text is ordered for the prompt cache — prompt, site 
   assert.equal(one.slice(prefix.length), `\n${ROWS_HEADING}\n\n{"question":"Can I cancel?"}\n`);
   // In that prefix, in order: the prompt, the site content, the page and what its components may use, the tools, the place line.
   const at = (s: string) => { const i = prefix.indexOf(s); assert.ok(i >= 0, s); return i; };
-  const order = [at('You are the assistant'), at('<site-content>'), at('The visitor is on the page "/".'), at('The pricing blocks you may show'),
+  const order = [at('You are the assistant'), at('<site-content>'), at('The visitor is on the page "/".'), at('show pricing /plans — "Plans"'),
     at('The table of the league.'), at('A map may also place')].filter((i, n, all) => n === 0 || i > all[n - 1]);
   assert.equal(order.length, 6, 'each part after the one before');
   assert.ok(!prefix.startsWith('# GENERATED'), 'the operator\'s header line is not sent');

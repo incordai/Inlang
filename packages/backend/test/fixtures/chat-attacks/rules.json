@@ -8,9 +8,10 @@
   ],
   "quotes": [
     {
-      "word": "pricing",
+      "label": "Plans",
+      "n": 0,
       "route": "/pricing",
-      "n": 0
+      "word": "pricing"
     }
   ],
   "destinations": [

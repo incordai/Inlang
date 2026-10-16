@@ -2184,6 +2184,33 @@ dashboard 78 → 9, a three-item faq 87 → 24, a model chart of two series
 67 → 16 — paid again by every later question until `trimHistory` drops the
 turn.
 
+**Quoting the site's own lists (§5.3 changed).** `show faq <route>` and
+`show feature <route>` quote an faq or a feature list the site already has,
+as `show pricing` quotes a pricing block: `#2` after the route for the
+page's second list of that word, and an item number after it for one item
+alone — `show faq /help #3`. Quotable: every faq and feature list with an
+item on a page a signed-out visitor can open, when some chat shows the word
+(context.json `answer.quotes` gains `{ word, route, n, label }`; the items
+are not written again — the server reads them from the same page's content
+in `pages` and refuses a context whose quote names a list the pages do not
+hold, or that carries items of its own). A quote is checked like the
+composed form it becomes: the word in the page's `show`, the list on the
+site (`no_quote`), the item in range (`no_quote`), at most six items and
+each within the composed caps (`too_many`, `too_long`, `empty`); an item of
+a pricing block is `shape`. The page receives an ordinary `faq` or
+`feature` event with the author's own words, so nothing new is drawn. The
+record and the history hold the quote's one line.
+
+The per-request text lists the quotable blocks with a short label each —
+its title and, for a list, its size — and asks for a quote over a composed
+answer: "The site's own blocks to quote; when one answers, quote it rather
+than write your own:" then `show pricing /pricing — "Plans"`, `show faq
+/help — "Shipping", 3 items`, and one line on quoting an item by its place
+in the site content. This replaces "The pricing blocks you may show". The
+items themselves are not listed: they are in the site content already. A
+quote costs about 6 output tokens; the composed three-item faq it replaces,
+87.
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links

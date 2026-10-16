@@ -2,7 +2,7 @@
  * @az server chat-answer
  * Purpose: the answer parser: a model's text, read line by line, becomes the closed set of page events — prose, or a component validated whole.
  * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3, §21.1.2, §21.2.3, §21.4.2)
- * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, ASK_FORM, FENCE, lineTokens, quoteKey
+ * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, ASK_FORM, FENCE, QUOTE_WORDS, lineTokens, quoteKey
  * Edit guide: linear in the characters read, no regular expression that can backtrack; a line that does not parse is prose; a component that breaks a rule is dropped whole and never shown as syntax.
  * Tests: packages/backend/test/chat-answer.test.ts, packages/backend/test/chat-attacks.test.ts
  */
@@ -12,6 +12,7 @@
  * few components written as a small subset of `.az`:
  *
  *     show pricing /pricing          the site's own pricing block, quoted
+ *     show faq /help #2              the site's own questions (or one of them), quoted
  *     faq                            questions and answers, composed
  *       item "Can I switch plans?"
  *         text "Yes, at any time."
@@ -97,8 +98,20 @@ export const ANSWER_LIMITS = {
 export const ANSWER_WORDS = ['pricing', 'faq', 'cta', 'feature', ...RICH_WORDS] as const;
 export type AnswerWord = (typeof ANSWER_WORDS)[number];
 
-/** A block the site lets answers quote, as context.json lists it: its word, its page, its position there. */
-export interface AnswerQuote { readonly word: AnswerWord; readonly route: string; readonly n: number }
+/**
+ * A block the site lets answers quote, as context.json lists it: its word,
+ * its page, its position there, its title; and for an faq or a feature list
+ * (chat-block-spec §19.14) the author's own items, which a quote shows whole
+ * or one by its number.
+ */
+export interface AnswerQuote {
+  readonly word: AnswerWord; readonly route: string; readonly n: number;
+  readonly label?: string;
+  readonly items?: readonly { readonly title: string; readonly text: string }[];
+}
+
+/** The words an answer may quote from the site's own pages (§5.3, §19.14). */
+export const QUOTE_WORDS: readonly AnswerWord[] = ['pricing', 'faq', 'feature'];
 
 /** What one chat page's answers may show, quote and link to (from context.json). */
 export interface AnswerRules {
@@ -416,14 +429,14 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     if (word !== undefined) parts.push({ kind: 'note', line: droppedNote(word, reason) });
   };
 
-  /** A component that passed every rule: sent, and its canonical lines added to the record. */
-  const emit = (block: AnswerBlock, lines: string, word: string) => {
+  /** A component that passed every rule: sent, and its canonical lines added to the record; a quote is its own line in the history too. */
+  const emit = (block: AnswerBlock, lines: string, word: string, quoted = false) => {
     if (shown >= ANSWER_LIMITS.components) {
       drop('components', word);
       ended = true;
       return;
     }
-    const line = standIn(block, lines);
+    const line = quoted ? lines : standIn(block, lines);
     if (record.length + lines.length > ANSWER_LIMITS.record || base + line.length + 1 > ANSWER_LIMITS.record) { drop('record', word); return; }
     shown++;
     flushText();
@@ -469,16 +482,42 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       return;
     }
     if (b.kind === 'show') {
-      const word = b.head[1].value;
+      const word = b.head[1].value as AnswerWord;
       const dest = b.head[2].value;
-      if (word !== 'pricing' || !allowed('pricing')) { drop('not_shown', b.word); return; }
+      const item = b.head[3]?.value;
+      if (!QUOTE_WORDS.includes(word) || !allowed(word)) { drop('not_shown', b.word); return; }
       const hash = dest.indexOf('#');
       const route = hash < 0 ? dest : dest.slice(0, hash);
       const suffix = hash < 0 ? '1' : dest.slice(hash + 1);
-      // `#2` is the page's second pricing block; anything else after # is no block.
+      // `#2` is the page's second block of the word; anything else after # is no block.
       const nth = /^[1-9][0-9]{0,2}$/.test(suffix) ? Number(suffix) - 1 : -1;
-      if (!rules.quotes.some((q) => q.word === 'pricing' && q.route === route && q.n === nth)) { drop('no_quote', b.word); return; }
-      emit({ quote: 'pricing', route, n: nth }, `show pricing ${route}${nth > 0 ? `#${nth + 1}` : ''}\n`, b.word);
+      const quote = rules.quotes.find((q) => q.word === word && q.route === route && q.n === nth);
+      if (!quote) { drop('no_quote', b.word); return; }
+      const at = `${route}${nth > 0 ? `#${nth + 1}` : ''}`;
+      if (word === 'pricing') {
+        // A pricing block is quoted whole: its plans are one table.
+        if (item !== undefined) { drop('shape', b.word); return; }
+        emit({ quote: 'pricing', route, n: nth }, `show pricing ${at}\n`, b.word);
+        return;
+      }
+      // An faq or a feature list: the author's own items, whole, or the one `#n` names (§19.14), under the composed form's caps.
+      const all = quote.items ?? [];
+      const k = item === undefined ? -1 : /^#[1-9][0-9]?$/.test(item) ? Number(item.slice(1)) - 1 : -2;
+      if (k === -2 || k >= all.length) { drop('no_quote', b.word); return; }
+      const chosen = k < 0 ? all : [all[k]];
+      if (chosen.length === 0) { drop('empty', b.word); return; }
+      if (chosen.length > ANSWER_LIMITS.items) { drop('too_many', b.word); return; }
+      const [titleMax, textMax] = word === 'faq' ? [ANSWER_LIMITS.question, ANSWER_LIMITS.answer] : [ANSWER_LIMITS.title, ANSWER_LIMITS.text];
+      const items: { title: string; text: string }[] = [];
+      for (const it of chosen) {
+        const title = value(it.title, titleMax, true);
+        if ('why' in title) { drop(title.why, b.word); return; }
+        const text = value(it.text, textMax, word === 'faq');
+        if ('why' in text) { drop(text.why, b.word); return; }
+        items.push({ title: title.v, text: text.v });
+      }
+      // The record and the history hold the quote's one line; the page draws the items.
+      emit(word === 'faq' ? { faq: items.map((i) => ({ q: i.title, a: i.text })) } : { feature: items }, `show ${word} ${at}${item !== undefined ? ` ${item}` : ''}\n`, b.word, true);
       return;
     }
     if (b.kind === 'ask') {
@@ -578,8 +617,10 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
         return;
       case 'show':
         // The note names the quoted word only when it is one an answer may hold; the route is the model's and never noted.
-        if (rest.length === 2 && bare(0) && bare(1)) open = { kind: 'show', word: (ANSWER_WORDS as readonly string[]).includes(rest[0].value) ? rest[0].value : 'show', head: t, items: [], lines: [], broken: null };
-        else asProse();
+        // `show <word> <route>`, or with a list's item: `show faq /help #2` (§19.14).
+        if ((rest.length === 2 || (rest.length === 3 && rest[2].value.startsWith('#'))) && rest.every((r) => r.kind === 'bare')) {
+          open = { kind: 'show', word: (ANSWER_WORDS as readonly string[]).includes(rest[0].value) ? rest[0].value : 'show', head: t, items: [], lines: [], broken: null };
+        } else asProse();
         return;
       case 'cta':
         if (rest.length === 2 && str(0) && bare(1)) open = { kind: 'cta', word: 'cta', head: t, items: [], lines: [], broken: null };
