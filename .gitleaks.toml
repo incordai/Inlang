@@ -19,3 +19,26 @@ condition = "AND"
 targetRules = ["generic-api-key"]
 paths = ['''^packages/core/test/secrets\.test\.ts$''']
 regexes = ['''^Xk9vQ2mZr7Lp4sBw8TnC3yHd6JfA1gKe$''']
+
+[[allowlists]]
+description = "Made-up keys in the scanner's own tests (named-value and hex cases, path and bundle names): each test asserts az's scanner catches them, or deliberately leaves an obvious non-key such as a counting sequence."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^packages/core/test/secrets\.test\.ts$''']
+regexes = [
+  '''^Zq8Lm2Xv7Rt4Wp9Kd3Hs6Nb1Gc5Fy0JaQe$''',
+  '''^0123456789abcdef$''',
+  '''^fedcba9876543210$''',
+  '''^0123456789abcdef0123456789$''',
+  '''^9F3Ac07E5b1D42e8aB6c$''',
+]
+
+[[allowlists]]
+description = "Made-up short prefixed keys in the scanner's own tests: they assert az's key-shape rule catches a short live/test key."
+condition = "AND"
+targetRules = ["stripe-access-token"]
+paths = ['''^packages/core/test/secrets\.test\.ts$''']
+regexes = [
+  '''^sk_live_Ab3dE5gH7j$''',
+  '''^rk_test_Ab3dE5gH7j$''',
+]
