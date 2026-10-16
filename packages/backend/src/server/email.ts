@@ -4,7 +4,7 @@
  * Spec: docs/backend-spec.md §7
  * Exports: createMailer, resetMessage, linkMessage
  * Edit guide: log error class only, never addresses or server replies.
- * Tests: packages/backend/test/backend.test.ts
+ * Tests: packages/backend/test/backend.test.ts, packages/backend/test/email-tls.test.ts
  */
 
 /**
@@ -59,12 +59,23 @@ function deadlinePassed(): Error {
 }
 
 /**
+ * A mail server's TLS as a test meets it on loopback: `secure` is TLS from
+ * the connect (as port 465 is), else a required STARTTLS upgrade; `ca` is the
+ * one certificate trusted for it, in place of the system's. The certificate
+ * is still verified — host name included.
+ */
+export interface MailerTls { readonly secure: boolean; readonly ca: string }
+
+/**
  * `timeoutMs` replaces EMAIL_TIMEOUT_MS and `deadlineMs` EMAIL_DEADLINE_MS —
- * for tests that prove the bounds without waiting them out.
+ * for tests that prove the bounds without waiting them out; `tls` replaces
+ * the port's TLS mode and the system's certificates, for tests that prove
+ * both TLS paths end to end against a local server (a loopback host
+ * otherwise sends in the clear, and port 465 needs privileges to listen on).
  */
 export async function createMailer(
   config: Config,
-  env: { fetch: typeof fetch; timeoutMs?: number; deadlineMs?: number } = { fetch: (...a) => fetch(...a) },
+  env: { fetch: typeof fetch; timeoutMs?: number; deadlineMs?: number; tls?: MailerTls } = { fetch: (...a) => fetch(...a) },
 ): Promise<Mailer> {
   const timeoutMs = env.timeoutMs ?? EMAIL_TIMEOUT_MS;
   const deadlineMs = env.deadlineMs ?? EMAIL_DEADLINE_MS;
@@ -100,6 +111,10 @@ export async function createMailer(
     connectionTimeout: timeoutMs,
     greetingTimeout: timeoutMs,
     socketTimeout: timeoutMs,
+    ...(env.tls ? {
+      secure: env.tls.secure, requireTLS: !env.tls.secure, ignoreTLS: false,
+      tls: { rejectUnauthorized: true, ca: env.tls.ca },
+    } : {}),
   };
   return {
     async send(m) {
