@@ -1,7 +1,7 @@
 /**
  * @az module chat
  * Purpose: the file-wide rules of a `chat` block: a backend that talks to a model, what an answer may show and quote and link to, who may ask.
- * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §8.2, §14 (C1, C2, C2b, C3), §20
+ * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §8.2, §14 (C1, C2, C2b, C3), §20, §21.3
  * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, TOOLS_WORD, CHAT_REFUSED, SHARED_ROUTE, KNOWS_MAX, chatOf, chatAnswers, withAnswer, knowsTables, chatDiagnostics, sharedRouteDiagnostics, ChatAnswers
  * Edit guide: rules that need the whole file live here; a rule about one chat block alone is a word.json check (AZ2220–AZ2239).
  * Tests: packages/core/test/chat-decl.test.ts, packages/core/test/chat-answer-decl.test.ts, packages/core/test/chat-float-decl.test.ts
@@ -39,8 +39,10 @@ import { isFromMark } from './emit-contract.ts';
 /** The block's name, so the rules below never repeat it as a bare string. */
 export const CHAT_WORD = 'chat';
 
-/** The rich components (chat-block-spec §20): answer-only, never page words. */
-export const CHAT_RICH_WORDS: readonly string[] = ['chart', 'table', 'stats', 'cards', 'dashboard'];
+/** The rich components (chat-block-spec §20, and explore §21.3): answer-only, never page words. */
+export const CHAT_RICH_WORDS: readonly string[] = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore'];
+/** What a dashboard's tiles may be (§20.2): never another dashboard, never an explore. */
+const DASHBOARD_TILES: readonly string[] = ['chart', 'table', 'stats', 'cards'];
 /** The word that, after `from`, names the operator's data tools in an answer (chat-block-spec §21.2.3) — never a table (AZ1272). */
 export const TOOLS_WORD = 'tool';
 
@@ -265,7 +267,7 @@ export function chatDiagnostics(
     const show = c.props.show;
     if (show) {
       const words = show.value.split(LIST_SEPARATOR).filter(Boolean);
-      if (words.includes('dashboard') && !words.some((w) => w !== 'dashboard' && CHAT_RICH_WORDS.includes(w))) {
+      if (words.includes('dashboard') && !words.some((w) => DASHBOARD_TILES.includes(w))) {
         err('AZ1270', `${CHAT_WORD}: show dashboard, but nothing it can hold — add chart, table, stats or cards to show`, show.pos);
       }
       for (const word of show.value.split(LIST_SEPARATOR).filter(Boolean)) {

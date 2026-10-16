@@ -359,3 +359,48 @@ test('CONTROL: the rich parts run nothing — no script, no inline handler, no s
   }
   assert.equal(nodes.filter((n) => n.tag === 'img').length, 2);
 });
+
+/* ---- C7: an explore's templates (chat-block-spec §21.3.4, §21.3.6) ---- */
+
+function exploreChat(show: string): EmittedNode {
+  const r = compile(RICH_SITE.replace('    show chart table stats cards dashboard', `    show ${show}`), { manifests });
+  assert.ok(r.ok && r.spec, formatDiagnostics(r.diagnostics, 'site.az'));
+  const block = blocksFor(r.spec, r.spec.pages[0]).find((b) => b.word === 'chat')!;
+  return emitBlock(block, SERIES_THEME, WEB_EMITTERS, (p) => p, { name: 'aurora' });
+}
+
+test('an explore ships real controls: a labelled range with an <output>, a date input, radios in a fieldset, a form of labelled fields and one submit', () => {
+  const root = exploreChat('explore');
+  const [part] = partOf(root, 'explore');
+  assert.ok(part, 'the explore part');
+  const slots = (name: string) => walk(part).filter((n) => n.attrs?.['data-az-chat-slot'] === name);
+  const [section] = (part.children ?? []) as EmittedNode[];
+  assert.equal(section.tag, 'section', 'a section, labelled by its title at run time');
+  assert.equal(slots('title')[0].tag, 'h3');
+  const [slider] = slots('slider');
+  assert.deepEqual(walk(slider).filter((n) => ['label', 'input', 'output'].includes(n.tag)).map((n) => [n.tag, n.attrs?.type]), [['label', undefined], ['input', 'range'], ['output', undefined]]);
+  assert.deepEqual(walk(slots('date')[0]).filter((n) => n.tag === 'input').map((n) => n.attrs?.type), ['date']);
+  const [toggle] = slots('toggle');
+  assert.equal(toggle.tag, 'fieldset');
+  assert.deepEqual(walk(toggle).filter((n) => n.tag === 'legend' || n.tag === 'input').map((n) => n.attrs?.type ?? n.tag), ['legend', 'radio']);
+  const [form] = slots('form');
+  assert.equal(form.tag, 'form');
+  assert.ok(walk(form).some((n) => n.tag === 'fieldset') && walk(form).some((n) => n.tag === 'legend'));
+  const number = walk(slots('field-number')[0]).find((n) => n.tag === 'input')!;
+  assert.deepEqual([number.attrs?.type, number.attrs?.step, number.attrs?.required], ['number', 'any', 'required']);
+  assert.ok(walk(slots('field-choice')[0]).some((n) => n.tag === 'select'));
+  const submit = slots('submit');
+  assert.equal(submit.length, 1);
+  assert.deepEqual([submit[0].tag, submit[0].attrs?.type], ['button', 'submit']);
+  assert.deepEqual(texts(submit[0]).filter((t) => t.trim() !== ''), [], 'its words are the runtime\'s: Apply, or the question it asks');
+  assert.equal(slots('view').length + slots('view-wide').length, 2);
+  // It draws charts, tables and stat cards: their templates ship with it, and the series colours.
+  for (const k of ['paint', 'figure', 'table', 'stats', 'unavailable']) assert.equal(partOf(root, k).length, 1, k);
+  assert.equal(partOf(root, 'cards').length, 0);
+  for (const n of walk(part)) {
+    assert.ok(!['script', 'iframe', 'object', 'embed', 'img'].includes(n.tag), n.tag);
+    for (const a of Object.keys(n.attrs ?? {})) assert.ok(!/^on/i.test(a) && a !== 'style' && a !== 'action' && a !== 'formaction', `${n.tag} ${a}`);
+  }
+  // CONTROL: a chat that does not show explore ships none of it.
+  assert.equal(partOf(exploreChat('chart'), 'explore').length, 0);
+});

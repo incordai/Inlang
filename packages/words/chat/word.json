@@ -49,7 +49,7 @@
     },
     "show": {
       "type": "list",
-      "max": 9,
+      "max": 10,
       "description": "Components an answer may hold besides text",
       "valueDescriptions": {
         "pricing": "The site's own pricing block, quoted as its page shows it",
@@ -60,7 +60,8 @@
         "table": "A table of public rows or figures, or labelled AI-generated",
         "stats": "Up to four key figures with their change",
         "cards": "Up to four cards; images only from this site's galleries or tables",
-        "dashboard": "Stats, charts, tables and cards under one title"
+        "dashboard": "Stats, charts, tables and cards under one title",
+        "explore": "A data set with sliders, dates, toggles or a form that recompute its tables, stats and charts in the page"
       }
     },
     "knows": {

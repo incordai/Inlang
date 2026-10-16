@@ -142,6 +142,8 @@ test('a chat that draws charts gets the theme\'s six series colours, in both sch
   const charts = file(project(SITE('    model default\n', '  chat panel\n    show chart\n')), 'src/theme.css');
   for (let n = 1; n <= 6; n++) assert.match(charts, new RegExp(`--az-color-series-${n}: `));
   assert.ok((charts.match(/--az-color-series-1: /g) ?? []).length >= 2, 'light and dark');
+  // An explore draws charts too (§21.3.4).
+  assert.match(file(project(SITE('    model default\n', '  chat panel\n    show explore\n')), 'src/theme.css'), /--az-color-series-6: /);
   assert.doesNotMatch(file(project(SITE('    model default\n', '  chat panel\n    show faq\n')), 'src/theme.css'), /series-/);
   assert.doesNotMatch(file(project(SITE('', '')), 'src/theme.css'), /series-/);
 });

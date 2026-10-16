@@ -1,7 +1,7 @@
 /**
  * @az module chat-figures
- * Purpose: the hidden templates an answer's charts, tables, stat cards, image cards, dashboards and share control are drawn from.
- * Spec: docs/chat-block-spec.md §20.4, §20.6, §20.7, §20.8
+ * Purpose: the hidden templates an answer's charts, tables, stat cards, image cards, dashboards, explores and share control are drawn from.
+ * Spec: docs/chat-block-spec.md §20.4, §20.6, §20.7, §20.8, §21.3.4
  * Exports: FIGURE_COPY, SERIES_PARTS, richParts, assetParts, sharePart
  * Edit guide: every paint is a class from a theme token — the runtime copies a part's class, never writes a colour or a style;
  *   a slot the runtime fills is an element marked data-az-chat-slot, filled with textContent only.
@@ -21,6 +21,12 @@
  * table equivalent), a table's cells, a stat card, an image card, a
  * dashboard's grid, the "could not be loaded" note, each gallery image a
  * card may show, and the share control.
+ *
+ * An explore (§21.3.4) is a labelled section of real controls — a range
+ * input with its label and an <output>, a date input, a radio group, a form
+ * of labelled fields and one button — and the views it recomputes. The
+ * runtime (overlay chat-explore-draw.ts) clones each control's template,
+ * writes its values through properties and its words through textContent.
  */
 
 import { contentShare, px, visuallyHidden, type EmitContext, type EmittedNode, type ThemeLike } from '../../core/src/emit-contract.ts';
@@ -262,22 +268,138 @@ function unavailable(t: ThemeLike): EmittedNode {
 }
 
 /**
+ * An explore (§21.3.4): its title, its controls' templates and the views'
+ * holders. Each control is a real one — the range input's value is in an
+ * <output> tied to it, the toggle is radios in a fieldset (arrow keys move
+ * between them), a form's fields are labelled and its one button submits.
+ */
+function explore(t: ThemeLike, ctx: EmitContext): EmittedNode {
+  const small = { margin: 0, fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'] };
+  const ring = { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } };
+  const field = {
+    minHeight: px(t.size.tap), padding: `0 ${px(t.space[8])}`, fontSize: t.typeSize.sm,
+    background: t.color.bg, color: t.color.text, border: `1px solid ${t.color['border-strong']}`, borderRadius: px(t.radius.sm),
+  };
+  const labelStyle = { ...small, color: t.color.text, fontWeight: t.type['weight-bold'] };
+  const control = (name: string, children: EmittedNode[]): EmittedNode => ({
+    tag: 'div', attrs: { class: 'az-chat-explore-control', 'data-az-chat-slot': name },
+    style: { display: 'grid', gap: px(t.space[4]), minWidth: 0 }, children,
+  });
+  const submit = ctx.submit('', { hierarchy: 'secondary' });
+  return {
+    // A group, not a landmark: a transcript may hold many explores, and a view's table is a region of its own.
+    tag: 'section', attrs: { class: 'az-chat-explore', role: 'group' },
+    style: { display: 'grid', gap: px(t.space[12]), minWidth: 0 },
+    children: [
+      slot('title', 'h3', { margin: 0, fontSize: t.typeSize.base, color: t.color.text }, { class: 'az-chat-explore-title' }),
+      {
+        tag: 'div', attrs: { class: 'az-chat-explore-controls', 'data-az-chat-slot': 'controls' },
+        style: { display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${px(t.space[128])}, 1fr))`, gap: px(t.space[12]), alignItems: 'start' },
+        children: [
+          control('slider', [
+            slot('label', 'label', labelStyle),
+            {
+              tag: 'div', attrs: { class: 'az-chat-explore-range' }, style: { display: 'flex', alignItems: 'center', gap: px(t.space[8]) },
+              children: [
+                {
+                  tag: 'input', attrs: { type: 'range', 'data-az-chat-slot': 'input', class: 'az-chat-explore-slider' },
+                  style: { flex: '1 1 auto', minWidth: 0, minHeight: px(t.size.tap), accentColor: t.color.accent }, states: ring,
+                },
+                slot('output', 'output', { ...small, color: t.color.text, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }),
+              ],
+            },
+          ]),
+          control('date', [
+            slot('label', 'label', labelStyle),
+            { tag: 'input', attrs: { type: 'date', 'data-az-chat-slot': 'input', class: 'az-chat-explore-date' }, style: { ...field, width: '100%' }, states: ring },
+          ]),
+          {
+            tag: 'fieldset', attrs: { class: 'az-chat-explore-toggle', 'data-az-chat-slot': 'toggle' },
+            style: { display: 'grid', gap: px(t.space[4]), margin: 0, padding: 0, border: '0', minWidth: 0 },
+            children: [
+              slot('legend', 'legend', { ...labelStyle, padding: 0 }),
+              {
+                tag: 'div', attrs: { 'data-az-chat-slot': 'options' }, style: { display: 'flex', flexWrap: 'wrap', gap: `0 ${px(t.space[16])}` },
+                children: [{
+                  tag: 'label', attrs: { class: 'az-chat-explore-option', 'data-az-chat-slot': 'option' },
+                  style: { ...small, display: 'inline-flex', alignItems: 'center', gap: px(t.space[8]), minHeight: px(t.size.tap), color: t.color.text },
+                  children: [
+                    { tag: 'input', attrs: { type: 'radio', 'data-az-chat-slot': 'radio' }, style: { width: px(t.space[16]), height: px(t.space[16]), accentColor: t.color.accent }, states: ring },
+                    slot('text', 'span', {}),
+                  ],
+                }],
+              },
+            ],
+          },
+          {
+            tag: 'form', attrs: { class: 'az-chat-explore-form', 'data-az-chat-slot': 'form' },
+            style: { display: 'grid', gap: px(t.space[8]), minWidth: 0, gridColumn: '1 / -1' },
+            children: [{
+              tag: 'fieldset', attrs: { class: 'az-chat-explore-fieldset' },
+              style: { display: 'grid', gap: px(t.space[8]), margin: 0, padding: 0, border: '0', minWidth: 0 },
+              children: [
+                slot('legend', 'legend', { ...labelStyle, padding: 0 }),
+                {
+                  tag: 'div', attrs: { 'data-az-chat-slot': 'fields' },
+                  style: { display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${px(t.space[128])}, 1fr))`, gap: px(t.space[12]) },
+                  children: [
+                    control('field-number', [
+                      slot('label', 'label', labelStyle),
+                      { tag: 'input', attrs: { type: 'number', step: 'any', required: 'required', 'data-az-chat-slot': 'input', class: 'az-chat-explore-number' }, style: { ...field, width: '100%' }, states: ring },
+                    ]),
+                    control('field-choice', [
+                      slot('label', 'label', labelStyle),
+                      {
+                        tag: 'select', attrs: { 'data-az-chat-slot': 'input', class: 'az-chat-explore-choice' }, style: { ...field, width: '100%' }, states: ring,
+                        children: [{ tag: 'option', attrs: { 'data-az-chat-slot': 'choice' }, children: [] }],
+                      },
+                    ]),
+                  ],
+                },
+                {
+                  tag: 'div', attrs: { class: 'az-chat-explore-submit' }, style: { display: 'flex', flexWrap: 'wrap', gap: px(t.space[8]) },
+                  children: [{ ...submit, attrs: { ...submit.attrs, type: 'submit', 'data-az-chat-slot': 'submit' } }],
+                },
+              ],
+            }],
+          },
+        ],
+      },
+      {
+        tag: 'div', attrs: { class: 'az-chat-explore-views', 'data-az-chat-slot': 'views' },
+        style: { display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${px(t.space[128])}, 1fr))`, gap: px(t.space[12]) },
+        children: [
+          { tag: 'div', attrs: { class: 'az-chat-tile', 'data-az-chat-slot': 'view' }, style: { minWidth: 0 }, children: [] },
+          {
+            tag: 'div', attrs: { class: 'az-chat-tile az-chat-tile--wide', 'data-az-chat-slot': 'view-wide' },
+            style: { minWidth: 0, gridColumn: '1 / -1' },
+            children: [],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
  * The rich templates a chat's `show` needs (chat-block-spec §20): the paint
  * classes and the figure frame for any of them, then each component's own.
+ * An explore draws charts, tables and stat cards too (§21.3.4).
  */
 export function richParts(answer: SpecChatAnswer, ctx: EmitContext): EmittedNode[] {
   const t = ctx.theme;
   const show = answer.show;
-  const rich = ['chart', 'table', 'stats', 'cards', 'dashboard'].filter((w) => show.includes(w));
+  const rich = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore'].filter((w) => show.includes(w));
   if (rich.length === 0) return [];
-  const charts = show.includes('chart') || show.includes('dashboard');
+  const has = (...words: string[]) => words.some((w) => show.includes(w));
   return [
-    ...(charts && t.color['series-1'] !== undefined ? [part('paint', paint(t))] : []),
+    ...(has('chart', 'dashboard', 'explore') && t.color['series-1'] !== undefined ? [part('paint', paint(t))] : []),
     part('figure', figure(t)),
     part('table', table(t)),
-    ...(show.includes('stats') || show.includes('dashboard') ? [part('stats', stats(t))] : []),
-    ...(show.includes('cards') || show.includes('dashboard') ? [part('cards', cards(t))] : []),
-    ...(show.includes('dashboard') ? [part('dashboard', dashboard(t))] : []),
+    ...(has('stats', 'dashboard', 'explore') ? [part('stats', stats(t))] : []),
+    ...(has('cards', 'dashboard') ? [part('cards', cards(t))] : []),
+    ...(has('dashboard') ? [part('dashboard', dashboard(t))] : []),
+    ...(has('explore') ? [part('explore', explore(t, ctx))] : []),
     part('unavailable', unavailable(t)),
   ];
 }

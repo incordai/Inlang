@@ -310,17 +310,17 @@ const chatToolsCheck: Check = {
         fix: ['each tool needs _URL (https, or http on localhost), _FIELDS and _LABEL; _PARAMS, _SAMPLE and _TIMEOUT_MS as .env.example says', 'names checked, no value printed'],
       };
     }
-    // context.json says which chats show a chart, a table, stats or cards: only those may use a tool (§21.2.8 O5, §19.11).
+    // context.json says which chats show a chart, a table, stats, cards or an explore: only those may use a tool (§21.2.8 O5, §19.11, §21.3).
     const context = await readRegular(join(got.server, 'chat', 'context.json'));
     let usable = true;
     if (context !== null) {
       const { parseChatContext } = await import('../../backend/src/server/chat.ts');
       const c = parseChatContext(context);
-      if (typeof c !== 'string') usable = Object.values(c.chats).some((x) => x.show.some((w) => w === 'chart' || w === 'table' || w === 'stats' || w === 'cards'));
+      if (typeof c !== 'string') usable = Object.values(c.chats).some((x) => x.show.some((w) => w === 'chart' || w === 'table' || w === 'stats' || w === 'cards' || w === 'explore'));
     }
     const notes = [
       ...(unsampled.length > 0 ? [`${unsampled.join(', ')} ${unsampled.length === 1 ? 'is' : 'are'} not set — az backend probe can't call ${unsampled.length === 1 ? 'that tool' : 'those tools'} (${unsampled.length === 1 ? 'it requires' : 'they require'} parameters)`] : []),
-      ...(usable ? [] : ['no chat shows a chart, a table, stats or cards, so no answer can use a tool']),
+      ...(usable ? [] : ['no chat shows a chart, a table, stats, cards or an explore, so no answer can use a tool']),
     ];
     const line = `${count(tools.length, 'tool')} declared (${tools.join(', ')}), each URL, parameter shape, field shape, label and sample valid`;
     if (notes.length > 0) return { status: 'warn', line: `chat tools: ${notes.join('; ')}`, fix: [line, 'set a _SAMPLE the endpoint answers, then run az backend probe'] };

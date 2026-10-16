@@ -89,6 +89,21 @@ test('AZ1270: a dashboard with nothing it can hold', () => {
   assert.deepEqual(errors(`${HEAD}${page('dashboard stats')}`), [], 'CONTROL');
 });
 
+test('C7 (§21.3): explore is a value of show — it takes the public tables; a dashboard cannot hold one (AZ1270); a page cannot write one', () => {
+  const src = `${HEAD}${DATA}${page('explore')}`;
+  assert.deepEqual(errors(src), []);
+  const answer = chatOf(src)?.chat?.answer;
+  assert.deepEqual(answer?.show, ['explore']);
+  assert.deepEqual(answer?.tables?.map((t) => t.name), ['orders'], 'an explore may take a table\'s rows');
+  assert.equal(answer?.images, undefined);
+  assert.deepEqual(errors(`${HEAD}${page('dashboard explore')}`), ['AZ1270'], 'an explore is not a tile');
+  assert.deepEqual(errors(`${HEAD}${page('dashboard explore chart')}`), [], 'CONTROL');
+  // The table named tool is refused beside an explore too: it takes `from`.
+  assert.deepEqual(errors(`${HEAD}${DATA.replace('  data orders', '  data tool')}${page('explore')}`), ['AZ1272']);
+  assert.ok(errors(`${HEAD}page /\n  explore\n    title "x"\n  chat panel\n`).length > 0, 'not a word');
+  assert.ok(!manifests.has('explore'));
+});
+
 test('AZ1272: a public table named tool, where a chat shows a component with from — that word is the data tools\'', () => {
   const TOOL = DATA.replace('  data orders', '  data tool');
   const r = run(`${HEAD}${TOOL}${page('chart')}`);

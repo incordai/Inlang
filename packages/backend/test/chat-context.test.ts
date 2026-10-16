@@ -202,6 +202,24 @@ test('with show: context.json says what each chat may show, the quotable blocks 
   assert.doesNotMatch(prose.prompt, /Components:/);
 });
 
+test('C7 (§21.3): a chat that shows explore is taught its form — data, controls, views, no formula — and its page is told the tables', () => {
+  const r = compile(SHOW_SITE.replace('    show  pricing faq cta', '    show  explore'), { manifests });
+  assert.ok(r.ok && r.spec, JSON.stringify(r.diagnostics));
+  const a = chatBackend(r.spec)!;
+  assert.match(a.prompt, /^explore "A title"$/m);
+  assert.match(a.prompt, /^ {2}slider seats "Team size" 1 50 step 1 value 5$/m);
+  assert.match(a.prompt, /^ {2}form "Find a plan" send "Which plan fits \{budget\} a month\?"$/m);
+  assert.match(a.prompt, /^ {2}view chart bar "Price by plan" sum Price by Plan where Seats >= \$seats$/m);
+  assert.match(a.prompt, /nothing else is computed, so never write a formula/);
+  const ctx = parseChatContext(a.context);
+  assert.ok(typeof ctx === 'object');
+  assert.deepEqual(ctx.chats['/'].show, ['explore']);
+  assert.match(systemText(a.prompt, ctx, '/'), /may hold these components and no other: explore\./);
+  assert.match(systemText(a.prompt, ctx, '/'), /There are no tables to take figures "from"/);
+  // CONTROL: a chat that does not show it is not taught it.
+  assert.doesNotMatch(chatBackend(compile(SHOW_SITE, { manifests }).spec!)!.prompt, /^explore /m);
+});
+
 test('the per-request system text names what the visitor\'s page may show; a prose-only page is told so', () => {
   const r = compile(SHOW_SITE, { manifests });
   const a = chatBackend(r.spec!)!;

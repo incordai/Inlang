@@ -188,7 +188,7 @@ test('chat tools: each declaration and its sample by key name; refused keys fail
   const q = built();
   q.setEnv(TOOL);
   const unusable = await check('chat-tools', q);
-  assert.deepEqual([unusable.status, unusable.line], ['warn', 'chat tools: no chat shows a chart, a table, stats or cards, so no answer can use a tool']);
+  assert.deepEqual([unusable.status, unusable.line], ['warn', 'chat tools: no chat shows a chart, a table, stats, cards or an explore, so no answer can use a tool']);
 });
 
 test('chat budget: a budget that cannot pay for one answer fails; the default and the kill switch warn; CONTROL passes with the answers it pays for', async () => {

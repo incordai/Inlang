@@ -28,14 +28,14 @@ export { SHARED_ROUTE };
 export const CHAT_FILE = 'src/chat/runtime.tsx';
 
 /** The behaviour runtime's files that only a site with a chat block ships. */
-export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'rows-logic.ts'];
+export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts', 'rows-logic.ts'];
 
 /** Every page's chat — its own, or the site's float, as blocksFor resolves it (chat-block-spec §3.1). */
 const chatsOf = (spec: Spec): SpecBlock[] => spec.pages.flatMap((p) => blocksFor(spec, p).filter((b) => b.word === 'chat'));
 
 /** Some chat may draw a chart (chat-block-spec §20.4): the site's theme gets its series colours. */
 export function usesSeries(spec: Spec): boolean {
-  return chatsOf(spec).some((b) => (b.chat?.answer?.show ?? []).some((w) => w === 'chart' || w === 'stats' || w === 'dashboard'));
+  return chatsOf(spec).some((b) => (b.chat?.answer?.show ?? []).some((w) => w === 'chart' || w === 'stats' || w === 'dashboard' || w === 'explore'));
 }
 
 /** A page's chat may show image cards (§20.6): row images come from the backend, so its img-src names it. */
