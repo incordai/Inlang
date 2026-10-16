@@ -49,7 +49,7 @@
  */
 
 import {
-  ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind,
+  ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind, mayFollow,
   parseChatConfig, problemCopy, readShareLink, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
 } from './chat-logic.ts';
 import { FOCUSABLE, lockScroll, wireSheetDrag } from './behaviours.ts';
@@ -319,12 +319,22 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
 
   /* ---- §9: the transcript follows the newest words while the visitor is at its end ---- */
   let following = true;
+  /** Where the transcript was at its last scroll event, or where following last put it (chat-logic mayFollow). */
+  let known = 0;
   /** Jump to latest is scrolling there: the positions it passes are not the visitor scrolling up. */
   let jumping = false;
+  /** Follow from wherever the transcript is now: the visitor asked, or the float opened. */
+  const resume = () => {
+    following = true;
+    known = 0;
+  };
   const follow = () => {
-    if (following) p.transcript.scrollTop = p.transcript.scrollHeight;
+    if (!mayFollow(following, p.transcript.scrollTop, known)) return;
+    p.transcript.scrollTop = p.transcript.scrollHeight;
+    known = p.transcript.scrollTop;
   };
   const onScroll = () => {
+    known = p.transcript.scrollTop;
     const end = atEnd(p.transcript.scrollTop, p.transcript.scrollHeight, p.transcript.clientHeight);
     if (jumping && !end) return;
     jumping = false;
@@ -383,7 +393,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     if (para) para.textContent = text;
     p.transcript.append(item);
     // A question the visitor sends is one they mean to see answered: the transcript follows again.
-    if (who === 'visitor') following = true;
+    if (who === 'visitor') resume();
     follow();
     return item;
   };
@@ -650,7 +660,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     f.launcher.setAttribute('aria-expanded', 'true');
     // A frame later, so the browser has the closed style to move from.
     win.requestAnimationFrame(() => { if (f.dialog.open) f.dialog.setAttribute('data-state', 'open'); });
-    following = true;
+    resume();
     follow();
     (p.form.hidden ? f.close : p.input).focus({ preventScroll: true });
   };

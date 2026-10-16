@@ -2,7 +2,7 @@
  * @az runtime chat-logic
  * Purpose: the chat runtime's pure rules: the shell's config, the event-stream reader, a visitor's text, finished sentences, fixed copy.
  * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
- * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, parseChatConfig, atEnd, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
+ * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, parseChatConfig, atEnd, mayFollow, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
  * Edit guide: no DOM here; every event is checked against its closed shape and an unknown one is dropped, never guessed at.
  * Tests: packages/overlay/test/chat.test.ts
  */
@@ -43,6 +43,16 @@ export const END_SLACK_PX = 24;
 /** The transcript is scrolled to its end — the visitor is reading the newest words (§9). */
 export const atEnd = (scrollTop: number, scrollHeight: number, clientHeight: number): boolean =>
   scrollHeight - scrollTop - clientHeight <= END_SLACK_PX;
+
+/**
+ * New words may move the transcript to its end (§9). `following` is what the
+ * last scroll event decided, and `known` where the transcript was then (or
+ * where following last put it). A scroll event comes a frame after the
+ * scroll: words arriving in between find the transcript above `known` — the
+ * visitor has scrolled up, and their place wins over the newest words.
+ */
+export const mayFollow = (following: boolean, scrollTop: number, known: number): boolean =>
+  following && scrollTop >= known - END_SLACK_PX;
 
 /**
  * The overlay preset a float opens as at this viewport width (chat-block-spec

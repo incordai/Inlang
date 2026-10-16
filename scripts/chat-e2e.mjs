@@ -1018,8 +1018,12 @@ const transcriptAtEnd = (page) => page.evaluate(() => {
   const t = document.querySelector('[data-az-chat-transcript]');
   return t.scrollHeight - t.scrollTop - t.clientHeight <= 24;
 });
-/** Scroll the long answer up while it streams: the transcript must stop following and offer Jump to latest. */
-async function scrolledUpWhileStreaming(page) {
+/**
+ * Scroll the long answer up while it streams: the transcript must stop following and offer Jump to latest.
+ * A scroll event comes a frame after the scroll, so words can arrive in between: here they always do — the
+ * scroll's event is held back until the next paragraph is drawn — and the visitor's place must survive them.
+ */
+async function scrolledUpWhileStreaming(page, label) {
   const input = panel(page).locator('[data-az-chat-input]');
   await input.fill('scroll please');
   await input.press('Enter');
@@ -1027,7 +1031,28 @@ async function scrolledUpWhileStreaming(page) {
     const t = document.querySelector('[data-az-chat-transcript]');
     return t.scrollHeight > t.clientHeight + 200;
   }, null, { timeout: STATE_MS });
-  await page.evaluate(() => { document.querySelector('[data-az-chat-transcript]').scrollTop = 0; });
+  const raced = await page.evaluate((ms) => new Promise((done) => {
+    const t = document.querySelector('[data-az-chat-transcript]');
+    const answer = t.querySelector(':scope > li:last-child');
+    const drawn = answer.querySelectorAll(':scope > p').length;
+    let timer = 0;
+    const hold = (e) => { if (e.target === t) e.stopPropagation(); };
+    const release = (result) => {
+      words.disconnect();
+      clearTimeout(timer);
+      document.removeEventListener('scroll', hold, { capture: true });
+      t.dispatchEvent(new Event('scroll'));
+      done(result);
+    };
+    const words = new MutationObserver(() => {
+      if (answer.querySelectorAll(':scope > p').length > drawn) release({ kept: t.scrollTop === 0 });
+    });
+    document.addEventListener('scroll', hold, { capture: true });
+    words.observe(answer, { childList: true });
+    t.scrollTop = 0;
+    timer = setTimeout(() => release({ kept: false, detail: `no new paragraph within ${ms}ms` }), ms);
+  }), STATE_MS);
+  check(`${label}: a scroll up whose event comes after the next words keeps the visitor's place`, raced.kept, raced.detail ?? '');
   await panel(page).locator('[data-az-chat-latest]').waitFor({ state: 'visible', timeout: STATE_MS });
   const before = await page.evaluate(() => document.querySelectorAll('[data-az-chat-transcript] > li:last-child > p').length);
   await page.waitForFunction((n) => document.querySelectorAll('[data-az-chat-transcript] > li:last-child > p').length >= n + 3, before, { timeout: STATE_MS });
@@ -1125,7 +1150,7 @@ async function floatFlow(b, name, origins) {
     // §9: scrolled up, the transcript stops following and offers Jump to latest; that goes back to the end.
     await launcher(page).click();
     await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
-    const stayed = await scrolledUpWhileStreaming(page);
+    const stayed = await scrolledUpWhileStreaming(page, `${name} wide`);
     check(`${name}: scrolled up while an answer streams, the transcript stays where the visitor put it`, stayed);
     const jump = panel(page).locator('[data-az-chat-latest]');
     check(`${name}: Jump to latest is offered, a real button`, await jump.isVisible() && (await jump.textContent()).trim() === 'Jump to latest');
@@ -1179,7 +1204,7 @@ async function floatFlow(b, name, origins) {
     await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
     check(`${name}: reduced motion, the panel only fades — no slide`,
       (await floatDialog(page).evaluate((d) => getComputedStyle(d).transitionProperty)) === 'opacity');
-    await scrolledUpWhileStreaming(page);
+    await scrolledUpWhileStreaming(page, `${name} reduced motion`);
     const instant = await page.evaluate(() => {
       document.querySelector('[data-az-chat-latest]').click();
       const t = document.querySelector('[data-az-chat-transcript]');
@@ -1268,8 +1293,21 @@ async function adminFlow(b, name, origins) {
   }
 }
 
-/** One answered state as a PNG, from a fresh page: nothing moving, fonts loaded, the caret hidden. */
-async function snapshot(b, url, scheme, state) {
+/*
+ * The snapshots' own Chromium, without partial raster. With it (the default)
+ * a change re-rasters only its own rectangle into the tile already drawn, so
+ * the pixels at that rectangle's edge can keep what was there before: clay's
+ * float-wide state came out two ways, its Send button's bottom corners one
+ * level apart, as the stream's timing put the answer's last words and Send's
+ * return in one frame or in two. Without it every changed tile is drawn
+ * whole from the page as it is — the picture is the state's, not its history's.
+ */
+const SNAP_ARGS = ['--disable-partial-raster'];
+/** The control's pixel, this far into the float from its inner corner: clear of the rounded border. */
+const MARK_INSET = 16;
+
+/** One answered state as a PNG, from a fresh page: nothing moving, fonts loaded, the caret hidden; `mark`, one pixel added (the control). */
+async function snapshot(b, url, scheme, state, mark = false) {
   const ctx = await watchedContext(b, csp, { ...CONTEXT, viewport: state.viewport, colorScheme: scheme, reducedMotion: 'reduce' });
   try {
     const page = await ctx.newPage();
@@ -1286,6 +1324,21 @@ async function snapshot(b, url, scheme, state) {
     await page.mouse.move(0, 0);
     await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, { timeout: STATE_MS });
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    if (mark) {
+      // One device pixel inside the float's border, on whole pixels of the viewport.
+      await page.evaluate((inset) => {
+        const d = document.querySelector('dialog.az-chat-dialog');
+        const r = d.getBoundingClientRect();
+        const dot = document.createElement('div');
+        dot.setAttribute('aria-hidden', 'true');
+        Object.assign(dot.style, {
+          position: 'absolute', width: '1px', height: '1px', background: 'rgb(255 0 255)',
+          left: `${Math.ceil(r.left + d.clientLeft) - r.left - d.clientLeft + inset}px`, top: `${Math.ceil(r.top + d.clientTop) - r.top - d.clientTop + inset}px`,
+        });
+        d.append(dot);
+      }, MARK_INSET);
+      await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    }
     const target = state.whole ? page : state.float ? floatDialog(page) : page.locator('[data-az-chat-transcript] > .az-chat-message--site').last();
     return await target.screenshot({ animations: 'disabled', caret: 'hide' });
   } finally {
@@ -1293,9 +1346,25 @@ async function snapshot(b, url, scheme, state) {
   }
 }
 
-async function snapshotFlow(b) {
+async function snapshotFlow() {
   mkdirSync(SNAP_OUT, { recursive: true });
   const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+  const b = await chromium.launch({ args: SNAP_ARGS });
+  try {
+    await snapshotsIn(b, sha);
+  } finally {
+    closed = (await closeWithin(b, CLOSE_MS, 'snapshot chromium.close')) && closed;
+  }
+}
+
+async function snapshotsIn(b, sha) {
+  // CONTROL: the byte comparison sees a single pixel — the same state, once plain and once with one pixel added.
+  {
+    const [state] = SNAP_STATES;
+    const plain = await snapshot(b, host.url, 'light', state);
+    const marked = await snapshot(b, host.url, 'light', state, true);
+    check(`snapshots CONTROL: one added pixel changes the ${state.name} snapshot`, sha(plain) !== sha(marked));
+  }
   for (const { theme, url } of themeHosts) {
     const unstable = [];
     const alike = [];
@@ -1321,28 +1390,42 @@ async function snapshotFlow(b) {
   console.log(`snapshots: ${themeHosts.length * SNAP_STATES.length * 2} PNGs in ${SNAP_OUT}`);
 }
 
+/** Each engine's flows, in order; a step that throws ends its engine's run there. */
+const FLOWS = [
+  ['anonymous', anonymousFlow], ['signed-in', signedInFlow], ['components', componentsFlow], ['figures', richFlow],
+  ['float', floatFlow], ['moderation', moderationFlow], ['admin', adminFlow],
+];
+/** Where an engine's flows stopped: the flow, and the last check that passed before it. */
+const stopped = {};
+/** The engines whose moderation flow ran to its end: the server's block counts are judged on them. */
+const moderated = new Set();
+/** The line of a timed-out wait's call log that names what it was waiting for, without its colour codes. */
+const waitedFor = (message) => message.split('\n').find((l) => l.includes('waiting for '))?.replace(/\u001b\[\d+m/g, '').replace(/^\s*- /, '').trim() ?? '';
+
 const errors = [];
 try {
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
     const b = await engine.launch();
+    let step = `${name} policy control`;
     try {
       const caught = await violationControl(b, `${host.url}/az-policy-control/`, CONTROL_MS);
       check(`${name} CONTROL §2 B: the watch reports a page that breaks its policy`, !cspResult(caught).pass, caught[0] ?? 'nothing reported');
       const origins = new Set();
-      await anonymousFlow(b, name, origins);
-      await signedInFlow(b, name, origins);
-      await componentsFlow(b, name, origins);
-      await richFlow(b, name, origins);
-      await floatFlow(b, name, origins);
-      await moderationFlow(b, name, origins);
-      await adminFlow(b, name, origins);
+      for (const [flow, steps] of FLOWS) {
+        step = `${name} ${flow} flow`;
+        await steps(b, name, origins);
+        if (flow === 'moderation') moderated.add(name);
+      }
       const others = [...origins].filter((o) => o !== host.url && o !== backendOrigin);
       check(`${name}: every request went to the site or its backend — nothing else`, others.length === 0 && origins.has(backendOrigin), [...origins].join(' '));
       // Gate item 3's method, in the engine the gate's screenshots use.
-      if (name === 'chromium') await snapshotFlow(b);
+      step = `${name} snapshots`;
+      if (name === 'chromium') await snapshotFlow();
     } catch (e) {
+      stopped[name] = `the ${step}, after "${progress.last}"`;
+      const waited = waitedFor(e.message);
       errors.push(`${name}: ${e.message.split('\n')[0]}`);
-      check(`${name}: the flows ran to the end`, false, e.message.split('\n')[0]);
+      check(`${name}: the flows ran to the end`, false, `stopped in ${stopped[name]}: ${e.message.split('\n')[0]}${waited ? ` — ${waited}` : ''}`);
     } finally {
       closed = (await closeWithin(b, CLOSE_MS, `${name}.close`)) && closed;
     }
@@ -1357,8 +1440,16 @@ try {
     && !serverLog.includes('private-mark') && !serverLog.includes('Expected next quarter') && !serverLog.includes(GUIDE_SECRET)
     && !serverLog.includes('lifetime warranty'));
   check('the server logged the corpus\'s drops as counts and reasons only', /dropped \d+ \([a-z_,]+\)/.test(serverLog));
-  check('the moderation hook was asked, and blocked once per engine', moderation.seen.asked > 0 && moderation.seen.blocked === ENGINES.length, JSON.stringify(moderation.seen));
-  check('the server logged each block as a code, never the words', (serverLog.match(/chat: blocked by moderation/g) ?? []).length === ENGINES.length && !serverLog.includes(MODERATE_BLOCK));
+  // A count per engine means nothing once an engine stopped before its moderation flow: said so, not miscounted (the stop already failed the run).
+  const unmoderated = ENGINES.filter((e) => !moderated.has(e));
+  const perEngine = [
+    ['the moderation hook was asked, and blocked once per engine', () => [moderation.seen.asked > 0 && moderation.seen.blocked === ENGINES.length, JSON.stringify(moderation.seen)]],
+    ['the server logged each block as a code, never the words', () => [(serverLog.match(/chat: blocked by moderation/g) ?? []).length === ENGINES.length && !serverLog.includes(MODERATE_BLOCK)]],
+  ];
+  for (const [name, judge] of perEngine) {
+    if (unmoderated.length === 0) check(name, ...judge());
+    else console.log(`SKIP  ${name}   skipped because ${unmoderated.map((e) => `${e} flows stopped in ${stopped[e]}`).join('; ')}`);
+  }
 } finally {
   child.kill('SIGTERM');
   proxy.close();

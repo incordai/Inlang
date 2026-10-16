@@ -1,6 +1,7 @@
 /**
  * C3's runtime rules (chat-block-spec §3.2, §9), pure: when the transcript
- * counts as at its end (it follows only then), which overlay preset a float
+ * counts as at its end (it follows only then, and never over a scroll up
+ * whose event is still to come), which overlay preset a float
  * opens as at a width — the modal sheet below the shell's narrow width, the
  * non-modal panel above — and the config key that carries that width. The
  * DOM half (open, trap, Escape, focus return, Jump to latest) runs in three
@@ -10,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { END_SLACK_PX, atEnd, floatPreset, parseChatConfig } from '../src/runtime/chat-logic.ts';
+import { END_SLACK_PX, atEnd, floatPreset, mayFollow, parseChatConfig } from '../src/runtime/chat-logic.ts';
 import { POLICY } from '../src/runtime/policy.ts';
 
 test('atEnd: the end, within a line of it, and above it', () => {
@@ -18,6 +19,14 @@ test('atEnd: the end, within a line of it, and above it', () => {
   assert.equal(atEnd(600 - END_SLACK_PX, 1000, 400), true, 'a line short still counts');
   assert.equal(atEnd(600 - END_SLACK_PX - 1, 1000, 400), false, 'scrolled up: following stops');
   assert.equal(atEnd(0, 300, 400), true, 'a transcript too short to scroll is always at its end');
+});
+
+test('mayFollow: a scroll up whose event is still to come wins over new words', () => {
+  assert.equal(mayFollow(true, 600, 600), true, 'where following left it: follow');
+  assert.equal(mayFollow(true, 600 - END_SLACK_PX, 600), true, 'a line above it still follows');
+  assert.equal(mayFollow(true, 0, 600), false, 'scrolled to the top before the event ran: stay');
+  assert.equal(mayFollow(false, 600, 600), false, 'the last event said scrolled up: stay');
+  assert.equal(mayFollow(true, 0, 0), true, 'resumed (the visitor asked, the float opened): follow from anywhere');
 });
 
 test('floatPreset: the sheet below the narrow width (modal, trapped, locked); the side panel at and above it (not modal)', () => {
