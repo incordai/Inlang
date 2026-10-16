@@ -62,9 +62,9 @@ that only exists in CI config will drift.**
 
 Browsers: `pnpm exec playwright install chromium firefox webkit` once. Every
 browser suite also installs the generated project's pinned dependencies
-(network) before it builds. CI (`.github/workflows/ci.yml`, §7) runs
-`verify`, `verify:build`, the word gate with lint, auth, dev, 3D,
-thumbnails and the palette suite, and `test:backend-db`.
+(network) before it builds. CI (`.github/workflows/ci.yml`, §7) runs every
+suite in this table: all of them on every push and PR except
+`test:lighthouse`, which runs nightly.
 
 ---
 
@@ -202,12 +202,15 @@ than guess.
 ## 7. CI
 
 `.github/workflows/ci.yml` runs on every push to `main`, every PR, nightly
-(03:00 UTC) and on demand. Four parallel jobs, each on Ubuntu and Node 22
-unless noted, each step a command from §1, so CI and a local run cannot
-differ:
+(03:00 UTC) and on demand. Seven parallel jobs on every run, and an eighth
+nightly and on demand, each on Ubuntu and Node 22 unless noted, each step a
+command from §1, so CI and a local run cannot differ. A push does not cancel
+the nightly run (the concurrency group holds the event):
 
 - **verify** (typecheck + unit) — `pnpm verify`: the typecheck and every
-  unit suite (dependency rules, determinism, offline build). On a
+  unit suite (dependency rules, determinism, offline build); then
+  `pnpm coverage` and `pnpm bench:tokens` (seconds each; the benchmark
+  fails when a corpus site does not compile). On a
   push or PR it runs on Ubuntu, Node 22; nightly it runs across Ubuntu,
   macOS and Windows on Node 22 and 24.
 - **build** (end-to-end build and render) — `pnpm verify:build`.
@@ -223,10 +226,26 @@ differ:
 - **backend-db** (built-in backend on PostgreSQL and MySQL) —
   `pnpm test:backend-db`, which starts and removes its pinned database
   images itself (backend-spec §10).
+- **chat** (chat block end to end) — after installing the three engines:
+  `pnpm test:chat` (chat-block-spec §12), over local https with a
+  certificate made at test time; no model is called.
+- **data** (data tables end to end) — after installing the three engines:
+  `pnpm test:data` (data-spec §14), over local https likewise.
+- **cloud-auth** (hosted auth against the real identity server) — after
+  installing Chromium: `pnpm test:cloud-auth`, which starts and removes the
+  pinned server image and its database in the runner's Docker
+  (auth-block-spec §3.5).
+- **lighthouse** (Lighthouse on every preview; nightly and on demand only) —
+  after installing Chromium: `pnpm test:lighthouse --json … --reports …`,
+  alone on its runner. Scores move with load, so the job fails only when a
+  site cannot be built or audited — the script has no score threshold: a
+  score below the M5 target (perf ≥ 85, a11y 100, SEO ≥ 95) is printed with
+  a `!`, not failed. The summary, the JSON and every site's full report are
+  kept as the `lighthouse-results` artifact for 30 days, pass or fail.
 
-Not in CI, run locally (§1.1): `pnpm test:chat`, `pnpm test:data`,
-`pnpm test:cloud-auth`, `pnpm test:lighthouse`, `pnpm coverage` and
-`pnpm bench:tokens`.
+Every job is bounded by `timeout-minutes`. When chat, data or cloud-auth
+fails, its log (and chat's pixel snapshots, `.visual-out/chat/`) is kept as
+an artifact for 14 days.
 
 `.github/workflows/security.yml` runs on every push to `main`, every PR,
 weekly (Monday 04:30 UTC) and on demand — see docs/security-scanning.md:
@@ -244,7 +263,8 @@ development platform for this project, and path length, line endings and
 symlink permissions all bite a JS build tool there (word-quality-gate §5.3).
 A Windows failure found nightly is cheap; found by a contributor is not.
 
-Required to merge: every job above.
+Required to merge: every job above except lighthouse, which runs only
+nightly and on demand.
 Visual snapshots may be updated in a PR **only with a written explanation of
 what changed and why** (CONVENTIONS §9).
 
