@@ -101,7 +101,7 @@ function figure(t: ThemeLike): EmittedNode {
     attrs: { class: 'az-chat-figure' },
     style: {
       display: 'grid', gap: px(t.space[8]), margin: 0, padding: px(t.space[12]),
-      background: t.color.bg, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0,
+      background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0,
     },
     children: [
       {
@@ -201,7 +201,7 @@ function stats(t: ThemeLike): EmittedNode {
     style: { display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${px(t.space[128])}, 1fr))`, gap: px(t.space[12]), margin: 0 },
     children: [{
       tag: 'div', attrs: { class: 'az-chat-stat', 'data-az-chat-slot': 'stat' },
-      style: { display: 'grid', gap: px(t.space[4]), padding: px(t.space[12]), background: t.color['surface-alt'], borderRadius: px(t.radius.sm), minWidth: 0 },
+      style: { display: 'grid', gap: px(t.space[4]), padding: px(t.space[12]), background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0 },
       children: [
         slot('label', 'dt', { margin: 0, fontSize: t.typeSize.sm, color: t.color.muted }),
         slot('value', 'dd', { margin: 0, fontSize: t.typeSize['2xl'], fontWeight: t.type['weight-bold'], lineHeight: t.type['leading-tight'], color: t.color.text, fontVariantNumeric: 'tabular-nums' }),
@@ -222,7 +222,7 @@ function cards(t: ThemeLike): EmittedNode {
     style: { display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${px(t.space[128])}, 1fr))`, gap: px(t.space[12]), margin: 0, padding: 0, listStyle: 'none' },
     children: [{
       tag: 'li', attrs: { class: 'az-chat-card', 'data-az-chat-slot': 'card' },
-      style: { display: 'grid', alignContent: 'start', gap: px(t.space[8]), padding: px(t.space[12]), background: t.color.bg, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0 },
+      style: { display: 'grid', alignContent: 'start', gap: px(t.space[8]), padding: px(t.space[12]), background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0 },
       children: [
         slot('media', 'div', { borderRadius: px(t.radius.sm), overflow: 'hidden', background: t.color['surface-alt'] }),
         slot('title', 'h3', { margin: 0, fontSize: t.typeSize.base, lineHeight: t.type['leading-tight'], color: t.color.text }),
@@ -287,7 +287,7 @@ function explore(t: ThemeLike, ctx: EmitContext): EmittedNode {
   const ring = { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } };
   const field = {
     minHeight: px(t.size.tap), padding: `0 ${px(t.space[8])}`, fontSize: t.typeSize.sm,
-    background: t.color.bg, color: t.color.text, border: `1px solid ${t.color['border-strong']}`, borderRadius: px(t.radius.sm),
+    background: t.color.surface, color: t.color.text, border: `1px solid ${t.color['border-strong']}`, borderRadius: px(t.radius.sm),
   };
   const labelStyle = { ...small, color: t.color.text, fontWeight: t.type['weight-bold'] };
   const control = (name: string, children: EmittedNode[]): EmittedNode => ({
@@ -411,7 +411,7 @@ function map(t: ThemeLike, ctx: EmitContext): EmittedNode {
     tag: 'figure', attrs: { class: 'az-chat-map', 'data-az-chat-map': 'loading' },
     style: {
       display: 'grid', gap: px(t.space[8]), margin: 0, padding: px(t.space[12]),
-      background: t.color.bg, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0,
+      background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0,
     },
     children: [
       {
@@ -566,7 +566,7 @@ export function sharePart(ctx: EmitContext): EmittedNode {
       tag: 'input', attrs: { type: 'text', readonly: 'readonly', 'data-az-chat-slot': name, class: 'az-chat-share-url' },
       style: {
         width: '100%', minHeight: px(t.size.tap), padding: `0 ${px(t.space[8])}`, fontSize: t.typeSize.sm,
-        background: t.color.bg, color: t.color.text, border: `1px solid ${t.color['border-strong']}`, borderRadius: px(t.radius.sm),
+        background: t.color.surface, color: t.color.text, border: `1px solid ${t.color['border-strong']}`, borderRadius: px(t.radius.sm),
       },
       states: { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } },
     }],

@@ -360,14 +360,16 @@ As built in C1 (each with a case in `packages/core/test/chat-decl.test.ts`):
   },
   "slots": { "ask": {} },
   "themeReads": [
-    "breakpoint.sm", "color.accent", "color.bg", "color.border", "color.border-strong", "color.danger",
+    "breakpoint.sm", "color.accent", "color.accent-contrast", "color.accent-hover", "color.bg", "color.border",
+    "color.border-strong", "color.chat-visitor", "color.danger",
     "color.focus", "color.muted", "color.series-1", "color.series-2", "color.series-3", "color.series-4",
-    "color.series-5", "color.series-6", "color.surface", "color.surface-alt", "color.text", "layer.dropdown",
-    "layer.modal", "motion.easeIn", "motion.easeOut", "motion.fast", "motion.slow", "radius.full", "radius.lg",
-    "radius.md", "radius.sm", "shadow.lg", "size.gutter-sm", "size.measure-body", "size.measure-display",
+    "color.series-5", "color.series-6", "color.surface", "color.surface-alt", "color.text", "gradient.accent",
+    "gradient.accent-hover", "layer.dropdown", "layer.modal", "layer.raised", "motion.easeIn", "motion.easeOut",
+    "motion.fast", "motion.slow", "radius.full", "radius.lg",
+    "radius.md", "radius.sm", "shadow.lg", "shadow.md", "size.gutter-sm", "size.measure-body", "size.measure-display",
     "size.ring", "size.ring-offset", "size.tap", "space.4", "space.8", "space.12", "space.16", "space.24",
-    "space.32", "space.48", "space.96", "space.128", "type.display", "type.leading-body", "type.leading-tight",
-    "type.mono", "type.size.2xl", "type.size.base", "type.size.sm", "type.weight-bold", "type.weight-display"
+    "space.32", "space.48", "space.96", "space.128", "type.display", "type.body", "type.leading-body", "type.leading-tight",
+    "type.mono", "type.size.2xl", "type.size.base", "type.size.lg", "type.size.sm", "type.size.xl", "type.weight-bold", "type.weight-display"
   ],
   "checks": ["AZ2220 … AZ2229, the table above"]
 }
@@ -375,9 +377,13 @@ As built in C1 (each with a case in `packages/core/test/chat-decl.test.ts`):
 
 `show` is a free list in the manifest so that a word outside the closed set
 reaches the file-wide rule that gives its reason (AZ1254) rather than a bare
-"not a show". The colour reads are §9's: visitor messages on `surface-alt`,
-answers on `surface`, the input's edge `border-strong`, errors `danger`;
-Send is the button primitive's primary (its own accent reads).
+"not a show". The colour reads are §9's: the panel and the float on
+`surface`; visitor messages on `chat-visitor` (the accent's quiet tint,
+theme-spec §16), answers on the plain surface with no bubble; the input's
+edge `border-strong`, errors `danger`; Send is the button primitive's
+primary (its own accent reads) and the only place an accent pair's
+`gradient.accent` is painted — elsewhere the chat flattens it to the solid
+accent (`accent-contrast` on `accent`).
 
 ---
 
@@ -640,7 +646,8 @@ answers:
    hidden `<template>` per thing an answer may show:
    - for each quotable block (each `pricing` on any page, when `show` has
      `pricing`): the block exactly as that page renders it, by the word's own
-     emitter — its classes are already in the site's generated stylesheet;
+     emitter — its classes are already in the site's generated stylesheet —
+     drawn compact (§19.14): no page padding or ground, its heading at `lg`;
    - for `faq`, `cta`, `feature`: the word's emitter run on a placeholder
      block whose text is markers (`fromMark`, `emit-contract.ts`), as a `from`
      template is.
@@ -905,11 +912,12 @@ in the panel, if ever.
 | Keyboard | Tab order: transcript (each answer focusable as a region when it has components), suggestions, input, Send/Stop. Enter sends, Shift+Enter is a new line, Escape stops a stream, then closes a `float` panel |
 | Focus | sending keeps focus in the input; it is never moved to the answer. `float`: opening moves focus to the input; closing returns it to the launcher (overlay engine `return`, `policy.ts`); below `sm` the `sheet` preset traps focus as it does for nav |
 | Reduced motion | no typing caret, no smooth scrolling, no panel slide: under `prefers-reduced-motion` the panel appears and the transcript jumps (theme-spec §9.3 tokens) |
-| Scrolling | the transcript follows new text only while the visitor is at its end; scrolling up stops following; a "Jump to latest" button appears |
+| Scrolling | the transcript follows new text only while the visitor is at its end; scrolling up stops following; a "Jump to latest" button appears, laid over the transcript's foot (it takes no height) — and, once an answer has arrived, not while the visitor reads it from its start (§19.14) |
+| Phone | the float's sheet is the preset's tallest (85 svh) and its controls compact, so the transcript has at least 60% of it at 390×844: a one-line input that grows with its text to 5 lines, Send beside it; the history note behind an info control and Clear history beside Close in the head, Clear shown only once there is history (§19.14) |
 | Names | the textarea has a visible label; Send/Stop/launcher have text names; the launcher's name is the `title` |
 | Errors | fixed copy in the status region, plus the visible message; `color.danger` text |
-| Colour | theme tokens only — visitor messages on `color.surface-alt`, answers on `color.surface`, text `color.text`/`color.muted`, controls `color.border-strong`, focus `color.focus`, Send on `color.accent` with `color.accent-contrast`; nothing else (theme-spec §1.2; the A7 lint, `words.test.ts`) |
-| Contrast | every pair above is already proven per theme (theme-spec §6); no new pair is introduced |
+| Colour | theme tokens only — the panel and the float on `color.surface`; visitor messages on `color.chat-visitor` (the accent's quiet tint, theme-spec §16); answers on the plain surface, no bubble; text `color.text`/`color.muted`, controls `color.border-strong`, focus `color.focus`, Send on `color.accent` with `color.accent-contrast`. The accent only on small things (Send, the focus ring, links); an accent pair's gradient on Send alone; nothing else (theme-spec §1.2; the A7 lint, `words.test.ts`) |
+| Contrast | every pair above is proven per theme × accent × offered pair × scheme (theme-spec §6, §16): `text` on `chat-visitor`, and on `surface` the text, muted, accent, danger, focus and `border-strong` pairs and every chart series |
 
 ---
 
@@ -1848,6 +1856,39 @@ and a table map's pins with a choice and a flag `where`) and
 `pnpm gate words/chat` (all 12 points). Every new or changed unit test file
 was run against `698a833` first and fails there.
 
+### 19.14 The chat's look, and issues #1 and #2 (2026-10-16)
+
+**The look.** Rendered in all six themes, both schemes, the float wide and
+as a sheet, and an answer with components and a dashboard (the 48 snapshots
+of `test:chat`), the chat read as busy rather than calm: the visitor's
+message on `surface-alt` — a blue-grey in `midnight`, lavender in `petal`, a
+loud yellow in `volt` light — and every answer in a white box on a tinted
+`bg` panel; chart and stat cards on two other grounds (`bg`, `surface-alt`)
+inside that box; a three-line input with a resize grip and a ring standing
+off its border; and on a pair site the gradient on the launcher, the answer's
+calls to action and a quoted plan's edge as well as on Send. Now: the panel
+and the float are on `surface`; the answer is plain text on it, with no
+bubble; the visitor's words sit in `chat-visitor`, the accent mixed 12% into
+`surface` (theme-spec §16); the cards share the surface with a hairline
+`border`; the accent is on Send, the focus ring and links only — an
+answer's calls to action are outlined — and a pair's gradient on Send alone
+(the emitter's `solid()` flattens it elsewhere).
+
+**Issue #1 — a quoted block in an answer.** The quote is the page's own
+block, but drawn compact: the section's page padding and ground go, its
+heading is `lg` (every other `2xl` figure `xl`, a lead paragraph `base`), and
+the 48 and 24 spacing steps become 16 and 12 (the emitter's `quoted()`). The
+page's own pricing block is unchanged — a style is its own class.
+
+**Issue #2 — the sheet on a phone.** At 390×844 the float's controls took
+more than half the sheet. Now the sheet is one height (85 svh); the input is
+one line and grows with its text to `INPUT_MAX_ROWS` (5), Send beside it;
+the history controls sit in the head beside Close — the note behind an info
+control, Clear history only once there is history; Jump to latest is laid
+over the transcript's foot, and is not offered over the start of an answer
+that has arrived (`offersLatest`). `test:chat` asserts the transcript has at
+least 60% of the sheet before a question and after one, in three engines.
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links
@@ -2637,13 +2678,14 @@ time but the save's.
 | cap | **256 KB** of JSON for the key; **8 conversations**, the least recently saved dropped first; a conversation that alone passes the cap is kept as its longest prefix of whole exchanges that fits (a prefix of a tagged history is still valid: the tag covers the turn's index from the start) |
 | expiry | **7 days** after the conversation was last saved; dropped when read |
 | restore | at attach, before the greeting's first question; every turn re-checked by the page's own rules (alternation, `visitorText`, the record cap, the tag's shape, each event through the stream's own shape check) — **one bad turn and the whole saved conversation is dropped**, never half-restored |
-| Clear history | a visible button under the input; it removes the key (every chat on this site), starts the panel over and says "History cleared." |
+| Clear history | a button with the history controls (a float's head, beside Close; under a panel's input), shown only once this chat has something kept (§19.14); it removes the key (every chat on this site), starts the panel over and says "History cleared." |
 | New chat | starts over and removes this chat's saved conversation |
 | sign-out | on a `signedin` chat, when the auth adapter reports the visitor signed out, the key is removed; a signed-in chat restores only once the session says signed in. **Since §19.11** the key is bound to who read the session (a salted hash of the account, or the browser): another account, a signed-out read, or a sign-in over a stranger's `allow anyone` chat clears it before anything is drawn |
 | two tabs | **since §19.11:** each save raises the conversation's revision; a save that finds a newer one it has not seen keeps nothing and the tab says so; an idle tab draws the other's newer revision; a clear in one tab empties the other |
 | storage refused | private windows, blocked site data, a full quota, a throwing accessor: every read and write is in `try`/`catch`; the panel works exactly as C4's, and the note and Clear control stay hidden |
 
-**The privacy note** (shown with Clear history, only when storage works):
+**The privacy note** (behind an info control named "How this chat is kept",
+only when storage works — §19.14; it was first shown with Clear history):
 "This chat is kept in this browser for 7 days. On a shared computer, clear
 it when you are done." It is fixed copy, one line, `color.muted`. **Since
 §19.11** it says what the binding does: "This chat is kept in this browser

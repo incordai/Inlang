@@ -25,7 +25,8 @@
  *     answer template — nothing from the network is ever parsed as markup;
  *   - keeps the conversation in the visitor's own browser (C5,
  *     chat-history.ts): capped, expiring after 7 days, restored on the next
- *     visit and offered with a visible Clear history; where storage is
+ *     visit; Clear history is offered once there is something kept, and
+ *     the note on where it is kept sits behind an info control; where storage is
  *     refused it is kept in memory only, as before. It is bound to who read
  *     the session — a salted hash of the account, or the browser for a
  *     visitor nobody signed in — and cleared before anything is drawn when
@@ -51,7 +52,9 @@
  * the link's fragment and draws it the same way (runShared).
  *
  * The transcript follows the newest words only while the visitor is at its
- * end; scrolling up stops it and shows Jump to latest (§9). An answer that
+ * end; scrolling away stops it and shows Jump to latest (§9) — but not over
+ * the start of an answer that has just arrived. The input is one line and
+ * grows with its text to a cap. An answer that
  * holds components becomes a stop in the Tab order. A `chat float`'s
  * launcher opens the panel in its dialog: below the shell's narrow width as
  * the overlay engine's sheet — modal, focus trapped, the page locked — and
@@ -65,7 +68,7 @@
  */
 
 import {
-  ANSWER_MAX, BLOCK_LIMITS, CHAT_TEXT, RETRYABLE, SHARE_TAG_MAX_MS, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, leftCopy, linkKind, mayFollow,
+  ANSWER_MAX, BLOCK_LIMITS, CHAT_TEXT, RETRYABLE, SHARE_TAG_MAX_MS, allowedDestination, atEnd, blockCopy, blockOf, createEventReader, finishedSentences, floatPreset, inputRows, leftCopy, linkKind, mayFollow, offersLatest,
   mergeText, parseChatConfig, problemCopy, readShareLink, requestBody, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn, type ShareTags,
 } from './chat-logic.ts';
 import { FOCUSABLE, lockScroll, wireSheetDrag } from './behaviours.ts';
@@ -129,11 +132,18 @@ interface Parts {
   readonly status: HTMLElement;
   /** The hidden templates of the components answers may hold; null for a prose-only chat. */
   readonly components: HTMLElement | null;
-  /** §9: Jump to latest, shown once the visitor scrolls up from the end. */
+  /** §9: Jump to latest, shown once the visitor scrolls away from the newest words. */
   readonly latest: HTMLButtonElement | null;
-  /** C5: the prose templates (null in a shell from before C5), and the history line — its note and Clear history. */
+  /**
+   * C5: the prose templates (null in a shell from before C5), and the history controls — Clear history, shown once
+   * there is a kept chat, and the info control with the note it shows (null in a shell from before them).
+   */
   readonly prose: ProseTemplates | null;
-  readonly history: { readonly box: HTMLElement; readonly clear: HTMLButtonElement } | null;
+  readonly history: {
+    readonly box: HTMLElement;
+    readonly clear: HTMLButtonElement;
+    readonly about: { readonly button: HTMLButtonElement; readonly note: HTMLElement } | null;
+  } | null;
   /** A float's launcher, its dialog and the dialog's Close; null for a panel. */
   readonly float: { readonly launcher: HTMLButtonElement; readonly dialog: HTMLDialogElement; readonly close: HTMLButtonElement } | null;
 }
@@ -161,6 +171,8 @@ function partsOf(host: HTMLElement): Parts | null {
   const close = one<HTMLButtonElement>('data-az-chat-close');
   const historyBox = one<HTMLElement>('data-az-chat-history');
   const clear = historyBox?.querySelector<HTMLButtonElement>('[data-az-chat-clear]') ?? null;
+  const about = historyBox?.querySelector<HTMLButtonElement>('[data-az-chat-about]') ?? null;
+  const privacy = one<HTMLElement>('data-az-chat-privacy');
   return {
     host, transcript, visitorTemplate, siteTemplate, form, input, send, stop, note, error, actions, retry, reset, status,
     asks: one<HTMLElement>('data-az-chat-asks'),
@@ -168,7 +180,7 @@ function partsOf(host: HTMLElement): Parts | null {
     components: one<HTMLElement>('data-az-chat-parts'),
     latest: one<HTMLButtonElement>('data-az-chat-latest'),
     prose: proseTemplatesOf(host),
-    history: historyBox && clear ? { box: historyBox, clear } : null,
+    history: historyBox && clear ? { box: historyBox, clear, about: about && privacy ? { button: about, note: privacy } : null } : null,
     float: launcher && dialog && close ? { launcher, dialog, close } : null,
   };
 }
@@ -402,7 +414,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   const endpoint = `${options.base.replace(/\/+$/, '')}/chat`;
   const hideable: HTMLElement[] = [p.form, p.stop, p.send, p.error, p.actions, p.retry, p.reset,
     ...(p.asks ? [p.asks] : []), ...(p.signin ? [p.signin] : []), ...(p.latest ? [p.latest] : []), ...(p.float ? [p.float.launcher] : []),
-    ...(p.history ? [p.history.box] : [])];
+    ...(p.history ? [p.history.box, p.history.clear, ...(p.history.about ? [p.history.about.note] : [])] : [])];
   const shipped = new Map(hideable.map((el) => [el, el.hidden] as const));
   const greeting = [...p.transcript.children].map((c) => c.cloneNode(true));
 
@@ -461,13 +473,23 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     p.transcript.scrollTop = p.transcript.scrollHeight;
     known = p.transcript.scrollTop;
   };
+  /** Where the newest answer begins, from the transcript's visible top — null until one has arrived (chat-logic offersLatest). */
+  const newestStart = (): number | null => {
+    const last = p.transcript.lastElementChild;
+    if (!last || !last.classList.contains('az-chat-message--site') || last.getAttribute('aria-busy') === 'true') return null;
+    return last.getBoundingClientRect().top - p.transcript.getBoundingClientRect().top;
+  };
+  /** §9, issue #2: Jump to latest only away from the newest words — never over the start of an answer just arrived. */
+  const placeLatest = (end: boolean) => {
+    if (p.latest) p.latest.hidden = !offersLatest(end, newestStart(), p.transcript.clientHeight);
+  };
   const onScroll = () => {
     known = p.transcript.scrollTop;
     const end = atEnd(p.transcript.scrollTop, p.transcript.scrollHeight, p.transcript.clientHeight);
     if (jumping && !end) return;
     jumping = false;
     following = end;
-    if (p.latest) p.latest.hidden = end;
+    placeLatest(end);
   };
 
   const flushAnnounce = () => {
@@ -541,6 +563,18 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     streaming = null;
     p.stop.hidden = true;
     p.send.hidden = false;
+  };
+
+  /** Issue #2: the input is one line until its text needs more, then grows to INPUT_MAX_ROWS and scrolls. */
+  const grow = () => {
+    const el = p.input;
+    el.rows = 1;
+    const line = Number.parseFloat(win?.getComputedStyle(el).lineHeight ?? '');
+    el.rows = inputRows(el.scrollHeight, el.clientHeight, 1, Number.isFinite(line) ? line : 0);
+  };
+  /** Issue #2: Clear history is offered only when this chat has something kept to clear. */
+  const offerClear = () => {
+    if (p.history) p.history.clear.hidden = stored.length === 0;
   };
 
   /** A refusal or a failure, with the fixed copy for its code (never server text). */
@@ -658,6 +692,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
             }];
             const keptAs = kept.save(keptKey, e.conversation, stored, rev);
             if (keptAs.kept) rev = keptAs.rev;
+            offerClear();
             // §19.11: another tab went on with this chat (or cleared it): its turns stand, and this answer is said not to be kept.
             const lost = !keptAs.kept && (keptAs.why === 'conflict' || keptAs.why === 'cleared');
             const follows = drawn.finish();
@@ -665,6 +700,8 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
             if (e.share && received.length > 0) offerShare(answer, e.conversation, index, e.share, received, question);
             pending = null;
             answer.setAttribute('aria-busy', 'false');
+            // The answer has arrived: where the visitor is reading now decides Jump to latest.
+            placeLatest(atEnd(p.transcript.scrollTop, p.transcript.scrollHeight, p.transcript.clientHeight));
             announce(spokenText(finishedSentences(text, said, true).said) || CHAT_TEXT.answered, true);
             if (follows > 0) announce(CHAT_TEXT.follows(follows), true);
             settle();
@@ -711,6 +748,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     pending = text;
     addMessage('visitor', text);
     p.input.value = '';
+    grow();
     if (p.asks) p.asks.hidden = true;
     void request();
   };
@@ -748,6 +786,8 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     p.transcript.replaceChildren(...greeting.map((g) => g.cloneNode(true)));
     p.note.textContent = '';
     if (p.asks) p.asks.hidden = mode !== 'ready';
+    if (p.latest) p.latest.hidden = true;
+    offerClear();
   }
 
   /** The panel asks again after a full conversation; who may ask is unchanged, so the session is not read again (focus stays put). */
@@ -785,6 +825,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
       if (t.share) offerShare(item, chat.conversation, i, t.share, t.events, chat.turns[i - 1].text);
     });
     if (p.asks) p.asks.hidden = true;
+    offerClear();
     if (chat.turns.length / 2 >= config.limit) setMode('full');
   };
 
@@ -921,6 +962,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   }
 
   on(p.form, 'submit', (e) => { e.preventDefault(); ask(p.input.value); });
+  on(p.input, 'input', grow);
   on(p.input, 'keydown', (e) => {
     // Enter sends; Shift+Enter is a new line; an IME composition is never cut short.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(p.input.value); }
@@ -940,6 +982,16 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   // §21.1.4: shown only where this browser can keep the chat; it forgets every chat on the site and starts over.
   if (p.history) {
     p.history.box.hidden = !kept.available;
+    offerClear();
+    // The note on where the chat is kept, behind its info control (issue #2): shown and hidden again on request.
+    const about = p.history.about;
+    if (about) {
+      on(about.button, 'click', () => {
+        const open = about.note.hidden;
+        about.note.hidden = !open;
+        about.button.setAttribute('aria-expanded', String(open));
+      });
+    }
     on(p.history.clear, 'click', () => {
       kept.clear();
       forget();
@@ -1007,6 +1059,8 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     p.error.textContent = '';
     p.status.textContent = '';
     p.input.value = '';
+    p.input.rows = 1;
+    p.history?.about?.button.setAttribute('aria-expanded', 'false');
     p.host.removeAttribute('aria-busy');
     setState('idle');
   };

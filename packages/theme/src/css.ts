@@ -2,7 +2,7 @@
  * @az module theme-css
  * Purpose: colour schemes as CSS custom properties: default scheme, OS preference, data-scheme.
  * Spec: docs/theme-spec.md §3
- * Exports: schemeCss, scopedSchemeCss, schemeReferences, patternCss, PATTERN_REFERENCES, gradientCss, GRADIENT_REFERENCES
+ * Exports: schemeCss, scopedSchemeCss, schemeReferences, colorProperty, patternCss, PATTERN_REFERENCES, gradientCss, GRADIENT_REFERENCES
  * Edit guide: words read var(--az-color-*) references; declarations are generated here only.
  *   Gradients are declared here too (theme-spec §13) — in the stylesheet, never inline.
  *   A scope other than `:root` is for a page that shows several themes at once (az palette).
@@ -33,6 +33,9 @@ const SCHEMED = ['color', 'shadow'] as const;
 type Schemed = (typeof SCHEMED)[number];
 
 const property = (group: Schemed, key: string) => `--az-${group}-${key}`;
+
+/** The custom property a colour token is declared as — for a value built on other tokens (chat-tint.ts). */
+export const colorProperty = (key: string): string => property('color', key);
 
 /** `{ accent: "var(--az-color-accent)", … }` for one group, keys sorted. */
 function references<T extends object>(group: Schemed, tokens: T): Record<keyof T, string> {

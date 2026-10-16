@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { END_SLACK_PX, atEnd, floatPreset, mayFollow, parseChatConfig } from '../src/runtime/chat-logic.ts';
+import { END_SLACK_PX, INPUT_MAX_ROWS, atEnd, floatPreset, inputRows, mayFollow, offersLatest, parseChatConfig } from '../src/runtime/chat-logic.ts';
 import { POLICY } from '../src/runtime/policy.ts';
 
 test('atEnd: the end, within a line of it, and above it', () => {
@@ -27,6 +27,25 @@ test('mayFollow: a scroll up whose event is still to come wins over new words', 
   assert.equal(mayFollow(true, 0, 600), false, 'scrolled to the top before the event ran: stay');
   assert.equal(mayFollow(false, 600, 600), false, 'the last event said scrolled up: stay');
   assert.equal(mayFollow(true, 0, 0), true, 'resumed (the visitor asked, the float opened): follow from anywhere');
+});
+
+test('offersLatest (issue #2): away from the newest words, but never over the start of an answer just arrived', () => {
+  assert.equal(offersLatest(true, 0, 400), false, 'at the end: nothing to jump to');
+  assert.equal(offersLatest(false, null, 400), true, 'scrolled up while the answer streams: offered');
+  assert.equal(offersLatest(false, 0, 400), false, 'reading the arrived answer from its start: not offered');
+  assert.equal(offersLatest(false, -END_SLACK_PX, 400), false, 'its start a line above the top still counts as its start');
+  assert.equal(offersLatest(false, 300, 400), false, 'its start in view lower down: the reader sees where it begins');
+  assert.equal(offersLatest(false, -END_SLACK_PX - 1, 400), true, 'scrolled into the middle of it: offered');
+  assert.equal(offersLatest(false, 400 - END_SLACK_PX + 1, 400), true, 'scrolled up above it, its start below the view: offered');
+});
+
+test('inputRows (issue #2): one line until the text needs more, then a line per line, up to the cap', () => {
+  assert.equal(inputRows(40, 42, 1, 24), 1, 'one line of text fits one row');
+  assert.equal(inputRows(64, 42, 1, 24), 2, 'a second line');
+  assert.equal(inputRows(88, 42, 1, 24), 3);
+  assert.equal(inputRows(10_000, 42, 1, 24), INPUT_MAX_ROWS, 'never past the cap: the input scrolls instead');
+  assert.equal(inputRows(64, 42, 1, 0), 1, 'no line height to measure by: left as it is');
+  assert.ok(INPUT_MAX_ROWS >= 3 && INPUT_MAX_ROWS <= 6, 'room for a question, not an essay');
 });
 
 test('floatPreset: the sheet below the narrow width (modal, trapped, locked); the side panel at and above it (not modal)', () => {

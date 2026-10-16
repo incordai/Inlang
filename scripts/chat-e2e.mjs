@@ -45,7 +45,11 @@
  * then closes; the answer is the one the model gives only when the guides
  * row reached it and the private column did not; the transcript stops
  * following when scrolled up and offers Jump to latest, which brings it back
- * to the end; under reduced motion the panel only fades and the jump is
+ * to the end — but not over the start of an answer that has arrived (issue
+ * #2); on a phone (390×844) the transcript has at least 60% of the sheet,
+ * before a question and after one, the input is one line that grows to its
+ * cap, the history note is behind its info control and Clear history waits
+ * for history; under reduced motion the panel only fades and the jump is
  * instant; an answer with components is a stop in the Tab order; axe in
  * every float state. Then, in Chromium, pixel snapshots of the answered
  * states — the float wide and as a sheet, an answer with the site's
@@ -154,6 +158,7 @@ import { chunksOf, corpusCases, corpusRules } from '../packages/backend/test/cha
 import { mapFixture } from './lib/map-fixture.mjs';
 import sharp from 'sharp';
 import { THEMES, DEFAULT_THEME } from '../packages/theme/src/index.ts';
+import { INPUT_MAX_ROWS } from '../packages/overlay/src/runtime/chat-logic.ts';
 
 /*
  * Deadlines (lib/bounded.mjs): a normal run takes a few minutes — six theme
@@ -1403,6 +1408,27 @@ async function scrolledUpWhileStreaming(page, label) {
   return stayed;
 }
 
+/** Scroll the transcript so the newest answer begins `offset` px below its visible top (negative: above it). */
+const placeNewest = (page, offset) => page.evaluate((o) => {
+  const t = document.querySelector('[data-az-chat-transcript]');
+  t.scrollTop += t.lastElementChild.getBoundingClientRect().top - t.getBoundingClientRect().top - o;
+}, offset);
+/** Wait, within the state deadline, for Jump to latest to be shown (`want`) or hidden; whether it came to that. */
+const latestBecomes = (page, want) => page.waitForFunction((w) => document.querySelector('[data-az-chat-latest]')?.hidden === !w, want, { timeout: STATE_MS })
+  .then(() => true, () => false);
+/** The sheet's layout on a phone (issue #2): the sheet, the transcript and the input, and which of the controls show. */
+const sheetLayout = (page) => page.evaluate(() => {
+  const box = (sel) => document.querySelector(sel)?.getBoundingClientRect().height ?? 0;
+  const shown = (sel) => { const el = document.querySelector(sel); return el !== null && !el.hidden && el.getClientRects().length > 0; };
+  const input = document.querySelector('[data-az-chat-input]');
+  return {
+    sheet: Math.round(box('dialog.az-chat-dialog')), transcript: Math.round(box('[data-az-chat-transcript]')), rows: input?.rows ?? null,
+    latest: shown('[data-az-chat-latest]'), clear: shown('[data-az-chat-clear]'), about: shown('[data-az-chat-about]'), note: shown('[data-az-chat-privacy]'),
+  };
+});
+/** Issue #2's floor: on a phone the transcript has at least this share of the sheet. */
+const TRANSCRIPT_SHARE = 0.6;
+
 async function floatFlow(b, name, origins) {
   const wide = await watchedContext(b, csp, { ...CONTEXT, viewport: { width: 1280, height: 800 } });
   try {
@@ -1494,6 +1520,16 @@ async function floatFlow(b, name, origins) {
     await floatDialog(page).waitFor({ state: 'visible', timeout: STATE_MS });
     const stayed = await scrolledUpWhileStreaming(page, `${name} wide`);
     check(`${name}: scrolled up while an answer streams, the transcript stays where the visitor put it`, stayed);
+    // Issue #2: once the answer has arrived, Jump to latest is for a visitor scrolled away from it — never over its start.
+    const clientHeight = await page.evaluate(() => document.querySelector('[data-az-chat-transcript]').clientHeight);
+    await placeNewest(page, -clientHeight);
+    const awayShown = await latestBecomes(page, true);
+    await placeNewest(page, 0);
+    const startHidden = await latestBecomes(page, false);
+    check(`${name}: an arrived answer read from its start offers no Jump to latest; scrolled into its middle, it is offered`,
+      awayShown && startHidden, JSON.stringify({ awayShown, startHidden }));
+    await placeNewest(page, -clientHeight);
+    await latestBecomes(page, true);
     const jump = panel(page).locator('[data-az-chat-latest]');
     check(`${name}: Jump to latest is offered, a real button`, await jump.isVisible() && (await jump.textContent()).trim() === 'Jump to latest');
     await settled(page);
@@ -1528,6 +1564,37 @@ async function floatFlow(b, name, origins) {
     check(`${name}: in the sheet, Tab and Shift+Tab never leave it`, held);
     await settled(page);
     await axe(page, `${name} float sheet`);
+
+    // Issue #2: on a phone the controls are compact and the answer has most of the sheet — before a question and after one.
+    const fresh = await sheetLayout(page);
+    check(`${name}: 390×844, a fresh sheet gives the transcript at least ${TRANSCRIPT_SHARE * 100}% of its height`,
+      fresh.transcript >= TRANSCRIPT_SHARE * fresh.sheet, JSON.stringify(fresh));
+    check(`${name}: a fresh sheet offers no Clear history (nothing kept yet), keeps the history note behind its info control, and a one-line input`,
+      !fresh.clear && fresh.about && !fresh.note && fresh.rows === 1, JSON.stringify(fresh));
+    const sheetInput = panel(page).locator('[data-az-chat-input]');
+    await sheetInput.fill('one\ntwo\nthree');
+    const three = await sheetInput.evaluate((el) => el.rows);
+    await sheetInput.fill(Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n'));
+    const capped = await sheetInput.evaluate((el) => ({ rows: el.rows, scrolls: el.scrollHeight > el.clientHeight }));
+    await sheetInput.fill('');
+    const emptied = await sheetInput.evaluate((el) => el.rows);
+    check(`${name}: the input grows a line per line of text, stops at its cap and scrolls, and is one line again when emptied`,
+      three === 3 && capped.rows === INPUT_MAX_ROWS && capped.scrolls && emptied === 1, JSON.stringify({ three, capped, emptied }));
+    await page.locator('[data-az-chat-about]').click();
+    const told = await sheetLayout(page);
+    const aboutOpen = await page.locator('[data-az-chat-about]').getAttribute('aria-expanded');
+    await page.locator('[data-az-chat-about]').click();
+    const folded = await sheetLayout(page);
+    check(`${name}: the info control shows the history note and folds it away again`, told.note && aboutOpen === 'true' && !folded.note,
+      JSON.stringify({ told: told.note, aboutOpen, folded: folded.note }));
+    await ask(page, 'What is the warranty?');
+    const answered = await sheetLayout(page);
+    check(`${name}: 390×844 after an answer, the transcript still has at least ${TRANSCRIPT_SHARE * 100}% of the sheet`,
+      answered.transcript >= TRANSCRIPT_SHARE * answered.sheet, JSON.stringify(answered));
+    check(`${name}: after an answer Clear history is offered (there is history now), and no Jump to latest stands over the new answer`,
+      answered.clear && !answered.latest, JSON.stringify(answered));
+    await settled(page);
+    await axe(page, `${name} float sheet answered`);
     await page.keyboard.press('Escape');
     const back = await floatState(page);
     check(`${name}: Escape closes the sheet, unlocks the page and returns focus to the launcher`, !back.open && !back.locked && back.launcher, JSON.stringify(back));
@@ -1609,9 +1676,16 @@ async function c5Flow(b, name, origins) {
     await page.goto(`${host.url}/ask`);
     await ready(page);
     const line = panel(page).locator('[data-az-chat-history]');
-    check(`${name}: where storage works, the panel says the chat is kept in this browser and offers Clear history`,
-      await line.isVisible() && /kept in this browser for 7 days; signing in clears it\. On a shared computer, clear it/.test(await line.textContent())
-      && await line.getByRole('button', { name: 'Clear history' }).isVisible());
+    // Issue #2: the note sits behind its info control, and Clear history waits until there is something to clear.
+    const about = line.getByRole('button', { name: 'How this chat is kept' });
+    const freshClear = await line.getByRole('button', { name: 'Clear history' }).isVisible();
+    await about.click();
+    const note = panel(page).locator('[data-az-chat-privacy]');
+    check(`${name}: where storage works, the info control says the chat is kept in this browser; a fresh panel offers no Clear history`,
+      await line.isVisible() && await note.isVisible() && await about.getAttribute('aria-expanded') === 'true'
+      && /kept in this browser for 7 days; signing in clears it\. On a shared computer, clear it/.test(await note.textContent()) && !freshClear,
+      JSON.stringify({ freshClear }));
+    await about.click();
 
     // Formatting: the subset becomes its elements; everything else — markup, links, a component in code — stays text.
     const said = await announcements(page, () => ask(page, 'c5-format please'));

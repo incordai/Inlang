@@ -172,8 +172,9 @@ text it is. An answer may end with up to three **follow-up questions**:
 buttons that ask exactly their words as the visitor's next question.
 
 The conversation is kept in the visitor's own browser (`localStorage`) for
-7 days, so a reload — or the next page, under a float — carries on; the
-panel says so and offers **Clear history**. What is kept is bound to who
+7 days, so a reload — or the next page, under a float — carries on; an
+info control says so, and **Clear history** is offered once there is
+something kept. What is kept is bound to who
 reads it — a salted hash of the signed-in account, or the browser for a
 visitor nobody signed in — so another account, a sign-out, or a sign-in
 over a stranger's chat starts empty. The same chat in two tabs stays in
@@ -190,10 +191,11 @@ works as before, keeping nothing.
 - an answer is `aria-busy` while it streams; focus stays in the input when a question is sent
 - Enter sends, Shift+Enter is a new line, Escape stops an answer — and then closes a float
 - a float's launcher is named by the title; opening moves focus to the input, closing returns it to the launcher; below `sm` focus stays in the sheet
-- the transcript scrolls on its own, follows the newest words only while you are at its end, and offers **Jump to latest** once you scroll up; it is a keyboard stop, and an answer that holds components is one too
+- the transcript scrolls on its own, follows the newest words only while you are at its end, and offers **Jump to latest** once you scroll away (not while you read a new answer from its start); it is a keyboard stop, and an answer that holds components is one too
+- on a phone the controls stay compact — a one-line input that grows as you type, the history controls beside Close — so the answer keeps most of the sheet
 - follow-up questions are real buttons in a list named "Follow-up questions"; a code block is a focusable, named scroll region with a **Copy code** button whose result is announced; formatting marks are never read aloud
 - with reduced motion the panel appears without sliding and the transcript jumps rather than glides
-- colours are theme tokens only: visitor messages on `color.surface-alt`, answers on `color.surface`, errors in `color.danger`
+- colours are theme tokens only: the panel on `color.surface`, your messages on `color.chat-visitor` (a quiet tint of the accent), answers on the plain surface, errors in `color.danger`; the accent only on Send, the focus ring and links
 
 The full floor is in the spec (§9).
 

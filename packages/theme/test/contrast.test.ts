@@ -17,7 +17,11 @@ import { THEMES, type ThemeName } from '../src/themes.ts';
 import { FONT_STACKS, type Scheme, type Theme, VEIL_PERCENT } from '../src/tokens.ts';
 import { ACCENT_NAMES, withAccent } from '../src/accent.ts';
 import type { PAIR_TOKENS } from '../src/gradient.ts';
-import type { SeriesToken } from '../src/series.ts';
+import { SERIES_EDGE, SERIES_TOKENS, withSeries, type SeriesToken } from '../src/series.ts';
+import { CHAT_SURFACES, CHAT_TINT_PERCENT, CHAT_TINT_SEPARATION, ChatTintUnavailable, chatTint, chatTokens, withChat, type ChatToken } from '../src/chat-tint.ts';
+import { withAccentPair } from '../src/gradient.ts';
+import type { AccentName } from '../src/ramps.ts';
+import { ACCENT_PAIRS } from '../../core/src/accent-pairs.ts';
 
 /* ---------------- colour maths ---------------- */
 
@@ -65,8 +69,8 @@ function ratio(a: string, b: string): number {
 const BODY = 4.5;   // hero-spec §9
 const LARGE = 3;    // 24px+, or a non-text edge
 
-/** The role tokens every theme defines; a pair's own tokens are proven in gradient.test.ts, the chart series' in series.test.ts. */
-type Role = Exclude<keyof typeof THEMES.midnight.color.light, (typeof PAIR_TOKENS)[number] | SeriesToken>;
+/** The role tokens every theme defines; a pair's own tokens are proven in gradient.test.ts, the chart series' in series.test.ts, the chat's below. */
+type Role = Exclude<keyof typeof THEMES.midnight.color.light, (typeof PAIR_TOKENS)[number] | SeriesToken | ChatToken>;
 
 const PAIRS: Array<[fg: Role, bg: Role, floor: number]> = [
   ['text', 'bg', BODY],
@@ -92,6 +96,8 @@ const PAIRS: Array<[fg: Role, bg: Role, floor: number]> = [
   ['focus', 'surface', LARGE],
   ['focus', 'surface-alt', LARGE],
   ['border-strong', 'bg', LARGE],
+  // chat-block-spec §9: the chat's input and outlined controls sit on the panel's `surface`.
+  ['border-strong', 'surface', LARGE],
   // pricing §7.3/§8: the highlighted plan's edge is accent on its
   // surface-alt fill — a non-text edge, 3:1 (WCAG 1.4.11).
   ['accent', 'surface-alt', LARGE],
@@ -235,4 +241,93 @@ test('CONTROL: one point under the minimum fails somewhere — the percentage is
     return VEIL_PAIRS.some(([fg, floor]) => EXTREMES.some(([, px]) => ratioRgb(c[fg], overPixel(c.bg, thin, px)) < floor));
   }));
   assert.ok(fails, `${thin}% should break at least one pair`);
+});
+
+
+/* ---------------- chat-block-spec §9, theme-spec §16: the chat's surfaces ---------------- */
+
+/**
+ * Every colour pair the chat draws, on the tokens it draws them with: the
+ * visitor's message on its accent tint, the answer and the controls on the
+ * panel's `surface`, Send on the accent. Proven on every theme × (own accent,
+ * each accent, each offered pair) × scheme, from the values a chat site ships
+ * — the tint as the colour its `color-mix()` paints (chat-tint.ts chatTint).
+ */
+const CHAT_PAIRS: Array<[fg: string, bg: string, floor: number]> = [
+  ['text', 'chat-visitor', BODY],
+  ['text', 'surface', BODY],
+  ['muted', 'surface', BODY],
+  ['accent', 'surface', BODY],
+  ['danger', 'surface', BODY],
+  ['focus', 'surface', LARGE],
+  ['border-strong', 'surface', LARGE],
+  ['accent-contrast', 'accent', BODY],
+  ['accent-contrast', 'accent-hover', BODY],
+];
+
+/** Every theme a chat site can be built with: own accent, each accent, each offered pair — with its chat and series tokens. */
+const CHAT_VARIANTS: { label: string; theme: Theme }[] = NAMES.flatMap((name) => {
+  const base = THEMES[name] as Theme;
+  const out = [{ label: `${name}+own`, theme: base }];
+  for (const hue of ACCENT_NAMES) {
+    out.push({ label: `${name}+${hue}`, theme: withAccent(base, hue) });
+    for (const second of ACCENT_PAIRS[name][hue] as AccentName[]) out.push({ label: `${name}+${hue}+${second}`, theme: withAccentPair(base, hue, second) });
+  }
+  return out.map(({ label, theme }) => ({ label, theme: withSeries(withChat(theme)) }));
+});
+
+/** A token as painted: a theme value parsed, the chat's tint mixed as the browser mixes it. */
+const painted = (theme: Theme, scheme: Scheme, token: string): [number, number, number] =>
+  token === 'chat-visitor'
+    ? chatTint(theme, scheme) as unknown as [number, number, number]
+    : hslToRgb((theme.color[scheme] as unknown as Record<string, string>)[token]);
+const chatRatio = (theme: Theme, scheme: Scheme, fg: string, bg: string): number => {
+  const la = luminance(painted(theme, scheme, fg)), lb = luminance(painted(theme, scheme, bg));
+  return Math.floor(((Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)) * 100) / 100;
+};
+
+for (const { label, theme } of CHAT_VARIANTS) {
+  for (const scheme of SCHEMES) {
+    test(`${label}/${scheme}: every chat pair clears its floor, and every chart series holds on every answer surface`, () => {
+      const failures: string[] = [];
+      for (const [fg, bg, floor] of CHAT_PAIRS) {
+        const r = chatRatio(theme, scheme, fg, bg);
+        if (r < floor) failures.push(`${fg} on ${bg} = ${r}:1 (needs ${floor})`);
+      }
+      for (const series of SERIES_TOKENS) for (const ground of CHAT_SURFACES) {
+        const r = chatRatio(theme, scheme, series, ground);
+        if (r < SERIES_EDGE) failures.push(`${series} on ${ground} = ${r}:1 (needs ${SERIES_EDGE})`);
+      }
+      const apart = chatRatio(theme, scheme, 'chat-visitor', 'surface');
+      if (apart < CHAT_TINT_SEPARATION) failures.push(`chat-visitor is ${apart}:1 from surface (needs ${CHAT_TINT_SEPARATION})`);
+      assert.deepEqual(failures, [], `${label}/${scheme}\n  ` + failures.join('\n  '));
+    });
+  }
+}
+
+test('chat: the visitor tint is declared as a mix of the accent into surface — tokens only, following the scheme', () => {
+  const value = chatTokens(THEMES.paper, 'light')['chat-visitor'];
+  assert.equal(value, `color-mix(in srgb, var(--az-color-accent) ${CHAT_TINT_PERCENT}%, var(--az-color-surface))`);
+  assert.equal(chatTokens(THEMES.paper, 'dark')['chat-visitor'], value, 'one declaration; the scheme decides what it resolves to');
+  assert.ok(CHAT_TINT_PERCENT > 0 && CHAT_TINT_PERCENT <= 16, 'a tint, not a fill');
+});
+
+test('CONTROL: a bubble filled with the accent itself fails the chat floor — the chat pairs are allowed to fail', () => {
+  const c = THEMES.paper.color.light;
+  assert.ok(ratio(c.text, c.accent) < BODY, 'text on a full-accent bubble is under 4.5:1');
+});
+
+test('CONTROL: a theme whose text cannot hold on the tint is refused, not shipped', () => {
+  const light = THEMES.paper.color.light;
+  const broken: Theme = { ...THEMES.paper, color: { ...THEMES.paper.color, light: { ...light, text: light.surface } } };
+  assert.throws(() => chatTokens(broken, 'light'), ChatTintUnavailable);
+});
+
+test(`all ${CHAT_PAIRS.length} chat pairs were computed on all ${CHAT_VARIANTS.length} chat themes, both schemes`, () => {
+  let n = 0;
+  for (const { theme } of CHAT_VARIANTS) for (const scheme of SCHEMES) {
+    for (const [fg, bg] of CHAT_PAIRS) { chatRatio(theme, scheme, fg, bg); n++; }
+  }
+  assert.equal(n, CHAT_PAIRS.length * CHAT_VARIANTS.length * SCHEMES.length);
+  assert.ok(CHAT_VARIANTS.length > VARIANTS.length, 'the offered pairs are among them');
 });

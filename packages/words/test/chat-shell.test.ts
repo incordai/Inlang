@@ -12,7 +12,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { blocksFor, compile, formatDiagnostics, type Manifest } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
-import { resolve, THEMES, withSeries } from '../../theme/src/index.ts';
+import { GRADIENT_REFERENCES, resolve, THEMES, withAccentPair, withChat, withSeries, type AccentName } from '../../theme/src/index.ts';
+import { ACCENT_PAIRS } from '../../core/src/accent-pairs.ts';
 import { emitBlock } from '../../target-web/src/tree.ts';
 import { WEB_EMITTERS } from '../registry.ts';
 
@@ -22,7 +23,8 @@ for (const w of readdirSync(WORDS).filter((d) => existsSync(join(WORDS, d, 'word
   const m = JSON.parse(readFileSync(join(WORDS, w, 'word.json'), 'utf8')) as Manifest;
   manifests.set(m.name, m);
 }
-const T = resolve(THEMES.midnight, 'dark') as unknown as ThemeLike;
+/** A chat site's theme: the chat's tint is added to every site with a chat (target-web namedTheme). */
+const T = resolve(withChat(THEMES.midnight), 'dark') as unknown as ThemeLike;
 
 /** The chat block of a small site, emitted; `lines` go under `chat panel`. */
 function chat(lines: string[] = [], { login = true } = {}): EmittedNode {
@@ -83,8 +85,9 @@ test('both message templates ship hidden, each one paragraph of nothing', () => 
   const items = (templates.children ?? []) as EmittedNode[];
   assert.deepEqual(items.map((i) => i.attrs?.class), ['az-chat-message az-chat-message--visitor', 'az-chat-message az-chat-message--site']);
   for (const i of items) assert.deepEqual(texts(i), []);
-  // §9: visitor messages on surface-alt, answers on surface — theme tokens only.
-  assert.deepEqual(items.map((i) => i.style?.background), [T.color['surface-alt'], T.color.surface]);
+  // §9: the visitor's words on the accent's quiet tint; the answer on the panel's plain surface — no bubble of its own.
+  assert.deepEqual(items.map((i) => i.style?.background), [T.color['chat-visitor'], undefined]);
+  assert.ok(T.color['chat-visitor'], 'CONTROL: the chat theme carries the tint');
 });
 
 test('suggested questions are buttons that never submit; none are emitted without any', () => {
@@ -438,4 +441,96 @@ test('a map ships its stage as a focusable image, az\'s own three buttons, the a
   // CONTROL: a chat that does not show maps ships none of it.
   assert.equal(partOf(exploreChat('chart'), 'map').length, 0);
   assert.equal(partOf(exploreChat('chart'), 'map-popup').length, 0);
+});
+
+/* ---- the chat's look (chat-block-spec §9) and issues #1 and #2 ---- */
+
+test('§9: the panel and the float are on the theme\'s surface; the answer has no bubble, the visitor\'s words the accent tint', () => {
+  const panelCard = walk(chat()).find((n) => n.attrs?.class === 'az-chat-panel')!;
+  assert.deepEqual([panelCard.style?.background, panelCard.style?.border], [T.color.surface, `1px solid ${T.color.border}`]);
+  const dialog = walk(floatOn()).find((n) => n.tag === 'dialog')!;
+  assert.equal(dialog.style?.background, T.color.surface);
+  const [visitor, site] = (one(chat(), 'data-az-chat-templates').children ?? []) as EmittedNode[];
+  assert.equal(visitor.style?.justifySelf, 'end');
+  assert.equal(site.style?.padding, undefined, 'the answer runs on the surface, not inside a box');
+});
+
+test('issue #1: a quoted block is drawn compact — no page padding or ground, a smaller heading — and the page\'s own block is unchanged', () => {
+  const { pricing, chat: root } = showPage();
+  const copy = (partOf(root, 'quote')[0].children ?? [])[0] as EmittedNode;
+  assert.deepEqual([copy.style?.paddingBlock, copy.style?.paddingInline, copy.style?.background], [0, 0, 'transparent']);
+  assert.equal(copy.below?.sm?.paddingInline, undefined, 'no mobile gutter either');
+  const heading = (n: EmittedNode) => walk(n).find((x) => x.attrs?.class === 'az-pricing-title')!;
+  assert.equal(heading(copy).style?.fontSize, T.typeSize.lg);
+  // The page's own pricing block keeps its section padding and its heading — a style is its own class.
+  assert.equal(pricing.style?.paddingBlock, `${T.space[96]}px`);
+  assert.equal(heading(pricing).style?.fontSize, T.typeSize['2xl']);
+  const plan = (n: EmittedNode) => walk(n).find((x) => (x.attrs?.class ?? '').split(' ').includes('az-plan'))!;
+  assert.equal(plan(copy).style?.padding, `${T.space[12]}px`, 'its cards step down too');
+  assert.equal(plan(pricing).style?.padding, `${T.space[24]}px`);
+});
+
+/** A chat site whose accent is a pair (theme-spec §13): the target hands words the gradients. */
+function pairTheme(): ThemeLike {
+  const hue = Object.keys(ACCENT_PAIRS.midnight).find((h) => ACCENT_PAIRS.midnight[h].length > 0)! as AccentName;
+  const named = withChat(withAccentPair(THEMES.midnight, hue, ACCENT_PAIRS.midnight[hue][0] as AccentName));
+  return { ...(resolve(named, 'dark') as unknown as ThemeLike), gradient: GRADIENT_REFERENCES };
+}
+
+test('§9: with an accent pair the gradient is painted on Send alone — the launcher and an answer\'s call to action are the solid accent', () => {
+  const pair = pairTheme();
+  const r = compile(SHOW_SITE.replace('  chat panel', '  chat float'), { manifests });
+  assert.ok(r.ok && r.spec, formatDiagnostics(r.diagnostics, 'site.az'));
+  const block = blocksFor(r.spec, r.spec.pages[0]).find((b) => b.word === 'chat')!;
+  const root = emitBlock(block, pair, WEB_EMITTERS, (p) => p, { name: 'aurora' });
+  const painted = walk(root).filter((n) => n.style?.backgroundImage === pair.gradient!.accent);
+  assert.deepEqual(painted.map((n) => n.attrs?.['data-az-chat-send'] !== undefined), [true], 'one gradient: Send');
+  const launcher = one(root, 'data-az-chat-launcher');
+  assert.deepEqual([launcher.style?.backgroundImage, launcher.style?.color, launcher.style?.background], ['none', pair.color['accent-contrast'], pair.color.accent]);
+  // An answer's call to action is outlined: the chat's one filled accent control is Send.
+  for (const key of ['cta-route', 'cta-https', 'cta-mailto']) {
+    const a = (partOf(root, key)[0].children ?? [])[0] as EmittedNode;
+    assert.deepEqual([a.style?.background, a.style?.backgroundImage], ['transparent', undefined], key);
+    assert.notEqual(a.states?.hover?.backgroundImage, pair.gradient!['accent-hover'], `${key} hover`);
+  }
+  // CONTROL: the same site with one hue paints no gradient anywhere, and the launcher is the target's primary unchanged.
+  const flat = emitBlock(block, T, WEB_EMITTERS, (p) => p, { name: 'aurora' });
+  assert.equal(walk(flat).filter((n) => n.style?.backgroundImage !== undefined).length, 0);
+});
+
+test('issue #2: the input is one line, not resizable, with Send beside it in one row', () => {
+  const input = one(chat(), 'data-az-chat-input');
+  assert.deepEqual([input.attrs?.rows, input.style?.resize], ['1', 'none']);
+  const compose = walk(chat()).find((n) => n.attrs?.class === 'az-chat-compose')!;
+  assert.equal(compose.style?.display, 'flex');
+  assert.ok(walk(compose).some((n) => n.attrs?.['data-az-chat-send'] !== undefined), 'Send is in the input\'s row');
+});
+
+test('issue #2: Clear history ships hidden and the history note sits behind an info control; in a float both are in the head', () => {
+  for (const root of [chat(['allow anyone']), floatOn()]) {
+    const box = one(root, 'data-az-chat-history');
+    assert.equal(box.attrs?.hidden, 'hidden', 'shown only where this browser can keep a chat');
+    assert.equal(one(root, 'data-az-chat-clear').attrs?.hidden, 'hidden', 'shown once there is history');
+    const about = one(root, 'data-az-chat-about');
+    const note = one(root, 'data-az-chat-privacy');
+    assert.deepEqual([about.tag, about.attrs?.type, about.attrs?.['aria-expanded'], about.attrs?.['aria-controls']],
+      ['button', 'button', 'false', note.attrs?.id]);
+    assert.equal(about.attrs?.['aria-label'], 'How this chat is kept');
+    assert.equal(note.attrs?.hidden, 'hidden');
+    assert.match(texts(note).join(''), /kept in this browser for 7 days; signing in clears it/);
+  }
+  const head = walk(floatOn()).find((n) => n.attrs?.class === 'az-chat-head')!;
+  assert.ok(walk(head).some((n) => n.attrs?.['data-az-chat-history'] !== undefined), 'the float\'s history controls take no line of their own');
+});
+
+test('issue #2: Jump to latest is laid over the transcript\'s foot — it takes no height from the answer', () => {
+  const latest = one(floatOn(), 'data-az-chat-latest');
+  assert.match(String(latest.style?.marginBlockStart), /^calc\(-1 \* /);
+  assert.equal(latest.style?.position, 'relative');
+  assert.equal(latest.style?.background, T.color.surface);
+});
+
+test('§9: the float sheet below sm is the preset\'s tallest, one height while an answer streams', () => {
+  const sheet = walk(floatOn()).find((n) => n.attrs?.class === 'az-chat-sheet')!;
+  assert.deepEqual([sheet.below?.sm?.height, sheet.below?.sm?.maxHeight], ['85svh', '85svh']);
 });

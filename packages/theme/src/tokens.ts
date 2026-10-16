@@ -217,6 +217,13 @@ export interface ColorTokens {
   readonly 'series-4'?: string;
   readonly 'series-5'?: string;
   readonly 'series-6'?: string;
+  /**
+   * Present only on a site with a chat (chat-block-spec §9, theme-spec §16):
+   * the visitor's message, a quiet tint of the accent over `surface`, derived
+   * by chat-tint.ts and proven against `text`. No theme defines it, so every
+   * other site declares exactly what it did before.
+   */
+  readonly 'chat-visitor'?: string;
 }
 
 export interface SizeTokens {

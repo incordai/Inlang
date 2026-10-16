@@ -2,7 +2,7 @@
  * @az runtime chat-logic
  * Purpose: the chat runtime's pure rules: the shell's config, the event-stream reader, a visitor's text, finished sentences, fixed copy.
  * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
- * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, REQUEST_MAX, SHARE_TAG_MAX_MS, requestBody, parseChatConfig, atEnd, mayFollow, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
+ * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, REQUEST_MAX, SHARE_TAG_MAX_MS, requestBody, parseChatConfig, atEnd, mayFollow, offersLatest, INPUT_MAX_ROWS, inputRows, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
  * Edit guide: no DOM here; every event is checked against its closed shape and an unknown one is dropped, never guessed at.
  * Tests: packages/overlay/test/chat.test.ts
  */
@@ -53,6 +53,35 @@ export const atEnd = (scrollTop: number, scrollHeight: number, clientHeight: num
  */
 export const mayFollow = (following: boolean, scrollTop: number, known: number): boolean =>
   following && scrollTop >= known - END_SLACK_PX;
+
+/**
+ * Jump to latest is offered (§9, issue #2) only when the visitor has moved
+ * away from the newest words: not at the end — and, once the newest answer
+ * has arrived, not reading it from its start either, where jumping to its
+ * end would skip what they are reading. `start` is where that answer begins,
+ * in CSS pixels from the transcript's visible top (negative once scrolled
+ * past), or null while no answer has arrived (none yet, or still streaming).
+ */
+export const offersLatest = (end: boolean, start: number | null, clientHeight: number): boolean =>
+  !end && !(start !== null && start >= -END_SLACK_PX && start <= clientHeight - END_SLACK_PX);
+
+/**
+ * The input starts as one line and grows with its text to this many lines,
+ * then scrolls (issue #2): room for a question on a phone without pushing
+ * the answer out of the sheet.
+ */
+export const INPUT_MAX_ROWS = 5;
+
+/**
+ * How many lines the input needs for its text, given the scroll height it
+ * has at `rows` lines and the height of one line: never fewer than one,
+ * never more than INPUT_MAX_ROWS.
+ */
+export const inputRows = (scrollHeight: number, clientHeight: number, rows: number, lineHeight: number): number => {
+  if (lineHeight <= 0) return rows;
+  const extra = Math.ceil(Math.max(0, scrollHeight - clientHeight) / lineHeight);
+  return Math.min(INPUT_MAX_ROWS, Math.max(1, rows + extra));
+};
 
 /**
  * The overlay preset a float opens as at this viewport width (chat-block-spec

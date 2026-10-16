@@ -1830,3 +1830,44 @@ accent, each accent, each offered pair) × scheme: six colours, each 3:1 on
 every ground (worst measured 3.56:1, `clay` light, teal 600), pairwise ≥ 0.06,
 `series-1` the accent and `series-2` the pair's second hue, deterministic, and
 absent from a theme that did not ask for them.
+
+---
+
+## 16. The chat's visitor tint
+
+A chat (chat-block-spec §9) draws its answers on the panel's plain `surface`
+and needs one surface a theme never chose: the visitor's own words, told
+apart from the answer without a second loud colour. It is **derived**, never
+written, by `packages/theme/src/chat-tint.ts`, and exists only on a site with
+a chat — the way the series colours exist only where charts are drawn (§15),
+so every other site declares exactly what it did before.
+
+| Token | Value |
+|---|---|
+| `color.chat-visitor` | `color-mix(in srgb, var(--az-color-accent) 12%, var(--az-color-surface))` — the accent laid over `surface` at `CHAT_TINT_PERCENT`, declared on tokens like `veil` (§1.2), so it follows the scheme with them |
+
+Two floors, each a named constant in `chat-tint.ts`; a theme that cannot
+meet either is **refused** (`ChatTintUnavailable`), never drawn under it:
+
+- `text` on the tint at the body floor, **4.5:1** (worst measured 10.88:1,
+  `clay` dark);
+- the tint at least **1.1:1** from `surface` (`CHAT_TINT_SEPARATION`), so the
+  bubble never vanishes into the answer; measured on 2026-10-16 over every
+  theme × accent × offered pair × scheme, the closest is 1.16:1 (`volt`, own
+  accent, dark).
+
+The chat uses the accent only on small things — Send, the focus ring, links —
+and paints an accent pair's gradient (§13.5) on **Send alone**: the
+launcher, the sign-in link, a share's or an explore's submit and a quoted
+plan's highlighted edge are the solid accent (`accent-contrast` on `accent`,
+a pair §6 proves), and an answer's calls to action are outlined.
+
+`packages/theme/test/contrast.test.ts` proves every pair the chat draws on
+every theme × (own accent, each accent, each offered pair) × scheme, from the
+colour the mix paints: `text` on `chat-visitor`; `text`, `muted`, `accent`,
+`danger` (4.5:1) and `focus`, `border-strong` (3:1) on `surface`;
+`accent-contrast` on `accent` and `accent-hover`; and every chart series 3:1
+on each answer surface (`CHAT_SURFACES`). `border-strong` on `surface` joins
+the role pairs every theme must hold, since the chat's input and outlined
+controls now sit there. `packages/theme/test/chat-tint.test.ts` proves what
+the tint adds, and that a site without a chat declares nothing new.

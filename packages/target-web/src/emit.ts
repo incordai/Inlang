@@ -24,7 +24,7 @@ import type { Spec } from '../../core/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
 import {
   ACCENT_RAMPS, FONT_STACKS, PATTERN_ORIGINS, PATTERN_REFERENCES, PATTERN_SHAPES, patternCss, patternLayers,
-  resolve, schemeCss, schemeReferences, THEMES, withAccentPair, withSeries, gradientCss, GRADIENT_REFERENCES,
+  resolve, schemeCss, schemeReferences, THEMES, withAccentPair, withSeries, withChat, gradientCss, GRADIENT_REFERENCES,
   type AccentName, type PatternOrigin, type PatternShape, type Theme,
 } from '../../theme/src/index.ts';
 import { generated, generatedJson } from './generated.ts';
@@ -662,8 +662,10 @@ const hueOf = (hue: string | null | undefined): AccentName | null =>
 function namedTheme(spec: Spec, override?: Theme): Theme {
   const base = override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
   const named = withAccentPair(base, hueOf(spec.site.accent), hueOf(spec.site.accent2));
-  // A chat that draws charts gets the theme's series colours (chat-block-spec §20.4); every other site is unchanged.
-  return usesSeries(spec) ? withSeries(named) : named;
+  // A chat gets the visitor's tint (chat-block-spec §9, theme-spec §16), and one that draws charts the
+  // theme's series colours (§20.4); every other site is unchanged.
+  const chatted = usesChat(spec) ? withChat(named) : named;
+  return usesSeries(spec) ? withSeries(chatted) : chatted;
 }
 
 /** Whether the site's theme carries an accent pair — then words get the gradients. */
