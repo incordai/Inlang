@@ -1,13 +1,29 @@
 # az
 
-`az` is a compiler that turns one `.az` file into a production website. You
-write short words — `hero center`, `faq list`, `pricing cards` — and `az build`
-emits a React + Vite project that pre-renders every page, ships a strict
-Content-Security-Policy, and reads its colours, spacing and type only from a
-theme. The build is deterministic (two builds give byte-identical files), runs
-offline after install, and has no AI in it. A site can also declare an
-optional backend — accounts, sessions and data tables over SQLite,
-PostgreSQL or MySQL — that `az build` generates beside it.
+**Describe a website in short words; az compiles them into a pre-rendered,
+locked-down site — and the words are designed so an AI assistant can write
+them for you.**
+
+az is for developers, small studios and agencies shipping client sites, and
+founders building their own product site — very often with an AI assistant
+doing the typing. When an assistant writes a site's code directly, every run
+comes out different and nothing checks the result. az gives the assistant a
+small vocabulary instead (`hero center`, `faq list`, `pricing cards`), checks
+every line of it, and compiles it into tested production code. The compiler
+itself has no AI in it and never calls the network.
+
+## What you get
+
+- **Pre-rendered static pages** with a strict Content-Security-Policy on every page.
+- **Colour first:** 6 themes, each light and dark, with 9 accent hues and gradient pairs proven for contrast.
+- **12 building blocks ("words"):** nav, hero, text, feature, gallery, pricing, faq, cta, footer, auth, scene (3D), chat.
+- **An optional backend:** accounts, social sign-in, data tables on SQLite, PostgreSQL or MySQL, and an admin area.
+- **An optional AI chat block** that answers with your own components, charts and tables, with share links and operator data tools.
+- **Images resized at build** into WebP widths, each `<img>` with its width and height.
+- **Checks built in:** `az check` for the file, `az doctor` for the machine, `az audit` for what a build ships.
+- **Deterministic builds:** the same file gives byte-identical output, every time.
+
+## A 60-second example
 
 ```az
 az 1
@@ -31,105 +47,113 @@ page /
 page /work
 ```
 
-That is [`fixtures/minimal.az`](fixtures/minimal.az). The full grammar is
-[docs/GRAMMAR.md](docs/GRAMMAR.md); `az explain <term>` says what any word
-means in one line.
+That is [`fixtures/minimal.az`](fixtures/minimal.az). It builds a two-page
+site (`/` and `/work`) in the dark `midnight` theme with a violet accent and a
+soft glow behind the opening section. Both pages share a navigation bar with
+a "Work" link. The home page opens with a centred headline, a small label
+above it and a line of text below. Every page comes out as plain HTML with
+its security policy, ready to put on any static host. `az explain <term>`
+says what any word means in one line, for example `az explain hero center`.
 
-## Install
+## Quick start
 
-Needs **Node 22.18 or later** (CI runs Node 22, nightly also 24) and pnpm, which
-corepack provides at the version pinned in `package.json`.
+**Install.** You need Node 22.18 or later and pnpm (corepack provides it).
 
 ```sh
-git clone https://github.com/incordai/incord-lang.git && cd incord-lang
+git clone https://github.com/incordai/inlang.git && cd inlang
 corepack enable pnpm
 pnpm install --frozen-lockfile --ignore-scripts
 alias az="node $(pwd)/packages/cli/bin/az.js"
 az --help
 ```
 
-Always install with `--ignore-scripts`: nothing here needs a lifecycle script,
-and they are the most common way a dependency attacks a machine
-([word-quality-gate §2](docs/word-quality-gate.md)). `az doctor` checks the
-machine for you.
+Always install with `--ignore-scripts`: nothing here needs install scripts,
+and they are a common way for a dependency to attack a machine.
 
-## Quick start
-
-A site is written in three steps, in this order:
-
-1. **Colour.** Choose the `theme`, its `accent` (one hue, or a pair for a
-   gradient) and its `pattern` first, from the brand or mood — see
-   [Colour](#colour):
-
-   ```sh
-   az palette               # a gallery page: every theme, hue, pair and pattern
-                            # in light and dark, each with its .az lines to copy
-   az palette --list        # the same choices in the terminal (--json for tools)
-   az explain theme         # one line per theme
-   az explain theme accent  # each hue and the hues it makes a gradient with
-   ```
-
-2. **Frame.** `width` and `font` under `site` (`az explain site width`,
-   `az explain font`).
-3. **Sections.** The pages and their words — `hero center`, `faq list` — from
-   the [words](#words) below (`az explain hero center`).
-
-Write `site.az` (the example above), then:
+**1. Choose the colour.** Colour is the first decision, before any section.
 
 ```sh
-az check site.az     # diagnostics only, writes nothing: "az: no problems found"
-az dev site.az       # build, serve on http://127.0.0.1:5173/ and reload on every save
-az build site.az     # write the project to .az-build/ (--out dir to choose)
-cd .az-build && npm install --ignore-scripts && npm run build   # the site, pre-rendered, in .az-build/dist/
-cd .. && az audit    # check what the build ships: secrets, CSP, new-tab links
+az palette            # writes a gallery page of every theme, hue, pair and pattern
+az palette --list     # the same choices in the terminal
 ```
 
-`az dev` installs the generated project's dependencies on its first run
-(network), then works offline. A diagnostic names the line, a stable code and
-the fix:
+**2. Write the file.** Save the example above as `site.az`, then change the
+words. [docs/WORDS.md](docs/WORDS.md) lists every word and its options.
+
+**3. Preview it.**
+
+```sh
+az dev site.az        # serves http://127.0.0.1:5173/ and reloads on every save
+```
+
+**4. Check and build.**
+
+```sh
+az check site.az      # diagnostics only, writes nothing: "az: no problems found"
+az build site.az      # writes the project to .az-build/
+cd .az-build && npm install --ignore-scripts && npm run build   # the site, in .az-build/dist/
+cd .. && az audit     # checks what the build ships: secrets, security policy, links
+```
+
+A mistake names the line, a stable code and the fix:
 
 ```
 broken.az:4:15 error AZ1202  hero: 'center' and 'split' are both layouts — pick one
-broken.az:6:3 error AZ1201  nonsense: unknown word — see the word list
 ```
 
-The generated project carries `AZ.md`, its own map for people and AI tools:
-it opens with the site's colour lines and their legal values, then which
-file each route and block went to, and where to change things.
+**5. Deploy.** `.az-build/dist/` is plain static files: upload them to any
+static file host. A site with a backend also builds a `server/` folder to run
+on Node 22; [docs/self-hosting.md](docs/self-hosting.md) walks through it.
+There is no `az deploy` command yet.
 
-## Colour
+The full walkthrough, with every option, is [docs/USAGE.md](docs/USAGE.md).
 
-Colour is the first decision, and it is made from closed sets so the contrast
-can be proven, never from a hex code. `theme` picks one of six
-hand-designed themes, each with a light and a dark scheme: `midnight` (dark
-product), `paper` (editorial), `signal` (industrial), `clay` (warm, cream and
-terracotta), `petal` (soft, lavender and violet), `volt` (loud, black, white
-and magenta). `accent` picks a hue (`violet` `indigo` `blue` `teal`
-`green` `lime` `amber` `orange` `rose`), and the compiler chooses the step of
-its ramp that holds every contrast floor in light and dark. Two hues make a
-gradient pair:
+## How it works
 
-```az
-  theme midnight
-    accent violet blue
+You write one `.az` file. The az compiler reads it, checks every word against
+the word list and the theme, and writes an ordinary React + Vite project. That
+project's build pre-renders every page. If the file declares a backend, the
+compiler also writes the server beside the site. You never edit the generated
+code; you change the `.az` file and rebuild (or `az eject` a word to own it).
+
+```
+site.az ──> az compiler ──> .az-build/   React + Vite project ──> dist/  static site
+            (checks,        └─ server/   optional backend (accounts, data, chat)
+             no network)    └─ AZ.md     a map of the project for people and AI tools
 ```
 
-The primary button, the highlighted pricing plan's edge and the `glow`,
-`spotlight` and `ramp` patterns then draw from violet to blue in OKLCH, with
-a label proven at 4.5:1 against every point of the gradient. Only pairs that
-hold every floor along the whole gradient, without a grey middle, are
-offered; any other is error AZ1423, naming the partners that work.
-`az explain theme accent` lists them; the rule and the table are in
-[theme-spec §13](docs/theme-spec.md).
+## Using az with an AI assistant
 
-To choose by eye, `az palette` writes one static page (default
-`.az-build/.palette/index.html`) showing, for each theme in light and dark
-side by side, its swatches, every hue as a button and a link, every allowed
-pair as a gradient button over its glow, and every pattern — each with the
-exact lines to paste and a copy button. `--theme clay` and `--accent violet`
-narrow it; `--list` prints the choices for a terminal and `--json` for tools.
-The page carries the same Content-Security-Policy a build gives its pages
-([theme-spec §14](docs/theme-spec.md)).
+- **`az prompt`** prints the instructions any AI model needs to write `.az`:
+  the order (colour first), the syntax, every word and its options, and the
+  common errors with their fixes. It is generated from the compiler's own
+  tables, and every example in it compiles. Paste it into the assistant's
+  instructions; `--compact` gives a short version.
+- **`az mcp`** serves the compiler to an assistant as tools (MCP over stdio):
+  look up words, check a file, build it. Setup: [docs/mcp.md](docs/mcp.md).
+- **`AZ.md`**, written into every generated project, maps each page and
+  block to its file and says where to change things.
+- **[docs/WORDS.md](docs/WORDS.md)** lists every word, variant and key.
+- **Fewer tokens:** on the median of the repository's sites, the same site
+  takes about 1.5× the `.az` file's tokens as a component-tree JSON and
+  about 9× as pre-rendered HTML ([token benchmark](docs/token-benchmark.md)).
+
+More detail: [docs/USAGE.md §6](docs/USAGE.md#6-using-az-with-an-ai-assistant).
+
+## Feature guides
+
+| Topic | Guide | Reference |
+|---|---|---|
+| Words (building blocks) | [WORDS.md](docs/WORDS.md) | [GRAMMAR](docs/GRAMMAR.md), one `docs/<word>-block-spec.md` per word |
+| Themes and colour | [USAGE §3](docs/USAGE.md#3-colour) | [theme-spec](docs/theme-spec.md) |
+| Backend and data | [USAGE §4](docs/USAGE.md#4-the-optional-backend), [self-hosting](docs/self-hosting.md), [managed cloud setup](docs/cloud-setup.md) | [backend-spec](docs/backend-spec.md), [data-spec](docs/data-spec.md) |
+| Sign-in | [USAGE §4](docs/USAGE.md#4-the-optional-backend) | [auth-block-spec](docs/auth-block-spec.md) |
+| AI chat | [chat README](packages/words/chat/README.md) | [chat-block-spec](docs/chat-block-spec.md) (§19: what is built) |
+| Images | [gallery-block-spec §7](docs/gallery-block-spec.md) | [hero-block-spec](docs/hero-block-spec.md) |
+| Security | [USAGE §5](docs/USAGE.md#5-security-model) | [security scanning](docs/security-scanning.md), [word-quality-gate](docs/word-quality-gate.md) |
+| Testing | [VERIFICATION §1.1](docs/VERIFICATION.md#11-every-suite-what-it-checks-and-what-it-needs) | [VERIFICATION](docs/VERIFICATION.md) |
+| AI assistants | [USAGE §6](docs/USAGE.md#6-using-az-with-an-ai-assistant) | [mcp](docs/mcp.md), [token benchmark](docs/token-benchmark.md) |
+| Every other doc | [USAGE §7](docs/USAGE.md#7-all-the-docs) | [ARCHITECTURE](docs/ARCHITECTURE.md), [PRD](docs/PRD.md) |
 
 ## Commands
 
@@ -160,56 +184,13 @@ The page carries the same Content-Security-Policy a build gives its pages
 Exit codes: 0 success; 1 errors in the file or a failed check; 2 bad usage,
 configuration, or a file that cannot be read.
 
-## The optional backend
-
-A site that needs accounts or data declares `backend`; one that does not
-builds exactly as before. Only choices go in the `.az` file — addresses,
-passwords and keys go in the server's `.env`, and the compiler refuses a
-connection string written in the file.
-
-```
-site shop
-  auth
-    adapter azbackend
-  backend
-    database sqlite          # sqlite | postgres | mysql
-    email    smtp            # smtp | api
-```
-
-- **Local:** `az dev site.az` runs the site and the backend with nothing to
-  configure — SQLite in `.az-dev/`, a generated secret, and a local mailbox
-  for reset and sign-in emails instead of sending them.
-- **Production:** `az build` writes `server/` beside the site (its own
-  `package.json`, `.env.example`, a runbook `README.md` and the source).
-  `az backend init <out>/server` writes `server/.env` with a fresh
-  `AZ_SESSION_SECRET` (mode 0600, never overwritten); fill in the rest —
-  database URL, mail relay or email API, allowed origins.
-- **Social sign-in:** any OpenID Connect or OAuth 2 provider, configured only
-  by `AZ_OAUTH_<ID>_…` keys in `.env` (issuer or three URLs, client id and
-  secret); no provider is named in the code. Accounts link by verified email.
-- **Auth adapters** (`auth` → `adapter`): `azbackend` (this backend, or your
-  own server speaking its protocol), `hosted` (a managed auth provider — its
-  public key only, `profile standard` or `token-endpoint`), `session` (your
-  own same-origin cookie routes), `custom` (your module, set with `impl`).
-- **Data tables:** `data <table>` declares fields (`text`, `longtext`,
-  `number`, `money`, `flag`, `date`, `datetime`, `email`, `url`, `choice`,
-  `image`, `ref`) and deny-by-default `allow` rules. The build gives
-  migrations for all three databases, a REST API, a typed client, an admin
-  area, and `from <table>` for `feature`, `faq` and `gallery`. Schema history
-  lives in a committed `<site>.data.json`: `az backend plan` shows a change,
-  `az backend schema` records it, and destructive steps need an explicit flag.
-
-Guides: [self-hosting](docs/self-hosting.md), [managed cloud setup](docs/cloud-setup.md).
-Specs: [backend](docs/backend-spec.md), [auth](docs/auth-block-spec.md), [data](docs/data-spec.md).
-
 ## Words
 
 A word is a block on the page. Each lives in `packages/words/<word>/` with
 its manifest (`word.json`), web emitter, README and previews. The table below
-is generated from each `word.json` by `node scripts/gen-words-index.mjs`, which
-also writes the full index, [docs/WORDS.md](docs/WORDS.md) (every variant,
-modifier and key with its info line, and the file to edit for each concern);
-`pnpm test` fails if either is stale.
+is generated from each `word.json` by `node scripts/gen-words-index.mjs`,
+which also writes the full index, [docs/WORDS.md](docs/WORDS.md); `pnpm test`
+fails if either is stale.
 
 <!-- words-catalogue:start (generated by scripts/gen-words-index.mjs — do not edit) -->
 | Word | Info | Variants | Docs |
@@ -228,129 +209,22 @@ modifier and key with its info line, and the file to edit for each concern);
 | `text` | Section of written copy from a string or .md file | `prose` `centered` `columns` | [README](packages/words/text/README.md) |
 <!-- words-catalogue:end -->
 
-## Security model
+## Project status
 
-- **Content-Security-Policy:** every built page gets a strict, hashed policy
-  as a `<meta>` — never `unsafe-inline` or `unsafe-eval`; the generated
-  server sends `default-src 'none'` and the usual hardening headers.
-- **Secret guard:** a service key in the `.az` file is an error (AZ1411); the
-  build refuses a secret-looking public variable and scans the built bundle
-  for key shapes. These checks have no off switch. Only `AZ_PUBLIC_…`
-  variables reach the browser.
-- **No network at build:** the compiler never calls the network. A project's
-  own words (`words/`, e.g. after `az eject`) are code: they run when the
-  project is built (`az build`, `az dev`, the MCP `az_build` tool), never in
-  the read-only tools.
-- **`az doctor`** checks the machine and the project (Node, image library,
-  compile, `.env` key names, build secrets) and prints each fix.
-- **`az audit`** checks a build's output: secrets in shipped files, page and
-  backend CSP, new-tab links, and with `--online` known-vulnerable dependencies.
+- **Built:** the compiler and web target, all 12 words, the six themes, the
+  backend with accounts, sign-in adapters and data tables, and the chat
+  block through its operator data tools (C6). Details: [ROADMAP](docs/ROADMAP.md#current-status).
+- **Still open:** chat's interactive controls and maps (C7, C8); a sign-in
+  test against a real provider; 3D measurements on a genuinely slow device.
+- **Not started:** M5, the first real site shipped with az. The grammar is
+  frozen only after it, so the file format can still change.
+- **Not built yet:** `az deploy`, an editor language server, a playground.
 
-Details: [word-quality-gate §2–§5](docs/word-quality-gate.md),
-[backend-spec §5](docs/backend-spec.md), [data-spec §13](docs/data-spec.md),
-[security scanning](docs/security-scanning.md).
+## Contributing
 
-## Tests
+Read [CONTRIBUTING.md](CONTRIBUTING.md): setup, which checks to run for each
+kind of change, the house rules, and where things live in the repository.
+Before any change, `pnpm verify` must pass.
 
-| Script | Checks | Needs |
-|---|---|---|
-| `pnpm verify` | `pnpm typecheck` + `pnpm test`: every unit suite — compiler, theme, words (props, variants, headers, descriptions, this README's example, commands and catalogue), target, CLI, runtimes, backend on in-memory SQLite, MCP | nothing |
-| `pnpm lint` | `az lint packages/words`: words use theme tokens only, and each `themeReads` lists exactly the tokens its code reads | nothing |
-| `pnpm coverage` | which variants and props each emitter implements | nothing |
-| `pnpm verify:build` | builds the GRAMMAR §8 fixture with the real toolchain and checks the shipped HTML, security and bundle budget | network (installs) |
-| `pnpm test:visual` | every preview in three themes, light and dark: overflow, axe, keyboard, reduced motion, behaviours | browsers |
-| `pnpm gate [words/<word>]` | the 12-point word gate ([VERIFICATION §3](docs/VERIFICATION.md)); `--every-variant` adds every variant without its own preview | browsers |
-| `pnpm test:palette` | the `az palette` gallery in three engines: zero CSP violations (served and opened from the file), axe, phone width, keyboard, copy; a screenshot per theme in a light and a dark browser, rendered twice and identical, in `.palette-shots/` | browsers |
-| `pnpm thumbnails [--verify]` | one PNG per word × variant in `.thumbnails/`; `--verify` renders twice and requires identical bytes | browsers |
-| `pnpm test:auth` | auth forms, protected pages and reset against a local mock provider and the generated server | browsers |
-| `pnpm test:dev` | `az dev` end to end: backend, dev mailbox, reload on save, clean Ctrl-C | browsers |
-| `pnpm test:3d` | the 3D runtime in real browsers | browsers |
-| `pnpm test:data` | data tables end to end: API, rules, admin, images, `from` blocks | browsers |
-| `pnpm test:backend-db` | the backend on real PostgreSQL and MySQL | Docker |
-| `pnpm test:cloud-auth` | the hosted adapter's token-endpoint profile against the real server software | Docker, browsers |
-| `pnpm test:lighthouse` | Lighthouse on the previews and fixture sites | browsers |
-
-Browsers: `pnpm exec playwright install chromium firefox webkit` once. Every
-browser suite also installs the generated project's pinned dependencies
-(network) before it builds.
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `verify`,
-`verify:build`, the word gate with lint, auth, dev, 3D and thumbnails, and
-`test:backend-db`.
-
-## Repository map
-
-| Path | What |
-|---|---|
-| `packages/core` | grammar, parser, linker, Spec, validation, `az explain` text — no filesystem, no network |
-| `packages/theme` | token schema, the three themes, accent ramps and pairs, scheme CSS |
-| `packages/target-web` | the web target: React + Vite project, stylesheet, CSP, `AZ.md` |
-| `packages/words` | the twelve words, one folder each, and their shared tests |
-| `packages/overlay` | behaviour runtime shipped to the browser: dialogs, menus, disclosures, carousel |
-| `packages/scene-runtime` | the 3D runtime: one renderer per page, posters as fallback |
-| `packages/auth-runtime` | the sign-in forms' browser runtime |
-| `packages/backend` | the generated server's source and its emitter |
-| `packages/cli` | the `az` binary |
-| `packages/mcp` | the MCP server behind `az mcp` |
-| `docs/` | product, grammar, architecture, one spec per block, verification |
-| `fixtures/` | small `.az` files |
-| `scripts/` | browser suites, the gate, thumbnails, generators |
-| `spike-m0/` | the M0 spike: a hand-built hero and motion tiers, its own package |
-
-## Docs
-
-Start with [AGENTS.md](docs/AGENTS.md) (reading order and the rules), then
-[ROADMAP](docs/ROADMAP.md) (current status), [PRD](docs/PRD.md),
-[ARCHITECTURE](docs/ARCHITECTURE.md), [CONVENTIONS](docs/CONVENTIONS.md),
-[GRAMMAR](docs/GRAMMAR.md), [theme-spec](docs/theme-spec.md),
-[VERIFICATION](docs/VERIFICATION.md), [ASSUMPTIONS](docs/ASSUMPTIONS.md) and
-[word-quality-gate](docs/word-quality-gate.md). Each word has a
-`docs/<word>-block-spec.md`; shared specs cover
-[buttons and sections](docs/buttons-and-sections-spec.md),
-[overlays](docs/overlays-spec.md), [motion tiers](docs/motion-tiers-spec.md),
-[mobile motion](docs/mobile-motion-spec.md) and the
-[3D techniques](docs/3d-technique-reference.md). Background:
-[stack evaluation](docs/stack-evaluation.md),
-[distribution and hosting](docs/distribution-and-hosting.md),
-[MCP](docs/mcp.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Using with an AI assistant
-
-- **Any model, no connection: paste `az prompt` into its instructions.**
-  `az prompt` prints one Markdown block — the authoring order (colour
-  first), the syntax with a minimal site, the colour choices, every word
-  with its variants and keys (types and allowed values), the backend and
-  data rules, and the common errors with the compiler's own fix — generated
-  from the same tables the compiler checks against, so it cannot drift.
-  Every example in it compiles with zero diagnostics (a test holds it to
-  that). Its size goes to stderr in characters and approximate tokens
-  (characters / 4, rounded up — a model's own tokenizer will differ).
-  `--compact` keeps the order, syntax, colour and every word's variants and
-  keys, and a test keeps it under 12,000 characters (3,000 approximate
-  tokens). `--words hero,cta` describes only those words;
-  `--budget N` fits N tokens by dropping, in this order, each word's
-  example, each word's validation rules, the info lines, the backend and
-  data section, then the common errors; `--json` gives the prompt and its
-  size to a tool, as the MCP tool `az_prompt` does.
-- **Colour comes first.** An assistant chooses the theme, accent and pattern
-  with the user before it writes any section, then the frame, then the
-  sections. `az mcp`'s instructions say so, and docs/WORDS.md and every
-  generated `AZ.md` open with that step and its legal values.
-- **`az mcp`** serves the compiler as tools — `az_words`, `az_explain`,
-  `az_word_docs`, `az_grammar`, `az_check`, `az_spec`, `az_build` and more —
-  with read-only tools that never run project code. Setup and the safety
-  model: [docs/mcp.md](docs/mcp.md).
-- **`az palette`** (and the MCP tool `az_palette`) gives every colour
-  choice with its `.az` line — as a gallery page to pick from by eye, or as
-  `--list` / `--json`.
-- **`az explain <term...>`** gives a ≤60-character line for any word,
-  variant, key or value — the cheapest lookup.
-- **[docs/WORDS.md](docs/WORDS.md)** lists every word, variant and key with
-  its info line and the file to edit for copy, style tokens, layout and
-  behaviour, plus the gate to run.
-- **Per-word READMEs** (`packages/words/<word>/README.md`) are each word's
-  docs page; each emitter opens with an `@az` header naming what it renders
-  and how to edit it.
-- **`AZ.md`** in every generated project maps routes and blocks to files.
-- **Tokens:** on the median of the repository's 34 sites, the same site
-  takes 1.5× the `.az` file's tokens as a component-tree JSON and 9.0× as
-  pre-rendered HTML ([token benchmark](docs/token-benchmark.md), `pnpm bench:tokens`).
+**License:** to be decided. The repository has no license file yet
+([PRD §11](docs/PRD.md#11-open-questions--answer-before-m1)).

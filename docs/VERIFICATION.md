@@ -38,6 +38,34 @@ pnpm scan:actions            # workflow lint (with shellcheck on run: blocks)
 Every check must be runnable locally with the same command CI uses. **A check
 that only exists in CI config will drift.**
 
+### 1.1 Every suite, what it checks and what it needs
+
+| Script | Checks | Needs |
+|---|---|---|
+| `pnpm verify` | `pnpm typecheck` + `pnpm test`: every unit suite — compiler, theme, words (props, variants, headers, descriptions, the root README's example, commands and catalogue), target, CLI, runtimes, backend on in-memory SQLite, MCP | nothing |
+| `pnpm lint` | `az lint packages/words`: words use theme tokens only, and each `themeReads` lists exactly the tokens its code reads | nothing |
+| `pnpm coverage` | which variants and props each emitter implements | nothing |
+| `pnpm bench:tokens` | the token benchmark: each site as `.az`, Spec JSON, a component tree and HTML ([token-benchmark](token-benchmark.md)) | nothing |
+| `pnpm verify:build` | builds the GRAMMAR §8 fixture with the real toolchain and checks the shipped HTML, security and bundle budget | network (installs) |
+| `pnpm test:visual` | every preview in three themes, light and dark: overflow, axe, keyboard, reduced motion, behaviours | browsers |
+| `pnpm gate [words/<word>]` | the 12-point word gate (§3); `--every-variant` adds every variant without its own preview | browsers |
+| `pnpm test:palette` | the `az palette` gallery in three engines: zero CSP violations (served and opened from the file), axe, phone width, keyboard, copy; a screenshot per theme in a light and a dark browser, rendered twice and identical, in `.palette-shots/` | browsers |
+| `pnpm thumbnails [--verify]` | one PNG per word × variant in `.thumbnails/`; `--verify` renders twice and requires identical bytes | browsers |
+| `pnpm test:auth` | auth forms, protected pages and reset against a local mock provider and the generated server | browsers |
+| `pnpm test:dev` | `az dev` end to end: backend, dev mailbox, reload on save, clean Ctrl-C | browsers |
+| `pnpm test:3d` | the 3D runtime in real browsers | browsers |
+| `pnpm test:data` | data tables end to end: API, rules, admin, images, `from` blocks | browsers |
+| `pnpm test:chat` | the chat block end to end against the generated server with the scripted `fake` model, in three engines (chat-block-spec §12) | browsers |
+| `pnpm test:backend-db` | the backend on real PostgreSQL and MySQL | Docker |
+| `pnpm test:cloud-auth` | the hosted adapter's token-endpoint profile against the real server software | Docker, browsers |
+| `pnpm test:lighthouse` | Lighthouse on the previews and fixture sites | browsers |
+
+Browsers: `pnpm exec playwright install chromium firefox webkit` once. Every
+browser suite also installs the generated project's pinned dependencies
+(network) before it builds. CI (`.github/workflows/ci.yml`, §7) runs
+`verify`, `verify:build`, the word gate with lint, auth, dev, 3D,
+thumbnails and the palette suite, and `test:backend-db`.
+
 ---
 
 ## 2. Real-device measurement protocol

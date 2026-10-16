@@ -93,6 +93,28 @@ works — a change that breaks one is sent back:
   `Modifiers`, `Props`, `Styling`, `Behaviour`). `headers.test.ts` checks it
   against the code, so keep it true when you change the file.
 
+## Where things live
+
+| Path | What |
+|---|---|
+| `packages/core` | grammar, parser, linker, Spec, validation, `az explain` text — no filesystem, no network |
+| `packages/theme` | token schema, the six themes, accent ramps and pairs, scheme CSS |
+| `packages/target-web` | the web target: React + Vite project, stylesheet, CSP, `AZ.md` |
+| `packages/words` | the twelve words, one folder each, and their shared tests |
+| `packages/overlay` | behaviour runtime shipped to the browser: dialogs, menus, disclosures, carousel |
+| `packages/scene-runtime` | the 3D runtime: one renderer per page, posters as fallback |
+| `packages/auth-runtime` | the sign-in forms' browser runtime |
+| `packages/backend` | the generated server's source and its emitter |
+| `packages/cli` | the `az` binary |
+| `packages/mcp` | the MCP server behind `az mcp` |
+| `docs/` | product, grammar, architecture, one spec per block, verification |
+| `fixtures/` | small `.az` files |
+| `scripts/` | browser suites, the gate, thumbnails, generators |
+| `spike-m0/` | the M0 spike: a hand-built hero and motion tiers, its own package |
+
+Every test suite, what it checks and what it needs is in
+[VERIFICATION §1.1](docs/VERIFICATION.md#11-every-suite-what-it-checks-and-what-it-needs).
+
 ## How a word is wired
 
 A word is a folder. The compiler, `az explain`, the MCP catalogue, the
