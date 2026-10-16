@@ -1,7 +1,7 @@
 /**
  * @az server chat-answer
  * Purpose: the answer parser: a model's text, read line by line, becomes the closed set of page events — prose, or a component validated whole.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3, §21.1.2, §21.2.3)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3, §21.1.2, §21.2.3, §21.4.2)
  * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, ASK_FORM, FENCE, lineTokens, quoteKey
  * Edit guide: linear in the characters read, no regular expression that can backtrack; a line that does not parse is prose; a component that breaks a rule is dropped whole and never shown as syntax.
  * Tests: packages/backend/test/chat-answer.test.ts, packages/backend/test/chat-attacks.test.ts
@@ -46,8 +46,8 @@
  * Caps per answer: ANSWER_LIMITS. Past the prose cap or the component cap
  * the parser ends (`ended`), and the route stops reading the model.
  *
- * The rich components — chart, table, stats, cards, dashboard (§20), and
- * explore (§21.3) — are held the same way and read whole by chat-rich.ts;
+ * The rich components — chart, table, stats, cards, dashboard (§20),
+ * explore (§21.3) and map (§21.4) — are held the same way and read whole by chat-rich.ts;
  * their `from` figures and rows are filled by the route (chat.ts) before the
  * page sees them.
  *
@@ -100,6 +100,8 @@ export interface AnswerRules {
   readonly images?: readonly string[];
   /** The operator's tools a `from tool` may name (§21.2); none when absent. */
   readonly tools?: readonly ChatToolShape[];
+  /** AZ_GEOCODER_URL is set: a map's `place` may be looked up (§21.4.2). */
+  readonly geocoder?: boolean;
 }
 
 /** One component, validated: exactly what the page's templates are filled with. */
@@ -120,7 +122,9 @@ export type DropReason =
   | 'not_shown' | 'no_quote' | 'composed_pricing' | 'destination' | 'shape'
   | 'too_long' | 'too_many' | 'empty' | 'components' | 'record' | 'number' | 'image' | 'figures' | 'tool'
   /** One view of an explore that names a column, a variable or a type that does not fit; the rest of it stands (§21.3). */
-  | 'view';
+  | 'view'
+  /** One map place the geocoder found nothing for, or could not look up; the rest of the map stands (§21.4). */
+  | 'place';
 
 /**
  * Each form the model is taught, in the order the prompt lists them: what
@@ -312,6 +316,8 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
   let queries = 0;
   /** `from tool` calls across the answer (§21.2.4). */
   let calls = 0;
+  /** Map places to geocode across the answer (§21.4.2). */
+  let places = 0;
   const dropped: DropReason[] = [];
   let out: AnswerEvent[] = [];
   let pendingText = '';
@@ -390,16 +396,20 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     if (b.kind === 'pricing') { drop('composed_pricing'); return; }
     if (b.kind === 'dropped' || b.broken) { drop(b.broken ?? 'shape'); return; }
     if (b.kind === 'rich') {
-      const read = richBlock(b.head, b.lines, { show: rules.show, destinations: rules.destinations, images: rules.images ?? [], tools: rules.tools ?? [] }, cleanText);
+      const read = richBlock(b.head, b.lines, {
+        show: rules.show, destinations: rules.destinations, images: rules.images ?? [], tools: rules.tools ?? [], geocoder: rules.geocoder === true,
+      }, cleanText);
       if (!read.ok) { drop(read.why); return; }
       for (let i = 0; i < read.lostImages; i++) drop('image');
       for (let i = 0; i < read.lostViews; i++) drop('view');
+      for (const why of read.lostMap) drop(why);
       // The answer's own caps: points across its components, requests the server will run.
       if (points + read.points > RICH_LIMITS.answerPoints || queries + read.queries > RICH_LIMITS.answerQueries
-        || calls + read.calls > RICH_LIMITS.answerCalls) { drop('too_many'); return; }
+        || calls + read.calls > RICH_LIMITS.answerCalls || places + read.places > RICH_LIMITS.answerPlaces) { drop('too_many'); return; }
       points += read.points;
       queries += read.queries;
       calls += read.calls;
+      places += read.places;
       emit(read.block, richLines(read.block));
       return;
     }
@@ -533,7 +543,8 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       case 'stats':
       case 'cards':
       case 'dashboard':
-      case 'explore': {
+      case 'explore':
+      case 'map': {
         // A line with a rich component's first-line shape is held as one; any other is a sentence that starts with the word.
         const shaped: Record<RichWord, boolean> = {
           chart: bare(0) && CHART_KINDS.includes(rest[0].value) && str(1),
@@ -542,6 +553,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
           cards: rest.length === 0 || (bare(0) && rest[0].value === 'from'),
           dashboard: rest.length === 1 && str(0),
           explore: rest.length === 1 && str(0),
+          map: str(0) && (rest.length === 1 || (bare(1) && rest[1].value === 'from')),
         };
         if (shaped[first.value as RichWord]) open = { kind: 'rich', head: t, items: [], lines: [], broken: null };
         else asProse();

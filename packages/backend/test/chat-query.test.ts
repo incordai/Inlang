@@ -15,7 +15,7 @@ import { dataOf } from './data-fixture.ts';
 import { QueryTimeout, type Db } from '../src/server/db.ts';
 import { selectAggregate } from '../src/server/data-query.ts';
 import {
-  QUERY_LIMITS, createQueries, isoWeek, parseCards, parseFigures, parseRows, queryable, weekGroups, type QueryRequest, type QueryTable,
+  QUERY_LIMITS, createQueries, isoWeek, parseCards, parseFigures, parsePins, parseRows, queryable, weekGroups, type QueryRequest, type QueryTable,
 } from '../src/server/chat-query.ts';
 import { clampText } from '../src/server/chat-rich.ts';
 
@@ -280,6 +280,72 @@ test('an explore\'s rows (§21.3): up to 200, page after page of the anonymous l
     assert.ok(t.ok && t.result.kind === 'rows' && t.result.rows.length === QUERY_LIMITS.rows);
     for (const bad of [0, 201, 1.5]) assert.equal(parseRows(words('orders columns item'), tables, bad), null, String(bad));
     assert.ok(!JSON.stringify(r).includes('call Ana'), 'no private value');
+  } finally {
+    await h.close();
+  }
+});
+
+/** C8 (§21.4.2): a public table of places — numbers for coordinates, a choice and a flag to filter by, a private note. */
+const PLACES = `  data places
+    name      text     required
+    latitude  number
+    longitude number
+    kind      choice   shop hall
+    open      flag
+    price     money    usd
+    note      text     private
+    allow anyone read
+  data hidden
+    name      text     required
+    latitude  number
+    longitude number
+    allow signedin read
+`;
+
+test('a map\'s pins (§21.4.2): label, lat and lon by name — numbers only, never money or private; a `where` a choice or a flag; the anonymous list\'s rows, each with a place', async () => {
+  const data = dataOf(PLACES);
+  const h = await startBackend({}, { data });
+  try {
+    // Coordinates in millionths of a degree: a `number` is whole (data-spec §3).
+    const rows: [string, number | null, number | null, string, number, string][] = [
+      ['North store', 52_530_000, 13_410_000, 'shop', 1, 'private north'],
+      ['Precise store', 52_520_008, 13_404_954, 'shop', 1, ''],
+      ['Closed hall', 52_500_000, 13_400_000, 'hall', 0, ''],
+      ['Placeless', null, null, 'shop', 1, ''],
+      ['Off the globe', 95_000_000, 13_000_000, 'shop', 1, ''],
+      ['South pole', -90_000_000, 0, 'hall', 1, ''],
+    ];
+    for (const [i, [name, lat, lon, kind, open, note]] of rows.entries()) {
+      await h.db.run('INSERT INTO azd_places (id, owner, created, updated, name, latitude, longitude, kind, open, note) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [`00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, i + 1, i + 1, name, lat, lon, kind, open, note]);
+    }
+    const tables = data.tables.map((table): QueryTable => ({ table, digits: {} }));
+    const q = createQueries({ db: h.db, database: 'sqlite', publicBase: h.url });
+    const all = await q.run(must(parsePins(words('places label name lat latitude lon longitude'), tables)));
+    assert.ok(all.ok && all.result.kind === 'pins');
+    assert.deepEqual(all.result.pins, [
+      { label: 'South pole', lat: -90, lon: 0 },
+      { label: 'Closed hall', lat: 52.5, lon: 13.4 },
+      { label: 'Precise store', lat: 52.520008, lon: 13.404954 },
+      { label: 'North store', lat: 52.53, lon: 13.41 },
+    ], 'newest first, as the list gives them; no place, or off the globe, is no pin; millionths of a degree read as degrees');
+    const shops = await q.run(must(parsePins(words('places label name lat latitude lon longitude where kind shop'), tables)));
+    assert.ok(shops.ok && shops.result.kind === 'pins');
+    assert.deepEqual(shops.result.pins.map((p) => p.label), ['Precise store', 'North store']);
+    const open = await q.run(must(parsePins(words('places label name lat latitude lon longitude where open no'), tables)));
+    assert.ok(open.ok && open.result.kind === 'pins');
+    assert.deepEqual(open.result.pins.map((p) => p.label), ['Closed hall']);
+    assert.deepEqual(shops.result.pins.length, 2);
+    assert.ok(!JSON.stringify([all, shops, open]).includes('private north'), 'no private value');
+    for (const w of [
+      'places label note lat latitude lon longitude', 'places label name lat price lon longitude', 'places label name lat latitude lon latitude',
+      'places label latitude lat latitude lon longitude', 'places label name lat latitude lon longitude where kind cafe',
+      'places label name lat latitude lon longitude where name North', 'places label name lat latitude lon longitude where open maybe',
+      'hidden label name lat latitude lon longitude', 'nowhere label name lat latitude lon longitude', 'places label name lat latitude',
+    ]) assert.equal(parsePins(words(w), tables), null, w);
+    // The `where` is a list parameter, so it is in the cache key.
+    assert.notEqual(must(parsePins(words('places label name lat latitude lon longitude where kind shop'), tables)).key,
+      must(parsePins(words('places label name lat latitude lon longitude where kind hall'), tables)).key);
   } finally {
     await h.close();
   }

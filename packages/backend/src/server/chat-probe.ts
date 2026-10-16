@@ -58,6 +58,7 @@ export const PROBE_QUESTIONS: Readonly<Record<'prose' | AnswerWord, string>> = {
   cards: 'Show a few things worth a look, as cards.',
   dashboard: 'Give me a small dashboard of the key figures.',
   explore: 'Let me explore the key figures with a slider and a chart.',
+  map: 'Where is the site? Show it on a map.',
 };
 
 export interface ProbeAnswer {

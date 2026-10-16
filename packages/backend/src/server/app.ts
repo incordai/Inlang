@@ -1,7 +1,7 @@
 /**
  * @az server app
- * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth; the /data, /admin and /chat edge.
- * Spec: docs/auth-block-spec.md §3.4 · docs/backend-spec.md §5 · docs/data-spec.md §5.4
+ * Purpose: the azbackend routes exactly: sign-in/up, link, reset, password, session, providers, oauth; the /data, /admin, /chat and /tiles edge.
+ * Spec: docs/auth-block-spec.md §3.4 · docs/backend-spec.md §5 · docs/data-spec.md §5.4 · docs/chat-block-spec.md §21.4.3
  * Exports: createApp, isEmail, isSitePath, COOKIE_NAMES, DataRequest, DataRoutes, DataResult, DataFile, ChatRequest, ChatRoutes
  * Edit guide: same answer for unknown account and wrong password; rate-limit before hashing; claim unverified accounts safely.
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/security.test.ts, packages/backend/test/data-api.test.ts, packages/backend/test/chat-route.test.ts
@@ -31,6 +31,7 @@ import { linkMessage, resetMessage, type Mailer } from './email.ts';
 import { BodyError, clientIp, cookie, corsHeaders, createLimiter, rateKey, readCookies, readJson, readRaw, redirect, send, sendFile } from './http.ts';
 import { ProviderError, type Oidc } from './oidc.ts';
 import { normaliseEmail, OAUTH_STATE_TTL_MS, TOKEN_TTL_MS, type Store, type User } from './store.ts';
+import type { Tiles } from './chat-tiles.ts';
 
 /**
  * Cookie names. In production every cookie is Secure, so the session takes
@@ -134,6 +135,26 @@ function imageHeaders(file: DataFile): Record<string, string> {
   };
 }
 
+/** The maps' tiles, glyphs and sprites (chat-block-spec §21.4.3), served by chat-tiles.ts under this prefix. */
+const TILES_PATH = '/tiles/';
+
+/**
+ * The tiles' CORS for one exact allowed origin (§21.4.3): GET and HEAD, the
+ * tile reader's `range` and `if-match` allowed, `etag` and `content-range`
+ * exposed so it can tell the archive's version and size. No credentials: the
+ * tiles are public data, fetched with no cookie.
+ */
+function tilesCors(origin: string): Record<string, string> {
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-headers': 'range, if-match',
+    'access-control-allow-methods': 'GET, HEAD',
+    'access-control-expose-headers': 'etag, content-range',
+    'access-control-max-age': '600',
+    vary: 'Origin',
+  };
+}
+
 /** data-spec §5.4: /data is a fetch route with the wider method set. */
 const DATA_METHODS = 'GET, POST, PATCH, PUT, DELETE';
 
@@ -146,6 +167,8 @@ export interface AppDeps {
   readonly data?: DataRoutes;
   /** POST /chat (docs/chat-block-spec.md §4.2); absent, /chat is 404 like any unknown path. */
   readonly chat?: ChatRoutes;
+  /** GET /tiles/… (chat-block-spec §21.4.3), only when a chat shows maps; absent, 404 like any unknown path. */
+  readonly tiles?: Tiles;
   readonly now?: () => number;
   /** Operational log. Never passed a password, token, secret or address. */
   readonly log?: (line: string) => void;
@@ -590,6 +613,20 @@ export function createApp(deps: AppDeps) {
         return method === 'GET' ? deps.chat.shares.read(share[1], chatReq, res) : deps.chat.shares.remove(share[1], chatReq, res);
       }
       return deps.chat.handle(chatReq, res);
+    }
+
+    if (deps.tiles && url.pathname.startsWith(TILES_PATH)) {
+      // A fetch route: an allowed origin always (the map's tile reader, glyphs and sprites are fetches),
+      // reads only, and CORS that lets the reader ask for a range and see the archive's version.
+      const origin = req.headers.origin ?? '';
+      if (!allowed.has(origin)) return send(res, 403, { error: 'unknown' });
+      const cors = tilesCors(origin);
+      if (method === 'OPTIONS') return send(res, 204, undefined, cors);
+      if (method !== 'GET' && method !== 'HEAD') return send(res, 405, { error: 'unknown' }, cors);
+      const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v.join(',') : v);
+      return deps.tiles.handle(method, url.pathname.slice(TILES_PATH.length), {
+        range: one(req.headers.range), ifMatch: one(req.headers['if-match']), ifNoneMatch: one(req.headers['if-none-match']),
+      }, res, cors);
     }
 
     if (!url.pathname.startsWith('/auth/')) return send(res, 404, { error: 'unknown' });

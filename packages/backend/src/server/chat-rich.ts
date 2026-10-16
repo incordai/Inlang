@@ -1,9 +1,9 @@
 /**
  * @az server chat-rich
- * Purpose: an answer's charts, tables, stat cards, image cards, dashboards and explores — read from the model's lines, checked and clamped, and their `from` figures filled by the server.
- * Spec: docs/chat-block-spec.md §20.2, §20.3, §20.5, §20.6, §21.2.3, §21.3
+ * Purpose: an answer's charts, tables, stat cards, image cards, dashboards, explores and maps — read from the model's lines, checked and clamped, and their `from` figures filled by the server.
+ * Spec: docs/chat-block-spec.md §20.2, §20.3, §20.5, §20.6, §21.2.3, §21.3, §21.4
  * Exports: RICH_WORDS, RichWord, RICH_LIMITS, RICH_FORMS, RichLine, RichBlock, RichChart, RichTable, RichStat, RichCard, RichCards,
- *   RichDashboard, RichTile, RichRules, RichRead, Resolved, FiguresRun, ToolRequest, ToolShape, ToolsRun, ToolAnswer, richBlock,
+ *   RichDashboard, RichTile, RichRules, RichRead, Resolved, FiguresRun, ToolRequest, ToolShape, ToolsRun, ToolAnswer, GeocodeRun, richBlock,
  *   resolveRich, clampText, parseNumber, richLines, linesCap
  * Edit guide: the model's numbers are numbers or the component goes; its words never reach SQL (a `from` is resolved by
  *   chat-query.ts against the public schema) nor a URL (a `from tool` names a declared tool and typed values, called by
@@ -41,6 +41,9 @@
  * An explore (§21.3) is read by chat-explore.ts with this reader's own
  * rules for strings, numbers and requests; its data, controls and views go
  * to the page, which recomputes the views as the visitor moves a control.
+ * A map (§21.4) is read by chat-map.ts the same way: the model's pins and
+ * routes (`src: model`), places the operator's geocoder looks up (`src:
+ * geocoded`), or a public table's rows (`src: site`).
  *
  * Numbers the model wrote are figures it wrote: they get `src: model`, and
  * the page shows them with the "AI-generated figures" label. A `from …` is
@@ -62,11 +65,12 @@
  */
 
 import type { LineToken } from './chat-answer.ts';
-import type { CardsResult, Figures, RowsResult } from './chat-query.ts';
+import type { CardsResult, Figures, PinsResult, RowsResult } from './chat-query.ts';
 import { isDay, paramValueOk, type ChatToolShape, type ToolParam } from './env.ts';
 import { bindExplore, EXPLORE_LIMITS, exploreLines, readExplore, type ExploreCell, type ExploreColumn, type RichExplore } from './chat-explore.ts';
+import { MAP_LIMITS, mapLines, readMap, type MapLost, type RichMap } from './chat-map.ts';
 
-export const RICH_WORDS = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore'] as const;
+export const RICH_WORDS = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'] as const;
 export type RichWord = (typeof RICH_WORDS)[number];
 
 /** chat-block-spec §20.2. The page holds the same (overlay chat-chart.ts, chat-figures.ts). */
@@ -94,6 +98,8 @@ export const RICH_LIMITS = {
   answerQueries: 6,
   /** `from tool` calls across one answer, inside its requests (§21.2.4). */
   answerCalls: 3,
+  /** Map places across one answer: the geocoder's calls (§21.4.2). */
+  answerPlaces: MAP_LIMITS.placesPerAnswer,
   /** Child lines one component may hold before it is too big to be one. */
   lines: 160,
   /** The largest figure. */
@@ -143,6 +149,17 @@ export const RICH_FORMS: Readonly<Record<RichWord, { readonly lines: readonly st
       '  view chart bar "Price by plan" sum Price by Plan where Seats >= $seats',
     ],
     about: `a data set the visitor explores with controls, every line one level in: first its rows — your own columns and up to ${EXPLORE_LIMITS.rows} rows (text in quotes, at most ${EXPLORE_LIMITS.cell} characters; numbers bare; dates bare as YYYY-MM-DD), or one line "from" a table's columns, or "from tool" a tool's columns; then up to ${EXPLORE_LIMITS.controls} controls — slider (min, max, optional step and value), date (from, to, optional value), toggle (${EXPLORE_LIMITS.toggleMin} to ${EXPLORE_LIMITS.toggleMax} options), and field lines (number min max, or choice and its options) each followed by a form that applies them or sends a question built from them ({name} for a field's value); then 1 to ${EXPLORE_LIMITS.views} views — a table, a stat or a chart — each optionally "where" one column, one of = != < <= > >=, and one value or a $control; a stat or chart counts, or sums, averages, or takes the min or max of a number column; nothing else is computed, so never write a formula`,
+  },
+  map: {
+    lines: [
+      'map "A title"',
+      '  pin "A label" 52.520008 13.404954',
+      '  route "A label"',
+      '    point 52.520008 13.404954',
+      '    point 52.5163 13.3777',
+      'map "A title" from stores label name lat latitude lon longitude',
+    ],
+    about: `a map of 1 to ${MAP_LIMITS.pins} pins, each a label and its latitude and longitude as plain numbers with at most ${MAP_LIMITS.decimals} decimals (your pins are shown labelled as AI-placed), and up to ${MAP_LIMITS.routes} routes of ${MAP_LIMITS.routePoints.min} to ${MAP_LIMITS.routePoints.max} points drawn as straight lines; or "from" a table: its label field and its number fields for latitude and longitude, optionally "where" a choice or flag field equals one value; never write a zoom, a centre or an address of a web page`,
   },
 };
 
@@ -202,7 +219,9 @@ export type RichBlock =
   | { readonly cards: RichCards }
   | { readonly dashboard: RichDashboard }
   /** §21.3: the rows, controls and views; a tool's rows by a checked request. */
-  | { readonly explore: RichExplore<ToolRequest> };
+  | { readonly explore: RichExplore<ToolRequest> }
+  /** §21.4: the model's pins, places and routes, or a public table's rows. */
+  | { readonly map: RichMap };
 
 /** What a chat page lets its rich components use (from context.json). */
 export interface RichRules {
@@ -212,11 +231,18 @@ export interface RichRules {
   readonly images: readonly string[];
   /** The operator's tools a `from tool` may name (§21.2): their shapes, never a URL or a key. None when absent. */
   readonly tools?: readonly ChatToolShape[];
+  /** AZ_GEOCODER_URL is set: a map's `place` may be looked up (§21.4.2). */
+  readonly geocoder?: boolean;
 }
 
 /** One component read, or why it was dropped; how many points and requests it holds; images it lost. */
 export type RichRead =
-  | { readonly ok: true; readonly block: RichBlock; readonly points: number; readonly queries: number; readonly calls: number; readonly lostImages: number; readonly lostViews: number }
+  | {
+    readonly ok: true; readonly block: RichBlock; readonly points: number; readonly queries: number; readonly calls: number;
+    readonly lostImages: number; readonly lostViews: number;
+    /** A map's places to geocode (§21.4.2), and the lines it lost by themselves — a pin's coordinate, a place it cannot look up. */
+    readonly places: number; readonly lostMap: readonly MapLost[];
+  }
   | { readonly ok: false; readonly why: 'shape' | 'not_shown' | 'destination' | 'too_many' | 'empty' | 'number' | 'tool' };
 
 const KINDS: ReadonlySet<string> = new Set(['bar', 'line', 'area', 'pie', 'donut']);
@@ -281,8 +307,8 @@ const fail = (why: Extract<RichRead, { ok: false }>['why']): never => { throw ne
 
 interface Node { readonly tokens: readonly LineToken[]; readonly children: Node[] }
 
-/** The child lines a component whose head is `word` may hold: an explore's rows are more than any other's (§21.3.3). */
-export const linesCap = (word: string): number => (word === 'explore' ? EXPLORE_LIMITS.lines : RICH_LIMITS.lines);
+/** The child lines a component whose head is `word` may hold: an explore's rows are more than any other's (§21.3.3); a map's own (§21.4.2). */
+export const linesCap = (word: string): number => (word === 'explore' ? EXPLORE_LIMITS.lines : word === 'map' ? MAP_LIMITS.lines : RICH_LIMITS.lines);
 
 /** The held lines as a tree two levels deep, or a drop: depth 1 under the head, depth 2 under the last depth-1 line. */
 function treeOf(lines: readonly RichLine[], cap: number): Node[] {
@@ -304,6 +330,8 @@ function reader(rules: RichRules, clean: Clean) {
   let calls = 0;
   let lostImages = 0;
   let lostViews = 0;
+  let places = 0;
+  const lostMap: MapLost[] = [];
   const bare = (t: LineToken | undefined, v?: string) => t?.kind === 'bare' && (v === undefined || t.value === v);
   const str = (t: LineToken | undefined): t is LineToken => t?.kind === 'string';
   /** A string token as shown text: cleaned, clamped, never empty. */
@@ -582,6 +610,16 @@ function reader(rules: RichRules, clean: Clean) {
     return { ...e, views };
   }
 
+  /** `map "title"` and its pins, places and routes, or `map "title" from …` (§21.4.2): read by chat-map.ts with this reader's rules. */
+  function map(head: readonly LineToken[], tree: readonly Node[]): RichMap {
+    shown('map');
+    const m = readMap(head, tree, { bare, str, clean, clampText, parseNumber, from, fail, geocoder: rules.geocoder === true });
+    points += m.points;
+    places += m.places;
+    lostMap.push(...m.lost);
+    return m.map;
+  }
+
   function read(head: readonly LineToken[], lines: readonly RichLine[]): RichBlock {
     const word = head[0].value as RichWord;
     const tree = treeOf(lines, linesCap(word));
@@ -629,9 +667,10 @@ function reader(rules: RichRules, clean: Clean) {
         return { dashboard: { title, tiles } };
       }
       case 'explore': return { explore: explore(head, tree) };
+      case 'map': return { map: map(head, tree) };
     }
   }
-  return { read, counts: () => ({ points, queries, calls, lostImages, lostViews }) };
+  return { read, counts: () => ({ points, queries, calls, lostImages, lostViews, places, lostMap }) };
 }
 
 /**
@@ -691,6 +730,8 @@ export function richLines(block: RichBlock): string {
     else { out.push('cards'); for (const c of block.cards) cardLines(c, '  '); }
   } else if ('explore' in block) {
     out.push(...exploreLines(block.explore, (t) => t.words));
+  } else if ('map' in block) {
+    out.push(...mapLines(block.map));
   } else {
     out.push(`dashboard ${quoted(block.dashboard.title)}`);
     for (const t of block.dashboard.tiles) {
@@ -704,7 +745,14 @@ export function richLines(block: RichBlock): string {
 }
 
 /** A `from` request answered: the kind of answer it wants decides which parse chat-query runs. */
-export type FiguresRun = (kind: 'figures' | 'rows' | 'cards', words: readonly string[], cap: number) => Promise<Figures | RowsResult | CardsResult | 'unavailable' | null>;
+export type FiguresRun = (kind: 'figures' | 'rows' | 'cards' | 'pins', words: readonly string[], cap: number) => Promise<Figures | RowsResult | CardsResult | PinsResult | 'unavailable' | null>;
+
+/**
+ * A map's `place` looked up by the operator's geocoder (chat-geocode.ts): its
+ * coordinates, null when nothing was found, `unavailable` when the geocoder
+ * failed, was late or the address's allowance is spent.
+ */
+export type GeocodeRun = (address: string) => Promise<{ readonly lat: number; readonly lon: number } | null | 'unavailable'>;
 
 /** A tool's rows as cards: each its title, and its text and image key when the request named those fields. */
 export interface ToolCards {
@@ -743,14 +791,14 @@ const figureColumns = (by: string, measure: string, unit: string | null) => [
  */
 export async function resolveRich(
   block: RichBlock, run: FiguresRun | null, day: string, tools: ToolsRun | null = null, images: readonly string[] = [],
-  lost: (why: 'view') => void = () => undefined,
+  lost: (why: 'view' | 'place') => void = () => undefined, geocode: GeocodeRun | null = null,
 ): Promise<Resolved | null> {
   const site = { src: 'site', asOf: day };
   type Out = Resolved | null | 'unavailable';
   type Source = { readonly from: readonly string[] } | { readonly tool: ToolRequest };
-  type Got = { readonly r: Figures | RowsResult | CardsResult | ToolCards | null; readonly meta: Resolved } | 'unavailable';
+  type Got = { readonly r: Figures | RowsResult | CardsResult | PinsResult | ToolCards | null; readonly meta: Resolved } | 'unavailable';
   /** The figures a source answers, with the provenance the page shows them under. */
-  const ask = async (s: Source, kind: 'figures' | 'rows' | 'cards', cap: number): Promise<Got> => {
+  const ask = async (s: Source, kind: 'figures' | 'rows' | 'cards' | 'pins', cap: number): Promise<Got> => {
     if ('from' in s) {
       const r = run ? await run(kind, s.from, cap) : null;
       return r === 'unavailable' ? r : { r, meta: site };
@@ -881,8 +929,40 @@ export async function resolveRich(
     return out;
   };
 
+  /**
+   * A map (§21.4): the model's pins and routes as written (src model), each
+   * place the geocoder found (src geocoded, its own label on the page), or a
+   * public table's rows (src site, the day they were read). A place nothing
+   * was found for is dropped by itself; a map left with no pin is the note
+   * when the geocoder failed, and dropped when the model's pins were none.
+   */
+  const map = async (m: RichMap): Promise<Out> => {
+    if ('from' in m) {
+      const got = await ask({ from: m.from }, 'pins', MAP_LIMITS.pins);
+      if (got === 'unavailable') return 'unavailable';
+      const r = got.r;
+      if (!r || r.kind !== 'pins') return null;
+      if (r.pins.length === 0) return 'unavailable';
+      return { title: m.title, ...got.meta, pins: r.pins.map((p) => ({ ...p, src: 'site' })), routes: [] };
+    }
+    const pins: Resolved[] = m.pins.map((p) => ({ label: p.label, lat: p.lat, lon: p.lon, src: 'model' }));
+    let failed = false;
+    for (const p of m.places) {
+      const at = geocode ? await geocode(p.address) : 'unavailable';
+      if (at === null || at === 'unavailable') {
+        failed ||= at === 'unavailable';
+        lost('place');
+        continue;
+      }
+      pins.push({ label: p.label, lat: at.lat, lon: at.lon, src: 'geocoded' });
+    }
+    if (pins.length === 0) return failed ? 'unavailable' : null;
+    return { title: m.title, src: 'model', pins, routes: m.routes.map((r) => ({ label: r.label, points: r.points })) };
+  };
+
   const titleOf = (b: RichBlock): string => {
     if ('chart' in b) return b.chart.title;
+    if ('map' in b) return b.map.title;
     if ('table' in b) return b.table.title;
     if ('dashboard' in b) return b.dashboard.title;
     if ('explore' in b) return b.explore.title;
@@ -902,6 +982,7 @@ export async function resolveRich(
     out = failed === null && items.length === block.stats.length ? { stats: items } : failed;
   } else if ('cards' in block) { const c = await cards(block.cards); out = c && c !== 'unavailable' ? { cards: c } : c; }
   else if ('explore' in block) { const x = await explore(block.explore); out = x && x !== 'unavailable' ? { explore: x } : x; }
+  else if ('map' in block) { const x = await map(block.map); out = x && x !== 'unavailable' ? { map: x } : x; }
   else {
     const tiles: Resolved[] = [];
     for (const t of block.dashboard.tiles) {

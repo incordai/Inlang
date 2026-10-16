@@ -45,6 +45,8 @@ export interface BackendChat {
   readonly context: string;
   /** Routes left out because the context would have passed CONTEXT_MAX. */
   readonly omitted: readonly string[];
+  /** Some chat shows maps (§21.4): the server serves their tiles and reads the map keys. */
+  readonly map?: true;
 }
 
 /**
@@ -240,5 +242,6 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
     prompt: CHAT_PROMPT(spec.site.name, ANSWER_WORDS.filter((w) => shown.has(w)), knows.size > 0),
     context: `${JSON.stringify(context, null, 2)}\n`,
     omitted,
+    ...(shown.has('map') ? { map: true as const } : {}),
   };
 }

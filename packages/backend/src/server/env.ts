@@ -1,9 +1,10 @@
 /**
  * @az server env
  * Purpose: the configuration: every key, validation, refuse to start naming bad keys.
- * Spec: docs/backend-spec.md §4 (chat keys: docs/chat-block-spec.md §11.1; tool keys: §21.2.2)
+ * Spec: docs/backend-spec.md §4 (chat keys: docs/chat-block-spec.md §11.1; tool keys: §21.2.2; map and geocoder keys: §21.4)
  * Exports: loadConfig, KEYS, urlProblem, CHAT_LIMITS, parseRate, ChatConfig, ChatRate, TOOL_KEYS, TOOL_LIMITS, TOOL_NAME, TOOL_WORD, toolKey,
- *   toolSecretKeys, paramValueOk, paramsProblem, isDay, ChatTool, ChatToolShape, ToolParam, ToolParamType, ToolFieldType
+ *   toolSecretKeys, paramValueOk, paramsProblem, isDay, ChatTool, ChatToolShape, ToolParam, ToolParamType, ToolFieldType, MapConfig,
+ *   GeocoderConfig, MAP_KEYS_LIMITS
  * Edit guide: server keys are never AZ_PUBLIC_; defaults are safe.
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/chat-route.test.ts
  */
@@ -33,6 +34,8 @@ export interface Setup {
   readonly images?: boolean;
   /** A page shows a chat (chat-block-spec): the model keys are listed too. */
   readonly chat?: boolean;
+  /** A chat shows maps (chat-block-spec §21.4): the tile, glyph and sprite keys are listed too. */
+  readonly map?: boolean;
 }
 
 export interface KeySpec {
@@ -100,6 +103,13 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_CHAT_FAKE_FILE', about: 'With AZ_CHAT_API=fake only: a JSON file of scripted answers, for tests and local development.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_CHAT_TOOLS', about: 'Optional: the names of your own HTTP data endpoints a chart, table or stat may take figures "from tool" (lower-case letters and digits, at most 24 characters, at most 8, comma-separated). Each needs its AZ_CHAT_TOOL_<NAME>_… keys below. The server POSTs the typed parameters as JSON to the URL you set and shows the rows it answers to the visitor, labelled; the model never reads them.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_CHAT_TOOL_CALLS_PER_ADDRESS', about: 'Tool calls one address may cause, in the form of AZ_CHAT_PER_ADDRESS (default 120/hour); past it a tool\'s figures show as not loaded. A cached answer is not a call.', when: (s) => s.chat === true, required: false, example: '120/hour' },
+  { name: 'AZ_MAP_WORLD', about: 'The world tile archive the chat\'s maps draw (one PMTiles file, zoom 0–6 covers the world in about 46 MB; docs/self-hosting.md says how to make one). This server serves it to the site with HTTP Range. Unset: maps show their list of places only.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_MAP_REGION', about: 'Optional: a regional extract (one PMTiles file) drawn over the world for detail; maps zoom in as far as it goes.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_MAP_GLYPHS', about: 'Optional: a folder of map label fonts as glyph ranges (<font name>/<start>-<end>.pbf). Unset: maps draw no place names.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_MAP_SPRITES', about: 'Optional: a folder of map icons (light.json, light.png, dark.json, dark.png and their @2x copies). Unset: maps draw no icons.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_MAP_ATTRIBUTION', about: 'The map data\'s attribution, shown under every map — the licence of your tile data requires it (one line, at most 200 characters). Required with AZ_MAP_WORLD.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_GEOCODER_URL', about: 'Optional: an endpoint that finds an address\'s coordinates, so a map may place an address. The server sends GET <url>?q=<address> and reads the first result\'s lat and lon (a JSON array, or { "results": [...] }) within 2 s and 16 KB; the browser never calls it. https, or plain http only for localhost.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_GEOCODER_PER_ADDRESS', about: 'Addresses one visitor\'s address may have looked up, in the form of AZ_CHAT_PER_ADDRESS (default 60/hour); a remembered address is not a call.', when: (s) => s.map === true, required: false, example: '60/hour' },
   { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: always, required: false, example: 'deny' },
 ];
 
@@ -380,6 +390,24 @@ const MIN_SECRET_BYTES = 32;
 const MAX_PROXY_HOPS = 10;
 const MINUTE_MS = 60 * 1000;
 
+/** chat-block-spec §21.4: the map keys' bounds. */
+export const MAP_KEYS_LIMITS = {
+  attribution: 200,
+  geocoderPerAddress: '60/hour',
+} as const;
+
+/** The tile data this server serves to the site's maps (chat-block-spec §21.4.3): file and folder paths, as .env gives them. */
+export interface MapConfig {
+  readonly world: string | null;
+  readonly region: string | null;
+  readonly glyphs: string | null;
+  readonly sprites: string | null;
+  readonly attribution: string;
+}
+
+/** The operator's geocoder (chat-block-spec §21.4.2): its URL, and how many lookups one address may cause. */
+export interface GeocoderConfig { readonly url: string; readonly perAddress: ChatRate }
+
 /** chat-block-spec §6.5: each chat setting's default and bounds. */
 export const CHAT_LIMITS = {
   dailyTokens: { default: 300_000, min: 1_000, max: 100_000_000 },
@@ -433,6 +461,8 @@ export interface ChatConfig {
   readonly tools: readonly ChatTool[];
   /** AZ_CHAT_TOOL_CALLS_PER_ADDRESS: tool calls one address may cause. */
   readonly toolCallsPerAddress: ChatRate;
+  /** The geocoder a map's `place` is looked up with (§21.4.2): null when AZ_GEOCODER_URL is unset or the chat shows no map. */
+  readonly geocoder: GeocoderConfig | null;
   /** Share links (chat-block-spec §20.7): whether new ones may be made, how long they last, how many at once, how often. */
   readonly shares: {
     readonly enabled: boolean;
@@ -489,6 +519,8 @@ export interface Config {
   readonly uploadLimit: number;
   /** The chat settings (setup.chat only); null otherwise. */
   readonly chat: ChatConfig | null;
+  /** The map tiles (setup.map only, chat-block-spec §21.4); null otherwise. */
+  readonly map: MapConfig | null;
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -643,7 +675,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
     problems.push(`AZ_UPLOAD_MAX_MB must be a whole number of MB, 1–${UPLOAD_MB.max}`);
   }
 
-  const chat = setup.chat === true ? chatConfig(env, get, publicUrl, problems) : null;
+  const chat = setup.chat === true ? chatConfig(env, get, publicUrl, problems, setup.map === true) : null;
+  const map = setup.chat === true && setup.map === true ? mapConfig(get, problems) : null;
 
   if (problems.length > 0) return { ok: false, problems };
   return {
@@ -671,6 +704,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
       filesDir: get('AZ_FILES_DIR') || './data/files',
       uploadLimit: uploadMb * 1024 * 1024,
       chat,
+      map,
     },
   };
 }
@@ -694,8 +728,50 @@ function onLoopback(value: string): boolean {
   }
 }
 
+/** A path as .env gives it: one line, no NUL; its file is opened when the server starts (main.ts), named if it cannot be. */
+const pathOk = (v: string) => v.length <= 4096 && !/[\u0000-\u001f]/.test(v);
+
+/** The map keys (chat-block-spec §21.4.3), every problem named — never a value quoted. */
+function mapConfig(get: (k: string) => string, problems: string[]): MapConfig {
+  const path = (key: string): string | null => {
+    const v = get(key);
+    if (v === '') return null;
+    if (!pathOk(v)) { problems.push(`${key} must be a path on one line`); return null; }
+    return v;
+  };
+  const world = path('AZ_MAP_WORLD');
+  const region = path('AZ_MAP_REGION');
+  const glyphs = path('AZ_MAP_GLYPHS');
+  const sprites = path('AZ_MAP_SPRITES');
+  const attribution = get('AZ_MAP_ATTRIBUTION');
+  if (region !== null && world === null) problems.push('AZ_MAP_REGION is drawn over the world archive — set AZ_MAP_WORLD too');
+  if ((glyphs !== null || sprites !== null) && world === null) problems.push('AZ_MAP_GLYPHS and AZ_MAP_SPRITES draw on the world archive — set AZ_MAP_WORLD too');
+  if (world !== null && attribution === '') problems.push('AZ_MAP_ATTRIBUTION is missing — the tile data\'s licence requires its attribution under every map');
+  else if (attribution !== '' && !plainText(attribution, MAP_KEYS_LIMITS.attribution)) problems.push(`AZ_MAP_ATTRIBUTION must be one line of at most ${MAP_KEYS_LIMITS.attribution} characters`);
+  return { world, region, glyphs, sprites, attribution };
+}
+
+/**
+ * AZ_GEOCODER_URL (chat-block-spec §21.4.2): https, or plain http only on
+ * this machine; no user name, password or #; a query is kept (the operator's
+ * own parameters), but not one named `q`, which the server sets.
+ */
+function geocoderUrlProblem(value: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    return 'is not a URL';
+  }
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && LOOPBACK.has(u.hostname))) return 'must use https (plain http only for localhost)';
+  if (u.username || u.password) return 'must not carry a user name or password';
+  if (u.hash || value.includes('#')) return 'must not have a #';
+  if (u.searchParams.has('q')) return 'must not set q — the server sends the address as q';
+  return null;
+}
+
 /** The chat keys (chat-block-spec §11.1), every problem named. */
-function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: string) => string, publicUrl: string, problems: string[]): ChatConfig {
+function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: string) => string, publicUrl: string, problems: string[], map = false): ChatConfig {
   const api = get('AZ_CHAT_API').toLowerCase();
   if (api && api !== 'completions' && api !== 'fake') problems.push('AZ_CHAT_API must be completions or fake');
   const url = get('AZ_CHAT_URL');
@@ -756,6 +832,7 @@ function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: 
     moderation: moderationUrl ? { url: moderationUrl, key: moderationKey } : null,
     tools: chatTools(env, get, problems),
     toolCallsPerAddress: rate('AZ_CHAT_TOOL_CALLS_PER_ADDRESS', TOOL_LIMITS.callsPerAddress),
+    geocoder: map ? geocoderOf(get, rate, problems) : null,
     shares: {
       enabled: shares !== 'off',
       days: bounded(get, 'AZ_CHAT_SHARE_DAYS', CHAT_LIMITS.shareDays, problems),
@@ -764,4 +841,14 @@ function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: 
       perAccount: rate('AZ_CHAT_SHARES_PER_ACCOUNT', CHAT_LIMITS.sharesPerAccount),
     },
   };
+}
+
+/** The geocoder's keys, when a chat shows maps (§21.4.2): null without AZ_GEOCODER_URL. */
+function geocoderOf(get: (k: string) => string, rate: (key: string, fallback: string) => ChatRate, problems: string[]): GeocoderConfig | null {
+  const url = get('AZ_GEOCODER_URL');
+  const perAddress = rate('AZ_GEOCODER_PER_ADDRESS', MAP_KEYS_LIMITS.geocoderPerAddress);
+  if (url === '') return null;
+  const p = geocoderUrlProblem(url);
+  if (p) problems.push(`AZ_GEOCODER_URL ${p}`);
+  return { url, perAddress };
 }

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { compile, type Spec, type SpecBlock } from '../../core/src/index.ts';
 import { chatBackend, CONTEXT_MAX } from '../src/chat-context.ts';
 import { backendFiles, envExample } from '../src/emit.ts';
-import { KEYS } from '../src/server/env.ts';
+import { KEYS, loadConfig } from '../src/server/env.ts';
 import { parseChatContext, systemText } from '../src/server/chat.ts';
 import { manifests } from './data-fixture.ts';
 
@@ -218,6 +218,68 @@ test('C7 (§21.3): a chat that shows explore is taught its form — data, contro
   assert.match(systemText(a.prompt, ctx, '/'), /There are no tables to take figures "from"/);
   // CONTROL: a chat that does not show it is not taught it.
   assert.doesNotMatch(chatBackend(compile(SHOW_SITE, { manifests }).spec!)!.prompt, /^explore /m);
+});
+
+test('C8 (§21.4): a chat that shows maps is taught its form; a place is taught per request only with the operator\'s geocoder; the server is told to serve tiles', () => {
+  const r = compile(SHOW_SITE.replace('    show  pricing faq cta', '    show  map'), { manifests });
+  assert.ok(r.ok && r.spec, JSON.stringify(r.diagnostics));
+  const a = chatBackend(r.spec)!;
+  assert.equal(a.map, true);
+  assert.match(a.prompt, /^map "A title"$/m);
+  assert.match(a.prompt, /^ {2}pin "A label" 52\.520008 13\.404954$/m);
+  assert.match(a.prompt, /^ {4}point 52\.5163 13\.3777$/m);
+  assert.match(a.prompt, /^map "A title" from stores label name lat latitude lon longitude$/m);
+  assert.match(a.prompt, /never write a zoom, a centre or an address of a web page/);
+  assert.doesNotMatch(a.prompt, /place "/, 'the build does not know whether the server has a geocoder');
+  const ctx = parseChatContext(a.context);
+  assert.ok(typeof ctx === 'object');
+  const without = systemText(a.prompt, ctx, '/');
+  assert.doesNotMatch(without, /place "/);
+  const withIt = systemText(a.prompt, ctx, '/', '', [], true);
+  assert.match(withIt, /A map may also place an address the site looks up for you — a line under it: place "A label" "A street address" \(at most 120 characters, at most 3 in an answer\)/);
+  // A page that shows no map is not taught places, geocoder or not.
+  assert.doesNotMatch(systemText(a.prompt, ctx, '/quiet', '', [], true), /place "/);
+  const files = backendFiles('Studio', { database: 'sqlite', email: 'smtp' }, undefined, a);
+  const file = (p: string) => files.find((f) => f.path === p)!.content;
+  assert.equal(JSON.parse(file('server/az.config.json')).map, true);
+  const env = file('server/.env.example');
+  for (const k of ['AZ_MAP_WORLD', 'AZ_MAP_REGION', 'AZ_MAP_GLYPHS', 'AZ_MAP_SPRITES', 'AZ_MAP_ATTRIBUTION', 'AZ_GEOCODER_URL', 'AZ_GEOCODER_PER_ADDRESS']) {
+    assert.match(env, new RegExp(`^${k}=`, 'm'), k);
+  }
+  assert.match(file('server/README.md'), /### Maps[\s\S]*AZ_MAP_WORLD[\s\S]*AZ_MAP_ATTRIBUTION/);
+  // CONTROL: a chat without maps lists none of it, and says nothing of maps.
+  const plain = chatBackend(compile(SHOW_SITE, { manifests }).spec!)!;
+  assert.equal(plain.map, undefined);
+  const plainFiles = backendFiles('Studio', { database: 'sqlite', email: 'smtp' }, undefined, plain);
+  assert.doesNotMatch(plainFiles.find((f) => f.path === 'server/.env.example')!.content, /AZ_MAP_|AZ_GEOCODER_/);
+  assert.equal(JSON.parse(plainFiles.find((f) => f.path === 'server/az.config.json')!.content).map, undefined);
+  assert.doesNotMatch(plainFiles.find((f) => f.path === 'server/README.md')!.content, /### Maps/);
+});
+
+test('the map keys (§21.4.3): paths read as given; the attribution required with an archive; a region or the label files need the world', () => {
+  const base = {
+    AZ_SESSION_SECRET: 'x'.repeat(43), AZ_BACKEND_PUBLIC_URL: 'http://localhost:8787', AZ_ALLOWED_ORIGINS: 'http://localhost:5173',
+    AZ_EMAIL_FROM: 'A <a@a.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: '2525', AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: 'f.json',
+  };
+  const setup = { database: 'sqlite' as const, email: 'smtp' as const, chat: true, map: true };
+  const ok = loadConfig({ ...base, AZ_MAP_WORLD: './tiles/world.pmtiles', AZ_MAP_ATTRIBUTION: 'Map data: its source' }, setup, 's');
+  assert.ok(ok.ok);
+  assert.deepEqual(ok.config.map, { world: './tiles/world.pmtiles', region: null, glyphs: null, sprites: null, attribution: 'Map data: its source' });
+  const none = loadConfig(base, setup, 's');
+  assert.ok(none.ok, 'no archive: the server starts, its maps are lists');
+  assert.deepEqual(none.ok && none.config.map, { world: null, region: null, glyphs: null, sprites: null, attribution: '' });
+  for (const [env, why] of [
+    [{ AZ_MAP_WORLD: 'w.pmtiles' }, /^AZ_MAP_ATTRIBUTION is missing/],
+    [{ AZ_MAP_REGION: 'r.pmtiles', AZ_MAP_ATTRIBUTION: 'x' }, /^AZ_MAP_REGION is drawn over the world archive/],
+    [{ AZ_MAP_GLYPHS: './glyphs', AZ_MAP_ATTRIBUTION: 'x' }, /^AZ_MAP_GLYPHS and AZ_MAP_SPRITES draw on the world archive/],
+    [{ AZ_MAP_WORLD: 'w.pmtiles', AZ_MAP_ATTRIBUTION: 'a'.repeat(201) }, /^AZ_MAP_ATTRIBUTION must be one line of at most 200 characters/],
+    [{ AZ_MAP_WORLD: 'w.pmtiles', AZ_MAP_ATTRIBUTION: 'line\u0007bell' }, /^AZ_MAP_ATTRIBUTION must be one line/],
+  ] as const) {
+    const r = loadConfig({ ...base, ...env }, setup, 's');
+    assert.ok(!r.ok && r.problems.some((p) => why.test(p)), `${JSON.stringify(env)}: ${r.ok ? 'accepted' : r.problems.join(' | ')}`);
+  }
+  // CONTROL: a site whose chat shows no maps reads no map key.
+  assert.ok(loadConfig({ ...base, AZ_MAP_WORLD: 'w.pmtiles' }, { ...setup, map: false }, 's').ok);
 });
 
 test('the per-request system text names what the visitor\'s page may show; a prose-only page is told so', () => {

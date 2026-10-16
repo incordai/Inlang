@@ -1,7 +1,7 @@
 /**
  * @az server main
- * Purpose: start the backend: config, migrations, store, routes (and the chat route, and its admins' usage view, when the site has one), HTTP server; --migrate --confirm for data steps; --images [--confirm] for the image backfill.
- * Spec: docs/backend-spec.md §8 · docs/data-spec.md §6.3, §8
+ * Purpose: start the backend: config, migrations, store, routes (and the chat route, its admins' usage view and the maps' tiles, when the site has them), HTTP server; --migrate --confirm for data steps; --images [--confirm] for the image backfill.
+ * Spec: docs/backend-spec.md §8 · docs/data-spec.md §6.3, §8 · docs/chat-block-spec.md §21.4.3
  * Exports: (none — entry point)
  * Edit guide: refuse to start on invalid config or an unconfirmed destructive step; never let a handler rejection crash the process.
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/chat-main.test.ts
@@ -22,6 +22,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createApp, type ChatRoutes, type DataRoutes } from './app.ts';
+import type { Tiles } from './chat-tiles.ts';
 import { MigrationBusy } from './claim.ts';
 import type { DataStep } from './data-migrate.ts';
 import { migrate, openMysql, openPostgres, openSqlite, type Db } from './db.ts';
@@ -44,6 +45,7 @@ const loaded = loadConfig(process.env, {
   database: site.database, email: site.email,
   ...(site.images === true ? { images: true } : {}),
   ...(site.chat === true ? { chat: true } : {}),
+  ...(site.map === true ? { map: true } : {}),
 }, site.siteName);
 if (!loaded.ok) {
   process.stderr.write(`backend: cannot start — fix these in .env (see .env.example):\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}\n`);
@@ -231,11 +233,29 @@ if (config.chat) {
     const { createTools } = await import('./chat-tools.ts');
     tools = createTools({ tools: config.chat.tools, perAddress: config.chat.toolCallsPerAddress, windows, log: (line) => process.stderr.write(`backend: ${line}\n`) });
   }
+  // A map's places, looked up by the operator's geocoder (§21.4.2), when AZ_GEOCODER_URL is set.
+  let geocoder;
+  if (config.chat.geocoder) {
+    const { createGeocoder } = await import('./chat-geocode.ts');
+    geocoder = createGeocoder({ url: config.chat.geocoder.url, perAddress: config.chat.geocoder.perAddress, windows, log: (line) => process.stderr.write(`backend: ${line}\n`) });
+  }
   chat = createChat({
     config: config.chat, secret: config.secret, db, prompt: read('prompt.txt'), context, adapter, windows,
     log: (line) => process.stderr.write(`backend: ${line}\n`), ...(figures ? { figures } : {}), ...(knows ? { knows } : {}),
-    ...(tools ? { tools } : {}),
+    ...(tools ? { tools } : {}), ...(geocoder ? { geocoder } : {}),
   });
+}
+// The maps' tiles, glyphs and sprites (§21.4.3), only when a chat shows maps: each file .env names is opened now, or the server does not start.
+let tiles: Tiles | undefined;
+if (config.map) {
+  const { openTiles, createTiles, TilesProblem } = await import('./chat-tiles.ts');
+  try {
+    tiles = createTiles(await openTiles(config.map));
+  } catch (e) {
+    if (!(e instanceof TilesProblem)) throw e;
+    process.stderr.write(`backend: cannot start — fix this in .env (see .env.example):\n  - ${e.message}\n`);
+    process.exit(1);
+  }
 }
 if (args.images !== null) {
   process.stdout.write('backend: this server has no data tables, so no stored images\n');
@@ -249,7 +269,10 @@ if (args.migrate) {
 }
 
 const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }, ownedRows);
-const app = createApp({ config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)), ...(data ? { data } : {}), ...(chat ? { chat } : {}) });
+const app = createApp({
+  config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)),
+  ...(data ? { data } : {}), ...(chat ? { chat } : {}), ...(tiles ? { tiles } : {}),
+});
 // The handler answers its own failures; requestListener is the last line.
 // Its 500, like the answer to a request Node cannot parse, carries the
 // security headers like every other response.

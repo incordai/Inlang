@@ -18,6 +18,7 @@ import { loadConfig, type Config } from '../src/server/env.ts';
 import { createOidc } from '../src/server/oidc.ts';
 import { createStore } from '../src/server/store.ts';
 import type { Message } from '../src/server/email.ts';
+import type { Tiles } from '../src/server/chat-tiles.ts';
 
 export const SITE = 'http://127.0.0.1:5173';
 export const SECRET = randomBytes(32).toString('base64url');
@@ -110,6 +111,8 @@ export async function startBackend(
     uploadLimit?: number;
     /** A site with chat: its tables made, and its usage report at GET /admin/chat (chat-block-spec §11.4). */
     chatUsage?: { readonly dailyTokens: number; readonly sharesEnabled: boolean };
+    /** A chat that shows maps: its tile route (chat-block-spec §21.4.3). */
+    tiles?: Tiles;
   } = {},
 ): Promise<Harness> {
   const clock = { now: Date.now() };
@@ -149,6 +152,7 @@ export async function startBackend(
         } : {}),
       }),
     } : {}),
+    ...(over.tiles ? { tiles: over.tiles } : {}),
   });
   server.on('request', (req, res) => { void app.handler(req, res); });
   return { url, mail, clock, config, db, close: async () => { server.close(); await db.close(); } };

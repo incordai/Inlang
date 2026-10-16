@@ -1,9 +1,9 @@
 /**
  * @az server chat-query
- * Purpose: the figures an answer's chart, table, stat or cards ask for — a closed set of requests over public tables, run as an anonymous read.
- * Spec: docs/chat-block-spec.md §20.5, §20.6
- * Exports: QueryTable, QueryRequest, QueryResult, Figures, RowsResult, CardsResult, CardImage, QUERY_LIMITS, queryable,
- *   parseFigures, parseRows, parseCards, createQueries, Queries, QueriesOptions, figuresRun, isoWeek, weekGroups
+ * Purpose: the figures an answer's chart, table, stat, cards or map ask for — a closed set of requests over public tables, run as an anonymous read.
+ * Spec: docs/chat-block-spec.md §20.5, §20.6, §21.3, §21.4.2
+ * Exports: QueryTable, QueryRequest, QueryResult, Figures, RowsResult, CardsResult, PinsResult, CardImage, QUERY_LIMITS, queryable,
+ *   parseFigures, parseRows, parseCards, parsePins, createQueries, Queries, QueriesOptions, figuresRun, isoWeek, weekGroups
  * Edit guide: the model's words only ever SELECT from closed lists and exact schema names — nothing it writes reaches SQL text.
  *   Every read is the anonymous one (`grant(read, null)`, user null); a private field is not in the schema the words are matched to.
  * Tests: packages/backend/test/chat-query.test.ts
@@ -18,9 +18,9 @@
  * owners or signed-in visitors may read, are simply not names this file
  * knows, so asking for one is a request that does not parse.
  *
- * Rows and cards go through the list route's own code (parseQuery,
- * selectList, outRow with no user), so they are exactly what `GET
- * /data/<t>` gives a signed-out visitor. Aggregations are one SELECT from
+ * Rows, cards and a map's pins go through the list route's own code
+ * (parseQuery, selectList, outRow with no user), so they are exactly what
+ * `GET /data/<t>` gives a signed-out visitor. Aggregations are one SELECT from
  * data-query.ts selectAggregate. Every read is cancelled by the database
  * past the public list's deadline; a cancelled read, or a total past what a
  * double holds exactly, is "unavailable" — never a guess.
@@ -34,6 +34,7 @@ import { outRow, type Field, type Table } from './data-values.ts';
 import { QueryTimeout, type Db, type Value } from './db.ts';
 import type { Database } from './env.ts';
 import { clampText, type FiguresRun } from './chat-rich.ts';
+import { MAP_LIMITS, mapWords, microDegrees } from './chat-map.ts';
 import type { ContextTable } from './chat.ts';
 
 /** chat-block-spec §20.2 / §20.5. */
@@ -45,6 +46,9 @@ export const QUERY_LIMITS = {
   rows: 20,
   /** The rows an explore holds (§21.3.3): two of the list route's pages. */
   exploreRows: 200,
+  /** A map's pins from a table (§21.4.2), and each one's label. */
+  pins: MAP_LIMITS.pins,
+  pinLabel: MAP_LIMITS.label,
   columns: 6,
   cards: 4,
   label: 24,
@@ -67,7 +71,9 @@ export type QueryRequest =
   /** `week`: the ISO weeks asked for — `agg` reads days, combined into weeks here with `week.fn` (§19.11). */
   | { readonly kind: 'figures'; readonly table: QueryTable; readonly agg: Aggregate; readonly key: string; readonly week?: { readonly fn: Aggregate['fn']; readonly cap: number } }
   | { readonly kind: 'rows'; readonly table: QueryTable; readonly columns: readonly Field[]; readonly sort: string; readonly limit: number; readonly key: string }
-  | { readonly kind: 'cards'; readonly table: QueryTable; readonly title: Field; readonly text: Field | null; readonly image: Field | null; readonly sort: string; readonly key: string };
+  | { readonly kind: 'cards'; readonly table: QueryTable; readonly title: Field; readonly text: Field | null; readonly image: Field | null; readonly sort: string; readonly key: string }
+  /** `filter`: one more list parameter, the `where` as the list route takes it (`status=open`, `open=on`). */
+  | { readonly kind: 'pins'; readonly table: QueryTable; readonly label: Field; readonly lat: Field; readonly lon: Field; readonly filter: readonly [string, string] | null; readonly key: string };
 
 /** One number, or groups in display order, with the unit the measure carries. */
 export interface Figures {
@@ -95,7 +101,13 @@ export interface CardsResult {
   readonly items: readonly { readonly title: string; readonly text: string | null; readonly image: CardImage | null; readonly row: { readonly table: string; readonly id: string; readonly field: string } | null }[];
 }
 
-export type QueryResult = { readonly ok: true; readonly result: Figures | RowsResult | CardsResult } | { readonly ok: false };
+/** A map's pins from a table (§21.4.2): each row with a label and both coordinates in range, read from millionths of a degree. */
+export interface PinsResult {
+  readonly kind: 'pins';
+  readonly pins: readonly { readonly label: string; readonly lat: number; readonly lon: number }[];
+}
+
+export type QueryResult = { readonly ok: true; readonly result: Figures | RowsResult | CardsResult | PinsResult } | { readonly ok: false };
 
 /** The tables a signed-out visitor may list (data-api grant with no user, and not owner-only). */
 export function queryable(tables: readonly QueryTable[]): QueryTable[] {
@@ -246,6 +258,45 @@ export function parseCards(words: readonly string[], tables: readonly QueryTable
   return { kind: 'cards', table: qt, title, text, image, sort, key };
 }
 
+/** The field types a pin's label may be read from: text a visitor reads. */
+const PIN_LABEL: ReadonlySet<string> = new Set(['text', 'longtext', 'choice']);
+
+/**
+ * `<table> label f lat f lon f [where f v]` — the words after a map's `from`
+ * (§21.4.2) — or null: the label a text or choice field, the coordinates
+ * `number` fields (never money) holding whole millionths of a degree — a
+ * `number` is whole (data-spec §3), and six decimals is the map's own
+ * precision — the `where` a choice field equal to one of
+ * its choices or a flag field `yes`/`no`, as parseFigures takes it. Rows are
+ * the list's own, newest first, at most QUERY_LIMITS.pins.
+ */
+export function parsePins(words: readonly string[], tables: readonly QueryTable[]): QueryRequest | null {
+  if (!mapWords(words)) return null;
+  const qt = tableOf(tables, words[0]);
+  if (!qt) return null;
+  const t = qt.table;
+  const label = publicField(t, words[2]);
+  const lat = publicField(t, words[4]);
+  const lon = publicField(t, words[6]);
+  if (!label || !PIN_LABEL.has(label.type) || !lat || lat.type !== 'number' || !lon || lon.type !== 'number' || lat === lon) return null;
+  let filter: readonly [string, string] | null = null;
+  if (words.length === 10) {
+    // `where <field> <value>`: what a figure's `where` takes, as the list route's own equality parameter.
+    const f = publicField(t, words[8]);
+    const raw = words[9];
+    if (!f || !AGGREGATE_FILTER.has(f.type)) return null;
+    if (f.type === 'flag') {
+      if (raw !== 'yes' && raw !== 'no') return null;
+      filter = [f.name, raw === 'yes' ? 'on' : 'off'];
+    } else {
+      if (!(f.choices ?? []).includes(raw)) return null;
+      filter = [f.name, raw];
+    }
+  }
+  const key = JSON.stringify(['pins', t.name, label.name, lat.name, lon.name, filter]);
+  return { kind: 'pins', table: qt, label, lat, lon, filter, key };
+}
+
 /** A figure as a double that is exact, or null: a total past 2^53 is not shown at all. */
 function exact(raw: unknown, digits: number | null): number | null {
   if (raw === null || raw === undefined) return null;
@@ -333,7 +384,7 @@ export function createQueries(o: QueriesOptions): Queries {
   const now = o.now ?? Date.now;
   const log = o.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   /** 60 s per normalised request, least recently used out past 500 (§20.5). */
-  const cache = new Map<string, { at: number; result: Figures | RowsResult | CardsResult }>();
+  const cache = new Map<string, { at: number; result: Figures | RowsResult | CardsResult | PinsResult }>();
 
   async function read(sql: string, params: readonly Value[]): Promise<Record<string, unknown>[] | null> {
     try {
@@ -390,13 +441,15 @@ export function createQueries(o: QueriesOptions): Queries {
   /**
    * The first `limit` rows a signed-out visitor's list gives, page after page
    * as the list route pages them (at most LIMIT_MAX a page, keyset by the
-   * last row's cursor), each page under the public list's deadline.
+   * last row's cursor), each page under the public list's deadline;
+   * `filter` is one more of the list's own parameters (a map's `where`).
    */
-  async function list(table: QueryTable, sort: string, limit: number): Promise<Record<string, unknown>[] | null> {
+  async function list(table: QueryTable, sort: string, limit: number, filter: readonly [string, string] | null = null): Promise<Record<string, unknown>[] | null> {
     const out: Record<string, unknown>[] = [];
     let after: string | null = null;
     while (out.length < limit) {
       const params = new URLSearchParams({ sort, limit: String(Math.min(limit - out.length, LIMIT_MAX)) });
+      if (filter !== null) params.set(filter[0], filter[1]);
       if (after !== null) params.set('after', after);
       const lq = parseQuery(table.table, params, false);
       const s = selectList(o.database, table.table, lq, null, false);
@@ -424,6 +477,25 @@ export function createQueries(o: QueriesOptions): Queries {
     };
   }
 
+  /**
+   * A map's pins: each row whose label is not empty and whose coordinates are
+   * whole millionths of a degree in range (`52520008` is 52.520008°); a row
+   * without them is no pin.
+   */
+  async function pins(req: Extract<QueryRequest, { kind: 'pins' }>): Promise<PinsResult | null> {
+    const items = await list(req.table, '-created', QUERY_LIMITS.pins, req.filter);
+    if (items === null) return null;
+    const out: { label: string; lat: number; lon: number }[] = [];
+    for (const r of items) {
+      const label = typeof r[req.label.name] === 'string' ? clampText((r[req.label.name] as string).trim(), QUERY_LIMITS.pinLabel) : '';
+      const lat = microDegrees(r[req.lat.name], 90);
+      const lon = microDegrees(r[req.lon.name], 180);
+      if (label === '' || lat === null || lon === null) continue;
+      out.push({ label, lat, lon });
+    }
+    return { kind: 'pins', pins: out };
+  }
+
   async function cards(req: Extract<QueryRequest, { kind: 'cards' }>): Promise<CardsResult | null> {
     const items = await list(req.table, req.sort, QUERY_LIMITS.cards);
     if (items === null) return null;
@@ -449,7 +521,7 @@ export function createQueries(o: QueriesOptions): Queries {
         cache.set(req.key, hit);
         return { ok: true, result: hit.result };
       }
-      const result = req.kind === 'figures' ? await figures(req) : req.kind === 'rows' ? await rows(req) : await cards(req);
+      const result = req.kind === 'figures' ? await figures(req) : req.kind === 'rows' ? await rows(req) : req.kind === 'pins' ? await pins(req) : await cards(req);
       if (result === null) return { ok: false };
       cache.delete(req.key);
       cache.set(req.key, { at: now(), result });
@@ -475,7 +547,7 @@ export function figuresRun(queries: Queries, tables: readonly Table[], context: 
   };
   const known = tables.map((table): QueryTable => ({ table, digits: digits(table) }));
   return async (kind, words, cap) => {
-    const req = kind === 'figures' ? parseFigures(words, known, cap) : kind === 'rows' ? parseRows(words, known, cap) : parseCards(words, known);
+    const req = kind === 'figures' ? parseFigures(words, known, cap) : kind === 'rows' ? parseRows(words, known, cap) : kind === 'pins' ? parsePins(words, known) : parseCards(words, known);
     if (!req) return null;
     const r = await queries.run(req);
     return r.ok ? r.result : 'unavailable';

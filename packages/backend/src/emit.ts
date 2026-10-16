@@ -333,12 +333,47 @@ readable), to the model named in \`.env\`, and streams the answer back. The
 `;
 }
 
+/** The README's maps section (chat-block-spec §21.4.3), only for a site whose chat shows maps. */
+function mapReadme(): string {
+  return `
+### Maps
+
+A chat on this site may answer with a map. The map's tiles, label fonts and
+icons come from this server — never a third party unless you choose one —
+under \`/tiles/\`, to the site's origins only, by HTTP Range.
+
+- **\`AZ_MAP_WORLD\`**: one PMTiles archive the maps draw (the world to zoom 6
+  is about 46 MB). Without it, every map shows its list of places only.
+  docs/self-hosting.md says how to make one with \`pmtiles extract\`.
+- **\`AZ_MAP_REGION\`** (optional): a regional extract drawn over the world;
+  maps zoom in as far as it goes.
+- **\`AZ_MAP_GLYPHS\`**, **\`AZ_MAP_SPRITES\`** (optional): the label fonts
+  (\`<font>/<start>-<end>.pbf\`) and icons (\`light.json\`, \`light.png\`,
+  \`dark.json\`, \`dark.png\`, their \`@2x\` copies). Without them, maps draw
+  no place names or icons.
+- **\`AZ_MAP_ATTRIBUTION\`**: the line your tile data's licence requires
+  under every map. The server will not start with an archive and without it.
+- **\`AZ_GEOCODER_URL\`** (optional): your geocoder, so an answer may place an
+  address. The server asks it \`GET <url>?q=<address>\` and reads the first
+  result's \`lat\` and \`lon\`; the browser never calls it. Each address is
+  remembered a day; \`AZ_GEOCODER_PER_ADDRESS\` bounds the calls a visitor
+  can cause. Logs say \`chat: geocode <found|none|why> <ms>\` — never the
+  address.
+
+Each file is opened when the server starts: a missing or foreign archive
+stops it, named by its key. \`az doctor\` checks the same, and names a
+third-party tile archive the site's build was given
+(\`AZ_PUBLIC_MAP_TILES_URL\`).
+`;
+}
+
 /** Everything under `server/` except the copied `src/`. */
 export function backendFiles(siteName: string, backend: SpecBackend, data?: BackendData, chat?: BackendChat): BackendFile[] {
   // `data` only when there are tables, so a site without them gets exactly the files it got before; `chat` the same.
   const setup: Setup = {
     database: backend.database, email: backend.email,
     ...(data ? { data: true } : {}), ...(hasImages(data) ? { images: true } : {}), ...(chat ? { chat: true } : {}),
+    ...(chat?.map ? { map: true } : {}),
   };
   const deps = serverDependencies(setup);
   return [
@@ -359,12 +394,12 @@ export function backendFiles(siteName: string, backend: SpecBackend, data?: Back
       content: `${JSON.stringify({
         _generated: generatedJson('the backend\'s choices from the .az source: database and email'),
         siteName, database: setup.database, email: setup.email, ...(setup.data ? { data: true } : {}), ...(setup.images ? { images: true } : {}),
-        ...(setup.chat ? { chat: true } : {}),
+        ...(setup.chat ? { chat: true } : {}), ...(setup.map ? { map: true } : {}),
       }, null, 2)}\n`,
     },
     { path: `${SERVER_DIR}/.env.example`, content: `${hashHeader('every backend key with its meaning; copy to .env (az backend init) and fill it')}${envExample(setup)}` },
     { path: `${SERVER_DIR}/.gitignore`, content: `${hashHeader('keeps .env, the SQLite data and node_modules out of version control')}.env\ndata/\nnode_modules/\n` },
-    { path: `${SERVER_DIR}/README.md`, content: `${readme(siteName, setup, data)}${chat ? chatReadme() : ''}` },
+    { path: `${SERVER_DIR}/README.md`, content: `${readme(siteName, setup, data)}${chat ? chatReadme() : ''}${setup.map ? mapReadme() : ''}` },
     // Only with a chat, so a site without one gets exactly the files it got before.
     ...(chat ? [
       { path: `${SERVER_DIR}/chat/prompt.txt`, content: `${hashHeader('what the chat model is told before the site content; read by the server, never sent to a browser')}${chat.prompt}` },

@@ -1,7 +1,7 @@
 /**
  * @az server chat
  * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer parsed into typed events and streamed to the page.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §8.2, §8.3, §20.5, §20.7, §21.2)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §8.2, §8.3, §20.5, §20.7, §21.2, §21.4)
  * Exports: createChat, parseChatContext, rulesFor, systemText, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, CHARS_PER_TOKEN
  * Edit guide: every limit is the server's, never the request's; nothing the model wrote reaches the page but chat-answer.ts's events; abort upstream whenever the answer stops; logs carry codes and counts, never text.
  * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts, packages/backend/test/chat-knows.test.ts, packages/backend/test/chat-moderation.test.ts,
@@ -30,7 +30,9 @@
  * marked `src: site`; each `from tool` request by one of the operator's
  * declared tools (`tools`, chat-tools.ts), marked `src: tool` with its
  * label — its rows go to the page only, never into what the model reads
- * (§21.2.4). When shares are on, `done` also carries the share tag
+ * (§21.2.4). A map's `place` is looked up by the operator's geocoder
+ * (`geocoder`, chat-geocode.ts) when AZ_GEOCODER_URL is set, marked `src:
+ * geocoded`; the model never reads what it found (§21.4.2). When shares are on, `done` also carries the share tag
  * over the answer's events as sent (chat-share.ts), so the page can keep
  * exactly this answer under a link if the visitor asks.
  *
@@ -59,6 +61,8 @@ import type { KnowsRun } from './chat-knows.ts';
 import { ANSWER_WORDS, createAnswerParser, type AnswerBlock, type AnswerEvent, type AnswerQuote, type AnswerRules, type AnswerWord, type DropReason } from './chat-answer.ts';
 import { RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
 import { toolsText, type Tools } from './chat-tools.ts';
+import type { Geocoder } from './chat-geocode.ts';
+import { MAP_LIMITS } from './chat-map.ts';
 import { createShareRoutes, createShareStore, mergeText, shareKey, shareTag, SHARE_LIMITS } from './chat-share.ts';
 import { createQueue, createRateLimits, createWindows, type Windows } from './chat-limits.ts';
 import { sseEvent } from './chat-sse.ts';
@@ -199,12 +203,17 @@ const TOOL_WORDS: readonly AnswerWord[] = ['chart', 'table', 'stats', 'cards', '
 /** Whether a page's chat may use the operator's tools: its `show` has a chart, a table, stats, cards or an explore. */
 const usesTools = (show: readonly AnswerWord[]) => show.some((w) => TOOL_WORDS.includes(w));
 
-/** What one chat page's answers may show: its own `show`, the site's quotes and destinations, and the tools when it may use them. */
-export function rulesFor(context: ChatContext, page: string, tools: readonly ChatToolShape[] = []): AnswerRules {
+/**
+ * What one chat page's answers may show: its own `show`, the site's quotes
+ * and destinations, the tools when it may use them, and whether a map's
+ * `place` may be looked up (a geocoder is set and the page shows maps).
+ */
+export function rulesFor(context: ChatContext, page: string, tools: readonly ChatToolShape[] = [], geocoder = false): AnswerRules {
   const show = Object.hasOwn(context.chats, page) ? context.chats[page].show : [];
   return {
     show, quotes: context.quotes, destinations: context.destinations, images: context.images.map((i) => i.key),
     ...(usesTools(show) && tools.length > 0 ? { tools } : {}),
+    ...(geocoder && show.includes('map') ? { geocoder: true } : {}),
   };
 }
 
@@ -224,8 +233,8 @@ const quoteLine = (q: AnswerQuote) => `show ${q.word} ${q.route}${q.n > 0 ? `#${
  * URLs, keys or anything one answered. Nothing about the visitor — no
  * cookie, address or account.
  */
-export function systemText(prompt: string, context: ChatContext, page: string, rows = '', tools: readonly ChatToolShape[] = []): string {
-  const rules = rulesFor(context, page, tools);
+export function systemText(prompt: string, context: ChatContext, page: string, rows = '', tools: readonly ChatToolShape[] = [], geocoder = false): string {
+  const rules = rulesFor(context, page, tools, geocoder);
   const lines = [`The visitor is on the page ${JSON.stringify(page)}.`];
   if (rules.show.length === 0) {
     lines.push('On this page an answer is prose only: write no component (follow-up questions are still allowed).');
@@ -243,6 +252,8 @@ export function systemText(prompt: string, context: ChatContext, page: string, r
         : 'There are no tables to take figures "from": any figure is your own, and is shown labelled as AI-generated.');
     }
     if (rules.tools) lines.push(toolsText(rules.tools));
+    // A place is an address the site looks up; only with the operator's geocoder is it taught (§21.4.2).
+    if (rules.geocoder) lines.push(`A map may also place an address the site looks up for you — a line under it: place "A label" "A street address" (at most ${MAP_LIMITS.address} characters, at most ${MAP_LIMITS.placesPerAnswer} in an answer); it is shown labelled as an approximate location.`);
     if (rules.show.includes('cards')) {
       lines.push(context.images.length > 0
         ? `The site images a card may show, by key: ${context.images.map((i) => `${i.key} (${JSON.stringify(i.alt)})`).join(' · ')}.`
@@ -275,6 +286,8 @@ export interface ChatOptions {
   readonly tools?: Tools;
   /** The rate-limit windows every instance shares (chat-limits.ts); by default this database's. */
   readonly windows?: Windows;
+  /** The operator's geocoder (chat-geocode.ts); absent when AZ_GEOCODER_URL is unset. */
+  readonly geocoder?: Geocoder;
 }
 
 /** A whole-number token estimate for `chars` characters. */
@@ -321,9 +334,10 @@ export function createChat(o: ChatOptions): ChatRoutes {
     });
     // The page learns at once that its answer is coming, before the first token.
     res.flushHeaders();
-    const parser = createAnswerParser(rulesFor(o.context, page, toolShapes));
-    // Tool calls stop when the visitor leaves; a capped answer still fills the components it sent.
+    const parser = createAnswerParser(rulesFor(o.context, page, toolShapes, o.geocoder !== undefined));
+    // Tool calls and lookups stop when the visitor leaves; a capped answer still fills the components it sent.
     const toolRun = o.tools ? o.tools.forAnswer(req.ip, req.closed) : null;
+    const geocodeRun = o.geocoder ? o.geocoder.forAnswer(req.ip, req.closed) : null;
     /** Every event sent, as the share tag covers them; and what a rich component's resolving dropped. */
     const sent_: Sent[] = [];
     const resolvedDrops: DropReason[] = [];
@@ -335,7 +349,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
         let out: Sent;
         if (e.type === 'text') out = e;
         else if (isRich(e.block)) {
-          const r = await resolveRich(e.block, o.figures ?? null, day, toolRun, o.context.images.map((i) => i.key), (why) => resolvedDrops.push(why));
+          const r = await resolveRich(e.block, o.figures ?? null, day, toolRun, o.context.images.map((i) => i.key), (why) => resolvedDrops.push(why), geocodeRun);
           if (r === null) { resolvedDrops.push('figures'); continue; }
           out = { type: 'block', block: r };
         } else out = { type: 'block', block: e.block as unknown as Record<string, unknown> };
@@ -441,7 +455,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
     const day = utcDay(now());
     // The rows the page's chat knows, read for this question as a signed-out visitor reads them (§8.2).
     const rows = chat.knows.length > 0 && o.knows ? await o.knows(chat.knows, ask.turns.at(-1)?.text ?? '') : '';
-    const system = systemText(o.prompt, o.context, ask.page, rows, toolShapes);
+    const system = systemText(o.prompt, o.context, ask.page, rows, toolShapes, o.geocoder !== undefined);
     const most = estimate(system.length + trimHistory(ask.turns).reduce((n, t) => n + t.text.length, 0)) + o.config.maxOutputTokens;
     if ((await usage.spent(day)) + most > o.config.dailyTokens) {
       if (exhaustedOn !== day) {
