@@ -1,7 +1,7 @@
 /**
  * @az runtime chat-draw
  * Purpose: draws an answer's chart, table, stat cards, image cards, dashboard or unavailable note into copies of the chat word's templates.
- * Spec: docs/chat-block-spec.md §20.2, §20.4, §20.6, §20.8
+ * Spec: docs/chat-block-spec.md §20.2, §20.4, §20.6, §20.8, §21.2.4
  * Exports: drawRich, RichDraw, RICH_KEYS, DRAW_COPY
  * Edit guide: text only through textContent; attributes only geometry, classes copied from the templates, ids, aria and
  *   checked URLs (a destination on the allow-list, a row image at the backend's own path); never a style or markup.
@@ -12,8 +12,9 @@
  * Every event is checked first (chat-chart.ts validChart, chat-figures.ts),
  * then drawn into clones of the hidden parts the chat word made
  * (words/chat/figures.ts): a figure's frame with its title, the
- * "AI-generated figures" label — removed only for the site's own figures —
- * or the source line, the SVG, a one-sentence summary and the same figures
+ * "AI-generated figures" label — removed only for the site's own figures
+ * and a tool's — or the source line ("From the site's data · <day>", or
+ * "From <the operator's label> · <minute>" for a tool's), the SVG, a one-sentence summary and the same figures
  * as a real table; a table with sortable headers; stat cards whose change is
  * a sign, a glyph and words; image cards whose image is a template's <img>
  * or the backend's own row image; a dashboard's grid of these.
@@ -22,7 +23,7 @@
  * width changes by 32 px or more, so its text stays the theme's size.
  */
 
-import { SERIES_PATTERNS, chartBox, chartGeometry, chartRows, chartSummary, validChart, type ChartData, type SvgNode } from './chat-chart.ts';
+import { SERIES_PATTERNS, chartBox, chartGeometry, chartRows, chartSummary, validChart, type ChartData, type FigureSource, type SvgNode } from './chat-chart.ts';
 import {
   announceOf, deltaWords, sortedRows, validCards, validDashboard, validStats, validTable, writeSvg,
   type CardItem, type FigureContext, type StatItem, type TableData, type Tile,
@@ -34,6 +35,8 @@ export const RICH_KEYS = ['chart', 'table', 'stats', 'cards', 'dashboard', 'unav
 /** Fixed copy the drawing adds (the rest is in the templates). */
 export const DRAW_COPY = {
   ai: 'AI-generated figures',
+  /** Before a tool's label: "From <label> · <date, time> UTC" (§21.2.4). */
+  from: 'From',
 } as const;
 
 /** A redraw happens only past this change in width. */
@@ -106,6 +109,15 @@ function dayText(doc: Document, day: string): string {
   return new Intl.DateTimeFormat(langOf(doc), { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
+/** A `YYYY-MM-DDTHH:MMZ` minute as the page shows it, in UTC, said so. */
+function minuteText(doc: Document, minute: string): string {
+  const at = new Date(`${minute.slice(0, 16)}:00Z`);
+  return `${new Intl.DateTimeFormat(langOf(doc), { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(at)} UTC`;
+}
+
+/** A tool's source line: the operator's label and when its figures were read — operator copy and the server's clock, never the model's. */
+const toolLine = (doc: Document, source: string, asOf: string) => `${DRAW_COPY.from} ${source} · ${minuteText(doc, asOf)}`;
+
 /** What the page knows that an event cannot tell it: its gallery images (from the parts), the allow-list, the backend. */
 function figureContext(d: RichDraw): FigureContext {
   const assets = new Map<string, { src: string; srcset: string | null; width: number; height: number; alt: string }>();
@@ -121,14 +133,18 @@ function figureContext(d: RichDraw): FigureContext {
   return { assets, allowed: d.allowed, backend: d.backend };
 }
 
-/** A figure's frame: title, then the AI label for model figures or the source line for the site's. */
-function frame(d: RichDraw, title: string, src: 'site' | 'model', asOf: string | null): HTMLElement | null {
+/** A figure's frame: title, then the AI label for model figures or the source line for the site's or a tool's. */
+function frame(d: RichDraw, title: string, src: FigureSource, asOf: string | null, source: string | null): HTMLElement | null {
   const f = clonePart(d.components, 'figure');
   if (!f) return null;
   fill(f, 'title', title);
   if (src === 'site') {
     f.querySelector('[data-az-chat-ai]')?.remove();
     fill(f, 'asOf', asOf ? dayText(d.doc, asOf) : '');
+  } else if (src === 'tool') {
+    f.querySelector('[data-az-chat-ai]')?.remove();
+    const line = f.querySelector('[data-az-chat-source]');
+    if (line) line.textContent = source && asOf ? toolLine(d.doc, source, asOf) : '';
   } else {
     f.querySelector('[data-az-chat-source]')?.remove();
   }
@@ -214,7 +230,7 @@ function tableOf(d: RichDraw, id: string, caption: string, head: readonly { labe
 /** A chart in its frame: the SVG, its summary, its legend, its table equivalent; redrawn when its width changes. */
 function drawChart(d: RichDraw, c: ChartData): HTMLElement | null {
   const classOf = painter(d);
-  const f = frame(d, c.title, c.src, c.asOf);
+  const f = frame(d, c.title, c.src, c.asOf, c.source);
   const body = f && slot(f, 'body');
   if (!f || !body || !classOf) return null;
   const fmt = formatter(d.doc, c.unit);
@@ -281,7 +297,7 @@ function drawChart(d: RichDraw, c: ChartData): HTMLElement | null {
 
 /** A table in its frame (no summary, legend or equivalent: it is the figures). */
 function drawTable(d: RichDraw, t: TableData): HTMLElement | null {
-  const f = frame(d, t.title, t.src, t.asOf);
+  const f = frame(d, t.title, t.src, t.asOf, t.source);
   const body = f && slot(f, 'body');
   const table = tableOf(d, d.suffix, t.title, t.columns, t.rows, t.sortable);
   if (!f || !body || !table) return null;
@@ -307,7 +323,7 @@ function drawStats(d: RichDraw, items: readonly StatItem[]): HTMLElement | null 
       fill(card, 'glyph', w.glyph);
       fill(card, 'words', w.words);
     }
-    fill(card, 'ai', s.src === 'model' ? DRAW_COPY.ai : s.asOf ? dayText(d.doc, s.asOf) : '');
+    fill(card, 'ai', s.src === 'model' ? DRAW_COPY.ai : s.src === 'tool' && s.source && s.asOf ? toolLine(d.doc, s.source, s.asOf) : s.asOf ? dayText(d.doc, s.asOf) : '');
     return card;
   }));
   return list;

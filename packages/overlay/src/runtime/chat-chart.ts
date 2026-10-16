@@ -37,15 +37,36 @@ export interface ChartSeries {
   readonly points: readonly (readonly [string, number])[];
 }
 
+/** Where figures came from (§20.2, §21.2.4): the site's tables, the model, or one of the operator's tools. */
+export type FigureSource = 'site' | 'model' | 'tool';
+
+/** The longest source label a tool's figures carry (env.ts TOOL_LIMITS.label). */
+export const SOURCE_MAX = 40;
+
+const MINUTE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
+
+/**
+ * An event's provenance, checked: `model` with no date; `site` with its UTC
+ * day; `tool` with its UTC minute and the operator's label — or null.
+ */
+export function sourceOf(v: Readonly<Record<string, unknown>>): { src: FigureSource; asOf: string | null; source: string | null } | null {
+  if (v.src === 'model') return (v.asOf === undefined || v.asOf === null) && v.source === undefined ? { src: 'model', asOf: null, source: null } : null;
+  if (v.src === 'site') return typeof v.asOf === 'string' && DAY.test(v.asOf) && v.source === undefined ? { src: 'site', asOf: v.asOf, source: null } : null;
+  if (v.src === 'tool' && typeof v.asOf === 'string' && MINUTE.test(v.asOf) && text(v.source, SOURCE_MAX)) return { src: 'tool', asOf: v.asOf, source: v.source };
+  return null;
+}
+
 export interface ChartData {
   readonly kind: ChartKind;
   readonly title: string;
   readonly unit: ChartUnit;
-  readonly src: 'site' | 'model';
+  readonly src: FigureSource;
   readonly series: readonly ChartSeries[];
-  /** Site figures only: the UTC day they were read, `YYYY-MM-DD`. */
+  /** Site figures: the UTC day they were read, `YYYY-MM-DD`; a tool's: the UTC minute, `YYYY-MM-DDTHH:MMZ`. */
   readonly asOf: string | null;
-  /** Site figures only: more groups existed than the chart shows. */
+  /** A tool's figures only: the operator's label for it (chat-block-spec §21.2.4). */
+  readonly source: string | null;
+  /** Site and tool figures only: more groups existed than the chart shows. */
   readonly more: boolean;
 }
 
@@ -89,16 +110,16 @@ const figure = (v: unknown): v is number => typeof v === 'number' && Number.isFi
  */
 export function validChart(v: unknown): ChartData | null {
   if (!isRecord(v)) return null;
-  const known = new Set(['kind', 'title', 'unit', 'src', 'series', 'asOf', 'more']);
+  const known = new Set(['kind', 'title', 'unit', 'src', 'series', 'asOf', 'source', 'more']);
   if (Object.keys(v).some((k) => !known.has(k))) return null;
-  const { kind, title, unit, src, series, asOf, more } = v;
+  const { kind, title, unit, series, more } = v;
   if (typeof kind !== 'string' || !KINDS.has(kind)) return null;
   if (!text(title, CHART_LIMITS.title)) return null;
   if (!(unit === null || unit === undefined || unit === 'percent' || (typeof unit === 'string' && CURRENCY.test(unit)))) return null;
-  if (src !== 'site' && src !== 'model') return null;
-  if (src === 'site' ? !(typeof asOf === 'string' && DAY.test(asOf)) : asOf !== undefined && asOf !== null) return null;
+  const from = sourceOf(v);
+  if (!from) return null;
   if (more !== undefined && typeof more !== 'boolean') return null;
-  if (src === 'model' && more === true) return null;
+  if (from.src === 'model' && more === true) return null;
   if (!Array.isArray(series) || series.length < 1) return null;
   const round = kind === 'pie' || kind === 'donut';
   if (series.length > (round ? 1 : CHART_LIMITS.series)) return null;
@@ -126,8 +147,8 @@ export function validChart(v: unknown): ChartData | null {
     if (values.some((x) => x < 0) || values.reduce((a, b) => a + b, 0) <= 0) return null;
   }
   return {
-    kind: kind as ChartKind, title, unit: (unit ?? null) as ChartUnit, src,
-    series: out, asOf: src === 'site' ? asOf as string : null, more: more === true,
+    kind: kind as ChartKind, title, unit: (unit ?? null) as ChartUnit, ...from,
+    series: out, more: more === true,
   };
 }
 

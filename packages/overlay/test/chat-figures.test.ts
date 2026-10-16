@@ -180,3 +180,32 @@ test('writeSvg: SVG namespace, geometry attributes only, fill only as this tree\
   assert.equal(label.textContent, '<img src=x onerror=alert(1)>', 'text is text');
   assert.equal(label.children.length, 0);
 });
+
+test('a tool\'s figures (chat-block-spec §21.2.4): src tool needs its UTC minute and the operator\'s label; nothing else may carry a label', async () => {
+  const { validChart, SOURCE_MAX } = await import('../src/runtime/chat-chart.ts');
+  const tool = { src: 'tool', source: 'Race results service', asOf: '2026-10-16T14:05Z' };
+  const chart = (over: Record<string, unknown>) => ({ kind: 'bar', title: 'Points', unit: null, series: [{ name: 'Points', points: [['Ana', 25], ['Ben', 18]] }], ...over });
+  assert.deepEqual(validTable(table(tool)), { title: 'Plans', columns: [{ label: 'Plan', type: 'text', unit: null }, { label: 'Seats', type: 'number', unit: null }], rows: [['Team', 10], ['Business', 50]], sortable: false, ...tool });
+  assert.equal(validChart(chart({ ...tool, more: true }))?.source, 'Race results service');
+  const stat = { label: 'Most', value: 25, unit: null, ...tool };
+  assert.deepEqual(validStats([{ ...stat, delta: 2, deltaOf: '2026-10-15' }])?.[0], { label: 'Most', value: 25, unit: null, delta: 2, deltaOf: '2026-10-15', ...tool });
+  const forged: Record<string, unknown>[] = [
+    { src: 'tool', asOf: '2026-10-16T14:05Z' },
+    { src: 'tool', source: '', asOf: '2026-10-16T14:05Z' },
+    { src: 'tool', source: 'x'.repeat(SOURCE_MAX + 1), asOf: '2026-10-16T14:05Z' },
+    { src: 'tool', source: 'Race results service' },
+    { src: 'tool', source: 'Race results service', asOf: '2026-10-16' },
+    { src: 'tool', source: 'Race results service', asOf: '2026-10-16T14:05:00Z' },
+    { src: 'model', source: 'Race results service' },
+    { src: 'site', source: 'Race results service', asOf: '2026-10-16' },
+    { src: 'operator', source: 'Race results service', asOf: '2026-10-16T14:05Z' },
+  ];
+  for (const f of forged) {
+    assert.equal(validTable(table(f)), null, JSON.stringify(f));
+    assert.equal(validChart(chart(f)), null, JSON.stringify(f));
+    assert.equal(validStats([{ label: 'Most', value: 25, ...f }]), null, JSON.stringify(f));
+  }
+  assert.equal(validTable(table({ ...tool, source: 'x'.repeat(SOURCE_MAX) }))?.source, 'x'.repeat(SOURCE_MAX), 'CONTROL: the label at its cap');
+  // A tool's figures are not the model's: no AI label in what is announced.
+  assert.equal(announceOf({ kind: 'table', data: validTable(table(tool))! }), 'Table: Plans, 2 rows');
+});

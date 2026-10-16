@@ -23,7 +23,7 @@
  * shows no image.
  */
 
-import { validChart, type ChartData, type SvgNode } from './chat-chart.ts';
+import { sourceOf, validChart, type ChartData, type FigureSource, type SvgNode } from './chat-chart.ts';
 import { rowSrcset, type RowImage } from './rows-logic.ts';
 
 export const FIGURE_LIMITS = {
@@ -44,7 +44,6 @@ export const FIGURE_LIMITS = {
 } as const;
 
 const VALUE_MAX = 1e15;
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const CURRENCY = /^[a-z]{3}$/;
 const KEY = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const NAME = /^[a-z][a-z0-9]*$/;
@@ -57,12 +56,6 @@ const maybeText = (v: unknown, max: number): v is string => typeof v === 'string
 const figure = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= VALUE_MAX;
 const unitOk = (v: unknown): v is string | null | undefined => v === null || v === undefined || v === 'percent' || (typeof v === 'string' && CURRENCY.test(v));
 
-/** Where a figure came from, and when the site's were read. */
-function source(v: Record<string, unknown>): { src: 'site' | 'model'; asOf: string | null } | null {
-  if (v.src === 'model') return v.asOf === undefined || v.asOf === null ? { src: 'model', asOf: null } : null;
-  if (v.src === 'site' && typeof v.asOf === 'string' && DAY.test(v.asOf)) return { src: 'site', asOf: v.asOf };
-  return null;
-}
 
 /** What the page knows that the event cannot tell it: its build assets, its allow-list, its backend. */
 export interface FigureContext {
@@ -79,13 +72,14 @@ export interface TableData {
   readonly columns: readonly { readonly label: string; readonly type: 'text' | 'number'; readonly unit: string | null }[];
   readonly rows: readonly (readonly (string | number | null)[])[];
   readonly sortable: boolean;
-  readonly src: 'site' | 'model';
+  readonly src: FigureSource;
   readonly asOf: string | null;
+  readonly source: string | null;
 }
 
 export function validTable(v: unknown): TableData | null {
-  if (!isRecord(v) || !only(v, ['title', 'columns', 'rows', 'sortable', 'src', 'asOf'])) return null;
-  const from = source(v);
+  if (!isRecord(v) || !only(v, ['title', 'columns', 'rows', 'sortable', 'src', 'asOf', 'source'])) return null;
+  const from = sourceOf(v);
   if (!from || !text(v.title, FIGURE_LIMITS.title)) return null;
   if (v.sortable !== undefined && typeof v.sortable !== 'boolean') return null;
   if (!Array.isArray(v.columns) || v.columns.length < 1 || v.columns.length > FIGURE_LIMITS.columns) return null;
@@ -117,18 +111,19 @@ export interface StatItem {
   readonly value: number;
   readonly unit: string | null;
   readonly delta: number | null;
-  /** Site figures only: what the delta is measured against, e.g. "2026-09". */
+  /** Site and tool figures only: what the delta is measured against, e.g. "2026-09". */
   readonly deltaOf: string | null;
-  readonly src: 'site' | 'model';
+  readonly src: FigureSource;
   readonly asOf: string | null;
+  readonly source: string | null;
 }
 
 function validStat(v: unknown): StatItem | null {
-  if (!isRecord(v) || !only(v, ['label', 'value', 'unit', 'delta', 'deltaOf', 'src', 'asOf'])) return null;
-  const from = source(v);
+  if (!isRecord(v) || !only(v, ['label', 'value', 'unit', 'delta', 'deltaOf', 'src', 'asOf', 'source'])) return null;
+  const from = sourceOf(v);
   if (!from || !text(v.label, FIGURE_LIMITS.statLabel) || !figure(v.value) || !unitOk(v.unit)) return null;
   if (v.delta !== undefined && v.delta !== null && !figure(v.delta)) return null;
-  if (v.deltaOf !== undefined && v.deltaOf !== null && (from.src !== 'site' || !text(v.deltaOf, 24))) return null;
+  if (v.deltaOf !== undefined && v.deltaOf !== null && (from.src === 'model' || !text(v.deltaOf, 24))) return null;
   return {
     label: v.label, value: v.value === 0 ? 0 : v.value, unit: (v.unit ?? null) as string | null,
     delta: typeof v.delta === 'number' ? v.delta : null, deltaOf: typeof v.deltaOf === 'string' ? v.deltaOf : null, ...from,
@@ -307,7 +302,7 @@ export function announceOf(
   c: { kind: 'chart'; data: ChartData } | { kind: 'table'; data: TableData } | { kind: 'stats'; data: readonly StatItem[] }
     | { kind: 'cards'; data: readonly CardItem[] } | { kind: 'dashboard'; data: DashboardData },
 ): string {
-  const ai = (src: 'site' | 'model') => (src === 'model' ? ', AI-generated figures' : '');
+  const ai = (src: FigureSource) => (src === 'model' ? ', AI-generated figures' : '');
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   switch (c.kind) {
     case 'chart': {
