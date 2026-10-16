@@ -112,6 +112,26 @@ test('server keys: the model key planted in a shipped file fails by key name and
   assert.deepEqual([(await check('server-keys', clean)).status, (await check('server-keys', clean)).line], ['pass', 'server keys: AZ_CHAT_KEY in none of 2 shipped text files']);
 });
 
+test('server keys: a data tool\'s key (chat-block-spec §21.2.5) planted in a shipped file fails by its name; CONTROL passes', async () => {
+  const toolKey = `planted-tool-key-${'t6'.repeat(10)}`;
+  const env = `AZ_CHAT_TOOLS=standings,results\nAZ_CHAT_TOOL_STANDINGS_KEY=${toolKey}\n`;
+  const b = built(SITE(), { 'index.html': PAGE(STRICT), 'assets/index.js': `fetch(u,{headers:{authorization:"Bearer ${toolKey}"}});` });
+  writeFileSync(join(b.server, '.env'), env, { mode: 0o600 });
+  const leaked = await check('server-keys', b);
+  assert.equal(leaked.status, 'fail');
+  assert.equal(leaked.line, 'server keys: AZ_CHAT_TOOL_STANDINGS_KEY is in the built site — anyone who loads it can read it');
+  assert.deepEqual(leaked.fix!.slice(0, 1), ['dist/assets/index.js (AZ_CHAT_TOOL_STANDINGS_KEY)']);
+  assert.ok(!JSON.stringify(leaked).includes('t6t6'), 'the value is never printed');
+  // Declared in the environment instead of .env: looked for all the same.
+  writeFileSync(join(b.server, '.env'), '', { mode: 0o600 });
+  assert.equal((await check('server-keys', b, { AZ_CHAT_TOOLS: 'standings', AZ_CHAT_TOOL_STANDINGS_KEY: toolKey })).status, 'fail');
+  // CONTROL: the same key, nowhere in what ships.
+  const clean = built();
+  writeFileSync(join(clean.server, '.env'), env, { mode: 0o600 });
+  const pass = await check('server-keys', clean);
+  assert.deepEqual([pass.status, pass.line], ['pass', 'server keys: AZ_CHAT_TOOL_STANDINGS_KEY in none of 2 shipped text files']);
+});
+
 test('chat shared page: noindex and a strict policy pass; without either it fails; a site with no shared page skips', async () => {
   const good = built(SITE(), { 'index.html': PAGE(STRICT), 'chat/shared/index.html': PAGE(STRICT + NOINDEX) });
   assert.deepEqual([(await check('chat-shared-page', good)).status, (await check('chat-shared-page', good)).line], ['pass', 'chat shared page: /chat/shared says noindex and has a strict policy']);

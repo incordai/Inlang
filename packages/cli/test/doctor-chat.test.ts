@@ -99,11 +99,11 @@ async function check(id: string, p: { dir: string; file: string; out: string }) 
 
 test('chat checks run between backend .env and build secrets, and skip a site without chat', async () => {
   const ids = CHECKS.map((c) => c.id);
-  assert.deepEqual(ids.slice(ids.indexOf('backend-env'), ids.indexOf('build-secrets') + 1), ['backend-env', 'chat-env', 'chat-budget', 'chat-context', 'build-secrets']);
+  assert.deepEqual(ids.slice(ids.indexOf('backend-env'), ids.indexOf('build-secrets') + 1), ['backend-env', 'chat-env', 'chat-tools', 'chat-budget', 'chat-context', 'build-secrets']);
   const plain = mkdtempSync(join(tmpdir(), 'az-doctor-chat-'));
   writeFileSync(join(plain, 'site.az'), 'az 1\nsite aurora\npage /\n  hero center\n    title "Hi"\n');
   const p = { dir: plain, file: join(plain, 'site.az'), out: join(plain, '.az-build') };
-  for (const id of ['chat-env', 'chat-budget', 'chat-context']) assert.equal((await check(id, p)).status, 'skip', id);
+  for (const id of ['chat-env', 'chat-tools', 'chat-budget', 'chat-context']) assert.equal((await check(id, p)).status, 'skip', id);
 });
 
 test('chat .env: the keys by name only — the fake model, a URL with the completions path, a refused key, moderation without its URL; CONTROL passes', async () => {
@@ -139,6 +139,55 @@ test('chat .env: the keys by name only — the fake model, a URL with the comple
   assert.equal((await check('chat-env', p)).line, 'chat .env: 1 problem — AZ_CHAT_MODERATION_URL is refused by the server');
   p.setEnv({ AZ_CHAT_MODERATION_URL: 'https://judge.example.test/check', AZ_CHAT_MODERATION_KEY: JUDGE_KEY, AZ_CHAT_SHARES: 'off' });
   assert.equal((await check('chat-env', p)).line, 'chat .env: the model keys are valid; moderation hook on (it fails closed); new shares off — names checked, no value printed');
+});
+
+/** A planted tool key: never in a report either. */
+const TOOL_KEY = `planted-tool-key-${'t3'.repeat(10)}`;
+/** The data tool "standings", declared whole (chat-block-spec §21.2.2). */
+const TOOL = {
+  AZ_CHAT_TOOLS: 'standings',
+  AZ_CHAT_TOOL_STANDINGS_URL: 'https://tools.example.test/standings',
+  AZ_CHAT_TOOL_STANDINGS_KEY: TOOL_KEY,
+  AZ_CHAT_TOOL_STANDINGS_PARAMS: JSON.stringify({ season: { type: 'int', min: 2000, max: 2030, required: true } }),
+  AZ_CHAT_TOOL_STANDINGS_FIELDS: JSON.stringify({ driver: 'text', points: 'number' }),
+  AZ_CHAT_TOOL_STANDINGS_LABEL: 'Race results service',
+  AZ_CHAT_TOOL_STANDINGS_SAMPLE: JSON.stringify({ season: 2026 }),
+};
+
+test('chat tools: each declaration and its sample by key name; refused keys fail, a missing sample or a chat that cannot use them warns; CONTROL passes', async () => {
+  const p = built(CHAT_SITE().replace('show     faq cta', 'show     faq cta chart table stats'));
+  const quiet = async () => {
+    const r = await check('chat-tools', p);
+    for (const leak of [TOOL_KEY, 't3t3', 'tools.example.test', '2026']) assert.ok(!JSON.stringify(r).includes(leak), `${leak} reached the report`);
+    return r;
+  };
+  assert.deepEqual([(await quiet()).status, (await quiet()).line], ['skip', 'chat tools: none declared (AZ_CHAT_TOOLS is optional)']);
+  p.setEnv(TOOL);
+  const good = await quiet();
+  assert.deepEqual([good.status, good.line], ['pass', 'chat tools: 1 tool declared (standings), each URL, parameter shape, field shape, label and sample valid — names checked, no value printed']);
+  // The other chat lines stay the model's and the budget's: a tool's keys are this line's alone.
+  assert.equal((await check('chat-env', p)).status, 'pass');
+  assert.equal((await check('chat-budget', p)).status, 'pass');
+
+  p.setEnv({ ...TOOL, AZ_CHAT_TOOL_STANDINGS_URL: 'http://tools.example.test/standings', AZ_CHAT_TOOL_STANDINGS_SAMPLE: JSON.stringify({ season: 1999 }) });
+  const refused = await quiet();
+  assert.equal(refused.status, 'fail');
+  assert.equal(refused.line, 'chat tools: AZ_CHAT_TOOL_STANDINGS_URL, AZ_CHAT_TOOL_STANDINGS_SAMPLE are refused by the server — it won\'t start');
+  assert.equal((await check('chat-env', p)).status, 'pass', 'not said twice');
+  assert.equal((await check('chat-budget', p)).line, 'chat budget: judged once the server\'s keys are valid — see the chat tools line');
+
+  p.setEnv({ ...TOOL, AZ_CHAT_TOOL_RESULT_URL: 'https://tools.example.test/x' });
+  assert.equal((await quiet()).line, 'chat tools: AZ_CHAT_TOOL_RESULT_URL is refused by the server — it won\'t start');
+
+  p.setEnv({ ...TOOL, AZ_CHAT_TOOL_STANDINGS_SAMPLE: '' });
+  const unsampled = await quiet();
+  assert.deepEqual([unsampled.status, unsampled.line], ['warn', 'chat tools: AZ_CHAT_TOOL_STANDINGS_SAMPLE is not set — az backend probe can\'t call that tool (it requires parameters)']);
+
+  // A site whose chat shows none of chart, table, stats: no answer can use a tool.
+  const q = built();
+  q.setEnv(TOOL);
+  const unusable = await check('chat-tools', q);
+  assert.deepEqual([unusable.status, unusable.line], ['warn', 'chat tools: no chat shows a chart, a table or stats, so no answer can use a tool']);
 });
 
 test('chat budget: a budget that cannot pay for one answer fails; the default and the kill switch warn; CONTROL passes with the answers it pays for', async () => {

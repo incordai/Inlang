@@ -32,7 +32,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
-import { KEYS } from '../../backend/src/server/env.ts';
+import { KEYS, toolSecretKeys } from '../../backend/src/server/env.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
 import { ownDigests } from '../../target-web/src/csp.ts';
 import { decodeAttribute, startTags } from '../../target-web/src/html-scan.ts';
@@ -63,7 +63,8 @@ const SHARED_PAGE = `${DIST}/chat/shared/index.html`;
 /**
  * The server keys az audit looks for, by exact value, in what ships: every
  * key the server's schema marks secret (env.ts KEYS) — the chat's model key
- * and moderation key among them (chat-block-spec §11.2).
+ * and moderation key among them (chat-block-spec §11.2) — and each data
+ * tool's AZ_CHAT_TOOL_<NAME>_KEY the .env declares (§21.2.5).
  */
 const SERVER_SECRET_KEYS = KEYS.filter((k) => k.secret === true).map((k) => k.name);
 /** A value shorter than this would be found by chance in any bundle; it is not looked for, and the line says so. */
@@ -201,7 +202,9 @@ async function serverKeys(ctx: AuditContext): Promise<{ keys: ServerKey[]; short
   if (text !== null) parseDotenv(text, file);
   const keys: ServerKey[] = [];
   const short: string[] = [];
-  for (const name of SERVER_SECRET_KEYS) {
+  // And each data tool's key (chat-block-spec §21.2.5): its name is the tool's, so the list is the .env's.
+  const toolKeys = toolSecretKeys({ ...file, ...ctx.probe.env });
+  for (const name of [...SERVER_SECRET_KEYS, ...toolKeys]) {
     const value = (ctx.probe.env[name] ?? file[name] ?? '').trim();
     if (value === '') continue;
     if (value.length < KEY_MIN_CHARS) short.push(name); else keys.push({ name, value });

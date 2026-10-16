@@ -1,24 +1,29 @@
 /**
  * @az module doctor-chat
  * Purpose: az doctor's chat checks — the chat keys in the server's .env, the budget against one answer's cost, the built context against the tables.
- * Spec: docs/chat-block-spec.md §11.2 (and §6.4, §6.5, §8.1, §8.2, §20.7) · docs/word-quality-gate.md §5
- * Exports: CHAT_DOCTOR_CHECKS, chatEnvProblems, answerCost, ChatServer
+ * Spec: docs/chat-block-spec.md §11.2 (and §6.4, §6.5, §8.1, §8.2, §20.7, §21.2.7) · docs/word-quality-gate.md §5
+ * Exports: CHAT_DOCTOR_CHECKS, chatEnvProblems, chatToolsProblems, answerCost, ChatServer
  * Edit guide: detect and instruct only; names, never values — a key's value, the model URL and the model id are never printed; a site without chat is a skip.
  * Tests: packages/cli/test/doctor-chat.test.ts
  */
 
 /**
- * A site with chat has three more things that can be wrong before it goes
+ * A site with chat has four more things that can be wrong before it goes
  * live, each its own line:
  *
  * - **chat .env** — the server's own validation of the chat keys
  *   (env.ts loadConfig) reduced to key names, and what it lets through but a
  *   deployment must not have: the scripted `fake` model, and a model URL
  *   that already ends in `/chat/completions` (the server adds that path).
+ * - **chat tools** — the operator's data tools (§21.2), when any is
+ *   declared: each declaration and its `_SAMPLE` as the server loads them,
+ *   by key name; a tool the probe cannot call (required parameters and no
+ *   sample); tools no chat can use.
  * - **chat budget** — whether AZ_CHAT_DAILY_TOKENS can pay for even one
  *   answer at the server's own estimate (§6.5: the prompt, the context and
  *   the most history, at CHARS_PER_TOKEN, plus AZ_CHAT_MAX_OUTPUT_TOKENS);
- *   a budget that cannot refuses every question. The default left in place,
+ *   a budget that cannot refuses every question (the tools' lines in the
+ *   system text count too). The default left in place,
  *   and the kill switch on, are said too.
  * - **chat context** — the built `server/chat/context.json` as the server
  *   reads it: the tables a chat knows must still be ones a signed-out
@@ -32,7 +37,7 @@ import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseEnv } from 'node:util';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
-import { loadConfig, type Setup } from '../../backend/src/server/env.ts';
+import { loadConfig, toolKey, type Setup } from '../../backend/src/server/env.ts';
 import type { Check, CheckResult, DoctorContext } from './doctor.ts';
 import { readRegular } from './shipped.ts';
 
@@ -67,7 +72,8 @@ const COMPLETIONS_PATH = '/chat/completions';
  */
 export function chatEnvProblems(setup: ChatServer, env: Readonly<Record<string, string>>): string[] {
   const loaded = loadConfig(env, { database: setup.database, email: setup.email, ...(setup.images === true ? { images: true } : {}), chat: true }, 'site');
-  const refused = loaded.ok ? [] : [...new Set(loaded.problems.map((p) => /^AZ_[A-Z0-9_]+/.exec(p)?.[0] ?? '').filter((k) => k.startsWith('AZ_CHAT_')))];
+  // A tool's keys are the chat tools line's.
+  const refused = loaded.ok ? [] : [...new Set(loaded.problems.map((p) => /^AZ_[A-Z0-9_]+/.exec(p)?.[0] ?? '').filter((k) => k.startsWith('AZ_CHAT_') && !k.startsWith('AZ_CHAT_TOOL')))];
   const out = refused.map((k) => `${k} is refused by the server`);
   const api = (env.AZ_CHAT_API ?? '').trim().toLowerCase();
   if (api === 'fake') out.push('AZ_CHAT_API=fake answers from a script, for development only');
@@ -145,7 +151,8 @@ const chatBudget: Check = {
     const loaded = loadConfig(got.env, { database: got.setup.database, email: got.setup.email, chat: true }, 'site');
     // A key the server refuses is the chat .env or backend .env line's; the budget is judged once every key is valid.
     if (!loaded.ok || !loaded.config.chat) {
-      const which = !loaded.ok && loaded.problems.some((p) => p.startsWith('AZ_CHAT_')) ? 'chat .env' : 'backend .env';
+      const chatKey = !loaded.ok ? loaded.problems.find((p) => p.startsWith('AZ_CHAT_')) : undefined;
+      const which = chatKey === undefined ? 'backend .env' : chatKey.startsWith('AZ_CHAT_TOOL') ? 'chat tools' : 'chat .env';
       return { status: 'skip', line: `chat budget: judged once the server's keys are valid — see the ${which} line` };
     }
     const chat = loaded.config.chat;
@@ -163,8 +170,10 @@ const chatBudget: Check = {
     })();
     // chat-knows.ts KNOWS_LIMITS.tableChars, read only when a chat knows a table (that module ships with tables only).
     const tableChars = known > 0 ? (await import('../../backend/src/server/chat-knows.ts')).KNOWS_LIMITS.tableChars : 0;
+    // The tools' lines in the per-request system text (chat-tools.ts toolsText), on a page that may use them.
+    const toolChars = chat.tools.length > 0 ? (await import('../../backend/src/server/chat-tools.ts')).toolsText(chat.tools).length : 0;
     const cost = answerCost({
-      prompt: prompt.length, context: context.length, knows: known, maxOutput: chat.maxOutputTokens,
+      prompt: prompt.length + toolChars, context: context.length, knows: known, maxOutput: chat.maxOutputTokens,
       charsPerToken: CHARS_PER_TOKEN, historyChars: HISTORY_CHARS, tableChars,
     });
     const daily = chat.dailyTokens;
@@ -254,5 +263,55 @@ const chatContext: Check = {
   },
 };
 
+/**
+ * The operator's data tools (chat-block-spec §21.2.7) as the server would
+ * load them: each declaration and its `_SAMPLE`, by key name only. Names
+ * what the server refuses, a tool `az backend probe` cannot call (required
+ * parameters and no sample), and tools no chat can use (no `show` with a
+ * chart, a table or stats).
+ */
+export function chatToolsProblems(setup: ChatServer, env: Readonly<Record<string, string>>): { refused: string[]; unsampled: string[]; tools: string[] } {
+  const loaded = loadConfig(env, { database: setup.database, email: setup.email, ...(setup.images === true ? { images: true } : {}), chat: true }, 'site');
+  const refused = loaded.ok ? [] : [...new Set(loaded.problems.map((p) => /^AZ_CHAT_TOOL[A-Z0-9_]*/.exec(p)?.[0] ?? '').filter((k) => k !== ''))];
+  const tools = loaded.ok && loaded.config.chat ? loaded.config.chat.tools : [];
+  const unsampled = tools.filter((t) => t.sample === null && Object.values(t.params).some((p) => p.required)).map((t) => toolKey(t.name, 'SAMPLE'));
+  return { refused, unsampled, tools: tools.map((t) => t.name) };
+}
+
+const chatToolsCheck: Check = {
+  id: 'chat-tools',
+  title: 'chat tools',
+  run: async (ctx) => {
+    const got = await serverAndEnv(ctx, 'chat tools');
+    if ('status' in got) return got;
+    if ((got.env.AZ_CHAT_TOOLS ?? '').trim() === '' && !Object.keys(got.env).some((k) => k.startsWith('AZ_CHAT_TOOL_') && k !== 'AZ_CHAT_TOOL_CALLS_PER_ADDRESS')) {
+      return { status: 'skip', line: 'chat tools: none declared (AZ_CHAT_TOOLS is optional)' };
+    }
+    const { refused, unsampled, tools } = chatToolsProblems(got.setup, got.env);
+    if (refused.length > 0) {
+      return {
+        status: 'fail',
+        line: `chat tools: ${refused.join(', ')} ${refused.length === 1 ? 'is' : 'are'} refused by the server — it won't start`,
+        fix: ['each tool needs _URL (https, or http on localhost), _FIELDS and _LABEL; _PARAMS, _SAMPLE and _TIMEOUT_MS as .env.example says', 'names checked, no value printed'],
+      };
+    }
+    // context.json says which chats show a chart, a table or stats: only those may use a tool (§21.2.8 O5).
+    const context = await readRegular(join(got.server, 'chat', 'context.json'));
+    let usable = true;
+    if (context !== null) {
+      const { parseChatContext } = await import('../../backend/src/server/chat.ts');
+      const c = parseChatContext(context);
+      if (typeof c !== 'string') usable = Object.values(c.chats).some((x) => x.show.some((w) => w === 'chart' || w === 'table' || w === 'stats'));
+    }
+    const notes = [
+      ...(unsampled.length > 0 ? [`${unsampled.join(', ')} ${unsampled.length === 1 ? 'is' : 'are'} not set — az backend probe can't call ${unsampled.length === 1 ? 'that tool' : 'those tools'} (${unsampled.length === 1 ? 'it requires' : 'they require'} parameters)`] : []),
+      ...(usable ? [] : ['no chat shows a chart, a table or stats, so no answer can use a tool']),
+    ];
+    const line = `${count(tools.length, 'tool')} declared (${tools.join(', ')}), each URL, parameter shape, field shape, label and sample valid`;
+    if (notes.length > 0) return { status: 'warn', line: `chat tools: ${notes.join('; ')}`, fix: [line, 'set a _SAMPLE the endpoint answers, then run az backend probe'] };
+    return { status: 'pass', line: `chat tools: ${line} — names checked, no value printed` };
+  },
+};
+
 /** The chat's doctor checks, in the order they print. */
-export const CHAT_DOCTOR_CHECKS: readonly Check[] = [chatEnv, chatBudget, chatContext];
+export const CHAT_DOCTOR_CHECKS: readonly Check[] = [chatEnv, chatToolsCheck, chatBudget, chatContext];
