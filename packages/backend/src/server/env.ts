@@ -1,8 +1,9 @@
 /**
  * @az server env
  * Purpose: the configuration: every key, validation, refuse to start naming bad keys.
- * Spec: docs/backend-spec.md §4 (chat keys: docs/chat-block-spec.md §11.1)
- * Exports: loadConfig, KEYS, urlProblem, CHAT_LIMITS, parseRate, ChatConfig, ChatRate
+ * Spec: docs/backend-spec.md §4 (chat keys: docs/chat-block-spec.md §11.1; tool keys: §21.2.2)
+ * Exports: loadConfig, KEYS, urlProblem, CHAT_LIMITS, parseRate, ChatConfig, ChatRate, TOOL_KEYS, TOOL_LIMITS, TOOL_NAME, TOOL_WORD, toolKey,
+ *   toolSecretKeys, paramValueOk, paramsProblem, isDay, ChatTool, ChatToolShape, ToolParam, ToolParamType, ToolFieldType
  * Edit guide: server keys are never AZ_PUBLIC_; defaults are safe.
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/chat-route.test.ts
  */
@@ -97,6 +98,8 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_CHAT_MODERATION_URL', about: 'Optional: an endpoint that judges each question before the model sees it. It is sent POST { "text": "…" } as JSON and must answer { "allow": true } or { "allow": false } within 3 s; any other answer, an error or no answer refuses the question (it fails closed). https, or plain http only for localhost.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_CHAT_MODERATION_KEY', about: 'Sent as `Authorization: Bearer <key>` to AZ_CHAT_MODERATION_URL; may be empty.', when: (s) => s.chat === true, required: false, secret: true },
   { name: 'AZ_CHAT_FAKE_FILE', about: 'With AZ_CHAT_API=fake only: a JSON file of scripted answers, for tests and local development.', when: (s) => s.chat === true, required: false, example: '' },
+  { name: 'AZ_CHAT_TOOLS', about: 'Optional: the names of your own HTTP data endpoints a chart, table or stat may take figures "from tool" (lower-case letters and digits, at most 24 characters, at most 8, comma-separated). Each needs its AZ_CHAT_TOOL_<NAME>_… keys below. The server POSTs the typed parameters as JSON to the URL you set and shows the rows it answers to the visitor, labelled; the model never reads them.', when: (s) => s.chat === true, required: false, example: '' },
+  { name: 'AZ_CHAT_TOOL_CALLS_PER_ADDRESS', about: 'Tool calls one address may cause, in the form of AZ_CHAT_PER_ADDRESS (default 120/hour); past it a tool\'s figures show as not loaded. A cached answer is not a call.', when: (s) => s.chat === true, required: false, example: '120/hour' },
   { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: always, required: false, example: 'deny' },
 ];
 
@@ -121,6 +124,254 @@ export const PROVIDER_KEYS: readonly { suffix: string; about: string; secret?: b
 
 export const providerKey = (id: string, suffix: string) =>
   `AZ_OAUTH_${id.toUpperCase().replace(/-/g, '_')}_${suffix}`;
+
+/**
+ * Per-tool keys (chat-block-spec §21.2.2), `AZ_CHAT_TOOL_<NAME>_<SUFFIX>`
+ * with the name upper-cased. KEY is a secret: never in `.env.example`,
+ * never in a message, looked for by `az audit` in what ships.
+ */
+export const TOOL_KEYS: readonly { suffix: string; about: string; secret?: boolean }[] = [
+  { suffix: 'URL', about: 'The endpoint the server POSTs the parameters to, as JSON. https, or plain http only for localhost; no user name or password, no #. Required.' },
+  { suffix: 'KEY', about: 'Optional: sent as `Authorization: Bearer <key>`.', secret: true },
+  { suffix: 'PARAMS', about: 'The parameters, a JSON object: { "<name>": { "type": "int"|"number"|"bool"|"date"|"enum"|"text", "min", "max", "values", "maxLength", "required" } }; at most 6. Absent: none.' },
+  { suffix: 'FIELDS', about: 'Each row\'s fields, a JSON object: { "<name>": "text"|"number"|"date"|"bool" }; 1 to 8. The endpoint answers a JSON array of rows of exactly these fields. Required.' },
+  { suffix: 'LABEL', about: 'The source the visitor sees under the figures ("From <label>"), 1 to 40 characters. Required.' },
+  { suffix: 'ABOUT', about: 'Optional: one sentence the model is told about the tool, at most 200 characters.' },
+  { suffix: 'TIMEOUT_MS', about: 'The longest one call may take, request and body, in ms (default 2000, 100–5000).' },
+  { suffix: 'SAMPLE', about: 'Parameters az doctor checks and az backend probe calls the tool with, a JSON object valid under PARAMS.' },
+];
+
+export const toolKey = (name: string, suffix: string) => `AZ_CHAT_TOOL_${name.toUpperCase()}_${suffix}`;
+
+/** chat-block-spec §21.2.2 / §21.2.4: what a tool declaration may hold. */
+export const TOOL_LIMITS = {
+  tools: 8,
+  params: 6,
+  enumValues: 24,
+  /** A text parameter's longest value, and the default when maxLength is not given. */
+  text: 80,
+  /** An enum value's longest. */
+  enumValue: 40,
+  fields: 8,
+  label: 40,
+  about: 200,
+  timeoutMs: { default: 2_000, min: 100, max: 5_000 },
+  callsPerAddress: '120/hour',
+} as const;
+
+/** A tool's name, as AZ_CHAT_TOOLS lists it and the model writes it. */
+export const TOOL_NAME = /^[a-z][a-z0-9]{0,23}$/;
+/** A parameter's or a field's name, as the model writes it. */
+export const TOOL_WORD = /^[a-z][a-z0-9_]{0,31}$/;
+/** Words that start the aggregate after the parameters: never a parameter's name, or a request would read two ways. */
+const TOOL_RESERVED: ReadonlySet<string> = new Set(['count', 'sum', 'avg', 'min', 'max', 'columns', 'by', 'from', 'tool']);
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export type ToolParamType = 'int' | 'number' | 'bool' | 'date' | 'enum' | 'text';
+export type ToolFieldType = 'text' | 'number' | 'date' | 'bool';
+
+/** One declared parameter: bounds for int, number and date; values for enum; a length for text. */
+export interface ToolParam {
+  readonly type: ToolParamType;
+  readonly min: number | string | null;
+  readonly max: number | string | null;
+  readonly values: readonly string[] | null;
+  readonly maxLength: number;
+  readonly required: boolean;
+}
+
+/** What the answer parser and the model know of a tool: never its URL or key. */
+export interface ChatToolShape {
+  readonly name: string;
+  readonly params: Readonly<Record<string, ToolParam>>;
+  readonly fields: Readonly<Record<string, ToolFieldType>>;
+  readonly label: string;
+  readonly about: string;
+}
+
+/** A tool as the server calls it. */
+export interface ChatTool extends ChatToolShape {
+  readonly url: string;
+  readonly key: string;
+  readonly timeoutMs: number;
+  /** AZ_CHAT_TOOL_<NAME>_SAMPLE, valid under params; null when unset. */
+  readonly sample: Readonly<Record<string, string | number | boolean>> | null;
+}
+
+/** A real calendar day written `YYYY-MM-DD`. */
+export function isDay(v: unknown): v is string {
+  if (typeof v !== 'string' || !DATE.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+
+/** Text an operator wrote for a person: one line, no control characters, within `max` characters. */
+const plainText = (v: string, max: number) => v.length > 0 && [...v].length <= max && !/[\u0000-\u001f\u007f-\u009f]/.test(v);
+
+/** Whether `v`, a JSON value, is a value `p` takes — the one check for a sample and for every call's body. */
+export function paramValueOk(p: ToolParam, v: unknown): boolean {
+  switch (p.type) {
+    case 'int':
+    case 'number':
+      if (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) > 1e15) return false;
+      if (p.type === 'int' && !Number.isInteger(v)) return false;
+      return (p.min === null || v >= (p.min as number)) && (p.max === null || v <= (p.max as number));
+    case 'bool': return typeof v === 'boolean';
+    case 'date': return isDay(v) && (p.min === null || v >= (p.min as string)) && (p.max === null || v <= (p.max as string));
+    case 'enum': return typeof v === 'string' && (p.values ?? []).includes(v);
+    case 'text': return typeof v === 'string' && v.trim() !== '' && [...v].length <= p.maxLength;
+  }
+}
+
+/** `{ "<param>": value }` checked against `params`: every name declared, every required one there, every value its type. */
+export function paramsProblem(params: Readonly<Record<string, ToolParam>>, v: unknown): string | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return 'is not a JSON object';
+  for (const [k, x] of Object.entries(v)) {
+    const p = Object.hasOwn(params, k) ? params[k] : undefined;
+    if (!p) return `names a parameter PARAMS does not declare`;
+    if (!paramValueOk(p, x)) return 'holds a value its parameter does not take';
+  }
+  for (const [k, p] of Object.entries(params)) if (p.required && !Object.hasOwn(v, k)) return 'leaves out a required parameter';
+  return null;
+}
+
+/** A JSON object from `text`, or null. */
+function jsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(text) as unknown;
+    return v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One parameter declaration, or why it is not one (never quoting a value). */
+function toolParam(raw: unknown): ToolParam | string {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return 'is not an object';
+  const x = raw as Record<string, unknown>;
+  if (Object.keys(x).some((k) => !['type', 'min', 'max', 'values', 'maxLength', 'required'].includes(k))) return 'has a key other than type, min, max, values, maxLength, required';
+  const type = x.type;
+  if (type !== 'int' && type !== 'number' && type !== 'bool' && type !== 'date' && type !== 'enum' && type !== 'text') return 'has no type of int, number, bool, date, enum or text';
+  if (x.required !== undefined && typeof x.required !== 'boolean') return 'has a required that is not true or false';
+  const ranged = type === 'int' || type === 'number' || type === 'date';
+  if (!ranged && (x.min !== undefined || x.max !== undefined)) return `takes no min or max as ${type}`;
+  const bound = (b: unknown): number | string | null | false => {
+    if (b === undefined) return null;
+    if (type === 'date') return isDay(b) ? b : false;
+    if (typeof b !== 'number' || !Number.isFinite(b) || Math.abs(b) > 1e15) return false;
+    return type === 'int' && !Number.isInteger(b) ? false : b;
+  };
+  const min = bound(x.min);
+  const max = bound(x.max);
+  if (min === false || max === false) return type === 'date' ? 'has a min or max that is not a YYYY-MM-DD day' : `has a min or max that is not ${type === 'int' ? 'a whole number' : 'a number'}`;
+  if (min !== null && max !== null && min > max) return 'has a min above its max';
+  let values: string[] | null = null;
+  if (type === 'enum') {
+    if (!Array.isArray(x.values) || x.values.length < 1 || x.values.length > TOOL_LIMITS.enumValues) return `needs values, 1 to ${TOOL_LIMITS.enumValues} of them`;
+    if (!x.values.every((s) => typeof s === 'string' && plainText(s, TOOL_LIMITS.enumValue) && s.trim() === s && !s.includes('"') && !s.includes('\\'))) {
+      return `has a value that is not one line of 1–${TOOL_LIMITS.enumValue} characters without quotes or backslashes`;
+    }
+    if (new Set(x.values).size !== x.values.length) return 'lists a value twice';
+    values = x.values as string[];
+  } else if (x.values !== undefined) return `takes no values as ${type}`;
+  let maxLength: number = TOOL_LIMITS.text;
+  if (type === 'text') {
+    if (x.maxLength !== undefined) {
+      if (!Number.isInteger(x.maxLength) || (x.maxLength as number) < 1 || (x.maxLength as number) > TOOL_LIMITS.text) return `has a maxLength that is not 1–${TOOL_LIMITS.text}`;
+      maxLength = x.maxLength as number;
+    }
+  } else if (x.maxLength !== undefined) return `takes no maxLength as ${type}`;
+  return { type, min, max, values, maxLength, required: x.required === true };
+}
+
+/**
+ * AZ_CHAT_TOOLS and each tool's keys (chat-block-spec §21.2.2), every
+ * problem named by its key — a value is never quoted, the key least of all.
+ */
+function chatTools(env: Readonly<Record<string, string | undefined>>, get: (k: string) => string, problems: string[]): ChatTool[] {
+  const names = get('AZ_CHAT_TOOLS').split(',').map((s) => s.trim()).filter(Boolean);
+  const tools: ChatTool[] = [];
+  if (names.length > TOOL_LIMITS.tools) problems.push(`AZ_CHAT_TOOLS lists ${names.length} tools — at most ${TOOL_LIMITS.tools}`);
+  const seen = new Set<string>();
+  for (const name of names.slice(0, TOOL_LIMITS.tools)) {
+    if (!TOOL_NAME.test(name)) { problems.push(`AZ_CHAT_TOOLS has a name that is not lower-case letters and digits, starting with a letter, at most 24 characters`); continue; }
+    if (seen.has(name)) { problems.push(`AZ_CHAT_TOOLS lists '${name}' twice`); continue; }
+    seen.add(name);
+    const k = (s: string) => toolKey(name, s);
+    const before = problems.length;
+    const url = get(k('URL'));
+    if (!url) problems.push(`${k('URL')} is missing (tool '${name}')`);
+    else {
+      let u: URL | null = null;
+      try { u = new URL(url); } catch { problems.push(`${k('URL')} is not a URL`); }
+      if (u) {
+        if (u.protocol !== 'https:' && !(u.protocol === 'http:' && LOOPBACK.has(u.hostname))) problems.push(`${k('URL')} must use https (plain http only for localhost)`);
+        if (u.username || u.password) problems.push(`${k('URL')} must not carry a user name or password`);
+        if (u.hash || url.includes('#')) problems.push(`${k('URL')} must not have a #`);
+      }
+    }
+    const paramsText = get(k('PARAMS'));
+    const params: Record<string, ToolParam> = {};
+    if (paramsText) {
+      const o = jsonObject(paramsText);
+      if (!o) problems.push(`${k('PARAMS')} is not a JSON object`);
+      else if (Object.keys(o).length > TOOL_LIMITS.params) problems.push(`${k('PARAMS')} declares more than ${TOOL_LIMITS.params} parameters`);
+      else {
+        for (const [p, raw] of Object.entries(o)) {
+          if (!TOOL_WORD.test(p) || TOOL_RESERVED.has(p)) { problems.push(`${k('PARAMS')} has a parameter name that is not lower-case letters, digits and _ (at most 32), or is one of ${[...TOOL_RESERVED].join(', ')}`); continue; }
+          const d = toolParam(raw);
+          if (typeof d === 'string') problems.push(`${k('PARAMS')}: parameter '${p}' ${d}`);
+          else params[p] = d;
+        }
+      }
+    }
+    const fields: Record<string, ToolFieldType> = {};
+    const fieldsText = get(k('FIELDS'));
+    if (!fieldsText) problems.push(`${k('FIELDS')} is missing (tool '${name}') — the fields of each row it answers`);
+    else {
+      const o = jsonObject(fieldsText);
+      const n = o ? Object.keys(o).length : 0;
+      if (!o) problems.push(`${k('FIELDS')} is not a JSON object`);
+      else if (n < 1 || n > TOOL_LIMITS.fields) problems.push(`${k('FIELDS')} must declare 1 to ${TOOL_LIMITS.fields} fields`);
+      else {
+        for (const [f, t] of Object.entries(o)) {
+          if (!TOOL_WORD.test(f)) problems.push(`${k('FIELDS')} has a field name that is not lower-case letters, digits and _ (at most 32)`);
+          else if (t !== 'text' && t !== 'number' && t !== 'date' && t !== 'bool') problems.push(`${k('FIELDS')}: field '${f}' is not text, number, date or bool`);
+          else fields[f] = t;
+        }
+      }
+    }
+    const label = get(k('LABEL'));
+    if (!label) problems.push(`${k('LABEL')} is missing (tool '${name}') — the source the visitor sees`);
+    else if (!plainText(label, TOOL_LIMITS.label)) problems.push(`${k('LABEL')} must be one line of 1–${TOOL_LIMITS.label} characters`);
+    const about = get(k('ABOUT'));
+    if (about && !plainText(about, TOOL_LIMITS.about)) problems.push(`${k('ABOUT')} must be one line of at most ${TOOL_LIMITS.about} characters`);
+    const timeoutMs = bounded(get, k('TIMEOUT_MS'), TOOL_LIMITS.timeoutMs, problems);
+    let sample: Record<string, string | number | boolean> | null = null;
+    const sampleText = get(k('SAMPLE'));
+    if (sampleText) {
+      const o = jsonObject(sampleText);
+      const why = o ? paramsProblem(params, o) : 'is not a JSON object';
+      if (why) problems.push(`${k('SAMPLE')} ${why}`);
+      else sample = o as Record<string, string | number | boolean>;
+    }
+    if (problems.length === before) tools.push({ name, url, key: get(k('KEY')), params, fields, label, about, timeoutMs, sample });
+  }
+  // A tool's key for a name not listed is a typo or a leftover: said, never silently ignored.
+  const suffixes = TOOL_KEYS.map((t) => t.suffix).join('|');
+  const keyRe = new RegExp(`^AZ_CHAT_TOOL_([A-Z][A-Z0-9]*)_(${suffixes})$`);
+  for (const [key, value] of Object.entries(env)) {
+    const m = keyRe.exec(key);
+    if (m && (value ?? '').trim() !== '' && !seen.has(m[1].toLowerCase())) problems.push(`${key} is set, but '${m[1].toLowerCase()}' is not in AZ_CHAT_TOOLS — add it there, or remove the key`);
+  }
+  return tools;
+}
+
+/** The names of the secret tool keys `env` sets values for — `az audit` looks for each value in what ships. */
+export function toolSecretKeys(env: Readonly<Record<string, string | undefined>>): string[] {
+  const names = (env.AZ_CHAT_TOOLS ?? '').split(',').map((s) => s.trim()).filter((n) => TOOL_NAME.test(n));
+  return [...new Set(names)].flatMap((n) => TOOL_KEYS.filter((t) => t.secret).map((t) => toolKey(n, t.suffix)));
+}
 
 export const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export const LABEL_MAX = 40;
@@ -178,6 +429,10 @@ export interface ChatConfig {
   readonly fakeFile: string;
   /** The input-moderation hook (chat-block-spec §6.8): null when AZ_CHAT_MODERATION_URL is unset. */
   readonly moderation: { readonly url: string; readonly key: string } | null;
+  /** The operator's data tools (chat-block-spec §21.2), in AZ_CHAT_TOOLS order; none when unset. */
+  readonly tools: readonly ChatTool[];
+  /** AZ_CHAT_TOOL_CALLS_PER_ADDRESS: tool calls one address may cause. */
+  readonly toolCallsPerAddress: ChatRate;
   /** Share links (chat-block-spec §20.7): whether new ones may be made, how long they last, how many at once, how often. */
   readonly shares: {
     readonly enabled: boolean;
@@ -388,7 +643,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
     problems.push(`AZ_UPLOAD_MAX_MB must be a whole number of MB, 1–${UPLOAD_MB.max}`);
   }
 
-  const chat = setup.chat === true ? chatConfig(get, publicUrl, problems) : null;
+  const chat = setup.chat === true ? chatConfig(env, get, publicUrl, problems) : null;
 
   if (problems.length > 0) return { ok: false, problems };
   return {
@@ -440,7 +695,7 @@ function onLoopback(value: string): boolean {
 }
 
 /** The chat keys (chat-block-spec §11.1), every problem named. */
-function chatConfig(get: (k: string) => string, publicUrl: string, problems: string[]): ChatConfig {
+function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: string) => string, publicUrl: string, problems: string[]): ChatConfig {
   const api = get('AZ_CHAT_API').toLowerCase();
   if (api && api !== 'completions' && api !== 'fake') problems.push('AZ_CHAT_API must be completions or fake');
   const url = get('AZ_CHAT_URL');
@@ -499,6 +754,8 @@ function chatConfig(get: (k: string) => string, publicUrl: string, problems: str
     enabled: enabled !== 'off',
     fakeFile,
     moderation: moderationUrl ? { url: moderationUrl, key: moderationKey } : null,
+    tools: chatTools(env, get, problems),
+    toolCallsPerAddress: rate('AZ_CHAT_TOOL_CALLS_PER_ADDRESS', TOOL_LIMITS.callsPerAddress),
     shares: {
       enabled: shares !== 'off',
       days: bounded(get, 'AZ_CHAT_SHARE_DAYS', CHAT_LIMITS.shareDays, problems),

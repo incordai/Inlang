@@ -1,7 +1,7 @@
 /**
  * @az server chat-answer
  * Purpose: the answer parser: a model's text, read line by line, becomes the closed set of page events — prose, or a component validated whole.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3, §21.1.2)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3, §21.1.2, §21.2.3)
  * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, ASK_FORM, FENCE, lineTokens, quoteKey
  * Edit guide: linear in the characters read, no regular expression that can backtrack; a line that does not parse is prose; a component that breaks a rule is dropped whole and never shown as syntax.
  * Tests: packages/backend/test/chat-answer.test.ts, packages/backend/test/chat-attacks.test.ts
@@ -50,10 +50,11 @@
  * held the same way and read whole by chat-rich.ts; their `from` figures are
  * filled by the route (chat.ts) before the page sees them.
  *
- * Copied into a generated server; imports only chat-rich.ts.
+ * Copied into a generated server; imports chat-rich.ts, and env.ts's tool types.
  */
 
 import { RICH_FORMS, RICH_LIMITS, RICH_WORDS, richBlock, richLines, type RichBlock, type RichLine, type RichWord } from './chat-rich.ts';
+import type { ChatToolShape } from './env.ts';
 
 /** Every cap the parser holds (chat-block-spec §5.3, §6.1). The prompt is generated from these too. */
 export const ANSWER_LIMITS = {
@@ -96,6 +97,8 @@ export interface AnswerRules {
   readonly destinations: readonly string[];
   /** The build's image keys an image card may name (§20.6); none when absent. */
   readonly images?: readonly string[];
+  /** The operator's tools a `from tool` may name (§21.2); none when absent. */
+  readonly tools?: readonly ChatToolShape[];
 }
 
 /** One component, validated: exactly what the page's templates are filled with. */
@@ -114,7 +117,7 @@ export type AnswerEvent =
 /** Why a component was dropped — counted and logged by kind, never with its text. */
 export type DropReason =
   | 'not_shown' | 'no_quote' | 'composed_pricing' | 'destination' | 'shape'
-  | 'too_long' | 'too_many' | 'empty' | 'components' | 'record' | 'number' | 'image' | 'figures';
+  | 'too_long' | 'too_many' | 'empty' | 'components' | 'record' | 'number' | 'image' | 'figures' | 'tool';
 
 /**
  * Each form the model is taught, in the order the prompt lists them: what
@@ -304,6 +307,8 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
   /** Data points and `from` requests across the answer's rich components (§20.2). */
   let points = 0;
   let queries = 0;
+  /** `from tool` calls across the answer (§21.2.4). */
+  let calls = 0;
   const dropped: DropReason[] = [];
   let out: AnswerEvent[] = [];
   let pendingText = '';
@@ -382,13 +387,15 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     if (b.kind === 'pricing') { drop('composed_pricing'); return; }
     if (b.kind === 'dropped' || b.broken) { drop(b.broken ?? 'shape'); return; }
     if (b.kind === 'rich') {
-      const read = richBlock(b.head, b.lines, { show: rules.show, destinations: rules.destinations, images: rules.images ?? [] }, cleanText);
+      const read = richBlock(b.head, b.lines, { show: rules.show, destinations: rules.destinations, images: rules.images ?? [], tools: rules.tools ?? [] }, cleanText);
       if (!read.ok) { drop(read.why); return; }
       for (let i = 0; i < read.lostImages; i++) drop('image');
       // The answer's own caps: points across its components, requests the server will run.
-      if (points + read.points > RICH_LIMITS.answerPoints || queries + read.queries > RICH_LIMITS.answerQueries) { drop('too_many'); return; }
+      if (points + read.points > RICH_LIMITS.answerPoints || queries + read.queries > RICH_LIMITS.answerQueries
+        || calls + read.calls > RICH_LIMITS.answerCalls) { drop('too_many'); return; }
       points += read.points;
       queries += read.queries;
+      calls += read.calls;
       emit(read.block, richLines(read.block));
       return;
     }

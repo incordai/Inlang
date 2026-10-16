@@ -1,7 +1,7 @@
 /**
  * @az server chat-probe
  * Purpose: az backend probe — the production prompt and context sent to the configured model, one fixed question per component; each answer measured and parsed.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §11.3)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §11.3, §21.2.7)
  * Exports: probeChat, probeReport, PROBE_QUESTIONS, PROBE_MS, ProbeResult, ProbeAnswer
  * Edit guide: the only path that calls a model outside a visitor's request; bounded per answer and in total; reports codes, times and counts — never the key, never the model's words.
  * Tests: packages/backend/test/chat-probe.test.ts
@@ -21,6 +21,13 @@
  * and why. It fails (exit 1) when an answer is empty, fails, or drops a
  * component — the model wrote one the filter refused.
  *
+ * Each of the operator's data tools (AZ_CHAT_TOOLS, §21.2.7) is then called
+ * once with its AZ_CHAT_TOOL_<NAME>_SAMPLE parameters — exactly as an answer
+ * would call it, its reply checked row by row against the declared fields —
+ * and reported by outcome, time and rows; a tool that fails, or that needs
+ * parameters and has no sample, fails the probe too. The system text the
+ * model is asked with lists the tools, as the chat route's does.
+ *
  * Every answer is bounded by the server's own timeouts; the whole run by
  * PROBE_MS, past which the questions left are reported as not asked.
  *
@@ -32,6 +39,8 @@ import { pathToFileURL } from 'node:url';
 import type { ChatAdapter } from './chat-adapters.ts';
 import { ANSWER_WORDS, createAnswerParser, type AnswerWord, type DropReason } from './chat-answer.ts';
 import { CHAT_TIMING, rulesFor, systemText, type ChatContext, type ChatTiming } from './chat.ts';
+import { probeTools, type ToolProbe } from './chat-tools.ts';
+import type { ChatTool } from './env.ts';
 
 /** The whole probe's bound; questions left after it are reported, not asked. */
 export const PROBE_MS = 10 * 60 * 1000;
@@ -65,7 +74,7 @@ export interface ProbeAnswer {
   readonly dropped: readonly DropReason[];
 }
 
-export interface ProbeResult { readonly ok: boolean; readonly answers: readonly ProbeAnswer[] }
+export interface ProbeResult { readonly ok: boolean; readonly answers: readonly ProbeAnswer[]; readonly tools: readonly ToolProbe[] }
 
 /** The block kind an event carries: quote, faq, cta, feature. */
 const kindOf = (block: object) => Object.keys(block)[0];
@@ -78,11 +87,13 @@ export async function probeChat(o: {
   readonly adapter: ChatAdapter; readonly prompt: string; readonly context: ChatContext;
   readonly maxOutputTokens: number; readonly timeoutMs: number;
   readonly now?: () => number; readonly timing?: ChatTiming; readonly budgetMs?: number;
+  /** The operator's data tools, each called once with its sample; fetch is replaceable in tests. */
+  readonly tools?: readonly ChatTool[]; readonly fetch?: typeof fetch;
 }): Promise<ProbeResult> {
   const now = o.now ?? Date.now;
   const timing = o.timing ?? CHAT_TIMING;
   const pages = Object.keys(o.context.chats).sort();
-  if (pages.length === 0) return { ok: false, answers: [] };
+  if (pages.length === 0) return { ok: false, answers: [], tools: [] };
   // Prose on the first chat page; each component on the first page that shows it.
   const asked: { question: 'prose' | AnswerWord; page: string }[] = [{ question: 'prose', page: pages[0] }];
   for (const word of ANSWER_WORDS) {
@@ -98,8 +109,10 @@ export async function probeChat(o: {
     }
     answers.push(await askOne(o, question, page, now, timing));
   }
-  const ok = answers.every((a) => a.outcome === 'ok' && a.dropped.length === 0);
-  return { ok, answers };
+  // Each tool once, one after another, each bounded by its own timeout (≤ 5 s).
+  const tools = await probeTools(o.tools ?? [], { now, ...(o.fetch ? { fetch: o.fetch } : {}) });
+  const ok = answers.every((a) => a.outcome === 'ok' && a.dropped.length === 0) && tools.every((t) => t.outcome === 'ok');
+  return { ok, answers, tools };
 }
 
 async function askOne(
@@ -111,7 +124,9 @@ async function askOne(
   const stop = () => { timedOut = true; ac.abort(); };
   let idle = setTimeout(stop, timing.firstMs);
   const whole = setTimeout(stop, o.timeoutMs);
-  const parser = createAnswerParser(rulesFor(o.context, page));
+  // What the model is told of each tool: never its URL or key.
+  const shapes = (o.tools ?? []).map(({ name, params, fields, label, about }) => ({ name, params, fields, label, about }));
+  const parser = createAnswerParser(rulesFor(o.context, page, shapes));
   let pieces = 0;
   let firstMs: number | null = null;
   let tokens: { input: number; output: number } | null = null;
@@ -126,7 +141,7 @@ async function askOne(
   };
   try {
     for await (const chunk of o.adapter.stream({
-      system: systemText(o.prompt, o.context, page), turns: [{ role: 'user', text: PROBE_QUESTIONS[question] }],
+      system: systemText(o.prompt, o.context, page, '', shapes), turns: [{ role: 'user', text: PROBE_QUESTIONS[question] }],
       maxOutputTokens: o.maxOutputTokens, signal: ac.signal,
     })) {
       clearTimeout(idle);
@@ -167,9 +182,12 @@ export function probeReport(r: ProbeResult): string {
       `dropped ${a.dropped.length === 0 ? 'none' : a.dropped.join(', ')}`,
     ].join(' · ');
   });
+  for (const t of r.tools) {
+    lines.push(`${t.outcome === 'ok' ? 'PASS' : 'FAIL'} tool ${t.tool} · outcome ${t.outcome} · total ${t.ms}ms · rows ${t.rows}`);
+  }
   lines.push(r.ok
-    ? 'probe: every answer arrived and parsed with nothing dropped'
-    : 'probe: FAILED — an answer was empty, failed, or held a component the filter dropped (see above); try another model or a larger AZ_CHAT_MAX_OUTPUT_TOKENS');
+    ? `probe: every answer arrived and parsed with nothing dropped${r.tools.length > 0 ? `; every tool answered rows of its declared fields` : ''}`
+    : 'probe: FAILED — an answer was empty, failed, or held a component the filter dropped, or a tool failed (see above); try another model or a larger AZ_CHAT_MAX_OUTPUT_TOKENS, or fix the tool or its AZ_CHAT_TOOL_<NAME>_SAMPLE');
   return `${lines.join('\n')}\n`;
 }
 
@@ -209,7 +227,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   // Where it asks, never with what key.
   process.stderr.write(`probe: ${chat.api} model ${JSON.stringify(chat.model)}${chat.api === 'completions' ? ` at ${new URL(chat.url).origin}` : ''}\n`);
-  const result = await probeChat({ adapter, prompt: read('prompt.txt'), context, maxOutputTokens: chat.maxOutputTokens, timeoutMs: chat.timeoutMs });
+  const result = await probeChat({ adapter, prompt: read('prompt.txt'), context, maxOutputTokens: chat.maxOutputTokens, timeoutMs: chat.timeoutMs, tools: chat.tools });
   process.stdout.write(argv.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : probeReport(result));
   return result.ok ? 0 : 1;
 }

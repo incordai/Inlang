@@ -1,10 +1,11 @@
 /**
  * @az server chat
  * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer parsed into typed events and streamed to the page.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §8.2, §8.3, §20.5, §20.7)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §8.2, §8.3, §20.5, §20.7, §21.2)
  * Exports: createChat, parseChatContext, rulesFor, systemText, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, CHARS_PER_TOKEN
  * Edit guide: every limit is the server's, never the request's; nothing the model wrote reaches the page but chat-answer.ts's events; abort upstream whenever the answer stops; logs carry codes and counts, never text.
- * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts, packages/backend/test/chat-knows.test.ts, packages/backend/test/chat-moderation.test.ts
+ * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts, packages/backend/test/chat-knows.test.ts, packages/backend/test/chat-moderation.test.ts,
+ *   packages/backend/test/chat-tools-route.test.ts
  */
 
 /**
@@ -26,7 +27,10 @@
  * A rich component (§20) is resolved before it is written: numbers the
  * model wrote are marked `src: model`; each `from` request is answered by
  * the server's own read of a public table (`figures`, chat-query.ts) and
- * marked `src: site`. When shares are on, `done` also carries the share tag
+ * marked `src: site`; each `from tool` request by one of the operator's
+ * declared tools (`tools`, chat-tools.ts), marked `src: tool` with its
+ * label — its rows go to the page only, never into what the model reads
+ * (§21.2.4). When shares are on, `done` also carries the share tag
  * over the answer's events as sent (chat-share.ts), so the page can keep
  * exactly this answer under a link if the visitor asks.
  *
@@ -54,6 +58,7 @@ import type { ChatAdapter } from './chat-adapters.ts';
 import type { KnowsRun } from './chat-knows.ts';
 import { ANSWER_WORDS, createAnswerParser, type AnswerBlock, type AnswerEvent, type AnswerQuote, type AnswerRules, type AnswerWord, type DropReason } from './chat-answer.ts';
 import { RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
+import { toolsText, type Tools } from './chat-tools.ts';
 import { createShareRoutes, createShareStore, mergeText, shareKey, shareTag, SHARE_LIMITS } from './chat-share.ts';
 import { createQueue, createRateLimits } from './chat-limits.ts';
 import { sseEvent } from './chat-sse.ts';
@@ -62,7 +67,7 @@ import { createModeration, type Moderation } from './chat-moderation.ts';
 import { createUsage, utcDay } from './chat-usage.ts';
 import { randomToken } from './crypto.ts';
 import type { Db } from './db.ts';
-import type { ChatConfig } from './env.ts';
+import type { ChatConfig, ChatToolShape } from './env.ts';
 import { BodyError, send, SECURITY_HEADERS } from './http.ts';
 
 /** Characters per token when a provider reports no usage — a conservative estimate (§6.5, INFERENCE). */
@@ -188,10 +193,19 @@ export function parseChatContext(text: string): ChatContext | string {
   return { chats, quotes: quotes as AnswerQuote[], destinations: destinations as string[], images, tables, knows, content: { site: r.site, pages: r.pages } };
 }
 
-/** What one chat page's answers may show: its own `show`, the site's quotes and destinations. */
-export function rulesFor(context: ChatContext, page: string): AnswerRules {
+/** The components a tool's figures may fill (§21.2.8 O5): a chat whose `show` has one of them may use the tools. */
+const TOOL_WORDS: readonly AnswerWord[] = ['chart', 'table', 'stats'];
+
+/** Whether a page's chat may use the operator's tools: its `show` has a chart, a table or stats. */
+const usesTools = (show: readonly AnswerWord[]) => show.some((w) => TOOL_WORDS.includes(w));
+
+/** What one chat page's answers may show: its own `show`, the site's quotes and destinations, and the tools when it may use them. */
+export function rulesFor(context: ChatContext, page: string, tools: readonly ChatToolShape[] = []): AnswerRules {
   const show = Object.hasOwn(context.chats, page) ? context.chats[page].show : [];
-  return { show, quotes: context.quotes, destinations: context.destinations, images: context.images.map((i) => i.key) };
+  return {
+    show, quotes: context.quotes, destinations: context.destinations, images: context.images.map((i) => i.key),
+    ...(usesTools(show) && tools.length > 0 ? { tools } : {}),
+  };
 }
 
 /** A table as the model reads it: `orders: status (choice: paid, open), total (money usd), placed (datetime)`. */
@@ -205,11 +219,13 @@ const quoteLine = (q: AnswerQuote) => `show ${q.word} ${q.route}${q.n > 0 ? `#${
  * What the model is told (chat-block-spec §8.3): the fixed prompt, then the
  * site's public content in a section marked as data, then the rows of the
  * tables the page's chat knows (chat-knows.ts, labelled data too), then the
- * page the visitor is on and what an answer there may hold. Nothing about
- * the visitor — no cookie, address or account.
+ * page the visitor is on and what an answer there may hold — the operator's
+ * tools among it, generated from their declarations (§21.2.2), never their
+ * URLs, keys or anything one answered. Nothing about the visitor — no
+ * cookie, address or account.
  */
-export function systemText(prompt: string, context: ChatContext, page: string, rows = ''): string {
-  const rules = rulesFor(context, page);
+export function systemText(prompt: string, context: ChatContext, page: string, rows = '', tools: readonly ChatToolShape[] = []): string {
+  const rules = rulesFor(context, page, tools);
   const lines = [`The visitor is on the page ${JSON.stringify(page)}.`];
   if (rules.show.length === 0) {
     lines.push('On this page an answer is prose only: write no component (follow-up questions are still allowed).');
@@ -226,6 +242,7 @@ export function systemText(prompt: string, context: ChatContext, page: string, r
         ? `The tables "from" may count, sum, average, or list (by field, a date by day, month or year; "where" a choice or flag field equals one value):\n${context.tables.map(tableLine).join('\n')}`
         : 'There are no tables to take figures "from": any figure is your own, and is shown labelled as AI-generated.');
     }
+    if (rules.tools) lines.push(toolsText(rules.tools));
     if (rules.show.includes('cards')) {
       lines.push(context.images.length > 0
         ? `The site images a card may show, by key: ${context.images.map((i) => `${i.key} (${JSON.stringify(i.alt)})`).join(' · ')}.`
@@ -254,6 +271,8 @@ export interface ChatOptions {
   readonly knows?: KnowsRun;
   /** The moderation hook; by default the one config.moderation names, or none. */
   readonly moderation?: Moderation;
+  /** The operator's data tools (chat-tools.ts); absent when AZ_CHAT_TOOLS is unset. */
+  readonly tools?: Tools;
 }
 
 /** A whole-number token estimate for `chars` characters. */
@@ -280,6 +299,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
     allowOf: (page) => (Object.hasOwn(o.context.chats, page) ? o.context.chats[page].allow : null),
   });
   const moderation = o.moderation ?? (o.config.moderation ? createModeration(o.config.moderation) : null);
+  const toolShapes = o.tools?.shapes ?? [];
   /** The day the budget last ran out, so it is logged once per day. */
   let exhaustedOn = '';
 
@@ -298,7 +318,9 @@ export function createChat(o: ChatOptions): ChatRoutes {
     });
     // The page learns at once that its answer is coming, before the first token.
     res.flushHeaders();
-    const parser = createAnswerParser(rulesFor(o.context, page));
+    const parser = createAnswerParser(rulesFor(o.context, page, toolShapes));
+    // Tool calls stop when the visitor leaves; a capped answer still fills the components it sent.
+    const toolRun = o.tools ? o.tools.forAnswer(req.ip, req.closed) : null;
     /** Every event sent, as the share tag covers them; and what a rich component's resolving dropped. */
     const sent_: Sent[] = [];
     const resolvedDrops: DropReason[] = [];
@@ -310,7 +332,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
         let out: Sent;
         if (e.type === 'text') out = e;
         else if (isRich(e.block)) {
-          const r = await resolveRich(e.block, o.figures ?? null, day);
+          const r = await resolveRich(e.block, o.figures ?? null, day, toolRun);
           if (r === null) { resolvedDrops.push('figures'); continue; }
           out = { type: 'block', block: r };
         } else out = { type: 'block', block: e.block as unknown as Record<string, unknown> };
@@ -414,7 +436,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
     const day = utcDay(now());
     // The rows the page's chat knows, read for this question as a signed-out visitor reads them (§8.2).
     const rows = chat.knows.length > 0 && o.knows ? await o.knows(chat.knows, ask.turns.at(-1)?.text ?? '') : '';
-    const system = systemText(o.prompt, o.context, ask.page, rows);
+    const system = systemText(o.prompt, o.context, ask.page, rows, toolShapes);
     const most = estimate(system.length + trimHistory(ask.turns).reduce((n, t) => n + t.text.length, 0)) + o.config.maxOutputTokens;
     if ((await usage.spent(day)) + most > o.config.dailyTokens) {
       if (exhaustedOn !== day) {
@@ -435,7 +457,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
 
   return {
     handle,
-    sweep: () => { limits.sweep(); shares.sweep(); },
+    sweep: () => { limits.sweep(); shares.sweep(); o.tools?.sweep(); },
     prune: async () => (await usage.sweep(now())) + (await shareStore.sweep()),
     shares,
   };

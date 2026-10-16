@@ -130,7 +130,7 @@ test('bounded: a model that never answers times out at the first-token bound; pa
 });
 
 /** A built server folder with a chat, its .env pointing at `url`. */
-function serverDir(url: string): string {
+function serverDir(url: string, extra: readonly string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), 'az-chat-probe-'));
   cpSync(SERVER_SRC, join(dir, 'src'), { recursive: true });
   writeFileSync(join(dir, 'az.config.json'), JSON.stringify({ siteName: 'Shop', database: 'sqlite', email: 'api', chat: true }));
@@ -140,7 +140,7 @@ function serverDir(url: string): string {
   writeFileSync(join(dir, '.env'), [
     `AZ_SESSION_SECRET=${randomBytes(32).toString('base64url')}`, 'AZ_BACKEND_PUBLIC_URL=http://127.0.0.1:9', 'AZ_ALLOWED_ORIGINS=http://localhost:5173',
     `AZ_SQLITE_PATH=${join(dir, 'data/app.db')}`, 'AZ_EMAIL_FROM=Shop <no-reply@shop.test>', 'AZ_EMAIL_API_URL=https://mail.invalid/send', 'AZ_EMAIL_API_KEY=<PLACEHOLDER>',
-    'AZ_CHAT_API=completions', `AZ_CHAT_URL=${url}`, `AZ_CHAT_KEY=${KEY}`, 'AZ_CHAT_MODEL=candidate-model', '',
+    'AZ_CHAT_API=completions', `AZ_CHAT_URL=${url}`, `AZ_CHAT_KEY=${KEY}`, 'AZ_CHAT_MODEL=candidate-model', ...extra, '',
   ].join('\n'));
   return dir;
 }
@@ -179,6 +179,55 @@ test('az backend probe <server-dir>: reads the server\'s .env and chat files, ex
   } finally {
     await good.close();
     await bad.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+/** A local data tool (chat-block-spec §21.2): `/ok` answers two rows of the declared fields, `/bad` a row of another shape. */
+async function toolServer() {
+  const seen: { path: string; body: string; auth: string | undefined }[] = [];
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    let body = '';
+    for await (const c of req) body += c;
+    seen.push({ path: req.url ?? '', body, auth: req.headers.authorization });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(req.url === '/ok' ? [{ driver: 'Ana', points: 25 }, { driver: 'Ben', points: 18 }] : [{ driver: 'Ana' }]));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  return { base, seen, close: () => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }) };
+}
+
+const TOOL_KEY = `probe-tool-key-${randomBytes(8).toString('hex')}`;
+const toolEnv = (url: string) => [
+  'AZ_CHAT_TOOLS=standings', `AZ_CHAT_TOOL_STANDINGS_URL=${url}`, `AZ_CHAT_TOOL_STANDINGS_KEY=${TOOL_KEY}`,
+  `AZ_CHAT_TOOL_STANDINGS_PARAMS=${JSON.stringify({ season: { type: 'int', min: 2000, max: 2030, required: true } })}`,
+  `AZ_CHAT_TOOL_STANDINGS_FIELDS=${JSON.stringify({ driver: 'text', points: 'number' })}`,
+  'AZ_CHAT_TOOL_STANDINGS_LABEL=Race results service', `AZ_CHAT_TOOL_STANDINGS_SAMPLE=${JSON.stringify({ season: 2026 })}`,
+];
+
+test('az backend probe calls each data tool once with its sample: a tool of the declared shape passes, one of another fails the probe; the key is never printed', async () => {
+  const good = await modelServer((q) => ({ text: GOOD[q] }));
+  const tool = await toolServer();
+  const dirs = [serverDir(good.url, toolEnv(`${tool.base}/ok`)), serverDir(good.url, toolEnv(`${tool.base}/bad`))];
+  try {
+    const ok = await cli(dirs[0]);
+    assert.equal(ok.code, 0, ok.out);
+    assert.match(ok.out, /^PASS tool standings · outcome ok · total \d+ms · rows 2$/m);
+    assert.match(ok.out, /every tool answered rows of its declared fields$/m);
+    assert.deepEqual(tool.seen.map((s) => [s.path, JSON.parse(s.body), s.auth]), [['/ok', { season: 2026 }, `Bearer ${TOOL_KEY}`]], 'once, with the sample and the key');
+    // This site's chat shows no chart, table or stats: the model is not told of the tools.
+    assert.ok(good.seen.every((s) => !s.body.messages[0].content.includes('from tool')));
+    const bad = await cli(dirs[1]);
+    assert.equal(bad.code, 1, bad.out);
+    assert.match(bad.out, /^FAIL tool standings · outcome shape · total \d+ms · rows 0$/m);
+    for (const r of [ok, bad]) {
+      assert.equal(r.out.includes(TOOL_KEY), false, 'the tool key is never printed');
+      assert.equal(r.out.includes(tool.base), false, 'nor its URL');
+    }
+  } finally {
+    await good.close();
+    await tool.close();
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
 });

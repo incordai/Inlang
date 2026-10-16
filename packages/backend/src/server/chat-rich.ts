@@ -1,11 +1,13 @@
 /**
  * @az server chat-rich
  * Purpose: an answer's charts, tables, stat cards, image cards and dashboards — read from the model's lines, checked and clamped, and their `from` figures filled by the server.
- * Spec: docs/chat-block-spec.md §20.2, §20.3, §20.5, §20.6
+ * Spec: docs/chat-block-spec.md §20.2, §20.3, §20.5, §20.6, §21.2.3
  * Exports: RICH_WORDS, RichWord, RICH_LIMITS, RICH_FORMS, RichLine, RichBlock, RichChart, RichTable, RichStat, RichCard, RichCards,
- *   RichDashboard, RichTile, RichRules, RichRead, Resolved, FiguresRun, richBlock, resolveRich, clampText, parseNumber, richLines
+ *   RichDashboard, RichTile, RichRules, RichRead, Resolved, FiguresRun, ToolRequest, ToolShape, ToolsRun, ToolAnswer, richBlock,
+ *   resolveRich, clampText, parseNumber, richLines
  * Edit guide: the model's numbers are numbers or the component goes; its words never reach SQL (a `from` is resolved by
- *   chat-query.ts against the public schema); `src` is set here and nowhere else; an image is a build key, never a URL.
+ *   chat-query.ts against the public schema) nor a URL (a `from tool` names a declared tool and typed values, called by
+ *   chat-tools.ts); `src` is set here and nowhere else; an image is a build key, never a URL.
  * Tests: packages/backend/test/chat-rich.test.ts, packages/backend/test/chat-attacks.test.ts
  */
 
@@ -39,11 +41,20 @@
  * at a grapheme boundary; a malformed number, a shape the forms do not
  * have, a link off the allow-list — the component is dropped whole.
  *
- * Copied into a generated server with chat; imports only types.
+ * `from tool <name> <param> <value>… <aggregate>` (§21.2.3) asks one of the
+ * operator's declared tools instead: the name must be one the server was
+ * started with, each parameter declared and its value of its type and in
+ * its bounds — or the component is dropped (`tool`). The request is checked
+ * here, whole, before anything is called; chat-tools.ts calls it and its
+ * figures get `src: tool` with the operator's label. The model never reads
+ * what a tool answered: the answer's record holds the request line only.
+ *
+ * Copied into a generated server with chat; imports env.ts's parameter checks and types.
  */
 
 import type { LineToken } from './chat-answer.ts';
 import type { CardsResult, Figures, RowsResult } from './chat-query.ts';
+import { isDay, paramValueOk, type ChatToolShape, type ToolParam } from './env.ts';
 
 export const RICH_WORDS = ['chart', 'table', 'stats', 'cards', 'dashboard'] as const;
 export type RichWord = (typeof RICH_WORDS)[number];
@@ -71,6 +82,8 @@ export const RICH_LIMITS = {
   answerPoints: 240,
   /** `from` requests across one answer. */
   answerQueries: 6,
+  /** `from tool` calls across one answer, inside its requests (§21.2.4). */
+  answerCalls: 3,
   /** Child lines one component may hold before it is too big to be one. */
   lines: 160,
   /** The largest figure. */
@@ -111,15 +124,34 @@ export const RICH_FORMS: Readonly<Record<RichWord, { readonly lines: readonly st
 export interface RichLine { readonly depth: number; readonly tokens: readonly LineToken[] }
 
 type Unit = string | null;
+
+/** A tool's aggregate (§21.2.3): a count or a measure of a number field, by a text or date field; or columns of rows. */
+export type ToolShape =
+  | { readonly kind: 'figures'; readonly fn: 'count' | 'sum' | 'avg' | 'min' | 'max'; readonly field: string | null; readonly by: string | null }
+  | { readonly kind: 'rows'; readonly columns: readonly string[] };
+
+/** A `from tool …` request, checked against the tool's declaration: what chat-tools.ts calls and aggregates. */
+export interface ToolRequest {
+  readonly tool: string;
+  /** Each parameter's value as the JSON body carries it. */
+  readonly args: Readonly<Record<string, string | number | boolean>>;
+  readonly shape: ToolShape;
+  /** The request in its canonical words, after `from ` — what the record holds. */
+  readonly words: string;
+}
+
 export type RichChart =
   | { readonly kind: string; readonly title: string; readonly unit: Unit; readonly src: 'model'; readonly series: readonly { readonly name: string; readonly points: readonly (readonly [string, number])[] }[] }
-  | { readonly kind: string; readonly title: string; readonly from: readonly string[] };
+  | { readonly kind: string; readonly title: string; readonly from: readonly string[] }
+  | { readonly kind: string; readonly title: string; readonly tool: ToolRequest };
 export type RichTable =
   | { readonly title: string; readonly sortable: boolean; readonly src: 'model'; readonly columns: readonly { readonly label: string; readonly type: 'text' | 'number' }[]; readonly rows: readonly (readonly (string | number)[])[] }
-  | { readonly title: string; readonly sortable: boolean; readonly from: readonly string[] };
+  | { readonly title: string; readonly sortable: boolean; readonly from: readonly string[] }
+  | { readonly title: string; readonly sortable: boolean; readonly tool: ToolRequest };
 export type RichStat =
   | { readonly label: string; readonly value: number; readonly unit: Unit; readonly delta?: number; readonly src: 'model' }
-  | { readonly label: string; readonly from: readonly string[] };
+  | { readonly label: string; readonly from: readonly string[] }
+  | { readonly label: string; readonly tool: ToolRequest };
 export interface RichCard {
   readonly title: string;
   readonly text?: string;
@@ -144,12 +176,14 @@ export interface RichRules {
   readonly destinations: readonly string[];
   /** Build image keys an image card may name. */
   readonly images: readonly string[];
+  /** The operator's tools a `from tool` may name (§21.2): their shapes, never a URL or a key. None when absent. */
+  readonly tools?: readonly ChatToolShape[];
 }
 
 /** One component read, or why it was dropped; how many points and requests it holds; images it lost. */
 export type RichRead =
-  | { readonly ok: true; readonly block: RichBlock; readonly points: number; readonly queries: number; readonly lostImages: number }
-  | { readonly ok: false; readonly why: 'shape' | 'not_shown' | 'destination' | 'too_many' | 'empty' | 'number' };
+  | { readonly ok: true; readonly block: RichBlock; readonly points: number; readonly queries: number; readonly calls: number; readonly lostImages: number }
+  | { readonly ok: false; readonly why: 'shape' | 'not_shown' | 'destination' | 'too_many' | 'empty' | 'number' | 'tool' };
 
 const KINDS: ReadonlySet<string> = new Set(['bar', 'line', 'area', 'pie', 'donut']);
 const CURRENCY = /^[a-z]{3}$/;
@@ -183,6 +217,11 @@ export function clampText(s: string, max: number): string {
   return `${graphemes.slice(0, max - 1).join('').trimEnd()}…`;
 }
 
+const quoted = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+const numberText = (n: number): string => String(n);
+/** The aggregates a tool request may end with (§21.2.3) — the closed set of §20.5. */
+const TOOL_FNS: ReadonlySet<string> = new Set(['count', 'sum', 'avg', 'min', 'max']);
+
 class Drop extends Error {
   readonly why: Extract<RichRead, { ok: false }>['why'];
   constructor(why: Extract<RichRead, { ok: false }>['why']) {
@@ -211,6 +250,7 @@ function treeOf(lines: readonly RichLine[]): Node[] {
 function reader(rules: RichRules, clean: Clean) {
   let points = 0;
   let queries = 0;
+  let calls = 0;
   let lostImages = 0;
   const bare = (t: LineToken | undefined, v?: string) => t?.kind === 'bare' && (v === undefined || t.value === v);
   const str = (t: LineToken | undefined): t is LineToken => t?.kind === 'string';
@@ -238,6 +278,84 @@ function reader(rules: RichRules, clean: Clean) {
     return words.map((w) => w.value);
   };
   const shown = (w: string) => { if (!rules.show.includes(w)) fail('not_shown'); };
+  const isTool = (tokens: readonly LineToken[], i: number) => bare(tokens[i], 'from') && bare(tokens[i + 1], 'tool');
+
+  /** One parameter's value as the model wrote it, of its declared type and in its bounds — or the component goes. */
+  const argOf = (p: ToolParam, t: LineToken): string | number | boolean => {
+    let v: string | number | boolean | null = null;
+    if (p.type === 'int' || p.type === 'number') v = bare(t) ? parseNumber(t.value) : null;
+    else if (p.type === 'bool') v = bare(t, 'yes') ? true : bare(t, 'no') ? false : null;
+    else if (p.type === 'date') v = bare(t) && isDay(t.value) ? t.value : null;
+    else if (p.type === 'enum') v = t.kind === 'string' ? clean(t.value).trim() : t.value;
+    else if (t.kind === 'string') {
+      // A text value is one line: a line break in it is not a value an endpoint is asked with.
+      const x = clean(t.value).trim();
+      v = x.includes('\n') ? null : x;
+    }
+    if (v === null || !paramValueOk(p, v)) fail('tool');
+    return v as string | number | boolean;
+  };
+  /** A value in its canonical word: a number, yes/no, a day, a bare enum value when it can be one, else a string. */
+  const argWord = (p: ToolParam, v: string | number | boolean): string => {
+    if (typeof v === 'number') return numberText(v);
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    if (p.type === 'date' || (p.type === 'enum' && /^[A-Za-z0-9._-]+$/.test(v))) return v;
+    return quoted(v);
+  };
+
+  /**
+   * `from tool <name> {<param> <value>} (count | sum|avg|min|max <field>) [by <field>]`,
+   * or `… columns <field> {<field>}` — `tokens[i]` is `from`. `want` is what
+   * the component can show: a chart groups, a stat is one figure or the
+   * latest of a date grouping, a table either groups or lists rows.
+   */
+  const toolOf = (tokens: readonly LineToken[], i: number, want: 'chart' | 'stat' | 'table'): ToolRequest => {
+    const w = tokens.slice(i + 2);
+    const nameT = w.shift();
+    const decl = bare(nameT) ? (rules.tools ?? []).find((x) => x.name === nameT!.value) : undefined;
+    if (!decl) return fail('tool');
+    const args: Record<string, string | number | boolean> = {};
+    const words = ['tool', decl.name];
+    const starts = (t: LineToken | undefined) => bare(t) && (TOOL_FNS.has(t!.value) || t!.value === 'columns');
+    while (w.length > 0 && !starts(w[0])) {
+      const p = w.shift()!;
+      const v = w.shift();
+      const param = bare(p) && Object.hasOwn(decl.params, p.value) ? decl.params[p.value] : undefined;
+      if (!param || v === undefined || Object.hasOwn(args, p.value)) return fail('tool');
+      args[p.value] = argOf(param, v);
+      words.push(p.value, argWord(param, args[p.value]));
+    }
+    for (const [name, p] of Object.entries(decl.params)) if (p.required && !Object.hasOwn(args, name)) fail('tool');
+    const field = (t: LineToken | undefined, types: readonly string[]): string => {
+      if (!bare(t) || !Object.hasOwn(decl.fields, t!.value) || !types.includes(decl.fields[t!.value])) return fail('tool');
+      return t!.value;
+    };
+    const head = w.shift();
+    let shape: ToolShape;
+    if (bare(head, 'columns')) {
+      if (want !== 'table') fail('tool');
+      const columns = w.splice(0).map((t) => field(t, ['text', 'number', 'date', 'bool']));
+      if (columns.length < 1 || columns.length > RICH_LIMITS.columns || new Set(columns).size !== columns.length) fail('tool');
+      shape = { kind: 'rows', columns };
+      words.push('columns', ...columns);
+    } else {
+      if (!bare(head) || !TOOL_FNS.has(head!.value)) return fail('tool');
+      const fn = head!.value as Extract<ToolShape, { kind: 'figures' }>['fn'];
+      const measure = fn === 'count' ? null : field(w.shift(), ['number']);
+      let by: string | null = null;
+      if (bare(w[0], 'by')) {
+        w.shift();
+        // A stat shows the latest period of a date grouping; a grouping by text is a chart's or a table's.
+        by = field(w.shift(), want === 'stat' ? ['date'] : ['text', 'date']);
+      }
+      if (w.length > 0 || (want === 'chart' && by === null)) fail('tool');
+      shape = { kind: 'figures', fn, field: measure, by };
+      words.push(fn, ...(measure ? [measure] : []), ...(by ? ['by', by] : []));
+    }
+    queries++;
+    calls++;
+    return { tool: decl.name, args, shape, words: words.join(' ') };
+  };
 
   /** `chart <kind> "title"` with `from …`, or with its points (one series inside a dashboard). */
   function chart(head: readonly LineToken[], children: readonly Node[], inTile: boolean): RichChart {
@@ -245,6 +363,10 @@ function reader(rules: RichRules, clean: Clean) {
     if (!bare(head[1]) || !KINDS.has(head[1].value)) fail('shape');
     const kind = head[1].value;
     const title = label(head[2], RICH_LIMITS.title);
+    if (isTool(head, 3)) {
+      if (children.length > 0) fail('shape');
+      return { kind, title, tool: toolOf(head, 3, 'chart') };
+    }
     if (bare(head[3], 'from')) {
       if (children.length > 0) fail('shape');
       return { kind, title, from: from(head, 3) };
@@ -299,6 +421,10 @@ function reader(rules: RichRules, clean: Clean) {
     let i = 2;
     const sortable = bare(head[i], 'sortable');
     if (sortable) i++;
+    if (isTool(head, i)) {
+      if (children.length > 0) fail('shape');
+      return { title, sortable, tool: toolOf(head, i, 'table') };
+    }
     if (bare(head[i], 'from')) {
       if (children.length > 0) fail('shape');
       return { title, sortable, from: from(head, i) };
@@ -326,6 +452,7 @@ function reader(rules: RichRules, clean: Clean) {
   function stat(tokens: readonly LineToken[]): RichStat {
     if (!bare(tokens[0], 'stat')) fail('shape');
     const lab = label(tokens[1], RICH_LIMITS.statLabel);
+    if (isTool(tokens, 2)) return { label: lab, tool: toolOf(tokens, 2, 'stat') };
     if (bare(tokens[2], 'from')) return { label: lab, from: from(tokens, 2) };
     const value = num(tokens[2]);
     let u: Unit = null;
@@ -411,7 +538,7 @@ function reader(rules: RichRules, clean: Clean) {
       }
     }
   }
-  return { read, counts: () => ({ points, queries, lostImages }) };
+  return { read, counts: () => ({ points, queries, calls, lostImages }) };
 }
 
 /**
@@ -429,8 +556,6 @@ export function richBlock(head: readonly LineToken[], lines: readonly RichLine[]
   }
 }
 
-const quoted = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
-const numberText = (n: number): string => String(n);
 
 /** A rich component in its canonical lines — what the answer's record (its history) holds for it. */
 export function richLines(block: RichBlock): string {
@@ -438,6 +563,7 @@ export function richLines(block: RichBlock): string {
   const unitPart = (u: Unit) => (u ? ` unit ${u}` : '');
   const chartLines = (c: RichChart, pad: string) => {
     if ('from' in c) { out.push(`${pad}chart ${c.kind} ${quoted(c.title)} from ${c.from.join(' ')}`); return; }
+    if ('tool' in c) { out.push(`${pad}chart ${c.kind} ${quoted(c.title)} from ${c.tool.words}`); return; }
     out.push(`${pad}chart ${c.kind} ${quoted(c.title)}`);
     if (c.unit) out.push(`${pad}  unit ${c.unit}`);
     if (c.series.length === 1) for (const [l, v] of c.series[0].points) out.push(`${pad}  point ${quoted(l)} ${numberText(v)}`);
@@ -449,11 +575,13 @@ export function richLines(block: RichBlock): string {
   const tableLines = (t: RichTable, pad: string) => {
     const head = `${pad}table ${quoted(t.title)}${t.sortable ? ' sortable' : ''}`;
     if ('from' in t) { out.push(`${head} from ${t.from.join(' ')}`); return; }
+    if ('tool' in t) { out.push(`${head} from ${t.tool.words}`); return; }
     out.push(head, `${pad}  columns ${t.columns.map((c) => quoted(c.label)).join(' ')}`);
     for (const r of t.rows) out.push(`${pad}  row ${r.map((c) => (typeof c === 'number' ? numberText(c) : quoted(c))).join(' ')}`);
   };
   const statLine = (s: RichStat, pad: string) => out.push('from' in s
     ? `${pad}stat ${quoted(s.label)} from ${s.from.join(' ')}`
+    : 'tool' in s ? `${pad}stat ${quoted(s.label)} from ${s.tool.words}`
     : `${pad}stat ${quoted(s.label)} ${numberText(s.value)}${unitPart(s.unit)}${s.delta !== undefined ? ` delta ${numberText(s.delta)}` : ''}`);
   const cardLines = (c: RichCard, pad: string) => {
     out.push(`${pad}card ${quoted(c.title)}`);
@@ -482,81 +610,111 @@ export function richLines(block: RichBlock): string {
 /** A `from` request answered: the kind of answer it wants decides which parse chat-query runs. */
 export type FiguresRun = (kind: 'figures' | 'rows' | 'cards', words: readonly string[], cap: number) => Promise<Figures | RowsResult | CardsResult | 'unavailable' | null>;
 
+/** A tool's rows, aggregated for the component, with the operator's label and the minute they were read (`YYYY-MM-DDTHH:MMZ`). */
+export interface ToolAnswer { readonly result: Figures | RowsResult; readonly source: string; readonly at: string }
+
+/** A `from tool` request answered (chat-tools.ts): `cap` is the groups the component shows. */
+export type ToolsRun = (req: ToolRequest, cap: number) => Promise<ToolAnswer | 'unavailable'>;
+
 /** What the page receives for one rich component: its figures filled, or a note that they could not be. */
 export type Resolved = Record<string, unknown>;
 
 /** The note a component becomes when its figures could not be read in time (§20.5): never the model's numbers instead. */
 const unavailable = (title: string): Resolved => ({ unavailable: { title } });
 
+/** The two columns a grouped table of figures shows: the grouping, and the measure. */
+const figureColumns = (by: string, measure: string, unit: string | null) => [
+  { label: clampText(by, RICH_LIMITS.header), type: 'text', unit: null },
+  { label: clampText(measure, RICH_LIMITS.header), type: 'number', unit },
+];
+
 /**
  * A rich component as the page receives it: model figures marked `src:
  * model`; each `from` answered by `run` and marked `src: site` with the day
- * it was read; a request that does not parse (an unknown table or field, a
- * private one, a grouping that does not fit) drops the component (null); a
- * read that timed out or overflowed becomes the unavailable note.
+ * it was read; each `from tool` answered by `tools` and marked `src: tool`
+ * with the operator's label and the minute it was read; a request that does
+ * not parse (an unknown table or field, a private one, a grouping that does
+ * not fit) drops the component (null); a read that timed out or overflowed,
+ * or a tool that failed or answered rows of the wrong shape, becomes the
+ * unavailable note.
  */
-export async function resolveRich(block: RichBlock, run: FiguresRun | null, day: string): Promise<Resolved | null> {
+export async function resolveRich(block: RichBlock, run: FiguresRun | null, day: string, tools: ToolsRun | null = null): Promise<Resolved | null> {
   const site = { src: 'site', asOf: day };
   type Out = Resolved | null | 'unavailable';
-  const ask = async (kind: 'figures' | 'rows' | 'cards', words: readonly string[], cap: number) => (run ? run(kind, words, cap) : null);
+  type Source = { readonly from: readonly string[] } | { readonly tool: ToolRequest };
+  type Got = { readonly r: Figures | RowsResult | CardsResult | null; readonly meta: Resolved } | 'unavailable';
+  /** The figures a source answers, with the provenance the page shows them under. */
+  const ask = async (s: Source, kind: 'figures' | 'rows' | 'cards', cap: number): Promise<Got> => {
+    if ('from' in s) {
+      const r = run ? await run(kind, s.from, cap) : null;
+      return r === 'unavailable' ? r : { r, meta: site };
+    }
+    if (!tools) return { r: null, meta: {} };
+    const a = await tools(s.tool, cap);
+    return a === 'unavailable' ? a : { r: a.result, meta: { src: 'tool', source: a.source, asOf: a.at } };
+  };
 
   const chart = async (c: RichChart): Promise<Out> => {
-    if (!('from' in c)) return { kind: c.kind, title: c.title, unit: c.unit, src: 'model', series: c.series };
+    if (!('from' in c) && !('tool' in c)) return { kind: c.kind, title: c.title, unit: c.unit, src: 'model', series: c.series };
     const round = c.kind === 'pie' || c.kind === 'donut';
-    const r = await ask('figures', c.from, round ? RICH_LIMITS.slices : RICH_LIMITS.points);
-    if (r === 'unavailable') return 'unavailable';
+    const got = await ask(c, 'figures', round ? RICH_LIMITS.slices : RICH_LIMITS.points);
+    if (got === 'unavailable') return 'unavailable';
+    const r = got.r;
     if (!r || r.kind !== 'figures' || r.groups === null) return null;
     if (r.groups.length < (c.kind === 'bar' ? 1 : 2)) return 'unavailable';
-    if (round && (r.groups.some(([, v]) => v < 0) || r.groups.reduce((a, [, v]) => a + v, 0) <= 0)) return null;
+    // A tool's figures are its endpoint's: a pie of negative values is figures that cannot be drawn, not a request that does not parse.
+    if (round && (r.groups.some(([, v]) => v < 0) || r.groups.reduce((a, [, v]) => a + v, 0) <= 0)) return 'tool' in c ? 'unavailable' : null;
     return {
-      kind: c.kind, title: c.title, unit: r.unit, ...site, more: r.more,
+      kind: c.kind, title: c.title, unit: r.unit, ...got.meta, more: r.more,
       series: [{ name: clampText(c.title, RICH_LIMITS.label), points: r.groups.map(([l, v]) => [clampText(l, RICH_LIMITS.label), v]) }],
     };
   };
   const table = async (t: RichTable): Promise<Out> => {
-    if (!('from' in t)) return { title: t.title, sortable: t.sortable, src: 'model', columns: t.columns, rows: t.rows };
-    const rows = t.from[1] === 'columns';
-    const r = await ask(rows ? 'rows' : 'figures', t.from, RICH_LIMITS.rows);
-    if (r === 'unavailable') return 'unavailable';
+    if (!('from' in t) && !('tool' in t)) return { title: t.title, sortable: t.sortable, src: 'model', columns: t.columns, rows: t.rows };
+    const rows = 'from' in t ? t.from[1] === 'columns' : t.tool.shape.kind === 'rows';
+    const got = await ask(t, rows ? 'rows' : 'figures', RICH_LIMITS.rows);
+    if (got === 'unavailable') return 'unavailable';
+    const r = got.r;
     if (!r) return null;
     if (r.kind === 'rows') {
       if (r.rows.length === 0) return 'unavailable';
       return {
-        title: t.title, sortable: t.sortable, ...site,
+        title: t.title, sortable: t.sortable, ...got.meta,
         columns: r.columns.map((c) => ({ label: clampText(c.label, RICH_LIMITS.header), type: c.type, unit: c.unit })),
         rows: r.rows,
       };
     }
     if (r.kind !== 'figures' || r.groups === null || r.groups.length === 0) return r.kind === 'figures' && r.groups !== null ? 'unavailable' : null;
-    return {
-      title: t.title, sortable: t.sortable, ...site,
-      columns: [
-        { label: clampText(t.from[t.from.indexOf('by') + 1], RICH_LIMITS.header), type: 'text', unit: null },
-        { label: clampText(t.from[1] === 'count' ? 'count' : `${t.from[1]} ${t.from[2]}`, RICH_LIMITS.header), type: 'number', unit: r.unit },
-      ],
-      rows: r.groups.map(([l, v]) => [l, v]),
-    };
+    let columns: ReturnType<typeof figureColumns>;
+    if ('from' in t) columns = figureColumns(t.from[t.from.indexOf('by') + 1], t.from[1] === 'count' ? 'count' : `${t.from[1]} ${t.from[2]}`, r.unit);
+    else {
+      const s = t.tool.shape as Extract<ToolShape, { kind: 'figures' }>;
+      columns = figureColumns(s.by ?? '', s.field === null ? 'count' : `${s.fn} ${s.field}`, r.unit);
+    }
+    return { title: t.title, sortable: t.sortable, ...got.meta, columns, rows: r.groups.map(([l, v]) => [l, v]) };
   };
   const stat = async (s: RichStat): Promise<Out> => {
-    if (!('from' in s)) return { label: s.label, value: s.value, unit: s.unit, ...(s.delta !== undefined ? { delta: s.delta } : {}), src: 'model' };
-    const r = await ask('figures', s.from, 2);
-    if (r === 'unavailable') return 'unavailable';
+    if (!('from' in s) && !('tool' in s)) return { label: s.label, value: s.value, unit: s.unit, ...(s.delta !== undefined ? { delta: s.delta } : {}), src: 'model' };
+    const got = await ask(s, 'figures', 2);
+    if (got === 'unavailable') return 'unavailable';
+    const r = got.r;
     if (!r || r.kind !== 'figures') return null;
-    if (r.groups === null) return r.value === null ? 'unavailable' : { label: s.label, value: r.value, unit: r.unit, ...site };
+    if (r.groups === null) return r.value === null ? 'unavailable' : { label: s.label, value: r.value, unit: r.unit, ...got.meta };
     // A stat over a date grouping is the latest period, and its change from the one before; over categories it is no stat.
     if (!r.dated) return null;
     const last = r.groups.at(-1);
     if (!last) return 'unavailable';
     const prev = r.groups.length > 1 ? r.groups.at(-2)! : null;
     return {
-      label: s.label, value: last[1], unit: r.unit, ...site,
+      label: s.label, value: last[1], unit: r.unit, ...got.meta,
       ...(prev ? { delta: Number((last[1] - prev[1]).toPrecision(15)), deltaOf: prev[0] } : {}),
     };
   };
   const cards = async (c: RichCards): Promise<Resolved[] | null | 'unavailable'> => {
     if (!('from' in c)) return c.map(cardOut);
-    const r = await ask('cards', c.from, RICH_LIMITS.cards);
-    if (r === 'unavailable') return 'unavailable';
+    const got = await ask(c, 'cards', RICH_LIMITS.cards);
+    if (got === 'unavailable') return 'unavailable';
+    const r = got.r;
     if (!r || r.kind !== 'cards') return null;
     if (r.items.length === 0) return 'unavailable';
     return r.items.map((i) => ({

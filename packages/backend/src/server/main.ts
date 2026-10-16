@@ -212,9 +212,16 @@ if (config.chat) {
     }
     knows = createKnows({ db, database: db.dialect, tables: dataTables!, known: context.knows, log: (line) => process.stderr.write(`backend: ${line}\n`) });
   }
+  // The operator's data tools (§21.2), declared in .env and already validated by loadConfig.
+  let tools;
+  if (config.chat.tools.length > 0) {
+    const { createTools } = await import('./chat-tools.ts');
+    tools = createTools({ tools: config.chat.tools, perAddress: config.chat.toolCallsPerAddress, log: (line) => process.stderr.write(`backend: ${line}\n`) });
+  }
   chat = createChat({
     config: config.chat, secret: config.secret, db, prompt: read('prompt.txt'), context, adapter,
     log: (line) => process.stderr.write(`backend: ${line}\n`), ...(figures ? { figures } : {}), ...(knows ? { knows } : {}),
+    ...(tools ? { tools } : {}),
   });
 }
 if (args.images !== null) {

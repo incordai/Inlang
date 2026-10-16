@@ -21,7 +21,7 @@ import { randomBytes } from 'node:crypto';
 import type { SpecBackend } from '../../core/src/backend.ts';
 import type { SpecTable } from '../../core/src/data.ts';
 import type { LockStep } from '../../core/src/data-lock.ts';
-import { KEYS, PROVIDER_KEYS, type Setup } from './server/env.ts';
+import { KEYS, PROVIDER_KEYS, TOOL_KEYS, toolKey, type Setup } from './server/env.ts';
 import { generatedJson, generatedMd } from '../../core/src/generated.ts';
 import { dataSteps } from './data-ddl.ts';
 import type { BackendChat } from './chat-context.ts';
@@ -83,6 +83,12 @@ export function envExample(setup: Setup): string {
   lines.push('# Provider sign-in: for each id in AZ_OAUTH_PROVIDERS, set AZ_OAUTH_<ID>_<SETTING>');
   lines.push('# (id upper-cased, - as _). Example for an id "work":');
   for (const p of PROVIDER_KEYS) lines.push(`#   AZ_OAUTH_WORK_${p.suffix}=    ${p.about}`);
+  if (setup.chat === true) {
+    lines.push('');
+    lines.push('# Chat data tools (optional): for each name in AZ_CHAT_TOOLS, set AZ_CHAT_TOOL_<NAME>_<SETTING>');
+    lines.push('# (name upper-cased). Example for a tool "standings":');
+    for (const t of TOOL_KEYS) lines.push(`#   ${toolKey('standings', t.suffix)}=    ${t.about}`);
+  }
   return `${lines.join('\n')}\n`;
 }
 
@@ -259,6 +265,22 @@ readable), to the model named in \`.env\`, and streams the answer back. The
   \`blocked\`, and an error, a late or malformed answer answers
   \`unavailable\`; the model is not asked either way. Answers are not
   moderated: what they can show is bounded by the parser above.
+- **Data tools (optional).** List your own HTTP endpoints in
+  \`AZ_CHAT_TOOLS\` and declare each with its \`AZ_CHAT_TOOL_<NAME>_…\` keys
+  (\`.env.example\` lists them): a chart, table or stat may then take live
+  figures \`from tool <name> …\`. The model only names a declared tool and
+  typed parameter values; the server POSTs those values as a JSON object to
+  the URL you set (https, or http on localhost; redirects are refused), with
+  \`AZ_CHAT_TOOL_<NAME>_KEY\` as a bearer token when set, and needs a \`200\`
+  \`application/json\` reply within the tool's timeout (≤ 5 s): an array of at
+  most 200 rows of exactly the declared fields, at most 256 KB. Anything else
+  shows the visitor "These figures could not be loaded." Figures show "From
+  <label>"; the rows go to the page only and are **never sent to the model**.
+  At most 3 calls an answer, \`AZ_CHAT_TOOL_CALLS_PER_ADDRESS\` per address,
+  each reply cached 60 s. **Your endpoint must treat the parameters as
+  untrusted input** — they are what a model wrote, checked only against the
+  types you declared. Logs say \`chat: tool <name> <outcome> <ms> <rows>\` —
+  never a parameter, a value or the key.
 - **Limits.** Per address and per account (\`AZ_CHAT_PER_ADDRESS\`,
   \`AZ_CHAT_PER_ACCOUNT\`), \`AZ_CHAT_CONCURRENCY\` answers at once with four
   times as many waiting up to 10 s, and \`AZ_CHAT_TIMEOUT_SECONDS\` per answer.
@@ -296,7 +318,11 @@ readable), to the model named in \`.env\`, and streams the answer back. The
 4. **A shared answer must go**: \`DELETE FROM az_chat_shares WHERE id = '<id>'\`
    (the id is the last part of its link); \`AZ_CHAT_SHARES=off\` stops new ones.
 5. **Rotating the model key**: set the new \`AZ_CHAT_KEY\`, restart; nothing
-   else holds it.
+   else holds it. A tool's key the same way (\`AZ_CHAT_TOOL_<NAME>_KEY\`).
+6. **A tool misbehaves** (slow, failing, answering the wrong shape — its log
+   line says which): remove its name from \`AZ_CHAT_TOOLS\` and restart; its
+   figures then drop from answers. \`az backend probe\` calls each tool once
+   with its \`_SAMPLE\`.
 - What a provider receives is the prompt, the context and the conversation —
   no cookie, address or account. Its terms for that data are yours to accept.
 `;
