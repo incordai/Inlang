@@ -845,6 +845,10 @@ Every other part of a key's line is accounted for the same way:
 | no value | `hero: 'title' has no value — write: title <value>` (AZ1205) |
 | one bare word for a `string` key (`title made`) — §4.1, copy is quoted; a bare number stays a value (`monthly 29`) | `hero: 'title' is copy and takes quotes — write: title "made"` (AZ1406) |
 | a value past a fill's declared `line` (`link "Shoes" /shoes extra`) | `link: takes a label and a destination — remove 'extra'` (AZ1406) |
+| a fill's label as a bare word (`link work /work`) — a label is copy, like a `string` key; a bare number stays a value (`group 2026`) | `link: its label is copy and takes quotes — write: link "work" /work` (AZ1406, at the word; unquoted copy of several words is quoted whole) |
+| a fill's label missing (`link /work`, `link`) | `link: has no label — write: link "…" /work` (AZ1205) |
+| a value the lexer refused (`title Made`, AZ1008) | that diagnostic only — not "has no value" or "has no label" as well |
+| a fill's key on a refused line (`text because` under a faq `item`) | that line's diagnostic only — a check that asks for the key (`has no answer`, AZ2041) does not report it missing as well, as AZ1207 does not for a block's own key |
 | a `flag` key (`lead`) given a value | `item: 'lead' takes no value — remove 'on'` (AZ1406) |
 | `as` after a key's value | `hero: 'title' takes no 'as' — remove 'as ghost'` (AZ1406) |
 | an indented line under a key | `hero: 'title' takes no indented lines — write it on one line` (AZ1219) |
@@ -865,8 +869,9 @@ or a flag of the fill written bare, `{ "flag": "lead" }`:
 ```
 
 The roles name what the word's emitter reads at each position; the link
-stage enforces the count and a flag's spelling — a value past the line, or a
-word in a flag's place that is not the flag, is AZ1406. Every button (`cta`,
+stage enforces the count, a flag's spelling and a label's quotes — a value
+past the line, a word in a flag's place that is not the flag, or a `label`
+that is a bare word, is AZ1406; a `label` the line lacks is AZ1205. Every button (`cta`,
 `alt`) is `["label", "destination"]` (§4.3).
 `packages/words/test/fill-lines.test.ts` requires a line on every fill and
 measures it: each fill is emitted with its line full and with one value more,
@@ -948,7 +953,15 @@ page /login
   auth login
 ```
 
-`none` is legal on inheritable words only, takes no other atoms and no body.
+`none` is legal on inheritable words only, takes no other atoms and no body:
+a modifier on it is `nav: 'none' takes no modifiers — remove 'sticky'`
+(AZ1204), an indented line under it `nav: 'none' takes no indented lines —
+remove them` (AZ1219), and a `scene none` asks for no poster. It is written
+under the page it leaves the block out of; under `site` there is no inherited
+block for it to leave out, and it is
+`nav: 'none' leaves the site's nav out of one page — under 'site' there is no nav to leave out; remove it, or write it under that page`
+(AZ1202). *(Before, `nav none` or `scene none` under `site` compiled and did
+nothing.)*
 *Decision: without it there is no way to write a page with no nav — a login or
 campaign page — and PRD §6.1's `page /login` example needs one. This is an
 addition to the taxonomy, not a re-litigation of it.*

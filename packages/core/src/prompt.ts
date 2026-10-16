@@ -252,6 +252,7 @@ export const ERROR_CASES: readonly ErrorCase[] = [
   { code: 'AZ1406', change: ['    title "Made by hand"', '    title made by hand'] },
   { code: 'AZ1406', change: ['    title "Made by hand"', '    title made'] },
   { code: 'AZ1406', change: ['    link "Work" /work', '    link "Work" /work now'] },
+  { code: 'AZ1406', change: ['    link "Work" /work', '    link work /work'] },
   { code: 'AZ1413', change: ['page /', 'page /home/'] },
   { code: 'AZ1414', change: ['  width default', '  width 1200'] },
   { code: 'AZ1416', change: ['    display serif', '    display georgia'] },

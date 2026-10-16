@@ -394,6 +394,12 @@ export interface LinkOptions {
    * pages a nav or footer links to are further down and not written yet.
    */
   readonly openRoutes?: boolean;
+  /**
+   * Lines on which the lexer refused a token (AZ1008 `Work`, AZ1007,
+   * AZ1024). The token is gone from the line, so "has no value" or "has no
+   * label" there would report the same mistake a second time.
+   */
+  readonly refusedLines?: ReadonlySet<number>;
 }
 
 /** Every route is a page — the open-routes reading of LinkOptions. */
@@ -405,6 +411,11 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     diagnostics.push({ code, message, pos, severity: 'error' });
   const warn = (code: string, message: string, pos: Pos) =>
     diagnostics.push({ code, message, pos, severity: 'warning' });
+  // A fill's keys written on a line that was refused (propLine): not missing,
+  // so a check that asks for one (faq's "has no answer") does not contradict
+  // the refusal, as AZ1207 does not for a block's own keys.
+  const refusedKeys = new WeakMap<LinkedWord, readonly string[]>();
+  const refusedLines = options.refusedLines ?? new Set<number>();
 
   // Every page the file declares, so a `route` prop can be checked against
   // the site rather than only its shape. Top-level only: GRAMMAR §5 puts
@@ -573,11 +584,47 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
    */
   function checkLine(s: Statement, line: FillLine | undefined): void {
     if (!line) return;
+    // The label first: unquoted copy splits into words, so its fix (the
+    // quotes) also accounts for the values it spilled past the line.
+    if (!checkLabel(s, line)) return;
     const extra = s.args.find((a, i) => {
       const at = line[i];
       return at === undefined || (typeof at !== 'string' && !(a.kind === 'word' && a.value === at.flag));
     });
     if (extra) err('AZ1406', `${s.word}: takes ${describeLine(line)} — remove '${shown(extra.value)}'`, extra.pos);
+  }
+
+  /**
+   * GRAMMAR §4.1, §4.5: a fill's label is copy, so it is quoted like a
+   * `string` key's — `link Work /work` compiled with the bare word as the
+   * label, and `link /work` with the route as one. A bare number stays a
+   * value (`group 2026`), as it does for a key. A bare word there is AZ1406
+   * with the quoted line as the fix; a label absent from its line (`link`,
+   * or `link /work` with only a destination) is AZ1205. False when the line
+   * was refused.
+   */
+  function checkLabel(s: Statement, line: FillLine): boolean {
+    const at = line.indexOf('label');
+    if (at < 0) return true;
+    const label = s.args[at];
+    if (label?.kind === 'string' || label?.kind === 'number') return true;
+    const flags = new Set(line.flatMap((v) => typeof v === 'string' ? [] : [v.flag]));
+    const written = (a: Arg) => shown(a.kind === 'string' ? `"${a.value}"` : a.value);
+    if (label?.kind === 'word' && !flags.has(label.value)) {
+      // The copy is the run of bare words from the label on, up to the first
+      // value of another shape or a flag of the fill: `item Sewn by hand lead`.
+      let end = at;
+      while (end < s.args.length && (s.args[end].kind === 'word' || s.args[end].kind === 'number')
+        && !(end > at && flags.has(s.args[end].value))) end++;
+      const copy = s.args.slice(at, end).map((a) => a.value).join(' ');
+      err('AZ1406', `${s.word}: its label is copy and takes quotes — write: `
+        + [s.word, ...s.args.slice(0, at).map(written), `"${shown(copy)}"`, ...s.args.slice(end).map(written)].join(' '), label.pos);
+      return false;
+    }
+    if (refusedLines.has(s.pos.line)) return false;
+    err('AZ1205', `${s.word}: has no label — write: `
+      + [s.word, ...s.args.slice(0, at).map(written), '"…"', ...s.args.slice(at).map(written)].join(' '), label?.pos ?? s.pos);
+    return false;
   }
 
   /**
@@ -614,7 +661,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       return { kind: 'word', value: 'on', pos: c.pos };
     }
     if (c.args.length === 0) {
-      err('AZ1205', `${owner}: '${c.word}' has no value — write: ${c.word} <value>`, c.pos);
+      if (!refusedLines.has(c.pos.line)) err('AZ1205', `${owner}: '${c.word}' has no value — write: ${c.word} <value>`, c.pos);
       return null;
     }
     if (spec.type !== 'list' && c.args.length > 1) {
@@ -1014,8 +1061,11 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       // one `cta` (pricing-spec §11), and nothing enforced it.
       checkValues(s.word, props, def.props);
       checkSlotBounds(s.word, def, children, s.pos);
-      return { word: s.word, variant: null, modifiers: [], args: s.args, props, as: s.as,
-               children, pos: s.pos };
+      const linked: LinkedWord = { word: s.word, variant: null, modifiers: [], args: s.args, props, as: s.as,
+                                   children, pos: s.pos };
+      const refused = [...seen].filter((key) => !(key in props));
+      if (refused.length > 0) refusedKeys.set(linked, refused);
+      return linked;
     }
 
     // POSITION DECIDES, before the manifest map is consulted.
@@ -1139,6 +1189,24 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
             `${s.word}: '${shown(a.value)}' is not a variant or modifier — try: ${known.slice(0, 6).join(', ')}`,
             a.pos);
       }
+    }
+
+    // ---- `none`, GRAMMAR §5.2 -------------------------------------------
+    // The reserved variant leaves the site's inherited block out of one
+    // page; it takes no other atoms and no body. Under `site` there is no
+    // inherited block for it to leave out, so `nav none` there compiled and
+    // did nothing; its modifiers and body were linked and read by nothing,
+    // and a `scene none` was asked for the poster a backdrop needs.
+    if (m && variant === 'none') {
+      if (parentWord === 'site') {
+        err('AZ1202', `${s.word}: 'none' leaves the site's ${s.word} out of one page — under 'site' there is no ${s.word} `
+          + `to leave out; remove it, or write it under that page`, s.pos);
+        return null;
+      }
+      const modifier = s.args.find((a) => a.kind === 'word' && modifiers.includes(a.value));
+      if (modifier) err('AZ1204', `${s.word}: 'none' takes no modifiers — remove '${shown(modifier.value)}'`, modifier.pos);
+      if (s.children.length > 0) err('AZ1219', `${s.word}: 'none' takes no indented lines — remove them`, s.children[0].pos);
+      return { word: s.word, variant, modifiers: [], args: s.args, props: {}, as: s.as, children: [], pos: s.pos };
     }
 
     // ---- children -------------------------------------------------------
@@ -1330,7 +1398,7 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       const values = (p: Record<string, Arg>) =>
         Object.fromEntries(Object.entries(p).map(([k, a]) => [k, a.value]));
       const fills: CheckChild[] = children.map((c) => ({
-        word: c.word, args: c.args, props: values(c.props), pos: c.pos,
+        word: c.word, args: c.args, props: values(c.props), pos: c.pos, refused: refusedKeys.get(c) ?? [],
       }));
       runBlockChecks(m.checks, {
         word: s.word,

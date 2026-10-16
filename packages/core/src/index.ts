@@ -119,7 +119,8 @@ export interface CompileOptions {
 export function compile(source: string, options: CompileOptions): CompileResult {
   const lexed = lex(source);
   const parsed = parse(lexed.tokens, lexed.diagnostics);
-  const linked = link(parsed.file, options.manifests, { openRoutes: options.openRoutes === true });
+  const refusedLines = new Set(lexed.diagnostics.filter((d) => d.severity === 'error').map((d) => d.pos.line));
+  const linked = link(parsed.file, options.manifests, { openRoutes: options.openRoutes === true, refusedLines });
   const built = buildSpec(parsed.file.version, linked.root, options.manifests);
 
   // A fatal version error (GRAMMAR §7.3) leaves an empty body; the missing

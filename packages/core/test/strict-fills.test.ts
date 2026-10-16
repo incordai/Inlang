@@ -138,3 +138,84 @@ test('CONTROL: nav, footer, a scene backdrop and auth settings under site compil
   assert.ok(errors(site('  chat panel\n')).some((d) => d.code === 'AZ1202' && d.pos.line === 3));
   assert.ok(!errors(site('  chat panel\n')).some((d) => d.code === 'AZ1214'), 'the C1 refusal is gone');
 });
+
+/* ---- 5. `none` under site, and `none` with more on it -------------------- */
+
+test("'none' under site is AZ1202 at the block: there is no inherited block to leave out", () => {
+  const r = only(site('  nav none\n'));
+  assert.equal(r.at, 'AZ1202 3:3');
+  assert.equal(r.message,
+    "nav: 'none' leaves the site's nav out of one page — under 'site' there is no nav to leave out; remove it, or write it under that page");
+  // A scene was asked for a backdrop's poster first; a chat compiled as nothing.
+  assert.equal(only(site('  scene none\n')).at, 'AZ1202 3:3');
+  assert.equal(only(site('  scene none\n    poster ./a.webp\n    alt "Fog"\n')).at, 'AZ1202 3:3');
+  assert.equal(only(site('  chat none\n')).at, 'AZ1202 3:3');
+});
+
+test("'none' takes no modifiers and no body: AZ1204 at the modifier, AZ1219 at the first line", () => {
+  assert.deepEqual(only(page('  nav none sticky\n')), { at: 'AZ1204 4:12', message: "nav: 'none' takes no modifiers — remove 'sticky'" });
+  assert.deepEqual(only(page('  nav none\n    link "Work" /\n')), { at: 'AZ1219 5:5', message: "nav: 'none' takes no indented lines — remove them" });
+});
+
+test("CONTROL: 'none' under a page compiles and leaves the site's block out; a page's scene none needs no poster", () => {
+  const src = 'az 1\nsite studio\n  nav bar\n    link "Home" /\npage /\npage /login\n  nav none\n  scene none\n';
+  clean(src);
+  const spec = run(src).spec!;
+  assert.deepEqual(spec.site.inherited.map((b) => b.word), ['nav']);
+  assert.deepEqual(spec.pages[1].blocks.map((b) => `${b.word} ${b.variant}`), ['nav none', 'scene none']);
+});
+
+/* ---- 6. a fill's label is copy ------------------------------------------- */
+
+test('a bare word as a label is AZ1406 at the word, and the fix is the quoted line', () => {
+  assert.deepEqual(only(site('  nav bar\n    link work /\n')),
+    { at: 'AZ1406 4:10', message: 'link: its label is copy and takes quotes — write: link "work" /' });
+  // Unquoted copy splits into words: the fix quotes them all, not "remove".
+  assert.deepEqual(only(site('  nav bar\n    link our work /\n')),
+    { at: 'AZ1406 4:10', message: 'link: its label is copy and takes quotes — write: link "our work" /' });
+  // A flag after the label stays the flag.
+  assert.deepEqual(only(page('  feature grid\n    title "Made"\n    item sewn by hand lead\n      text "a"\n    item "Cut"\n      text "b"\n')),
+    { at: 'AZ1406 6:10', message: 'item: its label is copy and takes quotes — write: item "sewn by hand" lead' });
+});
+
+test("every fill's label role is checked: buttons, nav children, footer, faq, feature, pricing", () => {
+  const code = (src: string) => only(src).at.split(' ')[0];
+  assert.equal(code(page('  hero center\n    title "x"\n    cta start /\n')), 'AZ1406');
+  assert.equal(code(page('  hero center\n    title "x"\n    cta "Go" /\n    alt more /\n')), 'AZ1406');
+  assert.equal(code(site('  nav bar\n    group shop\n      link "Bags" /\n')), 'AZ1406');
+  assert.equal(code(site('  nav bar\n    cta go /\n')), 'AZ1406');
+  assert.equal(code(site('  footer minimal\n    copyright "Studio"\n    legal terms /\n')), 'AZ1406');
+  assert.equal(code(page('  faq list\n    title "Asked"\n    item why\n      text "Because."\n    item "How?"\n      text "So."\n')), 'AZ1406');
+  assert.equal(code(page('  pricing cards\n    title "Plans"\n    currency usd\n    plan studio\n      monthly 29\n      cta "Start" /\n')), 'AZ1406');
+  assert.equal(code(page('  pricing cards\n    title "Plans"\n    currency usd\n    plan "Studio"\n      monthly 29\n      feature seats "10"\n      cta "Start" /\n')), 'AZ1406');
+});
+
+test('a label missing from its line is AZ1205: a destination alone is not a label', () => {
+  assert.deepEqual(only(site('  nav bar\n    link /\n')), { at: 'AZ1205 4:10', message: 'link: has no label — write: link "…" /' });
+  assert.deepEqual(only(site('  nav bar\n    link\n')), { at: 'AZ1205 4:5', message: 'link: has no label — write: link "…"' });
+  assert.equal(only(page('  feature grid\n    title "Made"\n    item lead\n      text "a"\n    item "Cut"\n      text "b"\n')).at, 'AZ1205 6:10');
+});
+
+test('a label or a value the lexer refused (AZ1008) is reported once, not again as missing', () => {
+  assert.deepEqual(errors(site('  nav bar\n    link Work /\n')).map((d) => d.code), ['AZ1008']);
+  assert.deepEqual(errors(page('  hero center\n    title Made\n')).map((d) => d.code), ['AZ1008']);
+});
+
+test('CONTROL: a quoted label, or a bare number, compiles', () => {
+  clean(site('  nav bar\n    link "Work" /\n    group "Shop"\n      link "Bags" /\n'));
+  clean(site('  nav bar\n    group 2026\n      link "Bags" /\n'));
+});
+
+/* ---- 7. a refused key is not also reported missing ----------------------- */
+
+test("a fill's required key on a refused line is reported once: no 'has no answer' after AZ1406", () => {
+  const src = page('  faq list\n    title "Asked"\n    item "Why?"\n      text because\n    item "How?"\n      text "So."\n');
+  assert.deepEqual(only(src), { at: 'AZ1406 7:12', message: `item: 'text' is copy and takes quotes — write: text "because"` });
+  // Two values on the line, or none, are refusals too.
+  assert.equal(only(page('  faq list\n    title "Asked"\n    item "Why?"\n      text "a" "b"\n    item "How?"\n      text "So."\n')).at, 'AZ1406 7:16');
+  assert.equal(only(page('  faq list\n    title "Asked"\n    item "Why?"\n      text\n    item "How?"\n      text "So."\n')).at, 'AZ1205 7:7');
+});
+
+test('CONTROL: a fill with no answer line at all is still AZ2041', () => {
+  assert.equal(only(page('  faq list\n    title "Asked"\n    item "Why?"\n    item "How?"\n      text "So."\n')).at, 'AZ2041 6:5');
+});

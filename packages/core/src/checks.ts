@@ -129,6 +129,11 @@ export interface CheckChild {
   readonly args: readonly CheckArg[];
   readonly props: Readonly<Record<string, string>>;
   readonly pos: Pos;
+  /**
+   * Keys written on the fill whose line was refused (link stage): the
+   * refusal names the fix, so they are not reported missing as well.
+   */
+  readonly refused?: readonly string[];
 }
 
 /** One block, as a check sees it — the same shape at link and page stage. */
@@ -225,7 +230,9 @@ export function runBlockChecks(
         say(c, s.pos);
         break;
       case 'childMissing':
-        for (const k of inSlot) if (!carries(k, c.prop!, c.value)) say(c, k.pos, { label: labelOf(k) });
+        for (const k of inSlot) {
+          if (!carries(k, c.prop!, c.value) && !k.refused?.includes(c.prop!)) say(c, k.pos, { label: labelOf(k) });
+        }
         break;
       case 'childEqual': {
         const [a, b] = c.props!;
@@ -236,7 +243,7 @@ export function runBlockChecks(
       }
       case 'childAllOrNone': {
         const withIt = inSlot.filter((k) => carries(k, c.prop!, c.value));
-        const without = inSlot.filter((k) => !carries(k, c.prop!, c.value));
+        const without = inSlot.filter((k) => !carries(k, c.prop!, c.value) && !k.refused?.includes(c.prop!));
         if (withIt.length > 0 && without.length > 0) {
           say(c, without[0].pos, {
             k: withIt.length, n: inSlot.length,
