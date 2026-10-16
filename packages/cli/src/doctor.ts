@@ -27,6 +27,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { statfs } from 'node:fs/promises';
 import { cpus, homedir, release } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import type { CompileResult, Manifest } from '../../core/src/index.ts';
@@ -81,6 +82,10 @@ export interface Probe {
   /** npm's entry script beside this Node, or null — the one az dev runs (serve.ts). */
   readonly npmCli: () => string | null;
   readonly run: (file: string, args: readonly string[], options: RunOptions) => Promise<RunResult>;
+  /** The free space of the filesystem holding `path` (`fs.statfs`): blocks free to this user, and their size in bytes. */
+  readonly statfs: (path: string) => Promise<{ readonly bavail: number; readonly bsize: number }>;
+  /** The flags this Node accepts (`process.allowedNodeEnvironmentFlags`): whether it can take its proxy from the environment. */
+  readonly nodeFlags: ReadonlySet<string>;
 }
 
 export interface DoctorContext {
@@ -256,6 +261,11 @@ export function systemProbe(npmCli: () => string | null): Probe {
     env: process.env,
     npmCli,
     run: runChild,
+    statfs: async (path) => {
+      const s = await statfs(path);
+      return { bavail: s.bavail, bsize: s.bsize };
+    },
+    nodeFlags: process.allowedNodeEnvironmentFlags,
   };
 }
 

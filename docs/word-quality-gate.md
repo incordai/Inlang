@@ -191,9 +191,11 @@ Worth stating so the offline claim stays honest:
   before. For the air-gapped users named in the PRD, ship an offline bundle
   (vendored `node_modules` tarball) — otherwise that market is theoretical.
 - **Corporate proxy / blocked registry.** Detect and explain; can't route around.
+  (Built: the proxy check, §5.4.)
 - **Windows path length, line endings, symlink permissions.** Real for a JS
   build tool; `doctor` can warn, `core.autocrlf` guidance helps.
-- **Disk space, ARM vs x86 native binaries.**
+- **Disk space, ARM vs x86 native binaries.** (Built: the disk space check and
+  the platform check, §5.4.)
 
 ### 5.4 What `az doctor` checks — built 2026-10-07
 
@@ -217,6 +219,8 @@ with it.
 | Node | older than the server's `engines` (`>=22.18`) | install link — Tier 3, never installed |
 | npm | missing beside Node, or no answer | reinstall Node — npm ships with it |
 | platform (known-bad) | an x64 Node translated on an arm64 machine; `AZ_WORDS` not a folder | the arm64 Node; unset `AZ_WORDS` |
+| proxy (built 2026-10-16, `doctor-system.ts`) | report only. `HTTPS_PROXY`/`HTTP_PROXY` (either spelling) and `NO_PROXY`, and what each reaches: npm takes the package registry through the proxy unless the registry's host (`npm_config_registry`) is in `NO_PROXY`; Node's fetch — the server's calls to sign-in providers, the email API, the chat model — ignores them unless started with `NODE_USE_ENV_PROXY=1` on a Node that has `--use-env-proxy` (measured on 22.23: without it a dead proxy is never tried, with it every call fails at the proxy); SMTP never uses an HTTP proxy. Warns when a project with a backend would send its calls direct, when `NODE_USE_ENV_PROXY=1` meets a Node without the support, when a value is not a URL, and when the two spellings differ. A proxy prints as scheme, host and port: user, password, path and query are never shown (`http://***@proxy:8080`) | `NODE_USE_ENV_PROXY=1` for the server; keep one spelling |
+| disk space (built 2026-10-16) | under `DISK_WARN_BYTES` (1 GB) free on the filesystem of the project or the output folder (`fs.statfs`; an output folder not made yet is measured at its nearest folder that is; one line per filesystem) — a warning; unreadable is a skip | free space, or `--out` to a larger disk |
 | image library | the resizer's own child (`image-encode.ts`, probe mode) can't load it — a warning: images ship unresized | reinstall az's packages |
 | backend image library | a built server with image fields can't load its copy, or the version differs from the pin | `npm install` in `server/`; skipped from MCP, which never loads project modules |
 | test browsers | only if the project's `package.json` uses the browser-test package: its Chromium revision is absent — read as the package reads it: `revisionOverrides` for this platform (named by the package's own rules, as its pinned 1.63.0 computes them: `mac14-arm64`, `ubuntu22.04-x64`, its platform-override variable honoured) wins, in its own `<name>_<platform>_special-<revision>` folder | the install command — Tier 2, never run from here |
@@ -225,14 +229,20 @@ with it.
 | table rules | a table with no `allow` lines (AZ1246); `adapter hosted` always — its row rules can't be read from here (auth-block-spec §4.1) | add `allow` lines; turn on row-level security per table |
 | models | a `.glb` with meshes and no Draco geometry compression (stack-evaluation §9) | the exact optimiser command, pinned, paths shell-quoted |
 | assets | a named file missing (fail) or over its manifest `maxBytes` (warn) | add the file; export it under the budget |
+| asset names (built 2026-10-16) | two files the site names differ only in case (`./img/Hero.webp`, `./img/hero.webp`, a folder too) — one file on a case-insensitive disk (Windows', macOS's default); a warning on every OS, from the names alone | rename one, and its path in the .az file |
 | backend .env | missing (warn); not a regular file or not owner-only (fail); a key the server's own start-up validation refuses (fail) — **names only, never a value** | `az backend init`; `chmod 600`; set the named keys |
 | build secrets | a variable the build inlines looks like a service key (§4 rule 1) — names only | move it to the server's `.env` |
 
 Not built, and why: **Docker** — no spec asks doctor for it; only this
 repository's own `test:backend-db` needs it. **A missing npm lockfile** —
 the generated `package.json` pins exact versions and there is no `az add`
-yet. **Windows path length, line endings, proxies, disk space** (§5.3) —
-not yet. **Tier 2 installs** (`--yes`) — doctor prints the command instead;
+yet. **Proxies, disk space and case-only asset name clashes** (§5.3) are built
+(above). **Windows path length** — what fails is the full path on the
+Windows machine, which depends on where the project is put there, so no check
+here can measure it; **line endings** — the compiler reads `\r\n` as `\n`
+(lex.ts), so a checkout with `core.autocrlf` compiles the same; **symlink
+permissions** — the build refuses a symbolic link in the output and reads
+assets through realpath inside the project, on every OS. **Tier 2 installs** (`--yes`) — doctor prints the command instead;
 nothing in it installs. **Texture weight in a GLB** — no texture budget is
 specified yet (ASSUMPTIONS A8, stack-evaluation §15 Q4).
 

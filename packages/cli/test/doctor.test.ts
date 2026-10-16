@@ -13,6 +13,7 @@ import { cpus, release, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { browserPlatform, CHECKS, doctor, glbGeometry, type DoctorOptions } from '../src/doctor-checks.ts';
+import { DISK_WARN_BYTES } from '../src/doctor-system.ts';
 import { formatReport, runChecks, shellQuote, systemProbe, type Check, type DoctorContext, type Probe, type RunResult } from '../src/doctor.ts';
 import { findNpmCli } from '../src/serve.ts';
 
@@ -490,4 +491,131 @@ test('E2E: a clean project exits 0; a usage error exits 2', () => {
   assert.match(r.stdout, /✓ site\.az compiles — no errors, no warnings/);
   assert.equal(az(p.dir, '--bogus').status, 2);
   assert.equal(az(p.dir, 'missing.az').status, 2);
+});
+
+/* ---- the proxy (word-quality-gate §5.3) ---------------------------------- */
+
+const SECRET_PROXY = 'http://ana:s3cr3t-pass@proxy.corp.test:8080/route?token=t0ken-value';
+const WITH_FLAG = new Set(['--use-env-proxy']);
+
+test('proxy: none set passes — the registry and the server\'s calls go direct', async () => {
+  const r = await check('proxy', project(GOOD), fakeProbe({ env: {} }));
+  assert.deepEqual([r.status, r.line], ['pass', "proxy: none set — the package registry and the server's outbound calls go direct"]);
+});
+
+test('SECURITY proxy: the proxy is shown as scheme, host and port — its user, password, path and query never', async () => {
+  for (const env of [{ HTTPS_PROXY: SECRET_PROXY }, { https_proxy: SECRET_PROXY, http_proxy: SECRET_PROXY }]) {
+    const p = project(BACKEND());
+    const r = await doctor({ ...options(p, fakeProbe({ env, nodeFlags: WITH_FLAG })), checks: [CHECKS.find((c) => c.id === 'proxy')!] });
+    const text = formatReport(r) + JSON.stringify(r);
+    assert.match(text, /http:\/\/\*\*\*@proxy\.corp\.test:8080/);
+    for (const secret of ['ana', 's3cr3t', 'route', 't0ken']) assert.ok(!text.includes(secret), `${secret} printed: ${text}`);
+  }
+});
+
+test('proxy: with a backend and no NODE_USE_ENV_PROXY, the server\'s calls go direct — a warning naming the fix', async () => {
+  const r = await check('proxy', project(BACKEND()), fakeProbe({ env: { HTTPS_PROXY: 'http://proxy.corp.test:3128' }, nodeFlags: WITH_FLAG }));
+  assert.equal(r.status, 'warn');
+  assert.equal(r.line, "proxy: the server's outbound calls (sign-in providers, the email API, the chat model) go direct: Node's fetch ignores HTTPS_PROXY/HTTP_PROXY"
+    + ' — if they must pass the proxy, start the server with NODE_USE_ENV_PROXY=1; SMTP never uses an HTTP proxy');
+  assert.ok(r.fix!.includes('HTTPS_PROXY: http://proxy.corp.test:3128'), JSON.stringify(r.fix));
+  assert.ok(r.fix!.includes('npm reaches the package registry through the proxy'), JSON.stringify(r.fix));
+  // On a Node without the support, the fix says so.
+  const old = await check('proxy', project(BACKEND()), fakeProbe({ node: '22.18.0', env: { HTTPS_PROXY: 'http://proxy.corp.test:3128' }, nodeFlags: new Set() }));
+  assert.match(old.line, /on a Node that supports it \(this 22\.18\.0 does not\)/);
+});
+
+test('proxy: with NODE_USE_ENV_PROXY=1 on a Node that has it, the server\'s calls use it except NO_PROXY\'s hosts; without the support it warns', async () => {
+  const env = { HTTPS_PROXY: 'http://proxy.corp.test:3128', NODE_USE_ENV_PROXY: '1', NO_PROXY: 'localhost,.corp.test' };
+  const on = await check('proxy', project(BACKEND()), fakeProbe({ env, nodeFlags: WITH_FLAG }));
+  assert.equal(on.status, 'pass');
+  assert.ok(on.fix!.some((f) => f.includes("go through the proxy, except NO_PROXY's hosts; SMTP never does")), JSON.stringify(on));
+  const unsupported = await check('proxy', project(BACKEND()), fakeProbe({ node: '22.18.0', env, nodeFlags: new Set() }));
+  assert.equal(unsupported.status, 'warn');
+  assert.match(unsupported.line, /NODE_USE_ENV_PROXY=1 is set, but this Node \(22\.18\.0\) has no environment proxy support/);
+});
+
+test('proxy: a registry in NO_PROXY is reached direct; one not in it goes through the proxy', async () => {
+  const base = { HTTPS_PROXY: 'http://proxy.corp.test:3128', npm_config_registry: 'https://registry.corp.test/npm/' };
+  const direct = await check('proxy', project(GOOD), fakeProbe({ env: { ...base, NO_PROXY: '*.corp.test' } }));
+  assert.ok([direct.line, ...(direct.fix ?? [])].includes('the package registry (registry.corp.test) is in NO_PROXY: npm reaches it direct'), JSON.stringify(direct));
+  const through = await check('proxy', project(GOOD), fakeProbe({ env: { ...base, NO_PROXY: 'localhost' } }));
+  assert.ok([through.line, ...(through.fix ?? [])].includes('npm reaches the package registry through the proxy (NO_PROXY does not name registry.corp.test)'), JSON.stringify(through));
+  // Without a backend the direct server calls are a note, not a warning.
+  assert.equal(through.status, 'pass');
+  assert.ok(through.fix!.some((f) => f.endsWith('this project has no backend to make them')), JSON.stringify(through));
+});
+
+test('proxy: a value that is not a URL, or two spellings that differ, warn — still without printing the value', async () => {
+  const bad = await check('proxy', project(GOOD), fakeProbe({ env: { HTTP_PROXY: 'corp-proxy-pass-word' } }));
+  assert.equal(bad.status, 'warn');
+  assert.equal(bad.line, "proxy: HTTP_PROXY is set but is not a URL — npm and Node can't use it; write it as http://host:port");
+  assert.ok(!JSON.stringify(bad).includes('pass-word'));
+  const two = await check('proxy', project(GOOD), fakeProbe({ env: { HTTPS_PROXY: 'http://a.test:1', https_proxy: 'http://b.test:2' } }));
+  assert.equal(two.status, 'warn');
+  assert.match(two.line, /HTTPS_PROXY and https_proxy are both set, to different values/);
+});
+
+/* ---- disk space ---------------------------------------------------------- */
+
+/** A probe whose filesystem has `free` bytes; records every path it was asked about. */
+function diskProbe(free: number | Error) {
+  const asked: string[] = [];
+  const probe = fakeProbe({
+    statfs: async (path: string) => {
+      asked.push(path);
+      if (free instanceof Error) throw free;
+      return { bavail: Math.floor(free / 4096), bsize: 4096 };
+    },
+  });
+  return { probe, asked };
+}
+
+test('disk: under DISK_WARN_BYTES free where the build writes is a warning with the space left; plenty passes', async () => {
+  const p = project(GOOD);
+  const low = diskProbe(500 * 1024 * 1024);
+  const r = await check('disk', p, low.probe);
+  assert.equal(r.status, 'warn');
+  assert.equal(r.line, `disk space: 500MB free for ${p.dir} — under 1.0GB, a build and its install may run out`);
+  assert.ok(r.fix!.at(-1)!.includes('--out'), JSON.stringify(r.fix));
+  assert.equal(DISK_WARN_BYTES, 1024 * 1024 * 1024);
+  const plenty = await check('disk', p, diskProbe(20 * 1024 * 1024 * 1024).probe);
+  assert.equal(plenty.status, 'pass');
+  assert.equal(plenty.line, `disk space: 20.0GB free for ${p.dir}`);
+  // The boundary: exactly the threshold is enough.
+  assert.equal((await check('disk', p, diskProbe(DISK_WARN_BYTES).probe)).status, 'pass');
+});
+
+test('disk: an output folder not made yet is measured at its nearest folder that is, and one filesystem is measured once', async () => {
+  const p = project(GOOD);
+  const d = diskProbe(5 * 1024 * 1024 * 1024);
+  const r = await doctor({ ...options({ ...p, out: join(p.dir, 'not', 'made', 'yet') }, d.probe), checks: [CHECKS.find((c) => c.id === 'disk')!] });
+  assert.equal(r.checks[0].status, 'pass');
+  assert.deepEqual(d.asked, [p.dir], 'the project and its unmade output share one filesystem: asked once, at a folder that exists');
+});
+
+test('disk: a filesystem that cannot be measured is skipped, not failed', async () => {
+  const r = await check('disk', project(GOOD), diskProbe(Object.assign(new Error('nope'), { code: 'ENOSYS' })).probe);
+  assert.equal(r.status, 'skip');
+  assert.match(r.line, /^disk space: can't be read for .* \(ENOSYS\)$/);
+});
+
+/* ---- asset names on a case-insensitive disk ------------------------------ */
+
+const GALLERY = (a: string, b: string) => `az 1\nsite s\npage /\n  gallery\n    image ${a}\n      alt "A"\n    image ${b}\n      alt "B"\n`;
+
+test('asset names: two that differ only in case warn on every OS — one file on a case-insensitive disk', async () => {
+  const r = await check('asset-case', project(GALLERY('./img/Hero.webp', './img/hero.webp')));
+  assert.equal(r.status, 'warn');
+  assert.equal(r.line, "asset names: './img/Hero.webp' and './img/hero.webp' differ only in case — on a case-insensitive disk (Windows, macOS) they are one file");
+  assert.deepEqual(r.fix, ['rename one of each pair, and the path to it in the .az file']);
+  // A folder differing in case is the same clash.
+  assert.equal((await check('asset-case', project(GALLERY('./Img/a.webp', './img/a.webp')))).status, 'warn');
+});
+
+test('asset names: CONTROL — distinct names, or one name used twice, pass; no file skips', async () => {
+  assert.deepEqual(await check('asset-case', project(GALLERY('./img/a.webp', './img/b.webp'))),
+    { id: 'asset-case', status: 'pass', line: 'asset names: 2 files, no two differing only in case' });
+  assert.equal((await check('asset-case', project(GALLERY('./img/a.webp', './img/a.webp')))).status, 'pass');
+  assert.equal((await check('asset-case', { dir: tmpdir(), file: null, out: join(tmpdir(), 'none') })).status, 'skip');
 });

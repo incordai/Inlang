@@ -9,8 +9,9 @@
 
 /**
  * The checks, in the order they print: the machine first (Node, npm, known
- * bad combinations, the image library), then the project (it compiles, its
- * data lock, its tables' rules, its models and its asset budgets), then the
+ * bad combinations, the image library, the proxy and the disk space —
+ * doctor-system.ts), then the project (it compiles, its data lock, its
+ * tables' rules, its models, its asset budgets and names), then the
  * backend's `.env` and the variables a build would refuse to inline.
  *
  * word-quality-gate §5.1 sets the policy: Node, npm and system libraries are
@@ -29,6 +30,7 @@ import { BACKEND_PINS, NODE_ENGINE, SERVER_DIR } from '../../backend/src/emit.ts
 import { loadConfig, type Setup } from '../../backend/src/server/env.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
 import { CHAT_DOCTOR_CHECKS } from './doctor-chat.ts';
+import { DISK_CHECK, PROXY_CHECK } from './doctor-system.ts';
 import { lockPath } from './data-schema.ts';
 import type { CompileJob } from './doctor-compile.ts';
 import { ENCODER, type ProbeJob } from './images.ts';
@@ -597,6 +599,38 @@ const assets: Check = {
   },
 };
 
+/**
+ * word-quality-gate §5.3, Windows paths: two files the site names whose
+ * paths differ only in case (`./img/Hero.webp`, `./img/hero.webp`) are two
+ * files on this disk and one on a case-insensitive one — Windows' and
+ * macOS's by default — where the second overwrites the first when the
+ * project is copied there, or the build reads the wrong one. The check is
+ * the same on every OS: it reads only the names the .az file gives.
+ */
+const assetCase: Check = {
+  id: 'asset-case',
+  title: 'asset names',
+  run: async (ctx) => {
+    const found = await projectFiles(ctx);
+    if (!Array.isArray(found)) return { ...found, line: found.line.replace(/^assets:/, 'asset names:') };
+    const byFolded = new Map<string, Set<string>>();
+    for (const f of found) {
+      const folded = f.path.toLowerCase();
+      byFolded.set(folded, (byFolded.get(folded) ?? new Set()).add(f.path));
+    }
+    const clashes = [...byFolded.values()].filter((names) => names.size > 1).map((names) => [...names].sort());
+    if (clashes.length > 0) {
+      return {
+        status: 'warn',
+        line: `asset names: ${clashes.map((c) => c.map((n) => `'./${n}'`).join(' and ')).join('; ')} differ only in case — on a case-insensitive disk (Windows, macOS) they are one file`,
+        fix: ['rename one of each pair, and the path to it in the .az file'],
+      };
+    }
+    if (found.length === 0) return { status: 'skip', line: 'asset names: the file names no project files' };
+    return { status: 'pass', line: `asset names: ${count(found.length, 'file')}, no two differing only in case` };
+  },
+};
+
 /** What a GLB's JSON says about its geometry, or why it can't be read. Reads the header and JSON chunk only. */
 export async function glbGeometry(file: string): Promise<{ meshes: number; compressed: boolean } | { problem: string }> {
   const fh = await open(file, 'r');
@@ -738,8 +772,8 @@ const buildSecrets: Check = {
 
 /** Every check, in the order the report prints them. */
 export const CHECKS: readonly Check[] = [
-  node, npm, platform, imageLibrary, backendImageLibrary, browsers,
-  compiles, dataLock, tableRules, models, assets,
+  node, npm, platform, imageLibrary, backendImageLibrary, browsers, PROXY_CHECK, DISK_CHECK,
+  compiles, dataLock, tableRules, models, assets, assetCase,
   backendEnv, ...CHAT_DOCTOR_CHECKS, buildSecrets,
 ];
 
