@@ -1,8 +1,8 @@
 /**
  * @az server chat-answer
  * Purpose: the answer parser: a model's text, read line by line, becomes the closed set of page events — prose, or a component validated whole.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3)
- * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, lineTokens, quoteKey
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3, §21.1.2)
+ * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, ASK_FORM, FENCE, lineTokens, quoteKey
  * Edit guide: linear in the characters read, no regular expression that can backtrack; a line that does not parse is prose; a component that breaks a rule is dropped whole and never shown as syntax.
  * Tests: packages/backend/test/chat-answer.test.ts, packages/backend/test/chat-attacks.test.ts
  */
@@ -19,6 +19,7 @@
  *     feature                        a short list, composed
  *       item "Fast"
  *         text "Pages are pre-rendered."
+ *     ask "How do I cancel?"         a follow-up question, a button (C5)
  *
  * The model is an untrusted author, so its text is read here, on the
  * server, and the page only ever receives the typed events below:
@@ -36,6 +37,11 @@
  *     dropped, so a visitor only ever sees the author's prices (L8);
  *   - strings lose control, bidirectional and zero-width characters and are
  *     NFC-normalised; nothing is decoded as an HTML entity.
+ *
+ * Prose may carry the page's markdown subset (§21.1.2); the page reads its
+ * shape. Here only fences matter: inside a code block (a line at the margin
+ * starting ```), every line is prose — a component written in code is the
+ * code's text, never a component.
  *
  * Caps per answer: ANSWER_LIMITS. Past the prose cap or the component cap
  * the parser ends (`ended`), and the route stops reading the model.
@@ -64,6 +70,10 @@ export const ANSWER_LIMITS = {
   title: 80,
   text: 300,
   label: 40,
+  /** Follow-up questions in one answer (§21.1.2); they are not components. */
+  asks: 3,
+  /** A follow-up question's characters — the `ask` key's cap (§3.2). */
+  ask: 80,
   /**
    * The answer as the page sends it back as history (`record`): prose and
    * every shown component in its canonical lines. A component that would
@@ -94,6 +104,7 @@ export type AnswerBlock =
   | { readonly faq: readonly { readonly q: string; readonly a: string }[] }
   | { readonly cta: { readonly label: string; readonly to: string } }
   | { readonly feature: readonly { readonly title: string; readonly text: string }[] }
+  | { readonly ask: string }
   | RichBlock;
 
 export type AnswerEvent =
@@ -130,6 +141,14 @@ export const ANSWER_FORMS: Readonly<Record<AnswerWord, { readonly lines: readonl
   ...RICH_FORMS,
 };
 
+/** A follow-up question as the model is taught it (§21.1.2): not a component, so outside ANSWER_FORMS. */
+export const ASK_FORM = {
+  lines: [`ask "A question the visitor may ask next, at most ${ANSWER_LIMITS.ask} characters"`],
+} as const;
+
+/** The line that opens and closes a code block, at the margin (§21.1.2). */
+export const FENCE = '```';
+
 /** The key a quote is found by, in context.json and the page's templates: `/pricing#0`. */
 export const quoteKey = (route: string, n: number): string => `${route}#${n}`;
 
@@ -147,7 +166,7 @@ export const stripText = (s: string): string => s.replace(STRIPPED, '');
 export const cleanText = (s: string): string => stripText(s).normalize('NFC');
 
 /** The first words a line may start a component with; any other first word makes the line prose at once. */
-const KEYWORDS: readonly string[] = ['text', 'show', 'faq', 'cta', 'feature', 'pricing', ...RICH_WORDS];
+const KEYWORDS: readonly string[] = ['text', 'show', 'faq', 'cta', 'feature', 'pricing', 'ask', ...RICH_WORDS];
 const LONGEST_KEYWORD = Math.max(...KEYWORDS.map((k) => k.length));
 const isKeywordPrefix = (s: string) => KEYWORDS.some((k) => k.startsWith(s));
 
@@ -214,7 +233,7 @@ const quoted = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g,
 /** Whether `ch` (one code point) is a combining mark — it may still join the character before it. */
 const MARK = /\p{M}/u;
 
-type BlockKind = 'faq' | 'feature' | 'cta' | 'show' | 'pricing' | 'rich' | 'dropped';
+type BlockKind = 'faq' | 'feature' | 'cta' | 'show' | 'pricing' | 'ask' | 'rich' | 'dropped';
 
 /** The chart kinds a `chart` head line names (chat-block-spec §20.2). */
 const CHART_KINDS: readonly string[] = ['bar', 'line', 'area', 'pie', 'donut'];
@@ -260,6 +279,27 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
   let ended = false;
   let prose = 0;
   let shown = 0;
+  /** Follow-up questions shown so far (§21.1.2). */
+  let asked = 0;
+  /** Inside a fenced code block: every line is prose until the closing fence. */
+  let fenced = false;
+  /**
+   * The current line started at the margin; its first characters — enough
+   * to tell a fence — and whether anything but spaces follows them (a
+   * closing fence is the three backticks alone; an opening one may name a
+   * language). The page's chat-markdown.ts reads fences by the same rule.
+   */
+  let margin = false;
+  let prefix = '';
+  let extra = false;
+  const note = (piece: string) => {
+    let k = 0;
+    if (prefix.length < FENCE.length) {
+      k = Math.min(piece.length, FENCE.length - prefix.length);
+      prefix += piece.slice(0, k);
+    }
+    for (; !extra && k < piece.length; k++) if (piece[k] !== ' ') extra = true;
+  };
   let record = '';
   /** Data points and `from` requests across the answer's rich components (§20.2). */
   let points = 0;
@@ -365,6 +405,20 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       emit({ quote: 'pricing', route, n: nth }, `show pricing ${route}${nth > 0 ? `#${nth + 1}` : ''}\n`);
       return;
     }
+    if (b.kind === 'ask') {
+      // A follow-up is one line of question: no line break, within the `ask` key's cap; past three, the rest go.
+      const q = value(b.head[1].value, ANSWER_LIMITS.ask, true);
+      if ('why' in q) { drop(q.why); return; }
+      if (q.v.includes('\n')) { drop('shape'); return; }
+      if (asked >= ANSWER_LIMITS.asks) { drop('too_many'); return; }
+      const lines = `ask ${quoted(q.v)}\n`;
+      if (record.length + lines.length > ANSWER_LIMITS.record) { drop('record'); return; }
+      asked++;
+      flushText();
+      record += lines;
+      out.push({ type: 'block', block: { ask: q.v } });
+      return;
+    }
     if (b.kind === 'cta') {
       if (!allowed('cta')) { drop('not_shown'); return; }
       const label = value(b.head[1].value, ANSWER_LIMITS.label, true);
@@ -450,6 +504,10 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
         if (rest.length === 2 && str(0) && bare(1)) open = { kind: 'cta', head: t, items: [], lines: [], broken: null };
         else asProse();
         return;
+      case 'ask':
+        if (rest.length === 1 && str(0)) open = { kind: 'ask', head: t, items: [], lines: [], broken: null };
+        else asProse();
+        return;
       case 'faq':
       case 'feature':
       case 'pricing': {
@@ -483,6 +541,8 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
 
   /** The current line ends (at a newline, or at the end of the answer). */
   const endLine = (newline: boolean) => {
+    // A fence line at the margin opens or closes a code block (§21.1.2).
+    if (state === 'prose' && margin && prefix === FENCE) fenced = fenced ? extra : true;
     if (state === 'prose') {
       const rest = tail;
       tail = '';
@@ -498,6 +558,9 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     state = 'start';
     line = '';
     over = false;
+    margin = false;
+    prefix = '';
+    extra = false;
   };
 
   /** Hold one more character of the current line, within the line cap. */
@@ -514,22 +577,29 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       const ch = text[i];
       if (ch === '\n') { endLine(true); i++; continue; }
       if (state === 'start') {
-        // The first character decides whether an open component goes on.
-        if (open && ch !== ' ') close();
-        if (ended) break;
-        if (ch === ' ') state = open ? 'hold' : 'prose';
-        else state = 'word';
+        margin = ch !== ' ';
+        // Inside a code block every line is the code's: prose, whatever it starts with.
+        if (fenced) state = 'prose';
+        else {
+          // The first character decides whether an open component goes on.
+          if (open && ch !== ' ') close();
+          if (ended) break;
+          if (ch === ' ') state = open ? 'hold' : 'prose';
+          else state = 'word';
+        }
       }
       if (state === 'prose') {
         // Everything up to the next newline at once.
         let j = i;
         while (j < text.length && text[j] !== '\n') j++;
+        note(text.slice(i, j));
         streamProse(text.slice(i, j));
         i = j;
         continue;
       }
       if (state === 'word') {
         hold(ch);
+        note(ch);
         i++;
         if (ch === ' ') {
           // The first word is complete: a keyword holds the line, anything else is prose now.

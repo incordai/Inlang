@@ -212,7 +212,7 @@ export function systemText(prompt: string, context: ChatContext, page: string, r
   const rules = rulesFor(context, page);
   const lines = [`The visitor is on the page ${JSON.stringify(page)}.`];
   if (rules.show.length === 0) {
-    lines.push('On this page an answer is prose only: write no component.');
+    lines.push('On this page an answer is prose only: write no component (follow-up questions are still allowed).');
   } else {
     lines.push(`On this page an answer may hold these components and no other: ${rules.show.join(', ')}.`);
     if (rules.show.includes('pricing')) {

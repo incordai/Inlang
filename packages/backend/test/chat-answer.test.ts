@@ -324,3 +324,70 @@ for (const [name, unit] of Object.entries(ADVERSARIAL)) {
     assert.ok(tBig <= 24 * Math.max(tSmall, 1), `8× the input took ${(tBig / tSmall).toFixed(1)}× (${tSmall.toFixed(1)} → ${tBig.toFixed(1)}ms)`);
   });
 }
+
+/* ---- C5 (chat-block-spec §21.1.2): follow-up questions and code fences ---- */
+
+test('a follow-up question is its own event, in the record, and not a component', () => {
+  const r = whole(['Here is the answer.', 'ask "How do I cancel?"', 'ask "Is there a \\"team\\" plan?"'].join('\n'));
+  assert.deepEqual(r.blocks, [{ ask: 'How do I cancel?' }, { ask: 'Is there a "team" plan?' }]);
+  assert.equal(r.text, 'Here is the answer.\n');
+  assert.equal(r.record, 'Here is the answer.\nask "How do I cancel?"\nask "Is there a \\"team\\" plan?"\n');
+  assert.deepEqual(r.dropped, []);
+  // On a prose-only page too: a follow-up needs no `show`.
+  assert.deepEqual(whole('ask "And yearly?"', { ...RULES, show: [] }).blocks, [{ ask: 'And yearly?' }]);
+  // Not counted as components: four components and three follow-ups all show.
+  const many = whole([...Array.from({ length: 4 }, (_, i) => `cta "Go ${i}" /contact`), 'ask "a?"', 'ask "b?"', 'ask "c?"'].join('\n'));
+  assert.equal(many.blocks.length, 7);
+  assert.equal(many.ended, false);
+});
+
+test(`caps: ${ANSWER_LIMITS.asks} follow-ups of ${ANSWER_LIMITS.ask} characters; past them dropped, the answer goes on`, () => {
+  const at = 'q'.repeat(ANSWER_LIMITS.ask);
+  assert.deepEqual(whole(`ask "${at}"`).blocks, [{ ask: at }]);
+  const over = whole(`ask "${at}q"`);
+  assert.deepEqual(over.blocks, []);
+  assert.deepEqual(over.dropped, ['too_long']);
+  const four = whole(['ask "1?"', 'ask "2?"', 'ask "3?"', 'ask "4?"', 'Still prose after them.'].join('\n'));
+  assert.deepEqual(four.blocks, [{ ask: '1?' }, { ask: '2?' }, { ask: '3?' }]);
+  assert.deepEqual(four.dropped, ['too_many']);
+  assert.equal(four.text, 'Still prose after them.');
+  assert.equal(four.ended, false);
+});
+
+test('a follow-up with a line break, a child line, no string or two strings is not one', () => {
+  assert.deepEqual(whole('ask "one\\ntwo"').dropped, ['shape']);
+  const child = whole(['ask "Why?"', '  text "nested"'].join('\n'));
+  assert.deepEqual(child.blocks, []);
+  assert.deepEqual(child.dropped, ['shape']);
+  // Not its shape: a sentence that starts with the word.
+  assert.equal(whole('ask me anything').text, 'ask me anything');
+  assert.equal(whole('ask "a" "b"').text, 'ask "a" "b"');
+  assert.deepEqual(whole('ask ""').dropped, ['empty']);
+});
+
+test('inside a code fence every line is prose: a component written as code is the code\'s text', () => {
+  const answer = ['Try this:', '```az', 'show pricing /pricing', 'cta "Go" /contact', 'ask "Hidden?"', '  item "indented"', '', 'faq', '```', 'After it, a real one:', 'cta "Go" /contact'].join('\n');
+  const r = whole(answer);
+  assert.equal(r.text, ['Try this:', '```az', 'show pricing /pricing', 'cta "Go" /contact', 'ask "Hidden?"', '  item "indented"', '', 'faq', '```', 'After it, a real one:', ''].join('\n'));
+  assert.deepEqual(r.blocks, [{ cta: { label: 'Go', to: '/contact' } }]);
+  assert.deepEqual(r.dropped, []);
+  // The same however it is split.
+  for (let i = 0; i <= answer.length; i++) assert.deepEqual(run([answer.slice(0, i), answer.slice(i)]), r, `split at ${i}`);
+});
+
+test('a fence opens only at the margin; an unclosed one runs to the end; it closes an open component first', () => {
+  // Indented: not a fence, so the next component line is a component.
+  assert.deepEqual(whole([' ```', 'cta "Go" /contact'].join('\n')).blocks, [{ cta: { label: 'Go', to: '/contact' } }]);
+  // Unclosed: everything after it is the code's.
+  const open = whole(['```', 'cta "Go" /contact', 'ask "x?"'].join('\n'));
+  assert.deepEqual(open.blocks, []);
+  assert.equal(open.text, '```\ncta "Go" /contact\nask "x?"');
+  // A fence at the margin ends the faq above it, which is shown; what follows is code.
+  const after = whole(['faq', '  item "Q?"', '    text "A."', '```', 'cta "Go" /contact', '```'].join('\n'));
+  assert.deepEqual(after.blocks, [{ faq: [{ q: 'Q?', a: 'A.' }] }]);
+  assert.equal(after.text, '```\ncta "Go" /contact\n```');
+  // Only the backticks alone (trailing spaces allowed) close a block: a line naming a language inside one does not.
+  const inner = whole(['```', '```js', 'cta "Go" /contact', '```  ', 'cta "Go" /contact'].join('\n'));
+  assert.deepEqual(inner.blocks, [{ cta: { label: 'Go', to: '/contact' } }]);
+  assert.equal(inner.text, '```\n```js\ncta "Go" /contact\n```  \n');
+});

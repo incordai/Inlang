@@ -167,9 +167,9 @@ export function createShareStore(o: ShareStoreOptions): ShareStore {
 }
 
 /** The block keys an answer's events carry (chat-answer.ts AnswerBlock, chat-rich.ts resolveRich). */
-const BLOCK_KEYS: ReadonlySet<string> = new Set(['quote', ...ANSWER_WORDS.filter((w) => w !== 'pricing'), 'unavailable']);
-/** Events in one answer: its components and the text runs between them. */
-const EVENTS_MAX = 2 * ANSWER_LIMITS.components + 1;
+const BLOCK_KEYS: ReadonlySet<string> = new Set(['quote', ...ANSWER_WORDS.filter((w) => w !== 'pricing'), 'ask', 'unavailable']);
+/** Events in one answer: its components and follow-up questions (§21.1.2), and the text runs between them. */
+const EVENTS_MAX = 2 * (ANSWER_LIMITS.components + ANSWER_LIMITS.asks) + 1;
 
 /**
  * Whether `v` has the shape of an answer's events as the stream sent them:
