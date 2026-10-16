@@ -2,9 +2,9 @@
 
 **Status** proposed 2026-10-15 · **approved by the owner 2026-10-15, every
 recommendation** (§17) · **C0, C1 and C2 built 2026-10-15** (§19: what was
-built, and where it differs) · C3–C4 not started · **C2b specified 2026-10-15**
-(§20: charts, tables, stats, image cards, dashboards and share links in
-answers, on the owner's Q13–Q15) · Extends backend-spec.md,
+built, and where it differs) · C3–C4 not started · **C2b specified and built
+2026-10-15** (§20: charts, tables, stats, image cards, dashboards and share
+links in answers, on the owner's Q13–Q15; §19.6: as built) · Extends backend-spec.md,
 data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12)
 
 The owner's goal: **a visitor on an az site asks a question and gets an
@@ -354,11 +354,13 @@ As built in C1 (each with a case in `packages/core/test/chat-decl.test.ts`):
   },
   "slots": { "ask": {} },
   "themeReads": [
-    "color.bg", "color.border-strong", "color.danger", "color.focus", "color.muted", "color.surface",
-    "color.surface-alt", "color.text", "radius.md", "radius.sm", "size.gutter-sm", "size.measure-body",
-    "size.measure-display", "size.ring", "size.ring-offset", "size.tap", "space.8", "space.12", "space.16",
-    "space.24", "space.48", "space.96", "type.display", "type.leading-body", "type.leading-tight",
-    "type.size.2xl", "type.size.base", "type.size.sm", "type.weight-display"
+    "color.accent", "color.bg", "color.border", "color.border-strong", "color.danger", "color.focus",
+    "color.muted", "color.series-1", "color.series-2", "color.series-3", "color.series-4", "color.series-5",
+    "color.series-6", "color.surface", "color.surface-alt", "color.text", "radius.md", "radius.sm",
+    "size.gutter-sm", "size.measure-body", "size.measure-display", "size.ring", "size.ring-offset", "size.tap",
+    "space.4", "space.8", "space.12", "space.16", "space.24", "space.48", "space.96", "space.128",
+    "type.display", "type.leading-body", "type.leading-tight", "type.size.2xl", "type.size.base",
+    "type.size.sm", "type.weight-bold", "type.weight-display"
   ],
   "checks": ["AZ2220 … AZ2228, the table above"]
 }
@@ -1196,9 +1198,8 @@ policy equals the plain page's, hashes aside).
 ### 19.4 Specified after C1
 
 C2b (§20, 2026-10-15) — charts, tables, stat cards, image cards,
-dashboards and share links in answers — is specified, not built. It is
-built on C2's parser, events and templates once they are on main, and
-records its own "as built" deviations here when it lands.
+dashboards and share links in answers — was specified after C1 and built
+on C2's parser, events and templates; §19.6 records it as built.
 
 ### 19.5 C2 as built (2026-10-15)
 
@@ -1266,12 +1267,94 @@ probe` was run against a local server speaking the completions shape
 (`chat-probe.test.ts`), not against a candidate model: the owner's
 curl-probe of each candidate remains to be done before one is pinned.
 
+### 19.6 C2b as built (2026-10-15)
+
+Against §20 (the rows of §20.10 and the tests of §20.9):
+
+| Item | State |
+|---|---|
+| `show chart table stats cards dashboard` | built: values of `show`, never words (`CHAT_RICH_WORDS`, core chat.ts); the manifest's `show` takes nine values. A page that writes `chart …` is refused as an unknown word, as before. **AZ1270** (`show dashboard` with nothing it can hold) and **AZ1259** (an author's page at `/chat/shared`, any case) are raised, each with a case and a CONTROL (`core/test/chat-rich-decl.test.ts`) |
+| the answer format | built on C2's parser (`server/chat-answer.ts`): the five words are keywords that hold a line; a line with a rich head's shape (`chart <kind> "…"`, `table "…"`, `stats`, `cards`, `dashboard "…"`) is held with its child lines (depth 1–2, at most 160) and read whole by `server/chat-rich.ts` — any other line starting with the word is prose (`table of contents` stays text). The answer's caps (240 points, 6 `from` requests) are the parser's; the 48 KB events cap is the route's |
+| `src` | set only by the server: `model` for numbers the model wrote, `site` (with `asOf`, the UTC day) for figures from `from`. Nothing a model writes can set it (`chat-rich.test.ts`: `src site` on a head or a line is a shape, not a source) |
+| server figures | built: `server/chat-query.ts` — the tables `grant(read, null)` lists and not owner-only; their non-private fields; `count`/`sum`/`avg`/`min`/`max`, `by` a choice, flag, date or datetime (`day`/`month`/`year`, UTC with no time zone on any engine), one `where`; rows and cards through `parseQuery` → `selectList(…, null, false)` → `outRow(…, null, …)`, the anonymous list's own code. Every read is `allWithin(…, LIST_DEADLINE_MS)`; a cancelled read, or a total past 2⁵³, is the `unavailable` note. 60 s cache, 500 entries. The module ships only with chat **and** tables (`az build` copies it then only); `figuresRun` is injected into the route, so a chat without data never loads it |
+| rendering | built: `overlay/runtime/chat-chart.ts` (pure: validation, nice ticks, band and linear scales, bar/line/area/pie/donut paths, label thinning, coordinates to 0.01, the summary and the table equivalent), `chat-figures.ts` (pure checks of table, stats, cards, dashboard), `chat-draw.ts` (the DOM: clones of the word's templates, SVG by `createElementNS` with allow-listed geometry attributes and a class per part). The word's templates are `words/chat/figures.ts` |
+| colours | built: `theme/src/series.ts` and theme-spec §15 — six `color.series-*` tokens, on chart sites only; every series 3:1 on `bg`, `surface` and `surface-alt` and ≥ 0.06 OKLab apart, re-proven on every theme × accent × offered pair × scheme (`series.test.ts`) |
+| images | built: a card's image is a gallery image on a public page with its author's alt (keys `i1`, `i2`… in page order; the build's own `<img>`, srcset and size, cloned) or a public row's image from `cards from …` (the backend's exact path for that row, checked twice; written in one function, `rowImage`, held by a unit test). Anything else is no image; the card keeps its text |
+| accessibility | built: a summary sentence and a real table behind a disclosure for every chart; `<caption>` and `<th scope="col">`; sortable headers as buttons with `aria-sort`; a scrolling table region the keyboard reaches; deltas in a sign, a glyph and words; patterns, markers, dashes and a legend for every series past the first; each component announced once, with "AI-generated figures" when it holds the model's |
+| share links | built: `server/chat-share.ts` (tags, store, routes), `az_chat_shares` as `CHAT_MIGRATIONS` step 2 on all three engines, `POST /chat/share`, `GET` and `DELETE /chat/share/<id>`, the `.env` keys of §20.10, `overlay/runtime/chat-shared.ts` (the Share control) and the read-only shell on the build's `/chat/shared` page |
+| the token benchmark | built into `pnpm bench:tokens` (`scripts/lib/answer-bench.mjs` rich cases, each parsed by the real parser first) |
+
+Where the build differs from §20:
+
+- **Share is offered on chats that list `show`.** Its template lives in
+  the parts container C2 ships only then; a prose-only (C1) chat offers no
+  Share. The server would take a prose answer's share; the page has no
+  control for it.
+- **The Share control is an inline disclosure** under the answer (Share →
+  "Include my question", unticked → Create link → the two links in
+  read-only fields), not the overlay engine's modal preset: nothing traps
+  focus, and the panel follows the answer it shares.
+- **No admin delete route.** `AZ_ADMIN_EMAILS` belongs to sites with data;
+  a chat site may have none. The operator deletes a share with one SQL
+  statement (`DELETE FROM az_chat_shares WHERE id = …`) or stops new ones
+  with `AZ_CHAT_SHARES=off`; every share is gone at its expiry anyway.
+- **The create answer is `{ id, expires, deleteToken }`**, not a URL: the
+  server does not know which of `AZ_ALLOWED_ORIGINS` the page is on, so the
+  page builds both links from its own origin.
+- **The sweep runs with the server's other prunes**, every 10 minutes
+  (`PRUNE_MS`), not at start-up and hourly. Reads and deletes check
+  `expires` in the statement, so a share is gone at the instant it expires
+  whatever the sweep does (measured on all three engines).
+- **The server re-checks a share's events by shape** (`shareableEvents`:
+  text runs within the prose cap, blocks with one known key) besides the
+  tag; each component's full check is the page's, with the same validators
+  as the live panel, when the shared page draws it. The tag is the proof
+  the events are this server's; the shape check is the second line.
+- **A pie's names and shares are in its legend and its table**, not drawn
+  on the slices; nothing on a chart moves (no fade), so reduced motion has
+  nothing to stop.
+- **The shared page's heading is an `<h1>`** ("A shared answer") with an
+  `<h2>` ("The answer") above the answer, so the answer's `<h3>`s are in
+  order (axe `heading-order`).
+- **Card images are gallery images**, not every image the build processed
+  (hero media is not offered): a gallery image is an author's content
+  image with its own alt.
+- **A stat over a category grouping is dropped**; over a date grouping it
+  is the latest period with its change from the one before (`deltaOf`).
+- **The page's sink test** (overlay `chat.test.ts`) now scans every chat
+  runtime file; its `.src =` rule is held to assignments (an event's `src`
+  field is compared with `===`), and the row image's one write is held to
+  its own test.
+- **`rows-logic.ts` ships with a chat too** (a row image's srcset), so the
+  runtime copy rule takes a file both lists name.
+- **Visual snapshots of the answered dashboard per theme are not built.**
+  `test:chat` checks the drawn DOM, the labels, axe and the policy in
+  three engines; `pnpm gate --every-variant` and the thumbnails cover the
+  words as before. A pixel snapshot of each answer state is left for C3,
+  with §9's other visual states.
+
+What was measured (2026-10-15): `pnpm verify` (2 815 tests), `pnpm
+test:chat` (231 checks in three engines: a dashboard with a server chart
+and a model chart, the AI label on the model's figures only, a pie, a
+sortable table, stat cards, an image card, the rich injection cases, axe in
+each state, a share made, read signed out with the same labels and
+`noindex`, gone after its delete link and after expiry; no request off the
+site and its backend; no CSP violation), `pnpm verify:build` (no chat key
+in any shipped file; the shared page's policy is the plain page's, hashes
+aside; the series tokens on the chart site only), `pnpm test:backend-db`
+(233 checks: the share lifecycle and every aggregation form on PostgreSQL
+18.6 and MySQL 8.4.11, equal to SQLite's), `pnpm test:data`, `pnpm
+test:auth`, `pnpm lint`, `node scripts/thumbnails.mjs --verify`, and `pnpm
+bench:tokens` (the rich answers in `.az` take 0.54–0.88 of their compact
+JSON's tokens; a dashboard of two server charts and a model chart is 78
+o200k tokens against 136 in JSON and 131 in markdown).
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links
 
 **Status** specified 2026-10-15 on the owner's decisions of that day (§17,
-Q13–Q15) · not built · builds on C2's parser, events and templates (§5.3,
+Q13–Q15) · **built 2026-10-15** (§19.6: what was built, and where it differs) · builds on C2's parser, events and templates (§5.3,
 §5.4), which it extends and never forks.
 
 Generative-UI frameworks let a model answer with charts, tables, cards and

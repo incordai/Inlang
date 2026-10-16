@@ -478,13 +478,13 @@ feature` — the server parses the model's `.az`-subset answer into typed
 events, the page fills templates the words' own emitters rendered, pricing
 is quote-only, a call to action only to a destination the file declares;
 the injection corpus in three engines; `az backend probe`; answer-format
-tokens in `pnpm bench:tokens`. Open: a curl-probe of a real candidate
-model before one is pinned, C2b
-(specified 2026-10-15, chat-block-spec §20: charts, tables, stat cards,
-image cards and dashboards inside answers only — no new word — with
-figures computed by the server from public tables, an "AI-generated
-figures" label on the model's own numbers, and opt-in share links that
-expire after 30 days), C3 (`float`,
+tokens in `pnpm bench:tokens`. C2b (built 2026-10-15, chat-block-spec §20,
+as built §19.6): charts, tables, stat cards, image cards and dashboards
+inside answers only — no new word — with figures computed by the server
+from public tables, an "AI-generated figures" label on the model's own
+numbers, six theme-derived series colours, and opt-in share links that
+expire after 30 days. Open: a curl-probe of a real candidate model before
+one is pinned, visual snapshots of answered states (C3), C3 (`float`,
 `knows`, §9's scroll polish), C4 (doctor/audit checks, moderation, a second
 adapter if wanted).
 

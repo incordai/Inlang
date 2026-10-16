@@ -559,7 +559,10 @@ AZ1251 (warning) `model default` that no page uses · AZ1254 a word an answer
 can never show, with its reason · AZ1256 (warning) `allow anyone`. AZ1252,
 AZ1253, AZ1255, AZ1257 and AZ1258 are reserved for `show` and `knows`, which
 arrive in phases C2 and C3; until then `show` and a site-level `chat` are
-AZ1214, not available yet. Its own rows are AZ2220–AZ2228 (§7.5).
+AZ1214, not available yet. C2b adds AZ1259 — an author's page at
+`/chat/shared`, the shared-answer page a chat site generates, in any case —
+and AZ1270, `show dashboard` with none of `chart`, `table`, `stats`, `cards`
+to hold (chat-block-spec §20.10). Its own rows are AZ2220–AZ2228 (§7.5).
 `from <table>` in a block is AZ1260–AZ1269 (data-spec §10, §12): a gallery's
 `alt` maps only to a `required` field (AZ1262), and a site with data owns
 `/admin`, so a page there is AZ1268 (§5.5).
@@ -992,6 +995,7 @@ compiled into a page that always says "not found" (AZ1413):
 | `page "about"` | `page: 'about' is not a route — write: page /about` |
 | `page "/a b"`, `page "/café"` | `page: '/a b' has characters an address would change — use letters, digits and - . _ ~ between slashes` |
 | `page /admin`, `page /Admin/x` in a site with `data` | `page: '/admin' is generated for data — use another route` (AZ1268, any case) |
+| `page /chat/shared` in a site with a chat | `page: '/chat/shared' is the shared-answer page chat generates — use another route` (AZ1259, any case) |
 
 Routes compare **case-insensitively** when checked for collisions: `/About`
 beside `/about` is AZ1509 (`page: '/About' and '/about' differ only in case —
