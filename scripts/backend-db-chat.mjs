@@ -12,8 +12,12 @@
  * its window, its order and its shares by day. Limits two (§19.11): ISO
  * weeks built from day buckets, equal on every engine across a year boundary
  * and week 53; the blocked count; the rate-limit windows shared by two
- * connections and by two server instances on one database. Run by
- * backend-db.mjs inside its containers.
+ * connections and by two server instances on one database. C7 (§21.3): an
+ * explore's rows paged through the anonymous list to its 200 — past one page
+ * of 100, ties on the sort key broken by the row's id, no row twice or
+ * missed, the default newest first. C8 (§21.4.2): a table map's pins through
+ * the same list, a `where` on a choice and on a flag, a row without a place
+ * no pin. Run by backend-db.mjs inside its containers.
  */
 
 import { createServer } from 'node:http';
@@ -24,7 +28,7 @@ import { compile, plan } from '../packages/core/src/index.ts';
 import { dataSteps } from '../packages/backend/src/data-ddl.ts';
 import { migrateData } from '../packages/backend/src/server/data-migrate.ts';
 import { loadTables } from '../packages/backend/src/server/data-values.ts';
-import { createQueries, parseFigures, parseRows } from '../packages/backend/src/server/chat-query.ts';
+import { createQueries, parseFigures, parsePins, parseRows, QUERY_LIMITS } from '../packages/backend/src/server/chat-query.ts';
 import { createKnows, knowsProblems, rowsSection } from '../packages/backend/src/server/chat-knows.ts';
 import { createShareStore, SHARE_LIMITS } from '../packages/backend/src/server/chat-share.ts';
 import { createApp } from '../packages/backend/src/server/app.ts';
@@ -417,6 +421,8 @@ export async function chatSuite(engine, db, openAgain, check, url) {
   await weekChecks(engine, db, check);
   await knowsChecks(engine, db, check);
   await usageReportChecks(engine, db, check);
+  await exploreChecks(engine, db, check);
+  await mapChecks(engine, db, check);
 
   // Through the route on this engine: an answer is counted in today's row.
   const loaded = loadConfig({
@@ -469,3 +475,106 @@ export async function chatSuite(engine, db, openAgain, check, url) {
     await closeWithin(second, DB_CLOSE_MS, `${engine} limits connection close`);
   }
 }
+
+/** The words the fixture sites are compiled with. */
+function wordManifests() {
+  const words = new Map();
+  for (const n of readdirSync(WORDS)) {
+    const f = new URL(`${n}/word.json`, WORDS);
+    if (existsSync(f)) {
+      const m = JSON.parse(readFileSync(f, 'utf8'));
+      words.set(m.name, m);
+    }
+  }
+  return words;
+}
+
+/** A fixture table on this engine, by a data step far from every other suite's: its server model, for chat-query. */
+async function fixtureTables(db, source, version) {
+  const r = compile(SITE_SOURCE(source), { manifests: wordManifests() });
+  if (!r.ok) throw new Error(`fixture: ${JSON.stringify(r.diagnostics)}`);
+  const ops = plan([], r.spec.site.data, { rename: [], drop: [], unique: [] }).ops;
+  await migrateData(db, dataSteps([{ version, ops }]), { confirm: Infinity });
+  return loadTables(JSON.parse(JSON.stringify({ tables: r.spec.site.data }))).map((table) => ({ table, digits: {} }));
+}
+
+const EXPLORE_TABLE = `  data chatexplore
+    name     text     required
+    n        number   required
+    placed   datetime required
+    allow anyone read
+`;
+
+/**
+ * chat-block-spec §21.3 on this engine (C7 tested it on SQLite only): an
+ * explore's rows are the anonymous list's, page after page of at most 100 by
+ * the list's own keyset cursor, to 200 — 230 rows, the sort key shared by
+ * threes so a page ends inside a tie, each row once, in the list's order.
+ */
+export async function exploreChecks(engine, db, check) {
+  const tables = await fixtureTables(db, EXPLORE_TABLE, 970);
+  const T0 = Date.UTC(2026, 0, 1);
+  for (let i = 0; i < 230; i++) {
+    await db.run('INSERT INTO azd_chatexplore (id, owner, created, updated, name, n, placed) VALUES (?, NULL, ?, ?, ?, ?, ?)',
+      [randomUUID(), T0 + i * 1000, T0 + i * 1000, `Row ${String(i).padStart(3, '0')}`, i, T0 + Math.floor(i / 3) * DAY]);
+  }
+  const q = createQueries({ db, database: engine, publicBase: 'http://127.0.0.1:9', log: () => {} });
+  const byPlaced = await q.run(parseRows(['chatexplore', 'columns', 'name', 'n', 'placed', 'sort', 'placed'], tables, QUERY_LIMITS.exploreRows));
+  const rows = byPlaced.ok ? byPlaced.result.rows : [];
+  const ns = rows.map((r) => r[1]);
+  const days = rows.map((r) => r[2]);
+  check(`${engine} explore rows: 200 of 230 through the anonymous list's pages, each row once`,
+    rows.length === QUERY_LIMITS.exploreRows && new Set(rows.map((r) => r[0])).size === rows.length, `${rows.length} rows, ${new Set(rows.map((r) => r[0])).size} distinct`);
+  check(`${engine} explore rows: in the list's order by the sort key — the first 200 by day, a tie across the page boundary kept whole and never repeated`,
+    // Days in order; within a day the list breaks the tie by the row's id (random here), so the last day's three give two.
+    days.every((d, i) => i === 0 || d >= days[i - 1]) && ns.slice().sort((a, b) => a - b).slice(0, 198).every((n, i) => n === i)
+      && ns.filter((n) => n >= 198).length === 2 && ns.filter((n) => n >= 198).every((n) => n <= 200),
+    JSON.stringify(ns.slice(95, 105)));
+  check(`${engine} explore rows: a datetime is a UTC day`, days[0] === '2026-01-01' && days.at(-1) === new Date(T0 + 66 * DAY).toISOString().slice(0, 10), `${days[0]} … ${days.at(-1)}`);
+  const newest = await q.run(parseRows(['chatexplore', 'columns', 'name', 'n'], tables, QUERY_LIMITS.exploreRows));
+  const nn = newest.ok ? newest.result.rows.map((r) => r[1]) : [];
+  check(`${engine} explore rows: without a sort, the newest 200 first — rows 229 down to 30`,
+    nn.length === 200 && nn[0] === 229 && nn.at(-1) === 30 && nn.every((n, i) => i === 0 || n === nn[i - 1] - 1), `${nn[0]} … ${nn.at(-1)} (${nn.length})`);
+}
+
+const MAP_TABLE = `  data chatplaces
+    name      text     required
+    latitude  number
+    longitude number
+    kind      choice   shop hall
+    open      flag
+    note      text     private
+    allow anyone read
+`;
+
+/** chat-block-spec §21.4.2 on this engine: a table map's pins — the list's rows, a `where` by choice and by flag, a row with no place no pin, six decimals. */
+export async function mapChecks(engine, db, check) {
+  const tables = await fixtureTables(db, MAP_TABLE, 980);
+  // Millionths of a degree: a `number` is whole on every engine (BIGINT).
+  const rows = [
+    ['North store', 52_530_000, 13_410_000, 'shop', 1, 'private north'],
+    ['Precise store', 52_520_008, 13_404_954, 'shop', 1, null],
+    ['Closed hall', 52_500_000, 13_400_000, 'hall', 0, null],
+    ['Placeless', null, null, 'shop', 1, null],
+  ];
+  for (const [i, [name, lat, lon, kind, open, note]] of rows.entries()) {
+    await db.run('INSERT INTO azd_chatplaces (id, owner, created, updated, name, latitude, longitude, kind, open, note) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), i + 1, i + 1, name, lat, lon, kind, open, note]);
+  }
+  const q = createQueries({ db, database: engine, publicBase: 'http://127.0.0.1:9', log: () => {} });
+  const pins = async (w) => {
+    const r = await q.run(parsePins(w.split(' '), tables));
+    return r.ok ? r.result.pins : null;
+  };
+  const all = await pins('chatplaces label name lat latitude lon longitude');
+  check(`${engine} map pins: the list's rows newest first, a row with no place no pin, millionths of a degree read as degrees`,
+    JSON.stringify(all) === JSON.stringify([{ label: 'Closed hall', lat: 52.5, lon: 13.4 }, { label: 'Precise store', lat: 52.520008, lon: 13.404954 }, { label: 'North store', lat: 52.53, lon: 13.41 }]),
+    JSON.stringify(all));
+  check(`${engine} map pins: where a choice equals one value`,
+    JSON.stringify((await pins('chatplaces label name lat latitude lon longitude where kind shop'))?.map((p) => p.label)) === JSON.stringify(['Precise store', 'North store']));
+  check(`${engine} map pins: where a flag is no`,
+    JSON.stringify((await pins('chatplaces label name lat latitude lon longitude where open no'))?.map((p) => p.label)) === JSON.stringify(['Closed hall']));
+  check(`${engine} map pins: a private field is no label`, parsePins('chatplaces label note lat latitude lon longitude'.split(' '), tables) === null
+    && !JSON.stringify(all).includes('private north'));
+}
+

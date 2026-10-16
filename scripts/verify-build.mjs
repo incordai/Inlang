@@ -36,7 +36,8 @@ import { watchCsp, cspResult } from './visual/csp.mjs';
 import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
 import { startTags } from '../packages/target-web/src/html-scan.ts';
 import { DEFAULT_THEME, THEMES } from '../packages/theme/src/themes.ts';
-import { CHAT_RUNTIME_FILES } from '../packages/target-web/src/chat.ts';
+import { CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../packages/target-web/src/chat.ts';
+import { PINS } from '../packages/target-web/src/emit.ts';
 import { ROWS_RUNTIME_FILES } from '../packages/target-web/src/data-rows.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -242,13 +243,14 @@ try {
     // The build's own lists: rows-logic.ts is on both (a row image's srcset, chat-block-spec §20.6).
     const ROWS = ROWS_RUNTIME_FILES;
     const CHAT = CHAT_RUNTIME_FILES;
-    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts') && !ROWS.includes(f) && !CHAT.includes(f));
+    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts') && !ROWS.includes(f) && !CHAT.includes(f) && !MAP_RUNTIME_FILES.includes(f));
     check('behaviour runtime shipped verbatim into src/az/',
       shipped.length > 0 && shipped.every((f) =>
         existsSync(join(proj, 'src/az', f)) &&
         readFileSync(join(proj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8')),
       shipped.join(' '));
     check('a site without a from block ships no rows runtime', ROWS.every((f) => !existsSync(join(proj, 'src/az', f))));
+    check('a site without a chat that shows maps ships no map runtime (chat-block-spec §21.4)', MAP_RUNTIME_FILES.every((f) => !existsSync(join(proj, 'src/az', f))));
     check('a site without a chat panel ships no chat runtime, no chat module and no chat server',
       CHAT.every((f) => !existsSync(join(proj, 'src/az', f))) && !existsSync(join(proj, 'src/chat')) && !existsSync(join(proj, 'server/chat')));
   }
@@ -779,6 +781,46 @@ try {
     check('chat §6.4: a chat key given a public name (AZ_PUBLIC_CHAT_KEY) fails the build, its value never printed',
       publicKey !== null && publicKey.includes('AZ_PUBLIC_CHAT_KEY') && !publicKey.includes(chatKey),
       publicKey?.split('\n').find((l) => l.includes('AZ_PUBLIC_CHAT_KEY')) ?? 'the build passed');
+
+    // C8 (§21.4.3): a site whose chat shows maps — its own install (the three map packages its package.json pins), its own
+    // build. The map page's policy is the plain chat page's plus exactly `worker-src 'self' blob:`; its other pages' are
+    // the plain page's; the map's module, stylesheet and worker are build files apart from the page's own bundle; the map
+    // runtime ships verbatim there and nowhere else.
+    const MAP_SITE = CHAT_SITE.replace('site chatcheck', 'site mapcheck')
+      .replace('    show     pricing faq cta feature chart table stats cards dashboard\n', '    show     pricing faq cta feature chart table stats cards dashboard map\n')
+      + '\npage /plain\n  hero center\n    title "No map here"\n  chat panel\n    title "Ask"\n    show  chart\n    allow anyone\n';
+    const mapFile = join(work, 'map.az');
+    writeFileSync(mapFile, MAP_SITE);
+    const mapProj = join(work, 'proj-map');
+    node(CLI, ['build', mapFile, '--out', mapProj], work);
+    npm(['install', '--no-audit', '--no-fund'], mapProj);
+    shippedBuild(mapProj, serverKeys);
+    const mapPages = Object.fromEntries(['', 'plain/', 'chat/shared/'].map((r) => [r, readFileSync(join(mapProj, 'dist', r, 'index.html'), 'utf8')]));
+    // Quotes as the page spells them, one way, so two policies compare by their sources.
+    const quotes = (policy) => policy.replace(/&#x27;/g, "'");
+    const mapPolicy = quotes(unhashed(policyOf(mapPages[''])));
+    check('C8 §21.4.3: the map page\'s policy is the plain chat page\'s plus exactly worker-src \'self\' blob: — nothing else new',
+      policyOf(mapPages['']) !== null && mapPolicy === quotes(unhashed(policyOf(chatPage))).replace('; object-src', "; worker-src 'self' blob:; object-src")
+        && !/wasm|connect-src[^;]*blob:/.test(mapPolicy),
+      mapPolicy);
+    check('C8 §21.4.3: on the map site a chat page that shows no maps keeps the plain page\'s policy; the shared-answer page, which may draw one, has the map\'s',
+      quotes(unhashed(policyOf(mapPages['plain/']))) === quotes(unhashed(policyOf(plainPage))) && quotes(unhashed(policyOf(mapPages['chat/shared/']))) === mapPolicy,
+      `${unhashed(policyOf(mapPages['plain/']))} | ${unhashed(policyOf(mapPages['chat/shared/']))}`);
+    const mapPkg = JSON.parse(readFileSync(join(mapProj, 'package.json'), 'utf8'));
+    const chatPkg = JSON.parse(readFileSync(join(chatProj, 'package.json'), 'utf8'));
+    check('C8 Q19a: the map site pins maplibre-gl, pmtiles and @protomaps/basemaps exactly; the chat site without maps none of them',
+      mapPkg.dependencies['maplibre-gl'] === PINS.maplibre && mapPkg.dependencies.pmtiles === PINS.pmtiles && mapPkg.dependencies['@protomaps/basemaps'] === PINS.basemaps
+        && ['maplibre-gl', 'pmtiles', '@protomaps/basemaps'].every((d) => chatPkg.dependencies[d] === undefined),
+      JSON.stringify(mapPkg.dependencies));
+    const assets = readdirSync(join(mapProj, 'dist/assets'));
+    const pageScripts = [...mapPages[''].matchAll(/<(?:script|link)[^>]*(?:src|href)="\.?\/assets\/([^"]+)"/g)].map((m) => m[1]);
+    check('C8 Q19f: the map\'s module, its stylesheet and its worker are build files of their own — none of them loaded by the page itself',
+      assets.some((f) => /^chat-map-gl-.*\.js$/.test(f)) && assets.some((f) => /^chat-map-gl-.*\.css$/.test(f)) && assets.some((f) => /^maplibre-gl-worker-.*\.mjs$/.test(f))
+        && pageScripts.length > 0 && pageScripts.every((f) => !/chat-map-gl|maplibre/.test(f)),
+      `${assets.filter((f) => /map/.test(f)).join(' ')} | page: ${pageScripts.join(' ')}`);
+    check('C8: the map runtime ships verbatim with a chat that shows maps, and with no other site',
+      MAP_RUNTIME_FILES.every((f) => readFileSync(join(mapProj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8'))
+        && MAP_RUNTIME_FILES.every((f) => !existsSync(join(chatProj, 'src/az', f)) && !existsSync(join(plainProj, 'src/az', f))));
 
     // C3 (§3.1, §3.2): a float under site ships on every page — its launcher
     // hidden until the runtime runs, its dialog closed, asking from that page —

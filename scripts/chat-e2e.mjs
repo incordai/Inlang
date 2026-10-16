@@ -108,6 +108,28 @@
  * drawn as text, dropped and absent; a reload restores the explore at its
  * written values; a shared explore works signed out with no send form; axe
  * in every state; and neither the question nor its mark in the server's log.
+ *
+ * C8 (§21.4.6): the server is started with this run's tile archive, glyphs
+ * and sprites (scripts/lib/map-fixture.mjs, made here, a few kilobytes) and a
+ * loopback geocoder. On /places, in Chromium (software WebGL), Firefox and
+ * WebKit: a model's map draws from the fixture's tiles, read from the backend
+ * by HTTP Range (206) — its worker started from a blob: URL — labelled
+ * "Approximate, AI-placed", a pin with seven decimals and one off the globe
+ * gone, a label of markup text in the list and in its popup; its list names
+ * each place's coordinates in words and the route's stops; the stage is an
+ * image named by its summary, said once; az's own buttons and the + − and
+ * arrow keys move it, the zoom buttons saying when they are at a limit, and
+ * at once under reduced motion; a table's map carries the site's source line
+ * and only its matching rows; a place the geocoder found is "Approximate
+ * location" and one it did not is gone; a shared map draws signed out on
+ * the shared page; without WebGL2 the list is the whole
+ * map, said once, and no map code loads; a theme switch repaints the map
+ * (read in a context of its own whose policy is bypassed — WebKit's
+ * screenshot injects a stylesheet a policy refuses); axe in each state; every
+ * request of the page and its worker to the site or the backend, no
+ * violation in the page or the worker; a chat page that shows no maps loads
+ * no map code at all; and neither a place, a label nor an address in the
+ * server's log.
  */
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
@@ -129,6 +151,8 @@ import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 import { selfSignedCert } from './lib/self-signed.mjs';
 import { chunksOf, corpusCases, corpusRules } from '../packages/backend/test/chat-corpus.ts';
+import { mapFixture } from './lib/map-fixture.mjs';
+import sharp from 'sharp';
 import { THEMES, DEFAULT_THEME } from '../packages/theme/src/index.ts';
 
 /*
@@ -280,6 +304,34 @@ const C7_ATTACK = [
   'That is all.',
 ].join('\n');
 
+/** C8 (§21.4): a mark in a pin's label and in an address — never in the server's log; the geocoder's one known address. */
+const C8_MARK = `c8-mark-${randomBytes(4).toString('hex')}`;
+const C8_LABEL = `<b>${C8_MARK}</b>`;
+const C8_ADDRESS = 'Alexanderplatz, Berlin';
+const C8_FOUND = { lat: '52.521918', lon: '13.413215' };
+const C8_MODEL = [
+  'Here they are.',
+  'map "Where to find us"',
+  '  pin "Workshop" 52.520008 13.404954',
+  `  pin "${C8_LABEL}" 52.5163 13.3777`,
+  '  pin "Too precise" 52.5200081 13.404954',
+  '  pin "Off the globe" 91 13.4',
+  '  route "Walk"',
+  '    point 52.520008 13.404954',
+  '    point 52.5163 13.3777',
+].join('\n');
+const C8_TABLE = ['Our stores.', 'map "Our stores" from stores label name lat latitude lon longitude where open yes'].join('\n');
+const C8_PLACE = ['Found it.', 'map "The venue"', `  place "Main hall" "${C8_ADDRESS}"`, `  place "Nowhere" "No such street ${C8_MARK}"`].join('\n');
+/** The map data's line under every map, as the operator writes it in .env. */
+const C8_ATTRIBUTION = 'Map data: the test fixture';
+/** The stores the table map reads (admins write them, like the guides): one closed, one with no place; millionths of a degree. */
+const STORES = [
+  { name: 'North store', latitude: 52_530_000, longitude: 13_410_000, open: 1 },
+  { name: 'South store', latitude: 52_490_000, longitude: 13_390_000, open: 1 },
+  { name: 'Closed store', latitude: 52_500_000, longitude: 13_400_000, open: 0 },
+  { name: 'Placeless store', latitude: null, longitude: null, open: 1 },
+];
+
 const SITE = `az 1
 
 site lantern
@@ -375,6 +427,19 @@ page /figures
     limit    50
 `;
 
+/** C8's page (§21.4): a chat that shows maps, beside the site's others that do not. */
+const PLACES = `
+page /places
+  hero center
+    title "Places"
+  chat panel
+    title    "Ask about places"
+    greeting "Ask me where things are."
+    show     map
+    allow    anyone
+    limit    50
+`;
+
 /** The public table the server counts (chat-block-spec §20.5): a private note it must never read. */
 const DATA = `
   data guides
@@ -390,6 +455,12 @@ const DATA = `
     note     text     private
     allow anyone read
     allow anyone create
+  data stores
+    name      text   required
+    latitude  number
+    longitude number
+    open      flag
+    allow anyone read
 `;
 /** C3 (§3.1, §8.2): the float every page without a chat of its own shows, grounded on the guides table. */
 const FLOAT = `
@@ -487,6 +558,9 @@ const FAKE = {
     { when: 'c7-sources', chunks: chunksOf(C7_SOURCES), delayMs: 5 },
     { when: 'c7-attack', chunks: chunksOf(C7_ATTACK), delayMs: 1 },
     { when: C7_MARK, chunks: ['The explore question was answered.'], delayMs: 5 },
+    { when: 'c8-model', chunks: chunksOf(C8_MODEL), delayMs: 5 },
+    { when: 'c8-table', chunks: chunksOf(C8_TABLE), delayMs: 5 },
+    { when: 'c8-place', chunks: chunksOf(C8_PLACE), delayMs: 5 },
     { when: 'tab-quick', chunks: ['Quick ', 'tab ', 'answer.'], delayMs: 150 },
     { when: 'tab-slow', chunks: ['Slow ', 'tab ', 'answer.'], delayMs: 900 },
     { when: 'bulky', chunks: chunksOf(LIMITS_BULK), delayMs: 1 },
@@ -549,7 +623,8 @@ function startSite(root) {
       if (!file.startsWith(root + sep)) break;
       try {
         const body = await readFile(file);
-        const type = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }[extname(file)] ?? 'application/octet-stream';
+        // A map site ships the library's worker as an .mjs file: a module script must be served as JavaScript.
+        const type = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css' }[extname(file)] ?? 'application/octet-stream';
         res.writeHead(200, { 'content-type': type }).end(body);
         return;
       } catch { /* next candidate */ }
@@ -615,6 +690,22 @@ function startModeration() {
     done({ url: `http://127.0.0.1:${server.address().port}/check`, seen, close: () => server.close() })));
 }
 
+/**
+ * The operator's geocoder (§21.4.2) on loopback: GET ?q=<address> answers
+ * the first result's numbers as strings for the one known address, and an
+ * empty list for any other. `seen` holds each address it was asked.
+ */
+function startGeocoder() {
+  const seen = [];
+  const server = createHttpServer((req, res) => {
+    const q = new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '';
+    seen.push(q);
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(q === C8_ADDRESS ? [{ ...C8_FOUND, name: 'ignored' }] : []));
+  });
+  return new Promise((done) => server.listen(0, '127.0.0.1', () =>
+    done({ url: `http://127.0.0.1:${server.address().port}/search`, seen, close: () => server.close() })));
+}
+
 /** The site's admins (data-spec §11), one per engine: their accounts are made, then verified, in adminFlow. */
 const ENGINES = ['chromium', 'firefox', 'webkit'];
 const adminEmail = (engine) => `admin-${engine}@lantern.test`;
@@ -640,7 +731,7 @@ const serverPort = await freePort();
 const proxy = await startTlsProxy(serverPort);
 process.env.AZ_PUBLIC_BACKEND_URL = proxy.url;
 // A site with tables builds with its schema lock, written by the real `az backend schema` (data-spec §6).
-const SOURCE = `${SITE.replace('    model    default\n', `    model    default\n${DATA}${FLOAT}`)}${FIGURES}`;
+const SOURCE = `${SITE.replace('    model    default\n', `    model    default\n${DATA}${FLOAT}`)}${FIGURES}${PLACES}`;
 const ASSETS = join(ROOT, 'packages/words/gallery/preview-assets');
 const site = { dir: join(work, 'lantern'), source: SOURCE, assetsFrom: ASSETS };
 /*
@@ -668,6 +759,21 @@ if (!site.dist || !themed.every((s) => s.dist)) {
 const smtp = await startSmtpSink();
 const moderation = await startModeration();
 const tools = await startTools();
+const geocoder = await startGeocoder();
+// C8 (§21.4): this run's tile archive, a glyph range per font and the sprites — made here, a few kilobytes.
+const fixture = mapFixture();
+const mapDir = join(work, 'map');
+mkdirSync(join(mapDir, 'sprites'), { recursive: true });
+writeFileSync(join(mapDir, 'world.pmtiles'), fixture.archive);
+for (const g of fixture.glyphs) {
+  mkdirSync(join(mapDir, 'glyphs', g.font), { recursive: true });
+  writeFileSync(join(mapDir, 'glyphs', g.font, `${g.range}.pbf`), g.bytes);
+}
+for (const n of ['light', 'dark']) {
+  writeFileSync(join(mapDir, 'sprites', `${n}.json`), fixture.sprite.json);
+  writeFileSync(join(mapDir, 'sprites', `${n}@2x.json`), fixture.sprite.json2x);
+  for (const r of ['', '@2x']) writeFileSync(join(mapDir, 'sprites', `${n}${r}.png`), fixture.sprite.png);
+}
 // The server trusts this run's certificate for the https tool, as a deployment trusts a real one.
 const toolCa = join(work, 'tool-ca.pem');
 writeFileSync(toolCa, tls.cert);
@@ -711,6 +817,9 @@ const child = spawn(process.execPath, ['src/main.ts'], {
     AZ_CHAT_TOOL_BROKEN_URL: `${tools.https}/broken`, AZ_CHAT_TOOL_BROKEN_FIELDS: JSON.stringify({ driver: 'text', points: 'number' }),
     AZ_CHAT_TOOL_BROKEN_LABEL: 'Broken service',
     AZ_ADMIN_EMAILS: ENGINES.map(adminEmail).join(','),
+    // C8 (§21.4.3): the maps' tiles, glyphs and sprites from this server, and the operator's geocoder.
+    AZ_MAP_WORLD: join(mapDir, 'world.pmtiles'), AZ_MAP_GLYPHS: join(mapDir, 'glyphs'), AZ_MAP_SPRITES: join(mapDir, 'sprites'),
+    AZ_MAP_ATTRIBUTION: C8_ATTRIBUTION, AZ_GEOCODER_URL: geocoder.url,
     // Three engines ask the whole corpus: room for it under the per-address limit and the day's budget.
     AZ_CHAT_PER_ADDRESS: '500/hour', AZ_CHAT_DAILY_TOKENS: '100000000',
   },
@@ -729,7 +838,7 @@ const up = await new Promise((done) => {
 check('the generated server starts with the fake model adapter', up, serverLog.trim().split('\n').slice(0, 4).join(' / '));
 if (!up) {
   child.kill('SIGTERM');
-  proxy.close(); smtp.close(); moderation.close(); tools.close();
+  proxy.close(); smtp.close(); moderation.close(); tools.close(); geocoder.close();
   for (const h of themeHosts) h.close();
   console.log(`\n1 CHECK(S) FAILED — work dir kept: ${work}`);
   run.clear();
@@ -742,6 +851,9 @@ if (!up) {
   try {
     const insert = db.prepare('INSERT INTO azd_guides (id, owner, created, updated, title, body, secret) VALUES (?, NULL, ?, ?, ?, ?, ?)');
     GUIDES.forEach((g, i) => insert.run(`00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, i + 1, i + 1, g.title, g.body, GUIDE_SECRET));
+    // C8: the stores a table map reads — the site's own rows, no visitor writes them.
+    const store = db.prepare('INSERT INTO azd_stores (id, owner, created, updated, name, latitude, longitude, open) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)');
+    STORES.forEach((s, i) => store.run(`00000000-0000-4000-9000-${String(i + 1).padStart(12, '0')}`, i + 1, i + 1, s.name, s.latitude, s.longitude, s.open));
   } finally { db.close(); }
 }
 
@@ -1236,10 +1348,10 @@ const settled = (page) => page.waitForFunction(() => {
   return d?.getAttribute('data-state') === 'open' && d.getAnimations({ subtree: true }).every((a) => a.playState !== 'running');
 }, null, { timeout: STATE_MS });
 /** Press Tab until `locator` has focus, at most `max` times. */
-async function tabTo(page, locator, max = 60) {
+async function tabTo(page, locator, max = 60, key = 'Tab') {
   for (let i = 0; i < max; i++) {
     if (await isFocused(locator)) return true;
-    await page.keyboard.press('Tab');
+    await page.keyboard.press(key);
   }
   return isFocused(locator);
 }
@@ -2141,6 +2253,275 @@ async function c7Flow(b, name, origins) {
 /* ---- C4: the moderation hook and the operator's usage view ------------ */
 
 /** A question the hook blocks (§6.8): fixed copy, no answer, the model never asked — and the chat goes on. */
+/* ---- C8 (§21.4.6): maps ------------------------------------------------- */
+
+/** The n-th map of the last answer as the page shows it — its state, words, list, buttons and stage. */
+const mapState = (page, n) => page.evaluate((i) => {
+  const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
+  const m = items[items.length - 1]?.querySelectorAll('figure.az-chat-map')[i];
+  if (!m) return null;
+  const slot = (name) => m.querySelector(`[data-az-chat-slot="${name}"]`);
+  const shown = (el) => !!el && !el.hidden && el.getClientRects().length > 0;
+  const stage = slot('stage');
+  const list = slot('list');
+  return {
+    state: m.getAttribute('data-az-chat-map'),
+    title: slot('title')?.textContent ?? '',
+    labelled: m.getAttribute('aria-labelledby') === slot('title')?.id,
+    label: shown(slot('label')) ? slot('label').textContent : null,
+    source: shown(slot('source')) ? slot('source').textContent : null,
+    stage: stage ? { role: stage.getAttribute('role'), name: stage.getAttribute('aria-label'), canvas: !!stage.querySelector('canvas'), focus: stage.tabIndex } : null,
+    attribution: shown(slot('attribution')) ? slot('attribution').textContent : null,
+    note: shown(slot('note')) ? slot('note').textContent : null,
+    open: list?.open ?? false,
+    pins: [...m.querySelectorAll('.az-chat-map-pin')].map((li) => [
+      li.querySelector('[data-az-chat-slot="pin-label"]')?.textContent ?? '', li.querySelector('[data-az-chat-slot="pin-where"]')?.textContent ?? '',
+      li.querySelector('[data-az-chat-slot="pin-src"]')?.textContent ?? null, !!li.querySelector('[data-az-chat-slot="pin-show"]'),
+    ]),
+    stops: [...m.querySelectorAll('.az-chat-map-route')].map((r) => [r.querySelector('[data-az-chat-slot="route-title"]')?.textContent ?? '', [...r.querySelectorAll('li')].map((li) => li.textContent)]),
+    buttons: [...m.querySelectorAll('.az-chat-map-controls button')].map((b) => [b.textContent, b.disabled, b.getAttribute('aria-disabled')]),
+    // What a label's markup would have made, had it been parsed: none.
+    injected: m.querySelectorAll('img, script, b, iframe, a').length,
+    popup: (() => { const p = m.querySelector('.maplibregl-popup'); return p ? { text: p.innerText.trim(), els: [...p.querySelectorAll('.az-chat-map-popup *')].map((e) => e.tagName.toLowerCase()) } : null; })(),
+  };
+}, n);
+
+/** Wait until the n-th map of the last answer is past `loading`; its state. */
+async function mapSettled(page, n, label) {
+  const ok = await page.waitForFunction((i) => {
+    const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
+    const s = items[items.length - 1]?.querySelectorAll('figure.az-chat-map')[i]?.getAttribute('data-az-chat-map');
+    return s === 'ready' || s === 'list';
+  }, n, { timeout: STATE_MS * 2 }).then(() => true, () => false);
+  if (!ok) throw new Error(`${label}: the map never settled: ${JSON.stringify(await mapState(page, n))}`);
+  return mapState(page, n);
+}
+
+/** A map stage's pixels, as a PNG (a context whose policy is bypassed: WebKit's screenshot injects a stylesheet). */
+const stageShot = (page) => page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="stage"]').last().screenshot({ caret: 'initial' });
+/** The mean luminance of a PNG, 0–255. */
+async function luminance(png) {
+  const { channels } = await sharp(png).stats();
+  const [r, g, b] = channels;
+  return 0.2126 * r.mean + 0.7152 * g.mean + 0.0722 * b.mean;
+}
+/** Two settled frames apart: the map has drawn what the last change asked (bounded by STATE_MS). */
+async function frames(page, until) {
+  const end = Date.now() + STATE_MS;
+  let last = null;
+  while (Date.now() < end) {
+    await page.waitForFunction(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))), null, { timeout: STATE_MS });
+    const shot = await stageShot(page);
+    if (await until(shot, last)) return shot;
+    last = shot;
+  }
+  throw new Error('the map never drew the expected change');
+}
+
+/** A request the map's code makes: its module, its stylesheet, its worker, its tiles. */
+const MAP_CODE = /chat-map-gl|maplibre|\/tiles\//;
+
+async function c8Flow(b, name, origins) {
+  const ctx = await watchedContext(b, csp, CONTEXT);
+  try {
+    const page = await ctx.newPage();
+    recordRequests(page, origins);
+    // The context's requests, a worker's too (a page's own listener may not see a worker's), and the workers it starts.
+    const all = [];
+    ctx.on('request', (r) => { if (!r.url().startsWith('data:')) all.push(r.url()); });
+    const workers = [];
+    page.on('worker', (w) => workers.push(w.url()));
+    const ranges = [];
+    ctx.on('response', (r) => { if (/\/tiles\/world\.pmtiles$/.test(new URL(r.url()).pathname)) ranges.push([r.request().headers().range ?? '', r.status()]); });
+    page.on('dialog', (d) => { check(`${name}: no dialog ever opens (C8)`, false, d.message()); void d.dismiss(); });
+    // Why a map is its list, when it is (chat-map-draw.ts says so on the console): shown with the check that fails.
+    const warned = [];
+    page.on('console', (msg) => { if (msg.type() === 'warning' || msg.type() === 'error') warned.push(msg.text().slice(0, 200)); });
+
+    // A chat page that shows no maps: the map's code never loads there, answered or not.
+    await page.goto(`${host.url}/ask`);
+    await ready(page);
+    await ask(page, 'A plain question for the plain page?');
+    check(`${name}: a chat page that shows no maps loads no map code — no module, stylesheet, worker or tile`,
+      !all.some((u) => MAP_CODE.test(u)) && workers.length === 0, all.filter((u) => MAP_CODE.test(u)).slice(0, 3).join(' '));
+
+    // The model's map.
+    const start = all.length;
+    await page.goto(`${host.url}/places`);
+    await ready(page);
+    check(`${name}: a map page loads no map code before a map arrives (the module comes with the first map)`, !all.slice(start).some((u) => MAP_CODE.test(u)),
+      all.slice(start).filter((u) => MAP_CODE.test(u)).join(' '));
+    await axe(page, `${name} map idle`);
+    const said = await announcements(page, () => ask(page, 'c8-model please'));
+    const m = await mapSettled(page, 0, `${name} model map`);
+    check(`${name}: the model's map draws from the fixture's tiles: a stage that is an image named by its summary, holding the map's canvas`,
+      m.state === 'ready' && m.stage?.role === 'img' && m.stage.name === 'Map: Where to find us, 2 places, 1 route.' && m.stage.canvas && m.labelled,
+      `${JSON.stringify(m)} ${warned.join(' | ')}`);
+    check(`${name}: its pins are labelled "Approximate, AI-placed" — the model's own numbers — and its data's attribution is under it`,
+      m.label === 'Approximate, AI-placed' && m.source === null && m.attribution === C8_ATTRIBUTION, JSON.stringify([m.label, m.source, m.attribution]));
+    check(`${name}: a pin with seven decimals and one off the globe are gone; the list says each place's coordinates in words, and the route's stops`,
+      JSON.stringify(m.pins) === JSON.stringify([
+        ['Workshop', '52.520008 degrees north, 13.404954 degrees east', 'Approximate, AI-placed', true],
+        [C8_LABEL, '52.5163 degrees north, 13.3777 degrees east', 'Approximate, AI-placed', true],
+      ]) && JSON.stringify(m.stops) === JSON.stringify([['Walk', ['Stop 1: 52.520008 degrees north, 13.404954 degrees east', 'Stop 2: 52.5163 degrees north, 13.3777 degrees east']]])
+      && m.injected === 0 && !m.open, JSON.stringify([m.pins, m.stops, m.injected]));
+    check(`${name}: the status region names the map once`, said.filter((s) => s.includes('Map: Where to find us, 2 places, 1 route.')).length === 1, JSON.stringify(said));
+    const blobbed = workers.length > 0 && workers.every((u) => u.startsWith('blob:'));
+    check(`${name}: the map's worker was started from a blob: URL, never from the worker file's own URL`, blobbed, JSON.stringify(workers));
+    check(`${name}: the tiles came from the backend's archive by HTTP Range, each answered 206`,
+      ranges.length > 0 && ranges.every(([range, status]) => /^bytes=\d+-\d+$/.test(range) && status === 206), JSON.stringify(ranges.slice(0, 4)));
+    const elsewhere = all.filter((u) => !u.startsWith('blob:') && new URL(u).origin !== host.url && new URL(u).origin !== backendOrigin);
+    check(`${name}: every request of the map page and its worker went to the site or its backend`, elsewhere.length === 0, elsewhere.slice(0, 3).join(' '));
+    await axe(page, `${name} map drawn`);
+
+    // A popup is the word's own element, its label text — markup in it stays text. Its button is in the list, opened first.
+    await page.locator('[data-az-chat-transcript] figure.az-chat-map .az-chat-map-summary').first().click();
+    await page.locator('[data-az-chat-transcript] figure.az-chat-map .az-chat-map-show').nth(1).click();
+    await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map .maplibregl-popup') !== null, null, { timeout: STATE_MS });
+    const popped = await mapState(page, 0);
+    check(`${name}: a place's popup is its label and its source as text — the label's markup made no element`,
+      popped.popup?.text === `${C8_LABEL}\nApproximate, AI-placed` && JSON.stringify(popped.popup.els) === JSON.stringify(['strong', 'span']) && popped.injected === 0,
+      JSON.stringify(popped.popup));
+
+    // az's own buttons and keys (§21.4.5): the view opens at its deepest zoom — Zoom in says so — and + − move it.
+    const stage = page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="stage"]').first();
+    const zoomIn = () => page.evaluate(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled'));
+    const zoomOut = () => page.evaluate(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-out"]')?.getAttribute('aria-disabled'));
+    check(`${name}: the map opens fitted to its places at its deepest zoom: Zoom in is at its limit, Zoom out is not`,
+      (await zoomIn()) === 'true' && (await zoomOut()) === 'false', JSON.stringify([await zoomIn(), await zoomOut()]));
+    // The map sits above the question input, which holds focus after asking: Shift+Tab goes back to it (Firefox's Tab does not wrap past the page's end).
+    const reached = await tabTo(page, stage, 60, 'Shift+Tab');
+    await page.keyboard.press('-');
+    const out = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'false', null, { timeout: STATE_MS }).then(() => true, () => false);
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('+');
+    const back = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'true', null, { timeout: STATE_MS }).then(() => true, () => false);
+    check(`${name}: the keyboard reaches the map (Shift+Tab from the input above which it sits); − zooms out, the arrows pan and + zooms back in, the buttons following`, reached && out && back,
+      JSON.stringify({ reached, out, back, zoomIn: await zoomIn(), zoomOut: await zoomOut(), focused: await page.evaluate(() => `${document.activeElement?.tagName} ${document.activeElement?.className}`) }));
+    const zoomOutButton = page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-out"]').first();
+    // WebKit's default keyboard setting leaves buttons out of Tab (the browser's choice): there the button must be a real one in the Tab order, focused directly.
+    const tabbed = name === 'webkit'
+      ? await zoomOutButton.evaluate((el) => el.tagName === 'BUTTON' && el.tabIndex === 0) && (await zoomOutButton.focus(), true)
+      : await tabTo(page, zoomOutButton);
+    await page.keyboard.press('Enter');
+    const viaButton = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'false', null, { timeout: STATE_MS }).then(() => true, () => false);
+    await page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="reset"]').first().click();
+    const reset = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'true', null, { timeout: STATE_MS }).then(() => true, () => false);
+    check(`${name}: Zoom out by keyboard zooms out, and Reset view fits the places again`, tabbed && viaButton && reset, JSON.stringify({ tabbed, viaButton, reset }));
+    await axe(page, `${name} map moved`);
+
+    // A table's map: the site's own rows, the matching ones only, under the site's source line — no AI label.
+    await ask(page, 'c8-table please');
+    const t = await mapSettled(page, 0, `${name} table map`);
+    check(`${name}: a table's map shows its open stores with coordinates — the closed one and the placeless one are not pins`,
+      JSON.stringify(t.pins.map((p) => p[0]).sort()) === JSON.stringify(['North store', 'South store']) && t.pins.every((p) => p[2] === null), JSON.stringify(t.pins));
+    check(`${name}: a table's map carries the site's source line and no AI label`, t.label === null && /^From the site’s data · /.test(t.source ?? ''), JSON.stringify([t.label, t.source]));
+
+    // A place the operator's geocoder found is "Approximate location"; one it did not is gone.
+    await ask(page, 'c8-place please');
+    const g = await mapSettled(page, 0, `${name} place map`);
+    check(`${name}: a place the geocoder found is a pin labelled "Approximate location"; the one it did not find is gone`,
+      JSON.stringify(g.pins) === JSON.stringify([['Main hall', '52.521918 degrees north, 13.413215 degrees east', 'Approximate location', true]]) && g.label === 'Approximate location',
+      JSON.stringify([g.pins, g.label]));
+    // A shared map (§20.7): the link opens signed out on the shared page, whose policy is the map page's, and draws the map there.
+    const answers = page.locator('[data-az-chat-transcript] > .az-chat-message--site');
+    await answers.nth(1).getByRole('button', { name: 'Share this answer' }).click();
+    await answers.nth(1).getByRole('button', { name: 'Create link' }).click();
+    const link = answers.nth(1).locator('[data-az-chat-slot="url"]');
+    await link.waitFor({ state: 'visible', timeout: STATE_MS });
+    const sharedUrl = await link.inputValue();
+    const outside = await watchedContext(b, csp, CONTEXT);
+    try {
+      const view = await outside.newPage();
+      recordRequests(view, origins);
+      const seen = [];
+      outside.on('request', (r) => { if (!r.url().startsWith('data:')) seen.push(r.url()); });
+      const sharedWorkers = [];
+      view.on('worker', (w) => sharedWorkers.push(w.url()));
+      await view.goto(sharedUrl);
+      const drawn = await view.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map')?.getAttribute('data-az-chat-map') === 'ready', null, { timeout: STATE_MS * 2 })
+        .then(() => true, () => false);
+      const label = await view.evaluate(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="label"]')?.textContent ?? null);
+      check(`${name}: a shared map draws signed out on the shared page, still labelled AI-placed, its worker from blob:, every request to the site or the backend`,
+        drawn && label === 'Approximate, AI-placed' && sharedWorkers.length > 0 && sharedWorkers.every((u) => u.startsWith('blob:'))
+          && seen.every((u) => u.startsWith('blob:') || new URL(u).origin === host.url || new URL(u).origin === backendOrigin),
+        JSON.stringify({ drawn, label, sharedWorkers: sharedWorkers.length, other: seen.filter((u) => !u.startsWith('blob:') && ![host.url, backendOrigin].includes(new URL(u).origin)) }));
+      await axe(view, `${name} shared map`);
+    } finally {
+      closed = (await closeWithin(outside, CLOSE_MS, `${name} c8 shared context close`)) && closed;
+    }
+    check(`${name}: still no request anywhere but the site and the backend`,
+      all.filter((u) => !u.startsWith('blob:') && new URL(u).origin !== host.url && new URL(u).origin !== backendOrigin).length === 0);
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} c8 close`)) && closed;
+  }
+
+  // Reduced motion: a camera move is a jump — the zoom buttons follow at once, with no frame to wait for.
+  const still = await watchedContext(b, csp, { ...CONTEXT, reducedMotion: 'reduce' });
+  try {
+    const page = await still.newPage();
+    recordRequests(page, origins);
+    await page.goto(`${host.url}/places`);
+    await ready(page);
+    await ask(page, 'c8-model please');
+    await mapSettled(page, 0, `${name} reduced-motion map`);
+    const stage = page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="stage"]').first();
+    await stage.focus();
+    await stage.press('-');
+    const at = await page.evaluate(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled'));
+    check(`${name}: under reduced motion − zooms out at once: the move ended before the next look`, at === 'false', String(at));
+  } finally {
+    closed = (await closeWithin(still, CLOSE_MS, `${name} c8 reduced close`)) && closed;
+  }
+
+  // Without WebGL2 the list is the whole map — said once — and the map's code never loads.
+  const flat = await watchedContext(b, csp, CONTEXT);
+  try {
+    await flat.addInitScript(() => {
+      const get = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function getContext(type, ...rest) { return type === 'webgl2' ? null : get.call(this, type, ...rest); };
+    });
+    const page = await flat.newPage();
+    recordRequests(page, origins);
+    const made = [];
+    page.on('request', (r) => made.push(r.url()));
+    await page.goto(`${host.url}/places`);
+    await ready(page);
+    const said = await announcements(page, () => ask(page, 'c8-model please'));
+    const l = await mapSettled(page, 0, `${name} flat map`);
+    check(`${name}: without WebGL2 the map is its list: open, with its note, no stage, no buttons, no attribution — and no "Show on the map"`,
+      l.state === 'list' && l.open && l.note === 'The map cannot be drawn here, so its places are listed.' && l.stage === null && l.buttons.length === 0
+      && l.attribution === null && l.pins.length === 2 && l.pins.every((p) => !p[3]), JSON.stringify(l));
+    check(`${name}: the status region hears the list once`, said.filter((s) => s.includes('Map: Where to find us, 2 places, shown as a list.')).length === 1, JSON.stringify(said));
+    check(`${name}: without WebGL2 no map code loads`, !made.some((u) => MAP_CODE.test(u)), made.filter((u) => MAP_CODE.test(u)).join(' '));
+    await axe(page, `${name} map as a list`);
+  } finally {
+    closed = (await closeWithin(flat, CLOSE_MS, `${name} c8 flat close`)) && closed;
+  }
+
+  // A theme switch repaints the map: its tokens read again, set as the library's paint (a context whose policy is bypassed, for the pixels).
+  const pixels = await b.newContext({ ...CONTEXT, bypassCSP: true, colorScheme: 'light' });
+  try {
+    const page = await pixels.newPage();
+    await page.goto(`${host.url}/places`);
+    await ready(page);
+    await ask(page, 'c8-model please');
+    await mapSettled(page, 0, `${name} pixel map`);
+    const light = await frames(page, async (shot, last) => last !== null && Buffer.compare(shot, last) === 0);
+    await page.emulateMedia({ colorScheme: 'dark' });
+    // Changed, then still: the library eases a paint change over a few frames, so the settled picture is the one judged.
+    const dark = await frames(page, async (shot, last) => last !== null && Buffer.compare(shot, light) !== 0 && Buffer.compare(shot, last) === 0);
+    const [lumLight, lumDark] = [await luminance(light), await luminance(dark)];
+    check(`${name}: switching to the dark scheme repaints the map darker, from the page's own tokens`, lumDark < lumLight - 20, `${lumLight.toFixed(1)} → ${lumDark.toFixed(1)}`);
+    await page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="stage"]').first().focus();
+    await page.keyboard.press('ArrowRight');
+    const panned = await frames(page, async (shot) => Buffer.compare(shot, dark) !== 0).then(() => true, () => false);
+    check(`${name}: an arrow key moves the map's picture`, panned);
+  } finally {
+    closed = (await closeWithin(pixels, CLOSE_MS, `${name} c8 pixels close`)) && closed;
+  }
+}
+
 async function moderationFlow(b, name, origins) {
   const ctx = await watchedContext(b, csp, CONTEXT);
   try {
@@ -2353,7 +2734,10 @@ async function snapshotsIn(b, sha) {
 const FLOWS = [
   ['anonymous', anonymousFlow], ['signed-in', signedInFlow], ['components', componentsFlow], ['figures', richFlow],
   ['float', floatFlow], ['moderation', moderationFlow], ['admin', adminFlow], ['c5', c5Flow], ['c6', c6Flow], ['c7', c7Flow], ['limits', limitsFlow],
+  ['c8', c8Flow],
 ];
+/** Chromium draws WebGL in software, the same on every machine (test-3d.mjs): a map needs WebGL2. */
+const GL_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 /** Where an engine's flows stopped: the flow, and the last check that passed before it. */
 const stopped = {};
 /** The engines whose moderation flow ran to its end: the server's block counts are judged on them. */
@@ -2364,7 +2748,7 @@ const waitedFor = (message) => message.split('\n').find((l) => l.includes('waiti
 const errors = [];
 try {
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
-    const b = await engine.launch();
+    const b = await engine.launch(name === 'chromium' ? { args: GL_ARGS } : {});
     let step = `${name} policy control`;
     try {
       const caught = await violationControl(b, `${host.url}/az-policy-control/`, CONTROL_MS);
@@ -2398,7 +2782,14 @@ try {
     && !serverLog.includes('evil.example') && !serverLog.includes(PASSWORD) && !serverLog.includes('lumens') && !serverLog.includes('attack ')
     && !serverLog.includes('private-mark') && !serverLog.includes('Expected next quarter') && !serverLog.includes(GUIDE_SECRET)
     && !serverLog.includes('lifetime warranty') && !serverLog.includes(C5_MARK) && !serverLog.includes('Is there more')
-    && !serverLog.includes(C7_MARK) && !serverLog.includes('Plan cost') && !serverLog.includes('suits a team'));
+    && !serverLog.includes(C7_MARK) && !serverLog.includes('Plan cost') && !serverLog.includes('suits a team')
+    && !serverLog.includes(C8_MARK) && !serverLog.includes('Alexanderplatz') && !serverLog.includes('Workshop') && !serverLog.includes('Where to find us'));
+  // C8 (§21.4.2): each lookup logged as an outcome and a time — found, or none — never the address; each address asked once (a day's cache).
+  check('the server logged the geocoder\'s outcomes only: one found, one none',
+    /chat: geocode found \d+ms/.test(serverLog) && /chat: geocode none \d+ms/.test(serverLog), serverLog.split('\n').filter((l) => l.includes('geocode')).slice(0, 4).join(' / '));
+  check('the geocoder was asked each address once, as q — the cache answered every other engine',
+    geocoder.seen.filter((q) => q === C8_ADDRESS).length === 1 && geocoder.seen.filter((q) => q.startsWith('No such street')).length === 1 && geocoder.seen.length === 2,
+    JSON.stringify(geocoder.seen.map((q) => q.replace(C8_MARK, '<mark>'))));
   check('the server logged the corpus\'s drops as counts and reasons only', /dropped \d+ \([a-z_,]+\)/.test(serverLog));
   // C6 (§21.2.5): each tool's outcome logged as a code; never a parameter, a row's value or the key.
   check('the server logged each tool call by name and outcome: the https tool ok, the slow one timed out, the wrong shape refused',
@@ -2428,6 +2819,7 @@ try {
   smtp.close();
   moderation.close();
   tools.close();
+  geocoder.close();
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED — work dir kept: ${work}`);
