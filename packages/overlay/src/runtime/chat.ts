@@ -1,7 +1,7 @@
 /**
  * @az runtime chat
  * Purpose: runs a `chat` panel: sends a question to the site's backend, reads the answer's event stream, writes it as text.
- * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
+ * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9, §20
  * Exports: attachChat, ChatOptions
  * Edit guide: answers are textContent in copies of the shell's templates, never markup; each shell once (late content via MutationObserver); attachChat() returns full cleanup.
  * Tests: packages/overlay/test/chat.test.ts, scripts/chat-e2e.mjs
@@ -28,15 +28,23 @@
  *   - gives the status region whole sentences, at most one update every
  *     1.5 s, never tokens; the transcript itself is not a live region.
  *
+ * A rich component (chat, table, stats, cards, dashboard — §20) is drawn by
+ * chat-draw.ts into its templates; an answer whose `done` carries share
+ * tags gets the Share control (chat-shared.ts). On the build's
+ * shared-answer page the shell is read-only: it reads one stored answer by
+ * the link's fragment and draws it the same way (runShared).
+ *
  * Touches nothing at import time. The returned cleanup aborts every request
  * and timer, removes every listener and puts each shell back as it shipped.
  * Imports only its siblings.
  */
 
 import {
-  ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, blockCopy, createEventReader, finishedSentences, leftCopy, linkKind,
-  parseChatConfig, problemCopy, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
+  ANSWER_MAX, CHAT_TEXT, RETRYABLE, allowedDestination, blockCopy, blockOf, createEventReader, finishedSentences, leftCopy, linkKind,
+  parseChatConfig, problemCopy, readShareLink, SHARE_TEXT, visitorText, type ChatBlock, type ChatConfig, type ChatTurn,
 } from './chat-logic.ts';
+import { drawRich } from './chat-draw.ts';
+import { shareControl } from './chat-shared.ts';
 
 export interface ChatOptions {
   /** The backend's base URL (AZ_PUBLIC_BACKEND_URL); the panel posts to `<base>/chat`. */
@@ -200,8 +208,22 @@ function partFor(components: HTMLElement | null, key: string, quote: string | nu
  * of the shell's own. Nothing here is markup from the network: values are
  * text, the one URL is a checked destination.
  */
-function drawBlock(doc: Document, p: Parts, config: ChatConfig, block: ChatBlock, suffix: string): { el: HTMLElement; said: string } | null {
+/** Where a drawn component sits and how its chart follows its width (rich components only). */
+interface Place { readonly within: HTMLElement; readonly base: string; readonly observe?: (el: Element, redraw: () => void) => () => void }
+
+function drawBlock(doc: Document, p: Pick<Parts, 'components'>, config: ChatConfig, block: ChatBlock, suffix: string, place: Place): { el: HTMLElement; said: string } | null {
   const shows = (w: string) => (config.show as readonly string[]).includes(w);
+  if (block.kind === 'rich') {
+    // A rich component the page shows (its note is the server's, for any of them); checked and drawn by chat-draw.ts.
+    const shown = block.word === 'unavailable' ? config.show.some((w) => ['chart', 'table', 'stats', 'cards', 'dashboard'].includes(w)) : shows(block.word);
+    if (!shown || !p.components) return null;
+    const made = drawRich({
+      doc, components: p.components, allowed: (to) => allowedDestination(config, to), link: (a, to) => setDestination(a, config, to), backend: place.base,
+      within: place.within, suffix, ...(place.observe ? { observe: place.observe } : {}),
+    }, block.word, block.data);
+    if (made) restore(made.el);
+    return made;
+  }
   if (block.kind === 'quote') {
     const template = shows('pricing') ? partFor(p.components, 'quote', `${block.route}#${block.n}`) : null;
     if (!template) return null;
@@ -267,6 +289,8 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   /** Components drawn so far: each copy's ids get their own suffix. */
   let copies = 0;
   const doc = p.host.ownerDocument;
+  const resizes = observer(doc, signal);
+  const place = (within: HTMLElement): Place => ({ within, base: options.base, observe: resizes });
 
   const setState = (state: string) => p.host.setAttribute('data-az-chat-state', state);
 
@@ -389,6 +413,9 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     // §9: sending keeps focus in the input, wherever the question came from.
     p.input.focus({ preventScroll: true });
     const deadline = setTimeout(() => ac.abort(), ANSWER_DEADLINE_MS);
+    // The answer's position in the messages the server tags it by, and its events as they arrive (§20.7).
+    const index = history.length + 1;
+    const received: Record<string, unknown>[] = [];
     let answer: HTMLElement | null = null;
     let text = '';
     let said = 0;
@@ -431,14 +458,16 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
           if (finished || !current()) break;
           if (e.type === 'text') {
             text += e.s;
+            received.push({ type: 'text', s: e.s });
             if (text.length > ANSWER_MAX) { ac.abort(); break; }
             drawn.text(e.s);
             const s = finishedSentences(text, said);
             said = s.next;
             announce(s.said);
           } else if (e.type === 'block') {
+            received.push({ type: 'block', block: e.raw });
             // A component the shell has no template for, or does not show, is not drawn.
-            const made = drawBlock(doc, p, config, e.block, `c${++copies}`);
+            const made = drawBlock(doc, p, config, e.block, `c${++copies}`, place(answer));
             if (!made) continue;
             // The prose before it is finished: its last words are said first, then the component, once.
             announce(finishedSentences(text, said, true).said);
@@ -450,6 +479,15 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
             // What the server tagged — prose and the components' lines — is what goes back as history.
             history = [...history, { role: 'visitor', text: question }, { role: 'site', text: e.text, tag: e.tag }];
             conversation = e.conversation;
+            // §20.7: the server makes share links — this answer may be kept under one if the visitor asks.
+            const shareTemplate = p.components ? partFor(p.components, 'share')?.firstElementChild as HTMLElement | null : null;
+            if (e.share && shareTemplate && received.length > 0) {
+              const control = shareControl(doc, shareTemplate, {
+                base: options.base, page: config.page, conversation: e.conversation, index, tags: e.share,
+                events: received, question, fetch: send, announce: (t) => announce(t, true), suffix: `s${++copies}`,
+              }, signal);
+              if (control) answer.append(control);
+            }
             pending = null;
             answer.setAttribute('aria-busy', 'false');
             announce(finishedSentences(text, said, true).said || CHAT_TEXT.answered, true);
@@ -565,6 +603,138 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   };
 }
 
+/** One ResizeObserver per shell for its charts: each redraws only when its own width moves (chat-draw.ts). */
+function observer(doc: Document, signal: AbortSignal): ((el: Element, redraw: () => void) => () => void) | undefined {
+  const Observer = doc.defaultView?.ResizeObserver;
+  if (!Observer) return undefined;
+  const redraws = new Map<Element, () => void>();
+  const ro = new Observer((entries) => { for (const e of entries) redraws.get(e.target)?.(); });
+  signal.addEventListener('abort', () => ro.disconnect(), { once: true });
+  return (el, redraw) => {
+    redraws.set(el, redraw);
+    ro.observe(el);
+    return () => { ro.unobserve(el); redraws.delete(el); };
+  };
+}
+
+/**
+ * The shared-answer page (chat-block-spec §20.7): read the link's fragment,
+ * fetch that one answer — no cookie, it is public — and draw it with the
+ * same templates and checks as a live answer. With the delete link's token
+ * it offers Delete. Returns its cleanup.
+ */
+function runShared(host: HTMLElement, config: ChatConfig, options: ChatOptions, signal: AbortSignal): Cleanup | null {
+  const one = <T extends Element>(attr: string): T | null => host.querySelector<T>(`[${attr}]`);
+  const transcript = one<HTMLElement>('data-az-chat-transcript');
+  const templates = one<HTMLElement>('data-az-chat-templates');
+  const note = one<HTMLElement>('data-az-chat-note');
+  const error = one<HTMLElement>('data-az-chat-error');
+  const status = one<HTMLElement>('data-az-chat-status');
+  const del = one<HTMLButtonElement>('data-az-chat-delete');
+  const components = one<HTMLElement>('data-az-chat-parts');
+  const visitorTemplate = templates?.querySelector<HTMLElement>('.az-chat-message--visitor') ?? null;
+  const siteTemplate = templates?.querySelector<HTMLElement>('.az-chat-message--site') ?? null;
+  if (!transcript || !note || !error || !status || !del || !visitorTemplate || !siteTemplate) return null;
+  const send = options.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
+  const doc = host.ownerDocument;
+  const intro = note.textContent ?? '';
+  const resizes = observer(doc, signal);
+  const say = (text: string) => { status.textContent = ''; status.textContent = text; };
+  const problem = (text: string) => {
+    transcript.removeAttribute('aria-busy');
+    error.textContent = text;
+    error.hidden = false;
+    say(text);
+  };
+  const link = readShareLink(doc.location.hash);
+  const base = options.base.replace(/\/+$/, '');
+  const load = async () => {
+    if (!link) { problem(SHARE_TEXT.expired); return; }
+    say(SHARE_TEXT.loading);
+    let res: Response;
+    try {
+      res = await send(`${base}/chat/share/${link.id}`, { credentials: 'omit', signal });
+    } catch {
+      if (!signal.aborted) problem(problemCopy('unavailable'));
+      return;
+    }
+    if (res.status !== 200) { problem(SHARE_TEXT.expired); return; }
+    let body: { events?: unknown; question?: unknown; expires?: unknown };
+    try { body = await res.json() as typeof body; } catch { problem(SHARE_TEXT.expired); return; }
+    if (!Array.isArray(body.events) || typeof body.expires !== 'number') { problem(SHARE_TEXT.expired); return; }
+    if (typeof body.question === 'string' && body.question.length <= 1000) {
+      const q = visitorTemplate.cloneNode(true) as HTMLElement;
+      const para = q.querySelector('p');
+      if (para) para.textContent = body.question;
+      transcript.append(q);
+    }
+    const answer = siteTemplate.cloneNode(true) as HTMLElement;
+    const model = answer.querySelector(':scope > p')?.cloneNode(false) as HTMLElement | undefined;
+    answer.replaceChildren();
+    transcript.append(answer);
+    let piece = '';
+    let nodes: HTMLElement[] = [];
+    const said: string[] = [];
+    let n = 0;
+    for (const raw of body.events.slice(0, 16)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const e = raw as Record<string, unknown>;
+      if (e.type === 'text' && typeof e.s === 'string' && model) {
+        piece += e.s;
+        for (const t of paragraphsOf(piece).slice(nodes.length)) {
+          const copy = model.cloneNode(false) as HTMLElement;
+          copy.textContent = t;
+          answer.append(copy);
+          nodes = [...nodes, copy];
+        }
+        paragraphsOf(piece).forEach((t, i) => { if (nodes[i].textContent !== t) nodes[i].textContent = t; });
+      } else if (e.type === 'block' && e.block && typeof e.block === 'object' && !Array.isArray(e.block)) {
+        const block = blockOf(e.block as Record<string, unknown>);
+        const made = block && drawBlock(doc, { components }, config, block, `shared${++n}`, { within: answer, base: options.base, ...(resizes ? { observe: resizes } : {}) });
+        if (!made) continue;
+        answer.append(made.el);
+        piece = '';
+        nodes = [];
+        said.push(made.said);
+      }
+    }
+    transcript.removeAttribute('aria-busy');
+    const until = new Intl.DateTimeFormat(doc.documentElement.lang || 'en', { dateStyle: 'medium' }).format(new Date(body.expires));
+    note.textContent = `${intro} ${SHARE_TEXT.until(until)}`;
+    say([...said, CHAT_TEXT.answered].filter(Boolean).join(' '));
+    if (link.token) del.hidden = false;
+  };
+  del.addEventListener('click', async () => {
+    if (!link?.token) return;
+    try {
+      const res = await send(`${base}/chat/share/${link.id}`, {
+        method: 'DELETE', credentials: 'omit', signal,
+        headers: { 'content-type': 'application/json', 'x-az-request': '1' },
+        body: JSON.stringify({ token: link.token }),
+      });
+      if (res.status !== 204) { problem(SHARE_TEXT.expired); del.hidden = true; return; }
+      transcript.replaceChildren();
+      del.hidden = true;
+      note.textContent = SHARE_TEXT.deleted;
+      say(SHARE_TEXT.deleted);
+      // The token's job is done: it leaves the address bar and this page's history entry.
+      doc.defaultView?.history.replaceState(null, '', `${doc.location.pathname}`);
+    } catch {
+      if (!signal.aborted) problem(problemCopy('unavailable'));
+    }
+  }, { signal });
+  void load();
+  return () => {
+    transcript.replaceChildren();
+    transcript.setAttribute('aria-busy', 'true');
+    note.textContent = intro;
+    error.textContent = '';
+    error.hidden = true;
+    del.hidden = true;
+    status.textContent = '';
+  };
+}
+
 /**
  * Run every chat panel in `doc`. `options.base` is the backend's URL; the
  * generated src/chat/runtime.tsx passes it and the auth adapter's session.
@@ -577,8 +747,13 @@ export function attachChat(doc: Document, options: ChatOptions): Cleanup {
 
   const wire = (host: HTMLElement) => {
     if (wired.has(host)) return;
-    const parts = partsOf(host);
     const config = parseChatConfig(host.getAttribute('data-az-chat'));
+    if (config?.shared) {
+      const cleanup = runShared(host, config, options, ac.signal);
+      if (cleanup) wired.set(host, cleanup);
+      return;
+    }
+    const parts = partsOf(host);
     if (!parts || !config) return;
     wired.set(host, runShell(parts, config, options, ac.signal));
   };

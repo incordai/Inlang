@@ -15,7 +15,7 @@ import {
 
 const CONFIG = { page: '/pricing', allow: 'signedin', limit: 20, signin: '/login' };
 /** A prose-only shell's config, as parsed: nothing to show, nowhere to link. */
-const PARSED = { ...CONFIG, show: [], to: [] };
+const PARSED = { ...CONFIG, show: [], to: [], shared: false };
 
 test('the config the chat word writes parses; anything else is refused, not guessed at', () => {
   assert.deepEqual(parseChatConfig(JSON.stringify(CONFIG)), PARSED);
@@ -29,6 +29,7 @@ test('the config the chat word writes parses; anything else is refused, not gues
     JSON.stringify({ ...CONFIG, limit: 51 }),
     JSON.stringify({ ...CONFIG, limit: 2.5 }),
     JSON.stringify({ ...CONFIG, signin: 'javascript:alert(1)' }),
+    JSON.stringify({ ...CONFIG, shared: 'yes' }),
   ]) {
     assert.equal(parseChatConfig(bad), null, String(bad));
   }
@@ -41,7 +42,7 @@ const STREAM = 'event: text\ndata: {"s":"Héllo — 🌍 "}\n\n'
 const EXPECTED: ChatEvent[] = [
   { type: 'text', s: 'Héllo — 🌍 ' },
   { type: 'text', s: 'world.\n\nNext' },
-  { type: 'done', tag: 'AbCdEfGhIjKlMnOpQrStUv', left: 19, conversation: 'c0nversation-id-01', text: 'Héllo — 🌍 world.\n\nNext' },
+  { type: 'done', tag: 'AbCdEfGhIjKlMnOpQrStUv', left: 19, conversation: 'c0nversation-id-01', text: 'Héllo — 🌍 world.\n\nNext', share: null },
 ];
 
 const read = (pieces: readonly string[]) => {
@@ -79,7 +80,7 @@ test('CONTROL: an event the server never sends, or one of the wrong shape, is dr
 const SHOWN = { ...CONFIG, show: ['pricing', 'faq', 'cta', 'feature'], to: ['/', '/contact', '/pricing#plans', 'https://docs.example.org/start', 'mailto:help@example.org', 'tel:+15550100'] };
 
 test('a shell that shows components lists them and its destinations; a word, scheme or address outside them refuses the config', () => {
-  assert.deepEqual(parseChatConfig(JSON.stringify(SHOWN)), SHOWN);
+  assert.deepEqual(parseChatConfig(JSON.stringify(SHOWN)), { ...SHOWN, shared: false });
   for (const bad of [
     { ...SHOWN, show: ['auth'] },
     { ...SHOWN, show: ['faq', 'faq'] },
@@ -112,7 +113,8 @@ test('a destination is followed as a route, https, mailto or tel — and allowed
   }
 });
 
-const block = (data: unknown) => read([`event: block\ndata: ${JSON.stringify(data)}\n\n`]);
+/** A block event as read — its checked block; the raw data it carries (for a share, §20.7) is checked in its own test. */
+const block = (data: unknown) => read([`event: block\ndata: ${JSON.stringify(data)}\n\n`]).map((e) => (e.type === 'block' ? { type: e.type, block: e.block } : e));
 
 test('each component event the server sends is read in its closed shape', () => {
   assert.deepEqual(block({ quote: 'pricing', route: '/pricing', n: 0 }), [{ type: 'block', block: { kind: 'quote', route: '/pricing', n: 0 } }]);
@@ -205,12 +207,17 @@ test('every refusal reads as fixed copy — never the server\'s text', () => {
 
 /* ---- §5.4 rule 3: no way from a string to markup or code ---------------- */
 
-const SOURCES = ['chat.ts', 'chat-logic.ts'].map((f) => [f, readFileSync(new URL(`../src/runtime/${f}`, import.meta.url), 'utf8')] as const);
+const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts']
+  .map((f) => [f, readFileSync(new URL(`../src/runtime/${f}`, import.meta.url), 'utf8')] as const);
+/** chat-draw.ts's one image write (§20.6): a row's image, at the backend's own path, checked in the same function. */
+const ROW_IMAGE_FN = /function rowImage\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
 /** Every sink that would parse a string as HTML or run it, write a style, or keep the conversation. */
 const SINKS = [
   /\binnerHTML\b/, /\bouterHTML\b/, /\binsertAdjacentHTML\b/, /\bdocument\.write/, /\beval\s*\(/, /\bnew\s+Function\b/, /\bFunction\s*\(/,
   /\bcreateContextualFragment\b/, /\bDOMParser\b/, /\bsetHTMLUnsafe\b/, /\.style\b/, /setAttribute\(\s*['"](?:style|src|srcset|on|formaction|action)/i,
-  /\blocalStorage\b/, /\bsessionStorage\b/, /\bindexedDB\b/, /\bcreateElement\(\s*['"](?:img|script|iframe|a)['"]/, /\.(?:href|src)\s*=/,
+  /\blocalStorage\b/, /\bsessionStorage\b/, /\bindexedDB\b/, /\bcreateElement\(\s*['"](?:img|script|iframe|a)['"]/,
+  // An assignment to `.href` or `.src` — not a comparison of an event's `src` field (§20.2), which is `===`.
+  /\.(?:href|src)\s*=(?!=)/,
 ];
 
 test('a URL is written in exactly one place: setDestination, right after the allow-list check', () => {
@@ -224,8 +231,18 @@ test('a URL is written in exactly one place: setDestination, right after the all
   assert.equal(/setAttribute\(\s*['"]href/.test(SOURCES.find(([f]) => f === 'chat-logic.ts')![1]), false);
 });
 
+test('a row image is the one image address an answer writes, after the backend-path check in the same function', () => {
+  const [, src] = SOURCES.find(([f]) => f === 'chat-draw.ts')!;
+  const fn = ROW_IMAGE_FN.exec(src)?.[1] ?? '';
+  assert.match(fn, /if \(!template \|\| !ours\(image\.src\) \|\| !set\) return null;[\s\S]*setAttribute\('src', image\.src\)/, 'the write follows the check');
+  const rest = src.replace(ROW_IMAGE_FN, '');
+  assert.equal(/setAttribute\(\s*['"](?:src|srcset|href)/.test(rest), false, 'nowhere else in chat-draw.ts');
+});
+
 test('the chat runtime has no sink: no HTML parsing, no eval, no style or URL written, no storage', () => {
-  for (const [file, src] of SOURCES) {
+  for (const [file, raw] of SOURCES) {
+    // The row-image write is held to its own test above.
+    const src = file === 'chat-draw.ts' ? raw.replace(ROW_IMAGE_FN, '') : raw;
     // Comments may name what the code never does.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     for (const sink of SINKS) assert.equal(sink.test(code), false, `${file} uses ${sink}`);

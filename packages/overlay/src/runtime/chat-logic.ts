@@ -2,7 +2,7 @@
  * @az runtime chat-logic
  * Purpose: the chat runtime's pure rules: the shell's config, the event-stream reader, a visitor's text, finished sentences, fixed copy.
  * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
- * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, parseChatConfig, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, RETRYABLE, CHAT_TEXT, CHAT_WORDS, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
+ * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, parseChatConfig, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
  * Edit guide: no DOM here; every event is checked against its closed shape and an unknown one is dropped, never guessed at.
  * Tests: packages/overlay/test/chat.test.ts
  */
@@ -27,10 +27,15 @@ export interface ChatConfig {
   readonly show: readonly ChatWord[];
   /** The destinations an answer's call to action may use — the .az file's own (chat-block-spec §6.2). */
   readonly to: readonly string[];
+  /** The build's shared-answer page (§20.7): shows one stored answer, read-only. */
+  readonly shared: boolean;
 }
 
 /** The closed list `show` takes. */
-export const CHAT_WORDS = ['pricing', 'faq', 'cta', 'feature'] as const;
+export const CHAT_WORDS = ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard'] as const;
+
+/** The block keys of the rich components (§20) and their note, drawn by chat-draw.ts after its own checks. */
+export const RICH_BLOCKS: readonly string[] = ['chart', 'table', 'stats', 'cards', 'dashboard', 'unavailable'];
 export type ChatWord = (typeof CHAT_WORDS)[number];
 
 /** One component of an answer, as the server validated it — and as this module validates it again. */
@@ -38,13 +43,17 @@ export type ChatBlock =
   | { readonly kind: 'quote'; readonly route: string; readonly n: number }
   | { readonly kind: 'faq'; readonly items: readonly { readonly q: string; readonly a: string }[] }
   | { readonly kind: 'cta'; readonly label: string; readonly to: string }
-  | { readonly kind: 'feature'; readonly items: readonly { readonly title: string; readonly text: string }[] };
+  | { readonly kind: 'feature'; readonly items: readonly { readonly title: string; readonly text: string }[] }
+  | { readonly kind: 'rich'; readonly word: string; readonly data: unknown };
+
+/** The share tags a finished answer carries when the server makes share links (§20.7). */
+export interface ShareTags { readonly at: number; readonly tag: string; readonly tagq: string }
 
 /** One event of the answer stream; anything else is dropped. */
 export type ChatEvent =
   | { readonly type: 'text'; readonly s: string }
-  | { readonly type: 'block'; readonly block: ChatBlock }
-  | { readonly type: 'done'; readonly tag: string; readonly left: number; readonly conversation: string; readonly text: string }
+  | { readonly type: 'block'; readonly block: ChatBlock; readonly raw: Record<string, unknown> }
+  | { readonly type: 'done'; readonly tag: string; readonly left: number; readonly conversation: string; readonly text: string; readonly share: ShareTags | null }
   | { readonly type: 'error'; readonly code: string };
 
 /**
@@ -148,7 +157,8 @@ export function parseChatConfig(raw: string | null): ChatConfig | null {
   const to = c.to ?? [];
   if (!Array.isArray(show) || !show.every((w) => (CHAT_WORDS as readonly unknown[]).includes(w)) || new Set(show).size !== show.length) return null;
   if (!Array.isArray(to) || !to.every((d) => typeof d === 'string' && linkKind(d) !== null)) return null;
-  return { page: c.page, allow: c.allow, limit: c.limit, signin: c.signin, show: show as ChatWord[], to: to as string[] };
+  if (c.shared !== undefined && c.shared !== true) return null;
+  return { page: c.page, allow: c.allow, limit: c.limit, signin: c.signin, show: show as ChatWord[], to: to as string[], shared: c.shared === true };
 }
 
 /** A string within `max` characters (and at least one when required). */
@@ -185,7 +195,27 @@ function toBlock(d: Record<string, unknown>): ChatBlock | null {
     if (!items(list, ['title', 'text']) || !list.every((i) => text(i.title, L.title) && text(i.text, L.text, false))) return null;
     return { kind: 'feature', items: list.map((i) => ({ title: i.title as string, text: i.text as string })) };
   }
+  // A rich component: one known key; its value is checked whole where it is drawn (chat-chart.ts, chat-figures.ts).
+  const keys = Object.keys(d);
+  if (keys.length === 1 && RICH_BLOCKS.includes(keys[0])) return { kind: 'rich', word: keys[0], data: d[keys[0]] };
   return null;
+}
+
+/** A shared answer's block as stored: the same closed shapes as a stream's (§20.7). */
+export const blockOf = (d: Record<string, unknown>): ChatBlock | null => toBlock(d);
+
+/**
+ * An answer's events as the share tag covers them (server chat-share.ts
+ * mergeText): consecutive text joined, the rest as received, in order.
+ */
+export function mergeText(events: readonly Record<string, unknown>[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const e of events) {
+    const last = out[out.length - 1];
+    if (e.type === 'text' && last?.type === 'text' && typeof e.s === 'string' && typeof last.s === 'string') out[out.length - 1] = { type: 'text', s: last.s + e.s };
+    else out.push(e);
+  }
+  return out;
 }
 
 /** What the status region says for a component: once, as a summary (§9). */
@@ -195,6 +225,7 @@ export function blockCopy(block: ChatBlock, plans = 0): string {
     case 'faq': return block.items.length === 1 ? '1 question and answer.' : `${block.items.length} questions and answers.`;
     case 'cta': return `Link: ${block.label}.`;
     case 'feature': return block.items.length === 1 ? 'A list of 1 item.' : `A list of ${block.items.length} items.`;
+    case 'rich': return '';
   }
 }
 
@@ -221,7 +252,7 @@ function toEvent(name: string, data: string): ChatEvent | null {
   if (name === 'text') return typeof d.s === 'string' ? { type: 'text', s: d.s } : null;
   if (name === 'block') {
     const block = toBlock(d);
-    return block ? { type: 'block', block } : null;
+    return block ? { type: 'block', block, raw: d } : null;
   }
   if (name === 'done') {
     const ok = typeof d.tag === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(d.tag)
@@ -229,7 +260,11 @@ function toEvent(name: string, data: string): ChatEvent | null {
       && typeof d.left === 'number' && Number.isInteger(d.left) && d.left >= 0
       // The answer as it is sent back as history: the server's record, tagged.
       && typeof d.text === 'string' && d.text.length <= BLOCK_LIMITS.record;
-    return ok ? { type: 'done', tag: d.tag as string, left: d.left as number, conversation: d.conversation as string, text: d.text as string } : null;
+    const s = d.share as Record<string, unknown> | undefined;
+    const tag = (v: unknown) => typeof v === 'string' && /^[A-Za-z0-9_-]{43}$/.test(v);
+    const share = s && typeof s === 'object' && Number.isSafeInteger(s.at) && tag(s.tag) && tag(s.tagq)
+      ? { at: s.at as number, tag: s.tag as string, tagq: s.tagq as string } : null;
+    return ok ? { type: 'done', tag: d.tag as string, left: d.left as number, conversation: d.conversation as string, text: d.text as string, share } : null;
   }
   if (name === 'error') return typeof d.code === 'string' && /^[a-z_]{1,40}$/.test(d.code) ? { type: 'error', code: d.code } : null;
   return null;
@@ -320,4 +355,35 @@ export function finishedSentences(text: string, from: number, all = false): { re
   }
   if (end < 0) return { said: '', next: from };
   return { said: text.slice(from, end).trim(), next: end };
+}
+
+/* ---- share links (chat-block-spec §20.7) ---- */
+
+/** The build's shared-answer page (core chat.ts SHARED_ROUTE). */
+export const SHARED_PATH = '/chat/shared';
+
+export const SHARE_TEXT = {
+  made: (until: string) => `This link works until ${until}. Anyone with it can see this answer.`,
+  working: 'Making the link…',
+  expired: 'This link has expired or was deleted.',
+  deleted: 'This shared answer is deleted.',
+  loading: 'Loading the shared answer…',
+  until: (date: string) => `This link works until ${date}.`,
+} as const;
+
+const SHARE_PROBLEMS: Readonly<Record<string, string>> = {
+  rate_limited: 'You have shared a lot — try again later.',
+  shares_full: 'Sharing is full right now — try again later.',
+  disabled: 'Sharing is off on this site.',
+  signin_required: 'Sign in to share.',
+  tampered: 'This answer can no longer be shared — ask again to share a new one.',
+  too_large: 'This answer is too large to share.',
+};
+/** One fixed line per refusal; never server text. */
+export const shareProblem = (code: string): string => (Object.hasOwn(SHARE_PROBLEMS, code) ? SHARE_PROBLEMS[code] : 'The link could not be made — try again.');
+
+/** A share link's id, and the delete token when it is the delete link — or null when the fragment is neither. */
+export function readShareLink(hash: string): { id: string; token: string | null } | null {
+  const m = /^#([A-Za-z0-9_-]{22})(?:&([A-Za-z0-9_-]{43}))?$/.exec(hash);
+  return m ? { id: m[1], token: m[2] ?? null } : null;
 }
