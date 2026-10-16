@@ -1,6 +1,7 @@
 az 1
 
 site aurora
+  description "The bar nav preview with a bottom-sheet mobile menu: Aurora's logo, Work and Studio links, a Products dropdown and a Reserve button."
   nav bar sticky
     mobile  sheet
     logo    ./preview-assets/assets/logo.svg

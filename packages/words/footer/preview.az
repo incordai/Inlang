@@ -1,6 +1,7 @@
 az 1
 
 site aurora
+  description "The minimal footer preview: Aurora's tagline, About and Contact links, a privacy link and the copyright line, under a one-line hero."
   footer minimal
     tagline   "Handmade in the dark."
     link      "About"   /about

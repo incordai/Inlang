@@ -1,6 +1,7 @@
 az 1
 
 site aurora
+  description "The mega footer preview: Aurora's tagline with four link groups (Shop, Studio, Help, Trade), a privacy link and the copyright line."
   footer mega
     tagline   "Handmade in the dark."
     group "Shop"

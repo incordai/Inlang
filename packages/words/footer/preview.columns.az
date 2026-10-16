@@ -1,6 +1,7 @@
 az 1
 
 site aurora
+  description "The columns footer preview: Aurora's tagline beside Shop and Studio link groups, a privacy link and the copyright line."
   footer columns
     tagline   "Handmade in the dark."
     group "Shop"

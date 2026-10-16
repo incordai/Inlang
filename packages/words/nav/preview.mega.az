@@ -1,6 +1,7 @@
 az 1
 
 site aurora
+  description "The mega nav preview: a Shoes group of boots and loafers, a Leather goods group of bags and belts, and a Reserve button."
   nav mega
     group "Shoes"
       link "Boots"   /boots

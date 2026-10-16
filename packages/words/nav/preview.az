@@ -1,6 +1,7 @@
 az 1
 
 site aurora
+  description "The split nav preview: Aurora's logo, Work and Studio links, a Products dropdown of shoes and bags, and a Reserve button."
   nav split sticky solid
     logo    ./preview-assets/assets/logo.svg
     inverse ./preview-assets/assets/logo-w.svg

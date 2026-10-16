@@ -1,6 +1,7 @@
 az 1
 
 site aurora
+  description "The orbit gallery preview: four photographs from Aurora's workshop in 3D: a workbench, a welt being stitched, wooden lasts and a sole."
 
 page /
   hero center
