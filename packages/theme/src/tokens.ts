@@ -205,6 +205,18 @@ export interface ColorTokens {
   readonly accent2?: string;
   readonly 'accent2-hover'?: string;
   readonly 'on-gradient'?: string;
+  /**
+   * Present only on a site whose chat may draw charts (chat-block-spec
+   * §20.4): six categorical colours derived from the theme by series.ts,
+   * each 3:1 on bg, surface and surface-alt. No theme defines them, so every
+   * other site declares exactly what it did before.
+   */
+  readonly 'series-1'?: string;
+  readonly 'series-2'?: string;
+  readonly 'series-3'?: string;
+  readonly 'series-4'?: string;
+  readonly 'series-5'?: string;
+  readonly 'series-6'?: string;
 }
 
 export interface SizeTokens {

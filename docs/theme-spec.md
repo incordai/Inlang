@@ -1792,3 +1792,39 @@ identical bytes, written to `.palette-shots/`.
 
 **Text.** `az palette --list` prints the choices for a terminal; `--json` gives
 each choice with its `.az` line (the shape `az_palette` returns).
+
+---
+
+## 15. Chart series colours (chat C2b)
+
+A chart in a chat answer (chat-block-spec §20.4) needs up to six colours a
+theme never chose: one per series of a bar, line or area chart, one per pie
+slice. They are **derived**, never written, by `packages/theme/src/series.ts`,
+and exist only on a site whose chat shows `chart`, `stats` or `dashboard` —
+the way `accent2` exists only on a pair site (§13.4), so every other site
+declares exactly what it did before.
+
+| Token | Value |
+|---|---|
+| `color.series-1` | the site's `accent` |
+| `color.series-2` | the pair's second hue (`accent2`) when the site names a pair; otherwise derived as below |
+| `color.series-2` … `color.series-6` | each a hue ramp at the first step of the accent picker's order (light 600, 700, 500, 800; dark 400, 300, 500, 200) that holds **3:1 on `bg`, `surface` and `surface-alt`** — WCAG 1.4.11, since marks are graphics; the next is always the hue farthest (OKLCH hue angle) from every colour chosen so far, ties by ramp name |
+
+Two more rules, each a named constant in `series.ts`:
+
+- any two series of one set stay at least **0.06 apart in OKLab**
+  (`SERIES_MIN_DISTANCE`); measured on 2026-10-15, the closest pair over
+  every theme × accent × scheme is 0.064 (`clay`, own accent, light);
+- a theme that cannot meet either floor is **refused** (`SeriesUnavailable`),
+  never drawn under it.
+
+Labels and values on a chart are text in `color.text` and `color.muted`, on
+the pairs §6 already proves; a series colour is never a text colour. Colour
+is never the only signal: series 2–6 also carry a fill pattern, a marker
+shape and a dash (chat-block-spec §20.4).
+
+`packages/theme/test/series.test.ts` proves the rule on every theme × (own
+accent, each accent, each offered pair) × scheme: six colours, each 3:1 on
+every ground (worst measured 3.56:1, `clay` light, teal 600), pairwise ≥ 0.06,
+`series-1` the accent and `series-2` the pair's second hue, deterministic, and
+absent from a theme that did not ask for them.

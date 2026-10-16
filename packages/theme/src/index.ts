@@ -2,7 +2,7 @@
  * @az module theme
  * Purpose: the theme package's public surface.
  * Spec: docs/theme-spec.md
- * Exports: (re-exports tokens, themes, lint, css, colour maths, accents, ramps, patterns and gradients)
+ * Exports: (re-exports tokens, themes, lint, css, colour maths, accents, ramps, patterns, gradients and chart series)
  * Edit guide: add a file here only if words or targets need it.
  * Tests: packages/theme/test/css.test.ts
  */
@@ -17,3 +17,4 @@ export * from './ramps.ts';
 export * from './accent.ts';
 export * from './pattern.ts';
 export * from './gradient.ts';
+export * from './series.ts';
