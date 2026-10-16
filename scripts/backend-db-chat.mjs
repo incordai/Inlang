@@ -399,7 +399,7 @@ export async function chatSuite(engine, db, openAgain, check, url) {
     const second = createUsage(other);
     await Promise.all([
       ...Array.from({ length: 10 }, () => usage.add(fresh, 7, 3, 0, 0)),
-      ...Array.from({ length: 10 }, () => second.add(fresh, 7, 3, 0)),
+      ...Array.from({ length: 10 }, () => second.add(fresh, 7, 3, 0, 0)),
     ]);
     const both = await usage.row(fresh);
     check(`${engine} chat: twenty concurrent answers over two connections are all counted (first row raced too)`,
@@ -413,7 +413,7 @@ export async function chatSuite(engine, db, openAgain, check, url) {
   check(`${engine} chat: the day rolls over at 00:00 UTC into its own row`, (await usage.spent(next)) === 2 && (await usage.spent(day)) === 175);
 
   const now = Date.UTC(2026, 9, 16);
-  await usage.add(utcDay(now - (USAGE_KEEP_DAYS + 3) * DAY), 9, 9, 0);
+  await usage.add(utcDay(now - (USAGE_KEEP_DAYS + 3) * DAY), 9, 9, 0, 0);
   check(`${engine} chat: the sweep removes only days past ${USAGE_KEEP_DAYS}`, (await usage.sweep(now)) === 1 && (await usage.spent(next)) === 2);
 
   await shareChecks(engine, db, check);
