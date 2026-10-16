@@ -2,15 +2,19 @@
   "name": "chat",
   "version": "1.0.0",
   "kind": "block",
-  "description": "A panel where visitors ask the site's AI a question",
+  "description": "A panel or a launcher where visitors ask the site's AI",
   "descriptions": {
     "variants": {
-      "panel": "A section on the page: transcript, suggestions, input"
+      "panel": "A section on the page: transcript, suggestions, input",
+      "float": "A corner button opening the panel (site or page)",
+      "none": "No chat on this page (page level)"
     },
     "modifiers": {}
   },
   "variants": [
-    "panel"
+    "panel",
+    "float",
+    "none"
   ],
   "modifiers": [],
   "props": {
@@ -58,6 +62,10 @@
         "cards": "Up to four cards; images only from this site's galleries or tables",
         "dashboard": "Stats, charts, tables and cards under one title"
       }
+    },
+    "knows": {
+      "type": "list",
+      "description": "Public tables whose rows ground the answers, up to 3"
     }
   },
   "slots": {
@@ -70,6 +78,7 @@
   },
   "requires": {},
   "themeReads": [
+    "breakpoint.sm",
     "color.accent",
     "color.bg",
     "color.border",
@@ -86,8 +95,16 @@
     "color.surface",
     "color.surface-alt",
     "color.text",
+    "layer.dropdown",
+    "layer.modal",
+    "motion.easeIn",
+    "motion.easeOut",
+    "motion.fast",
+    "motion.slow",
+    "radius.lg",
     "radius.md",
     "radius.sm",
+    "shadow.lg",
     "size.gutter-sm",
     "size.measure-body",
     "size.measure-display",
@@ -197,6 +214,17 @@
       "message": "a suggested question is empty — write it, or remove the line",
       "slot": "ask",
       "pattern": "\\S"
+    },
+    {
+      "code": "AZ2229",
+      "kind": "siteRepeats",
+      "severity": "error",
+      "message": "this page already has the site's chat float — remove this one, or write chat none to leave it out here",
+      "when": {
+        "variant": [
+          "float"
+        ]
+      }
     }
   ]
 }

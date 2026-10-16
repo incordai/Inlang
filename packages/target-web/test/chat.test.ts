@@ -76,6 +76,50 @@ test('CONTROL: a site without a chat panel emits exactly what it did before', ()
 
 const file = (p: ReturnType<typeof project>, path: string) => p.files.find((f) => f.path === path)?.content ?? '';
 
+/* ---- C3 (chat-block-spec §3.1): a float under site, on every page --------- */
+
+const FLOATING = `az 1
+site shop
+  auth
+    adapter azbackend
+  backend
+    database sqlite
+    email smtp
+    model default
+  chat float
+    title "Ask Shop"
+    allow anyone
+    show cta
+page /
+  hero center
+    title "Hi"
+page /about
+  hero center
+    title "About"
+page /quiet
+  chat none
+page /help
+  chat panel
+    allow anyone
+page /login
+  auth login
+    alt "Back" /
+`;
+
+test('a site whose only chat is the site\'s float gets the chat module; the launcher is on every page but the one that says none and the one with its own panel', () => {
+  const p = project(FLOATING);
+  assert.equal(p.chat, true, 'the float counts as a chat');
+  assert.ok(p.files.some((f) => f.path === CHAT_FILE));
+  const app = file(p, 'src/App.tsx');
+  // /, /about and /login show the float; /quiet says none; /help has its panel; the shared page its read-only shell.
+  assert.equal((app.match(/data-az-chat-launcher/g) ?? []).length, 3);
+  assert.equal((app.match(/az-chat--panel/g) ?? []).length, 2, '/help and the shared page');
+  for (const route of ['/', '/about', '/login']) assert.ok(app.includes(`\\"page\\":\\"${route}\\"`), `${route} asks from ${route}`);
+  assert.ok(!app.includes('\\"page\\":\\"/quiet\\"'));
+  // The shared page's shell is a panel whatever chat it was made from (a float has nothing to open there).
+  assert.match(app, /\\"shared\\":true/);
+});
+
 test('a chat that shows components gets the shared-answer page: read-only, noindex, its parts every chat\'s', () => {
   const p = project(SITE('    model default\n', '  chat panel\n    show chart cta\n    allow anyone\n'));
   const html = file(p, 'chat/shared/index.html');

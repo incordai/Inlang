@@ -31,7 +31,7 @@ import { LIST_SEPARATOR, type LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
 import { buildFrom, GALLERY_FROM_REFUSED, type FromContext } from './from.ts';
 import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
-import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, sharedRouteDiagnostics, withAnswer } from './chat.ts';
+import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, knowsTables, sharedRouteDiagnostics, withAnswer } from './chat.ts';
 
 /**
  * Where each block was written. A SpecBlock carries no position — it is the
@@ -119,11 +119,11 @@ export const SITE_DEFAULTS = {
   patternOrigin: 'top',
 } as const;
 
-/** Blocks that may be declared at site level and inherited — nav-spec §8. */
-const INHERITABLE = new Set(['nav', 'footer', 'scene']);
+/** Blocks that may be declared at site level and inherited — nav-spec §8, chat-block-spec §3.1. */
+const INHERITABLE = new Set(['nav', 'footer', 'scene', CHAT_WORD]);
 
 /** What may be declared under `site` and inherited, for a message (placementOf decides). */
-const INHERITED_AT_SITE = 'nav, footer and scene backdrop';
+const INHERITED_AT_SITE = 'nav, footer, scene backdrop and chat float';
 
 /**
  * Recursively build a block, applying manifest defaults.
@@ -225,7 +225,7 @@ function buildBlock(w: LinkedWord, manifests: Map<string, Manifest>, site: SiteS
     children: w.children.filter((c) => c !== fromLine).map((c) => toBlock(c, manifests, site)),
     ...(from ? { from } : {}),
     // chat-block-spec §4.2: the page a chat answers from, and its sign-in.
-    ...(w.word === CHAT_WORD && page ? { chat: chatOf(page.route, ordered.allow, page.data.login) } : {}),
+    ...(w.word === CHAT_WORD && page ? { chat: chatOf(page.route, ordered.allow, page.data.login, knowsTables(ordered.knows, page.data.tables)) } : {}),
   };
 }
 
@@ -391,13 +391,13 @@ export function buildSpec(
   }
 
   // GRAMMAR §5.2: a block under `site` is inherited by every page — nav,
-  // footer and a scene backdrop. A word with site-scoped settings (auth's
-  // adapter) is declared there for them. Any other block was linked and
-  // dropped from every page without a word; chat reports its own (AZ1214).
+  // footer, a scene backdrop and a chat float. A word with site-scoped
+  // settings (auth's adapter) is declared there for them. Any other block
+  // was linked and dropped from every page without a word.
   const inherited: SpecBlock[] = [];
   for (const w of kids) {
     const m = manifests.get(w.word);
-    if (!m || w.word === CHAT_WORD) continue;
+    if (!m) continue;
     const block = INHERITABLE.has(w.word) ? toBlock(w, manifests) : null;
     if (block && placementOf(block) !== undefined) {
       inherited.push(block);
@@ -486,9 +486,19 @@ export function buildSpec(
   // destination, so they are known only once every page is built.
   const answers = chatAnswers(built, inherited, protect, tables);
   diagnostics.push(...sharedRouteDiagnostics(
-    pageWords.some((p) => p.children.some((w) => w.word === CHAT_WORD)),
+    inherited.some((b) => b.word === CHAT_WORD && b.variant !== 'none') || pageWords.some((p) => p.children.some((w) => w.word === CHAT_WORD && w.variant !== 'none')),
     pageWords.map((p) => ({ route: p.args[0]?.value, pos: p.args[0]?.pos ?? p.pos })),
   ));
+  // A site-level chat float is on every page (chat-block-spec §3.1): its
+  // sign-in page and its tables are the site's; its route is each page's,
+  // given by blocksFor, so here it has none.
+  const siteChats = inherited.map((b) => {
+    if (b.word !== CHAT_WORD) return b;
+    const next = withAnswer({ ...b, chat: chatOf('', b.props.allow, login, knowsTables(b.props.knows, tables)) }, answers);
+    written.set(next, written.get(b) ?? { line: 1, col: 1 });
+    return next;
+  });
+  inherited.splice(0, inherited.length, ...siteChats);
   const pages: SpecPage[] = built.map((p) => ({
     ...p,
     blocks: p.blocks.map((b) => {
@@ -499,11 +509,12 @@ export function buildSpec(
   }));
   diagnostics.push(...chatDiagnostics(
     [
-      ...kids.filter((w) => w.word === CHAT_WORD).map((w) => ({ props: w.props, pos: w.pos, atSite: true })),
-      ...pageWords.flatMap((p) => p.children.filter((w) => w.word === CHAT_WORD).map((w) => ({ props: w.props, pos: w.pos, atSite: false }))),
+      // `chat none` is no chat: it asks nothing of the backend.
+      ...[...kids, ...pageWords.flatMap((p) => p.children)].filter((w) => w.word === CHAT_WORD && w.variant !== 'none').map((w) => ({ props: w.props, pos: w.pos })),
     ],
     declared?.props.model,
     answers.quotes.length,
+    tables,
   ));
 
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');
@@ -673,7 +684,18 @@ const PLACEMENT: Record<string, 'start' | 'end'> = {
  */
 function placementOf(b: SpecBlock): 'start' | 'end' | undefined {
   if (b.word === 'scene' && b.variant !== 'backdrop' && b.variant !== 'none') return undefined;
+  // A chat float is a launcher fixed in the corner: it closes the page, after
+  // the footer. A `chat panel` is page content, never inherited.
+  if (b.word === CHAT_WORD) return b.variant === 'float' || b.variant === 'none' ? 'end' : undefined;
   return Object.hasOwn(PLACEMENT, b.word) ? PLACEMENT[b.word] : undefined;
+}
+
+/**
+ * The inherited chat float as this page shows it: asking from this page's
+ * route (chat-block-spec §4.2), everything else the site's.
+ */
+function onPage(b: SpecBlock, page: SpecPage): SpecBlock {
+  return b.word === CHAT_WORD && b.chat && b.chat.route === '' ? { ...b, chat: { ...b.chat, route: page.route } } : b;
 }
 
 /**
@@ -697,16 +719,21 @@ export function blocksFor(spec: Spec, page: SpecPage): SpecBlock[] {
   const end: SpecBlock[] = [];
   const body: SpecBlock[] = [];
 
-  // What the page says about each inheritable word, if anything.
+  // What the page says about each inheritable word, if anything. A page
+  // shows one chat (chat-block-spec §3.1): its own `chat panel` replaces the
+  // site's float, as its own float or `chat none` would.
   const overrides = new Map<string, SpecBlock>();
   for (const b of page.blocks) {
-    if (placementOf(b) !== undefined) overrides.set(b.word, b);
+    if (placementOf(b) !== undefined || b.word === CHAT_WORD) overrides.set(b.word, b);
   }
 
   for (const inheritedBlock of spec.site.inherited) {
     const chosen = overrides.get(inheritedBlock.word) ?? inheritedBlock;
     if (chosen.variant === 'none') continue;
-    (placementOf(chosen) === 'end' ? end : start).push(chosen);
+    const at = placementOf(chosen);
+    // The page's own content block (a chat panel) renders in the body, below.
+    if (at === undefined) continue;
+    (at === 'end' ? end : start).push(onPage(chosen, page));
   }
 
   for (const b of page.blocks) {

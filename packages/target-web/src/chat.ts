@@ -18,7 +18,7 @@
 
 import { BACKEND_ENV, AUTH_DIR } from './auth.ts';
 import { generated } from './generated.ts';
-import type { Spec, SpecBlock } from '../../core/src/spec.ts';
+import { blocksFor, type Spec, type SpecBlock } from '../../core/src/spec.ts';
 import type { SpecChatAnswer } from '../../core/src/spec-block.ts';
 import { SHARED_ROUTE } from '../../core/src/chat.ts';
 
@@ -29,7 +29,8 @@ export const CHAT_FILE = 'src/chat/runtime.tsx';
 /** The behaviour runtime's files that only a site with a chat block ships. */
 export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'rows-logic.ts'];
 
-const chatsOf = (spec: Spec): SpecBlock[] => spec.pages.flatMap((p) => p.blocks.filter((b) => b.word === 'chat'));
+/** Every page's chat — its own, or the site's float, as blocksFor resolves it (chat-block-spec §3.1). */
+const chatsOf = (spec: Spec): SpecBlock[] => spec.pages.flatMap((p) => blocksFor(spec, p).filter((b) => b.word === 'chat'));
 
 /** Some chat may draw a chart (chat-block-spec §20.4): the site's theme gets its series colours. */
 export function usesSeries(spec: Spec): boolean {
@@ -66,16 +67,17 @@ export function withSharedPage(spec: Spec): Spec {
     ...(acc.tables || a.tables ? { tables: union(acc.tables ?? [], a.tables ?? [], (t) => t.name) } : {}),
   }), answers[0]);
   const first = chats[0];
+  // A section on its own page, whichever chat it was made from (a float's launcher has nothing to open there).
   const shell: SpecBlock = {
-    ...first, props: { ...first.props, allow: 'anyone' }, children: [],
+    ...first, variant: 'panel', props: { ...first.props, allow: 'anyone' }, children: [],
     chat: { route: SHARED_ROUTE, signin: null, answer, shared: true },
   };
   return { ...spec, pages: [...spec.pages, { route: SHARED_ROUTE, blocks: [shell] }] };
 }
 
-/** Some page renders a chat block (C1: `chat panel`, a page block). */
+/** Some page renders a chat block: its own panel or float, or the site's float. */
 export function usesChat(spec: Spec): boolean {
-  return spec.pages.some((p) => p.blocks.some((b) => b.word === 'chat'));
+  return chatsOf(spec).length > 0;
 }
 
 /** The module's text; `runtimeDir` is where the behaviour runtime is copied (src/az). */

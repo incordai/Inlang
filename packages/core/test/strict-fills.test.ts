@@ -120,20 +120,21 @@ test('a block under site that no page inherits is AZ1202 at the block', () => {
   const r = only(site('  hero center\n    title "On every page?"\n'));
   assert.equal(r.at, 'AZ1202 3:3');
   assert.equal(r.message,
-    "hero: not allowed inside 'site' — only nav, footer and scene backdrop are inherited; move it under the page it belongs to");
+    "hero: not allowed inside 'site' — only nav, footer, scene backdrop and chat float are inherited; move it under the page it belongs to");
   assert.equal(only(site('  text\n    title "x"\n    body "y"\n')).at, 'AZ1202 3:3');
 });
 
 test('a scene under site that is not a backdrop is AZ1202: only the backdrop is inherited', () => {
   const r = only(site('  scene inline 3d\n    poster ./a.webp\n    alt "Fog"\n'));
   assert.equal(r.at, 'AZ1202 3:3');
-  assert.equal(r.message, "scene: 'inline' is not inherited — only nav, footer and scene backdrop are; move it under the page it belongs to");
+  assert.equal(r.message, "scene: 'inline' is not inherited — only nav, footer, scene backdrop and chat float are; move it under the page it belongs to");
 });
 
-test('CONTROL: nav, footer, a scene backdrop and auth settings under site compile; chat keeps AZ1214', () => {
+test('CONTROL: nav, footer, a scene backdrop and auth settings under site compile; a chat panel there is AZ1202 (only a float is inherited)', () => {
   const src = site('  nav bar\n  footer minimal\n    copyright "Studio"\n  scene backdrop 3d\n    poster ./b.webp\n    alt "Fog"\n');
   clean(src);
   assert.deepEqual(run(src).spec?.site.inherited.map((b) => b.word), ['nav', 'footer', 'scene']);
   clean('az 1\nsite studio\n  auth\n    adapter session\npage /\npage /login\n  auth login\n');
-  assert.ok(errors(site('  chat panel\n')).some((d) => d.code === 'AZ1214' && d.pos.line === 3));
+  assert.ok(errors(site('  chat panel\n')).some((d) => d.code === 'AZ1202' && d.pos.line === 3));
+  assert.ok(!errors(site('  chat panel\n')).some((d) => d.code === 'AZ1214'), 'the C1 refusal is gone');
 });

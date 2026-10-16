@@ -35,7 +35,7 @@ import { markdownToNodes, MarkdownError } from './markdown.ts';
 import { compileStyles } from './stylesheet.ts';
 import { iconType, pageDescription, type TouchIcon } from './head.ts';
 import { uniqueIds } from './ids.ts';
-import { COMPONENT_EXT, ICON_FORMATS } from '../../core/src/index.ts';
+import { COMPONENT_EXT, ICON_FORMATS, blocksFor } from '../../core/src/index.ts';
 import { COMPONENT_TAG } from '../../core/src/emit-contract.ts';
 import { PUBLIC_ENV_PREFIX } from '../../core/src/index.ts';
 import {
@@ -910,7 +910,7 @@ function pageNeeds(
   const connect = plan?.adapter === 'hosted' ? [HOSTED_ENV[0]] : plan?.adapter === 'azbackend' ? [BACKEND_ENV[0]] : [];
   const images = (spec.site.data ?? []).some((t) => t.fields.some((f) => f.type === 'image')) ? [BACKEND_ENV[0]] : [];
   // A `from` block reads rows; a chat showing image cards may show a row's image (chat-block-spec §20.6).
-  const reads = new Set(spec.pages.filter((p) => p.blocks.some((b) => b.from) || showsCards(p.blocks)).map((p) => p.route));
+  const reads = new Set(spec.pages.filter((p) => p.blocks.some((b) => b.from) || showsCards(blocksFor(spec, p))).map((p) => p.route));
   const has = (test: (n: EmittedNode) => boolean) => {
     const walk = (n: EmittedNode | string): boolean => typeof n !== 'string' && (test(n) || (n.children ?? []).some(walk));
     return (nodes: readonly EmittedNode[]) => nodes.some(walk);
@@ -1261,7 +1261,7 @@ export default defineConfig({
         backend: spec.site.backend ?? null,
         data: spec.site.data ?? null,
         from: spec.pages.flatMap((p) => p.blocks.flatMap((b) => (b.from ? [{ route: p.route, word: b.word, from: b.from }] : []))),
-        chats: chat ? spec.pages.flatMap((p) => p.blocks.flatMap((b) => (b.word === 'chat' && b.chat ? [{
+        chats: chat ? spec.pages.flatMap((p) => blocksFor(spec, p).flatMap((b) => (b.word === 'chat' && b.chat ? [{
           route: p.route, allow: b.props.allow ?? 'signedin', limit: b.props.limit ?? '20',
           show: b.chat.answer?.show ?? [], quotes: (b.chat.answer?.quotes ?? []).map((q) => `${q.route}#${q.n}`),
         }] : []))) : [],

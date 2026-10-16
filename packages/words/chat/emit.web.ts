@@ -1,9 +1,13 @@
 /**
  * @az word chat
- * Purpose: a panel where a visitor asks the site's AI a question and reads the answer as it streams.
+ * Purpose: a panel — inline, or opened from a corner launcher — where a visitor asks the site's AI a question and reads the answer as it streams.
  * Spec: docs/chat-block-spec.md · terms: az explain chat
- * Renders: section.az-chat.az-chat--{variant}[data-az-chat=<config>][data-az-chat-state] > h2.az-chat-title#az-chat-title ·
- *   div.az-chat-panel > ol.az-chat-transcript[data-az-chat-transcript] > li.az-chat-message.az-chat-message--site (the greeting) > p.az-chat-text ·
+ * Renders: section.az-chat.az-chat--panel[data-az-chat=<config>][data-az-chat-state] > h2.az-chat-title#az-chat-title ·
+ *   (float: div.az-chat.az-chat--float[data-az-chat] > button.az-chat-launcher[data-az-chat-launcher][hidden] (the title) +
+ *     dialog.az-chat-dialog#az-chat-dialog[data-az-overlay=sheet] > div.az-chat-sheet > div.az-chat-head (the h2 + Close
+ *     [data-az-chat-close]) + the same panel) ·
+ *   div.az-chat-panel > ol.az-chat-transcript[data-az-chat-transcript][tabindex=0] (scrolls) > li.az-chat-message.az-chat-message--site (the greeting) > p.az-chat-text ·
+ *     button[data-az-chat-latest][hidden] (Jump to latest) ·
  *     ol.az-chat-templates[hidden][data-az-chat-templates] > li.az-chat-message--visitor + li.az-chat-message--site, each > p.az-chat-text ·
  *     (with show) div.az-chat-parts[hidden][data-az-chat-parts] > div.az-chat-part[data-az-chat-part=quote|faq|feature|cta-<kind>] —
  *       a quoted pricing block as its page renders it ([data-az-chat-quote=/route#n][data-az-chat-plans=n]; its behaviour
@@ -19,12 +23,14 @@
  *     div.az-chat-actions[hidden] > Try again [data-az-chat-retry] · New chat [data-az-chat-reset] ·
  *       Sign in to ask [data-az-chat-signin] (a link, only for allow signedin with a sign-in page) ·
  *     p.az-chat-status.az-visually-hidden[role=status][data-az-chat-status] · noscript > p.az-chat-noscript
- * Variants: panel — a section on one page (float, the launcher, comes in a later phase).
+ * Variants: panel — a section on one page · float — a launcher fixed to the inline-end bottom corner that opens the panel:
+ *   a bottom sheet (modal, focus trapped) below sm, a side panel (not modal) above; declared under `site` it is on every
+ *   page, and `chat none` leaves it out of one · none — no chat on this page (blocksFor drops it; never emitted).
  * Modifiers: none in this release.
- * Props: title → h2.az-chat-title (default "Ask a question") · greeting → the first site message, never sent to the model ·
+ * Props: title → h2.az-chat-title and the launcher's name (default "Ask a question") · greeting → the first site message, never sent to the model ·
  *   allow → config: signedin (default) shows Sign in to ask to a signed-out visitor, anyone lets everyone ask ·
  *   limit → config: visitor messages per conversation · show → config and the parts' templates (pricing quoted; faq, cta, feature composed) ·
- *   ask "question" → a suggested question button.
+ *   knows → nothing here (the server reads those rows) · ask "question" → a suggested question button.
  * Styling: theme tokens only; visitor messages on color.surface-alt, answers on color.surface; the input's edge color.border-strong;
  *   focusVisible ring color.focus; errors color.danger; below sm the mobile gutter.
  * Behaviour: packages/overlay runtime chat.ts sends with fetch, reads the event stream and writes every answer as text
@@ -32,7 +38,7 @@
  *   config's allow-list; the status region hears finished sentences. Other words render the parts (ctx.embed). With JavaScript off
  *   the greeting and the noscript line show, and the form stays hidden.
  * Edit guide: one message → message(); the controls → form(); the hidden state lines → notes(); the config → config();
- *   the components' templates → parts() (ids and behaviour marks parked by asTemplate()).
+ *   the components' templates → parts() (ids and behaviour marks parked by asTemplate()); the launcher and its dialog → floatShell().
  *   Keep: no inline handler, no markup from the network, every control a real button or link, the label visible.
  * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/chat-shell.test.ts
  */
@@ -52,6 +58,7 @@
 import type { SpecBlock } from '../../core/src/spec.ts';
 import type { SpecFrom } from '../../core/src/spec-block.ts';
 import { framed, fromMark, px, visuallyHidden, type EmitContext, type EmittedNode } from '../../core/src/emit-contract.ts';
+import { closeButton } from '../../overlay/src/index.ts';
 import { assetParts, richParts, sharePart } from './figures.ts';
 
 /** The shell's fixed copy; the runtime's copy lives in overlay chat-logic.ts. */
@@ -72,7 +79,13 @@ export const CHAT_COPY = {
   sharedIntro: 'An answer from this site’s AI assistant, shared by a visitor.',
   sharedDelete: 'Delete this shared answer',
   sharedAnswer: 'The answer',
+  /** §9: shown when the visitor has scrolled up from the newest words. */
+  latest: 'Jump to latest',
+  close: 'Close',
 } as const;
+
+/** The float's dialog: the launcher's aria-controls points here. */
+const DIALOG_ID = 'az-chat-dialog';
 
 /** chat-block-spec §4.2: a visitor message is at most this many characters. */
 export const MESSAGE_MAX = 1000;
@@ -85,7 +98,7 @@ const INPUT_ROWS = 3;
  * ask, and — when answers hold components — which ones, and the only
  * destinations an answer's call to action may use. Key order is fixed.
  */
-function config(block: SpecBlock): string {
+function config(block: SpecBlock, ctx: EmitContext): string {
   const answer = block.chat?.answer;
   return JSON.stringify({
     page: block.chat?.route ?? '/',
@@ -94,6 +107,8 @@ function config(block: SpecBlock): string {
     signin: block.chat?.signin ?? null,
     ...(answer ? { show: answer.show, to: answer.destinations } : {}),
     ...(block.chat?.shared ? { shared: true } : {}),
+    // A float opens as a modal sheet below this width, a side panel above it (chat-block-spec §3.2).
+    ...(block.variant === 'float' ? { narrow: ctx.theme.breakpoint.sm } : {}),
   });
 }
 
@@ -384,17 +399,171 @@ function sharedShell(ctx: EmitContext, components: EmittedNode | null): EmittedN
   ];
 }
 
-export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
+/**
+ * The transcript: a list, not a live region (§9), that scrolls on its own so
+ * the runtime can follow the newest words — focusable, so a keyboard scrolls
+ * it too. In a float it fills the panel's height; inline it is capped.
+ */
+function transcript(ctx: EmitContext, items: EmittedNode[], float: boolean): EmittedNode {
   const t = ctx.theme;
-  const variant = block.variant ?? 'panel';
+  return {
+    tag: 'ol',
+    attrs: { class: 'az-chat-transcript', 'aria-label': CHAT_COPY.transcript, 'data-az-chat-transcript': '', tabindex: '0' },
+    style: {
+      display: 'grid', alignContent: 'start', gap: px(t.space[12]), margin: 0, padding: px(t.space[4]),
+      overflowY: 'auto', overscrollBehavior: 'contain',
+      ...(float ? { flex: '1 1 auto', minBlockSize: 0 } : { maxBlockSize: '60svh' }),
+    },
+    states: { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } },
+    children: items,
+  };
+}
+
+/** The panel's working parts, the same inline and in a float. */
+function panelBody(block: SpecBlock, ctx: EmitContext, float: boolean): EmittedNode[] {
   const greeting = block.props.greeting?.trim() ?? '';
   const suggested = asks(block, ctx);
   const components = parts(block, ctx);
+  return [
+    transcript(ctx, greeting ? [message('site', greeting, ctx)] : [], float),
+    // §9: shown by the runtime once the visitor scrolls up from the end; it jumps back and follows again.
+    control(CHAT_COPY.latest, 'data-az-chat-latest', ctx),
+    {
+      tag: 'ol',
+      attrs: { class: 'az-chat-templates', hidden: 'hidden', 'data-az-chat-templates': '' },
+      children: [message('visitor', '', ctx), message('site', '', ctx)],
+    },
+    ...(components ? [components] : []),
+    ...(suggested ? [suggested] : []),
+    form(ctx),
+    ...notes(block, ctx),
+  ];
+}
+
+/** The panel's heading: the launcher's name too, and the dialog's label. */
+function heading(block: SpecBlock, ctx: EmitContext, float: boolean): EmittedNode {
+  const t = ctx.theme;
+  return {
+    // The shared-answer page has nothing above it: its heading is the page's own (§20.7).
+    tag: block.chat?.shared ? 'h1' : 'h2',
+    attrs: { id: 'az-chat-title', class: 'az-chat-title' },
+    style: {
+      fontSize: float ? t.typeSize.base : t.typeSize['2xl'],
+      lineHeight: t.type['leading-tight'],
+      fontFamily: t.type.display,
+      fontWeight: float ? t.type['weight-bold'] : t.type['weight-display'],
+      maxWidth: `${t.size['measure-display']}ch`,
+      margin: float ? 0 : `0 0 ${px(t.space[24])}`,
+    },
+    children: [block.chat?.shared ? CHAT_COPY.shared : block.props.title ?? 'Ask a question'],
+  };
+}
+
+/** A transition of `props` over a motion token's duration and curve: the open state's is the enter, the base style's the exit (overlays-spec §3). */
+const moving = (duration: string | number, easing: string | number, props: readonly string[]) =>
+  props.map((p) => `${p} ${duration}ms ${easing}`).join(', ');
+
+/**
+ * `chat float` (chat-block-spec §3.2, §9): a launcher fixed to the
+ * inline-end bottom corner, named by the title, and the panel in a dialog
+ * it controls. The runtime shows the dialog as a bottom sheet with focus
+ * trapped below `sm` (the overlay engine's sheet policy) and as a side
+ * panel that does not trap above it; Escape stops an answer, then closes;
+ * focus returns to the launcher. The launcher ships hidden: with JavaScript
+ * off there is nothing it could open. No inline style, only classes.
+ */
+function floatShell(block: SpecBlock, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const x = closeButton(t, CHAT_COPY.close);
+  const launcher = ctx.submit(block.props.title ?? 'Ask a question', { hierarchy: 'primary' });
+  return {
+    tag: 'div',
+    attrs: { class: 'az-chat az-chat--float', 'data-az-chat': config(block, ctx), 'data-az-chat-state': 'idle' },
+    children: [
+      {
+        ...launcher,
+        attrs: {
+          ...launcher.attrs, type: 'button', class: `${launcher.attrs?.class ?? ''} az-chat-launcher`.trim(), 'data-az-chat-launcher': '',
+          'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': DIALOG_ID, hidden: 'hidden',
+        },
+        style: {
+          ...launcher.style,
+          position: 'fixed', insetInlineEnd: px(t.space[24]), insetBlockEnd: px(t.space[24]), zIndex: t.layer.dropdown,
+          boxShadow: t.shadow.lg,
+        },
+        below: { ...launcher.below, sm: { ...launcher.below?.sm, insetInlineEnd: px(t.space[16]), insetBlockEnd: px(t.space[16]), width: 'auto' } },
+      },
+      {
+        tag: 'dialog',
+        attrs: { id: DIALOG_ID, class: 'az-chat-dialog', 'aria-labelledby': 'az-chat-title', 'data-az-overlay': 'sheet' },
+        style: {
+          position: 'fixed',
+          insetInlineStart: 'auto', insetInlineEnd: px(t.space[24]), insetBlockStart: 'auto', insetBlockEnd: px(t.space[24]),
+          margin: 0, padding: 0,
+          width: `min(calc(100vw - ${px(t.space[48])}), ${t.size['measure-body']}ch)`, maxWidth: 'none',
+          maxHeight: `calc(100svh - ${px(t.space[48])})`,
+          border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.lg),
+          background: t.color.bg, color: t.color.text, boxShadow: t.shadow.lg, zIndex: t.layer.modal,
+          opacity: 0, transform: `translateY(${px(t.space[16])})`,
+          transition: moving(t.motion.fast, t.motion.easeIn, ['opacity', 'transform']),
+        },
+        states: { open: { opacity: 1, transform: 'none', transition: moving(t.motion.slow, t.motion.easeOut, ['opacity', 'transform']) } },
+        // Below sm: the sheet preset's place — the bottom edge, the full width, its top corners rounded.
+        below: {
+          sm: {
+            insetInlineStart: 0, insetInlineEnd: 0, insetBlockEnd: 0, width: '100%', maxHeight: '85svh',
+            border: 0, borderRadius: `${px(t.radius.lg)} ${px(t.radius.lg)} 0 0`, transform: 'translateY(100%)',
+          },
+        },
+        children: [{
+          tag: 'div',
+          attrs: { class: 'az-chat-sheet' },
+          // The dialog's own `display` is the browser's (closed = none); this inner box lays out the panel.
+          style: {
+            display: 'flex', flexDirection: 'column', gap: px(t.space[12]),
+            maxHeight: `calc(100svh - ${px(t.space[48])})`, padding: px(t.space[16]),
+          },
+          below: { sm: { maxHeight: '85svh' } },
+          children: [
+            {
+              tag: 'div',
+              attrs: { class: 'az-chat-head' },
+              style: { display: 'flex', alignItems: 'center', gap: px(t.space[8]) },
+              children: [
+                heading(block, ctx, true),
+                {
+                  tag: 'button', attrs: { ...x.attrs, 'data-az-chat-close': '' }, style: x.style, states: x.states,
+                  children: [{
+                    tag: 'svg',
+                    attrs: { 'aria-hidden': 'true', focusable: 'false', viewBox: x.icon.viewBox, fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round' },
+                    style: { width: '1.5em', height: '1.5em' },
+                    children: [{ tag: 'path', attrs: { d: x.icon.d } }],
+                  }],
+                },
+              ],
+            },
+            {
+              tag: 'div',
+              attrs: { class: 'az-chat-panel' },
+              style: { display: 'flex', flexDirection: 'column', gap: px(t.space[12]), minBlockSize: 0, flex: '1 1 auto' },
+              children: panelBody(block, ctx, true),
+            },
+          ],
+        }],
+      },
+    ],
+  };
+}
+
+export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  if (block.variant === 'float' && !block.chat?.shared) return floatShell(block, ctx);
+  const components = block.chat?.shared ? parts(block, ctx) : null;
   return {
     tag: 'section',
     attrs: {
-      class: `az-chat az-chat--${variant}`, 'aria-labelledby': 'az-chat-title',
-      'data-az-chat': config(block), 'data-az-chat-state': 'idle',
+      class: 'az-chat az-chat--panel', 'aria-labelledby': 'az-chat-title',
+      'data-az-chat': config(block, ctx), 'data-az-chat-state': 'idle',
     },
     style: {
       paddingBlock: px(t.space[96]),
@@ -405,41 +574,12 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     // The container drops to the mobile gutter (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']), paddingBlock: px(t.space[48]) } },
     children: [
-      {
-        // The shared-answer page has nothing above it: its heading is the page's own (§20.7).
-        tag: block.chat?.shared ? 'h1' : 'h2',
-        attrs: { id: 'az-chat-title', class: 'az-chat-title' },
-        style: {
-          fontSize: t.typeSize['2xl'],
-          lineHeight: t.type['leading-tight'],
-          fontFamily: t.type.display,
-          fontWeight: t.type['weight-display'],
-          maxWidth: `${t.size['measure-display']}ch`,
-          margin: `0 0 ${px(t.space[24])}`,
-        },
-        children: [block.chat?.shared ? CHAT_COPY.shared : block.props.title ?? 'Ask a question'],
-      },
+      heading(block, ctx, false),
       {
         tag: 'div',
         attrs: { class: 'az-chat-panel' },
         style: { display: 'grid', gap: px(t.space[16]), maxWidth: `${t.size['measure-body']}ch` },
-        children: block.chat?.shared ? sharedShell(ctx, components) : [
-          {
-            tag: 'ol',
-            attrs: { class: 'az-chat-transcript', 'aria-label': CHAT_COPY.transcript, 'data-az-chat-transcript': '' },
-            style: { display: 'grid', gap: px(t.space[12]), margin: 0, padding: 0 },
-            children: greeting ? [message('site', greeting, ctx)] : [],
-          },
-          {
-            tag: 'ol',
-            attrs: { class: 'az-chat-templates', hidden: 'hidden', 'data-az-chat-templates': '' },
-            children: [message('visitor', '', ctx), message('site', '', ctx)],
-          },
-          ...(components ? [components] : []),
-          ...(suggested ? [suggested] : []),
-          form(ctx),
-          ...notes(block, ctx),
-        ],
+        children: block.chat?.shared ? sharedShell(ctx, components) : panelBody(block, ctx, false),
       },
     ],
   };

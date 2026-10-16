@@ -55,7 +55,8 @@ export type PageCheckKind =
  * signed-out users" (auth-spec §11) is about the whole site.
  */
 export type SiteCheckKind =
-  | 'siteNeeds';        // the site-level block holds `when`, and no page renders one matching `needs`
+  | 'siteNeeds'         // the site-level block holds `when`, and no page renders one matching `needs`
+  | 'siteRepeats';      // the site-level block holds `when`, and a page declares its own one holding `when` too
 
 /** A gate. Every field given must hold; an empty gate always holds. */
 export interface CheckWhen {
@@ -114,7 +115,7 @@ export const BLOCK_KINDS: ReadonlySet<string> = new Set<BlockCheckKind>([
   'childUnique', 'childLabelWords', 'childLabelPattern', 'childRoute', 'propWords', 'valuePattern',
 ]);
 export const PAGE_KINDS: ReadonlySet<string> = new Set<PageCheckKind>(['perPage', 'notFirst', 'pageWhen', 'pageLacks']);
-export const SITE_KINDS: ReadonlySet<string> = new Set<SiteCheckKind>(['siteNeeds']);
+export const SITE_KINDS: ReadonlySet<string> = new Set<SiteCheckKind>(['siteNeeds', 'siteRepeats']);
 
 /** One argument of a fill, as either stage holds it. */
 export interface CheckArg {
@@ -359,6 +360,15 @@ export function runSiteChecks(
   for (const e of sites) {
     for (const c of e.checks) {
       if (!SITE_KINDS.has(c.kind) || !holds(c.when, e.subject)) continue;
+      if (c.kind === 'siteRepeats') {
+        // A page's own declaration of what the site already gives every page: said where the page wrote it.
+        for (const b of pages.flat()) {
+          if (b.inPage && b.word === e.subject.word && holds(c.when, b)) {
+            report({ code: c.code, severity: c.severity, pos: b.pos, message: `${b.word}: ${fill(c.message, {})}` });
+          }
+        }
+        continue;
+      }
       const met = pages.some((blocks) =>
         blocks.some((b) => b.word === e.subject.word && holds(c.needs, b)));
       if (!met) {

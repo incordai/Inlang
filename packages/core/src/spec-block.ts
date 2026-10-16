@@ -47,7 +47,11 @@ export interface SpecBlock {
 
 /** What a chat block's emitter needs beyond its props (core/src/chat.ts chatOf). */
 export interface SpecChat {
-  /** The page the block is on — the server answers only its declared chat pages. */
+  /**
+   * The page the block is on — the server answers only its declared chat
+   * pages. A `chat float` declared under `site` holds '' here: it is on every
+   * page, and blocksFor gives each page's copy that page's route.
+   */
   readonly route: string;
   /** The site's sign-in page when only signed-in visitors may ask; null otherwise. */
   readonly signin: string | null;
@@ -56,6 +60,13 @@ export interface SpecChat {
    * `show`; absent for a prose-only chat, so it serialises as before.
    */
   readonly answer?: SpecChatAnswer;
+  /**
+   * `knows` (chat-block-spec §8.2): the tables whose rows the server reads,
+   * as a signed-out visitor, into each question's context — public fields
+   * only, never an image. Absent when the block names none, so such a block
+   * serialises as before.
+   */
+  readonly knows?: readonly SpecChatTable[];
   /**
    * The build's shared-answer page (chat-block-spec §20.7, target-web
    * chat.ts withSharedPage): a read-only shell that shows one stored answer.
@@ -81,7 +92,11 @@ export interface SpecChatAnswer {
 /** A table as chat may ask figures of it: its public fields, a money field's minor-unit digits. */
 export interface SpecChatTable {
   readonly name: string;
-  readonly fields: readonly { readonly name: string; readonly type: string; readonly choices?: readonly string[]; readonly currency?: string; readonly digits?: number }[];
+  readonly fields: readonly {
+    readonly name: string; readonly type: string; readonly choices?: readonly string[]; readonly currency?: string; readonly digits?: number;
+    /** A `search` field (knows only): the visitor's question is looked for in it. */
+    readonly search?: true;
+  }[];
 }
 
 /**

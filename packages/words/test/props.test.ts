@@ -195,7 +195,9 @@ const KNOWN_INERT: Record<string, string[]> = {
   // Declared so a word outside the closed set is told why (AZ1254), and
   // refused as not available yet in C1 (AZ1214): no compiled site has it,
   // so the emitter has nothing to draw until components ship (chat-block-spec §14 C2).
-  chat: ['show'],
+  // `knows` is the SERVER's (chat-block-spec §8.2): it reads those tables'
+  // rows per question; the shell the page ships is the same either way.
+  chat: ['knows', 'show'],
 };
 
 test('CONTROL: a prop KNOWN to work is detected as working', () => {

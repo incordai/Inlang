@@ -90,10 +90,13 @@ test('AZ1254: a word an answer can never show is refused with its reason', () =>
   assert.deepEqual(errors(site(chat('    show banana\n'))), ['AZ1254'], 'an unknown word too');
 });
 
-test('C2: show faq cta feature compiles; site-level chat is still not available (AZ1214, C3)', () => {
+test('C2: show faq cta feature compiles; C3: under site only a float is inherited — a panel there is AZ1202', () => {
   assert.deepEqual(errors(site(chat('    show faq cta feature\n'))), []);
-  const atSite = `az 1\nsite studio\n${BACKEND}${MODEL}  chat panel\npage /\n`;
-  assert.ok(errors(atSite).includes('AZ1214'));
+  const atSite = (variant: string) => `az 1\nsite studio\n${BACKEND}${MODEL}  chat ${variant}\npage /\n`;
+  assert.deepEqual(errors(atSite('panel')), ['AZ1202']);
+  assert.match(message(atSite('panel'), 'AZ1202'), /^chat: 'panel' is not inherited — only nav, footer, scene backdrop and chat float are; move it under the page it belongs to$/);
+  assert.deepEqual(errors(atSite('float')), [], 'CONTROL: a site-level float compiles');
+  assert.ok(!errors(atSite('float')).includes('AZ1214'), 'the C1 refusal is gone');
 });
 
 test('AZ1256: allow anyone spends the operator\'s budget on strangers — a warning', () => {
@@ -129,8 +132,8 @@ test('limit is a whole number from 1 to 50 (AZ1407, AZ1408)', () => {
   assert.deepEqual(errors(site(chat('    limit 50\n'))), [], 'CONTROL: 50 is allowed');
 });
 
-test('float is not a variant in C1 (AZ1204), and a key in a string is AZ1411 as everywhere', () => {
-  assert.deepEqual(errors(site('  chat float\n')), ['AZ1204']);
+test('float is a variant since C3 — on a page too — and a key in a string is AZ1411 as everywhere', () => {
+  assert.deepEqual(errors(site('  chat float\n')), []);
   const key = `sk_live_${'aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dF'}`;
   assert.ok(errors(site(chat(`    greeting "${key}"\n`))).includes('AZ1411'));
 });

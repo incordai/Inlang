@@ -281,6 +281,72 @@ test('the share control: a button, an unticked choice to include the question, a
   }
 });
 
+/* ---- C3: the float and §9's polish ---- */
+
+/** The site-level float as `route` shows it, emitted. */
+function floatOn(route = '/pricing', lines: string[] = []): EmittedNode {
+  const src = ['az 1', 'site aurora', '  auth', '    adapter azbackend', '  backend', '    database sqlite', '    email smtp',
+    '    model default', '  chat float', '    title "Ask Aurora"', '    allow anyone', ...lines.map((l) => `    ${l}`),
+    'page /pricing', '  hero center', '    title "Plans"', 'page /about', '  hero center', '    title "About"', ''].join('\n');
+  const r = compile(src, { manifests });
+  assert.ok(r.ok && r.spec, formatDiagnostics(r.diagnostics, 'site.az'));
+  const block = blocksFor(r.spec, r.spec.pages.find((p) => p.route === route)!).find((b) => b.word === 'chat')!;
+  return emitBlock(block, T, WEB_EMITTERS, (p) => p, { name: 'aurora' });
+}
+
+test('a float: a launcher named by the title, hidden until the runtime runs, that controls a dialog labelled by the same title', () => {
+  const root = floatOn();
+  assert.equal(root.tag, 'div', 'not a section: a launcher and its dialog are not a page region');
+  const launcher = one(root, 'data-az-chat-launcher');
+  assert.deepEqual([launcher.tag, launcher.attrs?.type, launcher.attrs?.hidden, launcher.attrs?.['aria-expanded'], launcher.attrs?.['aria-haspopup']],
+    ['button', 'button', 'hidden', 'false', 'dialog']);
+  assert.deepEqual(texts(launcher), ['Ask Aurora'], '§9: the launcher\'s name is the title');
+  const dialog = walk(root).find((n) => n.tag === 'dialog')!;
+  assert.equal(launcher.attrs?.['aria-controls'], dialog.attrs?.id);
+  assert.equal(dialog.attrs?.['aria-labelledby'], 'az-chat-title');
+  assert.equal(dialog.attrs?.open, undefined, 'closed until opened');
+  assert.equal(dialog.attrs?.['data-az-behaviour'], undefined, 'the chat runtime opens it, not the generic modal wiring (it is not modal above sm)');
+  const title = walk(dialog).find((n) => n.attrs?.id === 'az-chat-title')!;
+  assert.deepEqual([title.tag, texts(title)], ['h2', ['Ask Aurora']]);
+  const close = one(dialog, 'data-az-chat-close');
+  assert.deepEqual([close.tag, close.attrs?.type, close.attrs?.['aria-label']], ['button', 'button', 'Close']);
+});
+
+test('a float\'s config says the width below which it is a sheet — the theme\'s sm — and its page; a panel\'s does not', () => {
+  assert.deepEqual(JSON.parse(floatOn('/about').attrs!['data-az-chat']), { page: '/about', allow: 'anyone', limit: 20, signin: null, narrow: T.breakpoint.sm });
+  assert.equal(JSON.parse(chat().attrs!['data-az-chat']).narrow, undefined);
+});
+
+test('the float holds the whole panel: transcript, Jump to latest, form, status — and below sm the sheet\'s place, from tokens only', () => {
+  const root = floatOn();
+  for (const attr of ['data-az-chat-transcript', 'data-az-chat-latest', 'data-az-chat-form', 'data-az-chat-status', 'data-az-chat-templates']) one(root, attr);
+  const dialog = walk(root).find((n) => n.tag === 'dialog')!;
+  assert.equal(dialog.style?.position, 'fixed');
+  assert.equal(dialog.style?.zIndex, T.layer.modal);
+  assert.equal(dialog.below?.sm?.insetBlockEnd, 0, 'the bottom edge');
+  assert.equal(dialog.below?.sm?.width, '100%');
+  assert.equal(dialog.states?.open?.opacity, 1, 'it enters by its open state (reduced motion: the target\'s net keeps only opacity)');
+  assert.equal(dialog.style?.display, undefined, '§2: an overlay never sets display — the closed dialog stays hidden');
+});
+
+test('§9: the transcript scrolls on its own and is a keyboard stop; Jump to latest ships hidden, a real button', () => {
+  for (const root of [chat(), floatOn()]) {
+    const transcript = one(root, 'data-az-chat-transcript');
+    assert.equal(transcript.attrs?.tabindex, '0');
+    assert.equal(transcript.style?.overflowY, 'auto');
+    assert.equal(transcript.attrs?.['aria-live'], undefined, 'still not a live region');
+    const latest = one(root, 'data-az-chat-latest');
+    assert.deepEqual([latest.tag, latest.attrs?.type, latest.attrs?.hidden, texts(latest).join('')], ['button', 'button', 'hidden', 'Jump to latest']);
+  }
+});
+
+test('CONTROL: a float runs nothing — no inline handler, no script, no style attribute', () => {
+  for (const n of walk(floatOn())) {
+    assert.ok(!['script', 'iframe', 'object', 'embed', 'img'].includes(n.tag), n.tag);
+    for (const a of Object.keys(n.attrs ?? {})) assert.ok(!/^on/i.test(a) && a !== 'style', `${n.tag} ${a}`);
+  }
+});
+
 test('CONTROL: the rich parts run nothing — no script, no inline handler, no style attribute; images only the two templates', () => {
   const nodes = walk(one(richChat(), 'data-az-chat-parts'));
   for (const n of nodes) {

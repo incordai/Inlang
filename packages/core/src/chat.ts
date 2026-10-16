@@ -1,10 +1,10 @@
 /**
  * @az module chat
  * Purpose: the file-wide rules of a `chat` block: a backend that talks to a model, what an answer may show and quote and link to, who may ask.
- * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §14 (C1, C2, C2b), §20
- * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, CHAT_REFUSED, SHARED_ROUTE, chatOf, chatAnswers, withAnswer, chatDiagnostics, sharedRouteDiagnostics, ChatAnswers
+ * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §8.2, §14 (C1, C2, C2b, C3), §20
+ * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, CHAT_REFUSED, SHARED_ROUTE, KNOWS_MAX, chatOf, chatAnswers, withAnswer, knowsTables, chatDiagnostics, sharedRouteDiagnostics, ChatAnswers
  * Edit guide: rules that need the whole file live here; a rule about one chat block alone is a word.json check (AZ2220–AZ2239).
- * Tests: packages/core/test/chat-decl.test.ts, packages/core/test/chat-answer-decl.test.ts
+ * Tests: packages/core/test/chat-decl.test.ts, packages/core/test/chat-answer-decl.test.ts, packages/core/test/chat-float-decl.test.ts
  */
 
 /**
@@ -21,6 +21,11 @@
  * signed-out visitor can see — the only prices an answer can show, quoted
  * — and the destinations the file declares, the only places an answer's
  * call to action may point (§6.2).
+ *
+ * What an answer may KNOW besides the pages (`knows`, §8.2) is up to three
+ * tables a signed-out visitor can read and that only the site's own people
+ * fill: a row a stranger wrote is text that would steer the model (indirect
+ * prompt injection), so a table anyone may add to or change is refused.
  */
 
 import type { Diagnostic, Pos } from './lex.ts';
@@ -42,6 +47,9 @@ export const CHAT_ANSWER_WORDS: readonly string[] = ['pricing', 'faq', 'cta', 'f
 
 /** The page the build makes for a shared answer (§20.7); an author's page there is AZ1259. */
 export const SHARED_ROUTE = '/chat/shared';
+
+/** The most tables one chat may know (chat-block-spec §3.2). */
+export const KNOWS_MAX = 3;
 
 /** The one word an answer quotes rather than composes (§5.3, L8): its prices are always the author's. */
 const QUOTED_WORD = 'pricing';
@@ -70,8 +78,6 @@ const LINKABLE = /^(?:https:\/\/|mailto:|tel:)[^\s\\]+$/;
 export interface ChatDecl {
   readonly props: Readonly<Record<string, Arg>>;
   readonly pos: Pos;
-  /** Declared directly under `site`, not under a page. */
-  readonly atSite: boolean;
 }
 
 /**
@@ -80,8 +86,46 @@ export interface ChatDecl {
  * only signed-in visitors may ask (null otherwise, or when no page has an
  * `auth login`).
  */
-export function chatOf(route: string, allow: string | undefined, login: string | null): { route: string; signin: string | null } {
-  return { route, signin: allow === 'anyone' ? null : login };
+export function chatOf(
+  route: string, allow: string | undefined, login: string | null, knows: readonly SpecChatTable[] = [],
+): { route: string; signin: string | null; knows?: readonly SpecChatTable[] } {
+  return { route, signin: allow === 'anyone' ? null : login, ...(knows.length > 0 ? { knows } : {}) };
+}
+
+/** Who may add rows to `t` or change them, as the rule that grants it — null when only the site's admins can (§8.2). */
+function strangersWrite(t: SpecTable): { who: string; action: 'create' | 'edit' } | null {
+  for (const action of ['create', 'edit'] as const) {
+    const who = t.rules[action][0];
+    if (who !== undefined) return { who, action };
+  }
+  return null;
+}
+
+/**
+ * A table as a chat knows it: read by anyone, written only by the site's
+ * admins, with only the fields a signed-out visitor reads — never a private
+ * field, never an image — each `search` field marked. Null for a table the
+ * rules refuse (AZ1252, AZ1253), so a refused table is never in the Spec.
+ */
+function knownTable(t: SpecTable): SpecChatTable | null {
+  if (!t.rules.read.includes('anyone') || strangersWrite(t) !== null) return null;
+  const fields = t.fields.filter((f) => !f.private && f.type !== 'image').map((f) => ({
+    name: f.name, type: f.type,
+    ...(f.choices ? { choices: f.choices } : {}),
+    ...(f.currency ? { currency: f.currency, digits: CURRENCY_DIGITS[f.currency] ?? 2 } : {}),
+    ...(f.search ? { search: true as const } : {}),
+  }));
+  return fields.length > 0 ? { name: t.name, fields } : null;
+}
+
+/** The tables a chat's `knows` names that it may know, in the order written, each once (§8.2). */
+export function knowsTables(knows: string | undefined, tables: readonly SpecTable[]): SpecChatTable[] {
+  const names = [...new Set((knows ?? '').split(LIST_SEPARATOR).filter(Boolean))].slice(0, KNOWS_MAX);
+  return names.flatMap((n) => {
+    const t = tables.find((x) => x.name === n);
+    const known = t ? knownTable(t) : null;
+    return known ? [known] : [];
+  });
 }
 
 /** What the whole site offers every chat's answers: its quotable blocks and its declared destinations. */
@@ -196,22 +240,21 @@ export function withAnswer(block: SpecBlock, answers: ChatAnswers): SpecBlock {
 /**
  * The file-wide chat rules: AZ1250 (chat without a model), AZ1251 (a model
  * nothing uses), AZ1254 (a word an answer can never show), AZ1255 (`show
- * pricing` with no pricing block to quote), AZ1214 (site-level `chat` is
- * not available in this release), AZ1256 (`allow anyone` spends the
- * operator's budget on strangers). `quotable` is how many pricing blocks a
- * signed-out visitor can see (chatAnswers).
+ * pricing` with no pricing block to quote), AZ1256 (`allow anyone` spends
+ * the operator's budget on strangers), and `knows` (§8.2): AZ1271 (not a
+ * table), AZ1252 (signed-out visitors can't read it, or none of its fields),
+ * AZ1253 (strangers write to it), AZ1258 (named twice, or more than three).
+ * `quotable` is how many pricing blocks a signed-out visitor can see
+ * (chatAnswers).
  */
 export function chatDiagnostics(
-  chats: readonly ChatDecl[], model: Arg | undefined, quotable = 0,
+  chats: readonly ChatDecl[], model: Arg | undefined, quotable = 0, tables: readonly SpecTable[] = [],
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const err = (code: string, message: string, pos: Pos) => out.push({ code, message, pos, severity: 'error' });
   const warn = (code: string, message: string, pos: Pos) => out.push({ code, message, pos, severity: 'warning' });
 
   for (const c of chats) {
-    if (c.atSite) {
-      err('AZ1214', `${CHAT_WORD}: at site level is not available yet — put chat panel under the page it belongs to`, c.pos);
-    }
     if (model === undefined) {
       err('AZ1250', `${CHAT_WORD}: needs a backend with a model — add under backend: model default`, c.pos);
     }
@@ -236,10 +279,47 @@ export function chatDiagnostics(
     if (allow?.value === 'anyone') {
       warn('AZ1256', `${CHAT_WORD}: allow anyone — every stranger spends your model budget; the limits are in server/.env (AZ_CHAT_…)`, allow.pos);
     }
+    const knows = c.props.knows;
+    if (knows) out.push(...knowsDiagnostics(knows, tables));
   }
   if (model && chats.length === 0) {
-    warn('AZ1251', `backend: model default but no page shows chat — remove it, or add to a page: chat panel`, model.pos);
+    warn('AZ1251', `backend: model default but no page shows chat — remove it, or add under site: chat float`, model.pos);
   }
+  return out;
+}
+
+/** `knows`'s rules (§8.2), each table named once, in the order written. */
+function knowsDiagnostics(knows: Arg, tables: readonly SpecTable[]): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const err = (code: string, message: string) => out.push({ code, message, pos: knows.pos, severity: 'error' });
+  const names = knows.value.split(LIST_SEPARATOR).filter(Boolean);
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) {
+      err('AZ1258', `${CHAT_WORD}: knows '${name}' twice — keep one`);
+      continue;
+    }
+    seen.add(name);
+    const t = tables.find((x) => x.name === name);
+    if (!t) {
+      err('AZ1271', `${CHAT_WORD}: knows '${name}', which is not a table — declare it under site with: data ${name}, or remove it`);
+      continue;
+    }
+    if (!t.rules.read.includes('anyone')) {
+      err('AZ1252', `${CHAT_WORD}: knows '${name}', which signed-out visitors can't read — chat only knows tables with: allow anyone read`);
+      continue;
+    }
+    const writer = strangersWrite(t);
+    if (writer) {
+      const what = writer.action === 'create' ? 'takes rows from strangers' : 'lets strangers change its rows';
+      err('AZ1253', `${CHAT_WORD}: knows '${name}', which ${what} (allow ${writer.who} ${writer.action}) — their text would steer the model; pick a table only you fill`);
+      continue;
+    }
+    if (knownTable(t) === null) {
+      err('AZ1252', `${CHAT_WORD}: knows '${name}', which has no field signed-out visitors can read — make one public, or remove it`);
+    }
+  }
+  if (seen.size > KNOWS_MAX) err('AZ1258', `${CHAT_WORD}: knows ${seen.size} tables, max is ${KNOWS_MAX} — remove ${seen.size - KNOWS_MAX}`);
   return out;
 }
 

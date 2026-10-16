@@ -77,7 +77,7 @@ Gates for any word change: `pnpm verify` (unit, typecheck, this index), `pnpm li
 | Word | Info | Variants |
 |---|---|---|
 | [`auth`](#auth) | Sign-in, sign-up or password-reset form on its own page | `login` `signup` `reset` |
-| [`chat`](#chat) | A panel where visitors ask the site's AI a question | `panel` |
+| [`chat`](#chat) | A panel or a launcher where visitors ask the site's AI | `panel` `float` `none` |
 | [`cta`](#cta) | Closing call-to-action section before the footer | `band` `card` `split` |
 | [`faq`](#faq) | Questions with expandable answers, plus FAQ schema | `list` `columns` |
 | [`feature`](#feature) | Set of features or benefits | `grid` `rows` `bento` |
@@ -141,7 +141,7 @@ Gate: `pnpm verify` · `pnpm lint` · `pnpm gate words/auth` · `pnpm thumbnails
 
 ## `chat`
 
-A panel where visitors ask the site's AI a question
+A panel or a launcher where visitors ask the site's AI
 
 [README](../packages/words/chat/README.md) · [spec](chat-block-spec.md) · terms: `az explain chat`
 
@@ -150,6 +150,8 @@ A panel where visitors ask the site's AI a question
 | Variant | Info | Preview |
 |---|---|---|
 | `panel` (default) | A section on the page: transcript, suggestions, input | `preview.az` |
+| `float` | A corner button opening the panel (site or page) | `preview.float.az` |
+| `none` | No chat on this page (page level) | renders nothing; no thumbnail |
 
 ### Keys
 
@@ -160,19 +162,20 @@ A panel where visitors ask the site's AI a question
 | `allow` | enum | `signedin` / `anyone` | `signedin` | Who may send a message |
 | `limit` | int |  | `20` | Messages per conversation before a new chat |
 | `show` | list |  |  | Components an answer may hold besides text |
+| `knows` | list |  |  | Public tables whose rows ground the answers, up to 3 |
 | `ask` | child |  |  | A suggested question, shown as a button |
 
 ### Where to edit
 
 | Concern | Edit |
 |---|---|
-| Copy | the site's `.az` file (the keys above); worked examples: `preview.az` |
+| Copy | the site's `.az` file (the keys above); worked examples: `preview.az`, `preview.float.az` |
 | Info lines, keys, values, bounds | `packages/words/chat/word.json` — `description`, `descriptions`, each key's `description` |
-| Style tokens | values: `packages/theme/src/themes.ts` (per theme), `packages/theme/src/tokens.ts` (scales); its own code reads `color.accent`, `color.bg`, `color.border`, `color.border-strong`, `color.danger`, `color.focus`, `color.muted`, `color.series-1`, `color.series-2`, `color.series-3`, `color.series-4`, `color.series-5`, `color.series-6`, `color.surface`, `color.surface-alt`, `color.text`, `radius.md`, `radius.sm`, `size.gutter-sm`, `size.measure-body`, `size.measure-display`, `size.ring`, `size.ring-offset`, `size.tap`, `space.4`, `space.8`, `space.12`, `space.16`, `space.24`, `space.48`, `space.96`, `space.128`, `type.display`, `type.leading-body`, `type.leading-tight`, `type.size.2xl`, `type.size.base`, `type.size.sm`, `type.weight-bold`, `type.weight-display` (`themeReads`, held to the code by `pnpm lint`; shared helpers and `ctx.actions` read their own) |
+| Style tokens | values: `packages/theme/src/themes.ts` (per theme), `packages/theme/src/tokens.ts` (scales); its own code reads `breakpoint.sm`, `color.accent`, `color.bg`, `color.border`, `color.border-strong`, `color.danger`, `color.focus`, `color.muted`, `color.series-1`, `color.series-2`, `color.series-3`, `color.series-4`, `color.series-5`, `color.series-6`, `color.surface`, `color.surface-alt`, `color.text`, `layer.dropdown`, `layer.modal`, `motion.easeIn`, `motion.easeOut`, `motion.fast`, `motion.slow`, `radius.lg`, `radius.md`, `radius.sm`, `shadow.lg`, `size.gutter-sm`, `size.measure-body`, `size.measure-display`, `size.ring`, `size.ring-offset`, `size.tap`, `space.4`, `space.8`, `space.12`, `space.16`, `space.24`, `space.48`, `space.96`, `space.128`, `type.display`, `type.leading-body`, `type.leading-tight`, `type.size.2xl`, `type.size.base`, `type.size.sm`, `type.weight-bold`, `type.weight-display` (`themeReads`, held to the code by `pnpm lint`; shared helpers and `ctx.actions` read their own) |
 | Style and layout | `packages/words/chat/emit.web.ts` — theme tokens only; visitor messages on color.surface-alt, answers on color.surface; the input's edge color.border-strong; focusVisible ring color.focus; errors color.danger; below sm the mobile gutter. |
-| Markup | `packages/words/chat/emit.web.ts` — one message → message(); the controls → form(); the hidden state lines → notes(); the config → config(); the components' templates → parts() (ids and behaviour marks parked by asTemplate()). Keep: no inline handler, no markup from the network, every control a real button or link, the label visible. |
+| Markup | `packages/words/chat/emit.web.ts` — one message → message(); the controls → form(); the hidden state lines → notes(); the config → config(); the components' templates → parts() (ids and behaviour marks parked by asTemplate()); the launcher and its dialog → floatShell(). Keep: no inline handler, no markup from the network, every control a real button or link, the label visible. |
 | Behaviour | packages/overlay runtime chat.ts sends with fetch, reads the event stream and writes every answer as text (textContent) into copies of the hidden templates — a component into a copy of its part, a destination only from the config's allow-list; the status region hears finished sentences. Other words render the parts (ctx.embed). With JavaScript off the greeting and the noscript line show, and the form stays hidden. |
-| Validation | `packages/words/chat/word.json` `checks`: `AZ2220`–`AZ2228` (9) |
+| Validation | `packages/words/chat/word.json` `checks`: `AZ2220`–`AZ2229` (10) |
 | Tests | `packages/words/test/props.test.ts`, `packages/words/test/variants.test.ts`, `packages/words/test/structure.test.ts`, `packages/words/test/chat-shell.test.ts` |
 
 Gate: `pnpm verify` · `pnpm lint` · `pnpm gate words/chat` · `pnpm thumbnails chat --verify`

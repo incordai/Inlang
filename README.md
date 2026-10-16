@@ -214,7 +214,7 @@ modifier and key with its info line, and the file to edit for each concern);
 | Word | Info | Variants | Docs |
 |---|---|---|---|
 | `auth` | Sign-in, sign-up or password-reset form on its own page | `login` `signup` `reset` | [README](packages/words/auth/README.md) |
-| `chat` | A panel where visitors ask the site's AI a question | `panel` | [README](packages/words/chat/README.md) |
+| `chat` | A panel or a launcher where visitors ask the site's AI | `panel` `float` `none` | [README](packages/words/chat/README.md) |
 | `cta` | Closing call-to-action section before the footer | `band` `card` `split` | [README](packages/words/cta/README.md) |
 | `faq` | Questions with expandable answers, plus FAQ schema | `list` `columns` | [README](packages/words/faq/README.md) |
 | `feature` | Set of features or benefits | `grid` `rows` `bento` | [README](packages/words/feature/README.md) |

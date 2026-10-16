@@ -444,7 +444,7 @@ block-word      = "nav" | "hero" | "feature" | "gallery" | "pricing"
                 | "faq"  | "cta"  | "footer"  | "auth"    | "scene" | "text"
                 | "chat" ;                       (* PRD §6.2 exception, 2026-10-15 *)
 
-inheritable-block = block ;      (* nav, footer or scene backdrop under site, §5.2 *)
+inheritable-block = block ;      (* nav, footer, scene backdrop or chat float under site, §5.2 *)
 
 atom            = variant        (* ∈ this block's word.json "variants"; max one *)
                 | modifier       (* ∈ this block's word.json "modifiers"; free *)
@@ -505,7 +505,7 @@ value           = STRING | PAIR | BARE ;
 | `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
 | `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here |
 | `model default` | `backend` | 1 | chat-block-spec §3.1 — optional; the server talks to a model the operator picks in `.env` (`AZ_CHAT_API`, `AZ_CHAT_MODEL`); any other value is AZ1412 |
-| `chat panel` | `page` | 1 | chat-block-spec §3 — a section; at most one per page (AZ2220). `float`, site-level `chat` (inherited) and `chat none` come with phase C3 |
+| `chat panel` · `chat float` · `chat none` | `page`; `chat float` also `site` | 1 | chat-block-spec §3 — `panel` a section, `float` a corner launcher that opens the panel; at most one chat per page (AZ2220). A float under `site` is inherited by every page (§5.2): a page's own `chat panel` replaces it there, `chat none` leaves it out, and a page's own `chat float` beside it is AZ2229. `knows <table>…` grounds answers on up to three public tables only the site fills (AZ1252, AZ1253, AZ1258, AZ1271) |
 | `data <table>` + indented lines | `site` | 1 | data-spec §4 — needs `backend`; a table and its `/data/<table>` API; not a block |
 | `<field> <type> [type-arg…] [modifier…]` | `data` | 1 | data-spec §4.2–§4.5 — types `text longtext number money flag date datetime email url choice image ref`; modifiers `required unique index search private locked default <v>` |
 | `allow <who> <action…>` | `data` | 1 | data-spec §4.7 — who `anyone signedin owner`, action `read create edit delete`; the matrix is closed |
@@ -556,13 +556,17 @@ people, until `az backend schema --expose <table>` (data-spec §6, §18.7).
 `chat`'s file-wide diagnostics are AZ1250–AZ1259 at the link stage
 (chat-block-spec §3.4): AZ1250 a chat without `backend … model default` ·
 AZ1251 (warning) `model default` that no page uses · AZ1254 a word an answer
-can never show, with its reason · AZ1256 (warning) `allow anyone`. AZ1252,
-AZ1253, AZ1255, AZ1257 and AZ1258 are reserved for `show` and `knows`, which
-arrive in phases C2 and C3; until then `show` and a site-level `chat` are
-AZ1214, not available yet. C2b adds AZ1259 — an author's page at
-`/chat/shared`, the shared-answer page a chat site generates, in any case —
-and AZ1270, `show dashboard` with none of `chart`, `table`, `stats`, `cards`
-to hold (chat-block-spec §20.10). Its own rows are AZ2220–AZ2228 (§7.5).
+can never show, with its reason · AZ1255 `show pricing` with no pricing block
+a signed-out visitor can see · AZ1256 (warning) `allow anyone` · AZ1257
+(warning, `az build`) a page left out of the site context by its cap. `knows`
+(C3) is AZ1252 — a table signed-out visitors can't read, or none of whose
+fields they can · AZ1253 — a table strangers can add rows to or change
+(`allow anyone|signedin create`, `allow … edit`): their text would steer the
+model · AZ1258 — a table named twice, or more than three · AZ1271 — a name
+that is no table. C2b adds AZ1259 — an author's page at `/chat/shared`, the
+shared-answer page a chat site generates, in any case — and AZ1270, `show
+dashboard` with none of `chart`, `table`, `stats`, `cards` to hold
+(chat-block-spec §20.10). Its own rows are AZ2220–AZ2229 (§7.5).
 `from <table>` in a block is AZ1260–AZ1269 (data-spec §10, §12): a gallery's
 `alt` maps only to a `required` field (AZ1262), and a site with data owns
 `/admin`, so a page there is AZ1268 (§5.5).
@@ -894,18 +898,26 @@ Lowest to highest. A higher level always wins outright.
 > **A page-level declaration of an inheritable word replaces the site-level one
 > entirely. It does not merge with it.**
 
-Inheritable words in Phase 1: **`nav` and `footer`**, and `scene backdrop`
-(scene-spec §6). Everything else declared at site level (`theme`, `font`) is
-site-scoped and cannot be redeclared.
+Inheritable words in Phase 1: **`nav` and `footer`**, `scene backdrop`
+(scene-spec §6) and `chat float` (chat-block-spec §3.1, phase C3).
+Everything else declared at site level (`theme`, `font`) is site-scoped and
+cannot be redeclared.
 
-A block under `site` is one of those three, or a word declared there only
+A block under `site` is one of those four, or a word declared there only
 for its site-scoped settings (auth's `adapter`, which no page renders). Any
 other block was dropped from every page without a word; it is
-`hero: not allowed inside 'site' — only nav, footer and scene backdrop are inherited; move it under the page it belongs to`,
-and a scene that is not a backdrop is
-`scene: 'inline' is not inherited — only nav, footer and scene backdrop are; move it under the page it belongs to`
-(both AZ1202). A site-level `chat` is AZ1214 instead — not available yet,
-since it is phase C3's `float` (chat-block-spec §3).
+`hero: not allowed inside 'site' — only nav, footer, scene backdrop and chat float are inherited; move it under the page it belongs to`,
+and a scene that is not a backdrop, or a chat that is not a float, is
+`scene: 'inline' is not inherited — only nav, footer, scene backdrop and chat float are; move it under the page it belongs to`
+(both AZ1202).
+
+`chat` keeps one more rule, because a page shows one chat (AZ2220): the
+site's float is replaced on a page by that page's own `chat panel` as well as
+suppressed by `chat none`. A page's own `chat float` under the site's is
+AZ2229 — one assistant follows the visitor across the site, so a page differs
+by leaving it out or by holding a panel, never by a second launcher.
+An inherited float asks from the page it is on: each page's copy carries that
+page's route (core `blocksFor`).
 
 ```
 site aurora

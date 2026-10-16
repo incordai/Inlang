@@ -267,6 +267,8 @@ const CASES: Case[] = [
   { code: 'AZ2226', severity: 'error', bad: file('chat panel\n  title " "'), good: file('chat panel\n  title "Ask"') },
   { code: 'AZ2227', severity: 'error', bad: file('chat panel\n  greeting ""'), good: file('chat panel\n  greeting "Hi"') },
   { code: 'AZ2228', severity: 'error', bad: file('chat panel\n  ask ""'), good: file('chat panel\n  ask "Why?"') },
+  // A page's own float under the site's float: `chat none` (or nothing) is the way to differ.
+  { code: 'AZ2229', severity: 'error', bad: file(`${HERO}\nchat float`, 'chat float'), good: file(`${HERO}\nchat none`, 'chat float') },
 
   // ---- generic: what manifests declared and nothing enforced -------------
   // A slot fill's own slot minimum: pricing's plan must have its cta.
