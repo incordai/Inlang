@@ -11,10 +11,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PINS } from '../src/emit.ts';
+import { compile, formatDiagnostics, type Manifest } from '../../core/src/index.ts';
+import { emitProject, PINS } from '../src/emit.ts';
+import { WEB_EMITTERS } from '../../words/registry.ts';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const doc = readFileSync(join(ROOT, 'docs/stack-evaluation.md'), 'utf8');
@@ -57,15 +59,48 @@ test('every emitted pin matches its VERIFIED row', () => {
   assert.equal(PINS.react, verifiedVersion('react'));
   assert.equal(PINS.vite, verifiedVersion('vite'));
   assert.equal(PINS.three, verifiedVersion('three'));
+  assert.equal(PINS.typesReact, verifiedVersion('@types/react'));
+  assert.equal(PINS.typesReactDom, verifiedVersion('@types/react-dom'));
+  assert.equal(PINS.typesThree, verifiedVersion('@types/three'));
 });
 
-test('scene-spec: every 3D word pins the three a site is built with — no drift', () => {
-  // hero, scene and gallery (orbit) draw into one renderer; a page that
-  // mixed two three versions would ship two copies of the library.
-  const words = join(ROOT, 'packages/words');
-  const pinned = ['hero', 'scene', 'gallery'].map((w) =>
-    (JSON.parse(readFileSync(join(words, w, 'word.json'), 'utf8')) as { deps?: Record<string, string> }).deps ?? {});
-  for (const deps of pinned) assert.deepEqual(deps, { three: PINS.three });
+test('the type declarations a generated project pins are the ones this repo type-checks generated code with', () => {
+  // generated-types.test.ts checks generated code against the repository's own
+  // installed declarations; a generated project that pinned different ones
+  // would be checked by its author against something this repo never ran.
+  const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as
+    { devDependencies?: Record<string, string> };
+  assert.equal(PINS.typesReact, rootPkg.devDependencies?.['@types/react']);
+  assert.equal(PINS.typesReactDom, rootPkg.devDependencies?.['@types/react-dom']);
+  assert.equal(PINS.typesThree, rootPkg.devDependencies?.['@types/three']);
+});
+
+test('the generated package.json carries the type declarations: React\'s always, three\'s only with three', () => {
+  const manifests = new Map<string, Manifest>();
+  for (const n of readdirSync(join(ROOT, 'packages/words'))) {
+    const at = join(ROOT, 'packages/words', n, 'word.json');
+    if (!existsSync(at)) continue;
+    const m = JSON.parse(readFileSync(at, 'utf8')) as Manifest;
+    manifests.set(m.name, m);
+  }
+  const pkgOf = (source: string) => {
+    const r = compile(source, { manifests });
+    assert.ok(r.ok && r.spec, formatDiagnostics(r.diagnostics, 'site.az'));
+    const file = emitProject(r.spec, { emitters: WEB_EMITTERS }).files.find((f) => f.path === 'package.json');
+    assert.ok(file, 'no package.json emitted');
+    return JSON.parse(file.content) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+  };
+  const flat = pkgOf('az 1\nsite flat\npage /\n  hero split\n    title "Grown"\n');
+  assert.deepEqual(flat.devDependencies, {
+    '@types/react': PINS.typesReact, '@types/react-dom': PINS.typesReactDom, vite: PINS.vite, typescript: PINS.typescript,
+  });
+  assert.equal(flat.dependencies.three, undefined, 'CONTROL: this site must not use 3D');
+  const depth = pkgOf('az 1\nsite depth\npage /\n  hero split 3d\n    title "Grown"\n    describe "Strands"\n');
+  assert.equal(depth.dependencies.three, PINS.three, 'CONTROL: this site must use 3D');
+  assert.deepEqual(depth.devDependencies, {
+    '@types/react': PINS.typesReact, '@types/react-dom': PINS.typesReactDom, '@types/three': PINS.typesThree,
+    vite: PINS.vite, typescript: PINS.typescript,
+  });
 });
 
 test('typescript is pinned to the version this repo actually uses', () => {

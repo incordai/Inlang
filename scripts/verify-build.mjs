@@ -710,12 +710,15 @@ try {
     shippedBuild(chatProj, serverKeys);
     shippedBuild(plainProj, serverKeys);
     // chat-block-spec §19.11: the generated client code type-checks as written — under its own tsconfig.json, with
-    // the bundler's real client declarations from the project's install and React's types from this repository's
-    // lockfile (@types/react, @types/react-dom, and @types/three for the fixture's 3D view), linked in beside them.
-    mkdirSync(join(proj, 'node_modules/@types'), { recursive: true });
-    for (const t of ['react', 'react-dom', 'three']) {
-      if (!existsSync(join(proj, 'node_modules/@types', t))) symlinkSync(join(ROOT, 'node_modules/@types', t), join(proj, 'node_modules/@types', t), 'dir');
-    }
+    // only what the project's own install brought: the bundler's client declarations and the type declarations its
+    // package.json pins (@types/react, @types/react-dom, and @types/three beside three), exactly as a site author's
+    // `tsc --noEmit` would run. The chat sites share the fixture's install, so each must pin no more than it.
+    const devDependencies = (dir) => JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).devDependencies ?? {};
+    check('the generated package.json pins the type declarations its own type-check needs — React\'s, and three\'s beside three',
+      ['@types/react', '@types/react-dom', '@types/three'].every((t) => typeof devDependencies(proj)[t] === 'string')
+        && ['@types/react', '@types/react-dom'].every((t) => devDependencies(chatProj)[t] === devDependencies(proj)[t])
+        && devDependencies(chatProj)['@types/three'] === undefined,
+      JSON.stringify({ fixture: devDependencies(proj), chat: devDependencies(chatProj) }));
     for (const [name, dir] of [['the GRAMMAR §8 fixture', proj], ['the chat site', chatProj], ['the chat site without its chat', plainProj]]) {
       const tsc = spawnSync(process.execPath, [join(dir, 'node_modules/typescript/bin/tsc'), '--noEmit', '-p', 'tsconfig.json'], {
         cwd: dir, encoding: 'utf8', timeout: COMMAND_MS, killSignal: 'SIGKILL',

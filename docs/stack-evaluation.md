@@ -683,6 +683,9 @@ before pinning if this document is more than a few weeks old.**
 |---|---|---|---|
 | `vite` | `8.2.2` | MIT | **VERIFIED** [↗](https://registry.npmjs.org/vite/latest) |
 | `vite-react-ssg` | `0.9.2` | MIT | **VERIFIED** — pre-1.0 [↗](https://registry.npmjs.org/vite-react-ssg/latest) |
+| `@types/react` | `19.2.18` | MIT | **VERIFIED** 2026-10-16 — a generated project's devDependency, so its author's `tsc --noEmit` passes; the latest of the 19.2 line (published 2026-07-30), matching `react` 19.2.8 (`19.3.0` describes React 19.3); brings `csstype ^3.2.2` (MIT) [↗](https://registry.npmjs.org/@types/react/19.2.18) |
+| `@types/react-dom` | `19.2.7` | MIT | **VERIFIED** 2026-10-16 — a generated project's devDependency; the latest of the 19.2 line (published 2026-09-03); no dependencies, peer `@types/react ^19.2.0` [↗](https://registry.npmjs.org/@types/react-dom/19.2.7) |
+| `@types/three` | `0.186.0` | MIT | **VERIFIED** 2026-10-16 — a generated 3D project's devDependency, only beside `three`; matches `three` 0.186.0 (§0, published 2026-09-11) [↗](https://registry.npmjs.org/@types/three/0.186.0) |
 
 ### Author-side (never a compiler dependency)
 

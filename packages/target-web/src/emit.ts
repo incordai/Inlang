@@ -83,6 +83,14 @@ export const PINS = {
   typescript: '7.0.2',
   /** Only a site that uses 3D depends on it (scene-spec §5). */
   three: '0.186.0',
+  /**
+   * The type declarations a site author's `tsc` needs to check the generated
+   * project: React's (the 19.2 line, matching `react`) for every site, and
+   * three's (matching `three`) only beside it. Development only; never shipped.
+   */
+  typesReact: '19.2.18',
+  typesReactDom: '19.2.7',
+  typesThree: '0.186.0',
 } as const;
 
 /**
@@ -1194,7 +1202,14 @@ ${frameCss(theme)}${schemeCss(named)}${gradientCss(isPaired(named))}${patternCss
           'react-dom': PINS.react,
           ...(seeded.used ? { three: PINS.three } : {}),
         },
-        devDependencies: { vite: PINS.vite, typescript: PINS.typescript },
+        // The declarations `tsc --noEmit` reads; the build itself needs none of them.
+        devDependencies: {
+          '@types/react': PINS.typesReact,
+          '@types/react-dom': PINS.typesReactDom,
+          ...(seeded.used ? { '@types/three': PINS.typesThree } : {}),
+          vite: PINS.vite,
+          typescript: PINS.typescript,
+        },
       }, null, 2) + '\n',
     },
     {
