@@ -3,7 +3,7 @@
  * Purpose: the figures an answer's chart, table, stat or cards ask for — a closed set of requests over public tables, run as an anonymous read.
  * Spec: docs/chat-block-spec.md §20.5, §20.6
  * Exports: QueryTable, QueryRequest, QueryResult, Figures, RowsResult, CardsResult, CardImage, QUERY_LIMITS, queryable,
- *   parseFigures, parseRows, parseCards, createQueries, Queries, QueriesOptions, figuresRun
+ *   parseFigures, parseRows, parseCards, createQueries, Queries, QueriesOptions, figuresRun, isoWeek, weekGroups
  * Edit guide: the model's words only ever SELECT from closed lists and exact schema names — nothing it writes reaches SQL text.
  *   Every read is the anonymous one (`grant(read, null)`, user null); a private field is not in the schema the words are matched to.
  * Tests: packages/backend/test/chat-query.test.ts
@@ -62,7 +62,8 @@ export interface QueryTable {
 }
 
 export type QueryRequest =
-  | { readonly kind: 'figures'; readonly table: QueryTable; readonly agg: Aggregate; readonly key: string }
+  /** `week`: the ISO weeks asked for — `agg` reads days, combined into weeks here with `week.fn` (§19.11). */
+  | { readonly kind: 'figures'; readonly table: QueryTable; readonly agg: Aggregate; readonly key: string; readonly week?: { readonly fn: Aggregate['fn']; readonly cap: number } }
   | { readonly kind: 'rows'; readonly table: QueryTable; readonly columns: readonly Field[]; readonly sort: string; readonly key: string }
   | { readonly kind: 'cards'; readonly table: QueryTable; readonly title: Field; readonly text: Field | null; readonly image: Field | null; readonly sort: string; readonly key: string };
 
@@ -102,7 +103,7 @@ export function queryable(tables: readonly QueryTable[]): QueryTable[] {
 }
 
 const NAME = /^[a-z][a-z0-9]*$/;
-const BUCKETS: ReadonlySet<string> = new Set(['day', 'month', 'year']);
+const BUCKETS: ReadonlySet<string> = new Set(['day', 'week', 'month', 'year']);
 const FNS: ReadonlySet<string> = new Set(['count', 'sum', 'avg', 'min', 'max']);
 
 /** A public field of `t` by its exact name, or null — private fields are not names here. */
@@ -117,9 +118,15 @@ function tableOf(tables: readonly QueryTable[], name: string | undefined): Query
 }
 
 /**
- * `<table> count|sum f|avg f|min f|max f [by f [day|month|year]] [where f v]`
+ * `<table> count|sum f|avg f|min f|max f [by f [day|week|month|year]] [where f v]`
  * — the words after `from`, already lexed — or null. `cap` is the groups
  * the component shows (QUERY_LIMITS.slices for a pie, .groups otherwise).
+ *
+ * `week` is the ISO 8601 week (`2026-W53`): the engines disagree on weeks
+ * (SQLite's `%W` is not ISO's; MySQL and PostgreSQL each have their own
+ * spelling of it), so no engine is asked for one — the day buckets are read,
+ * as for `day`, and combined into weeks here (isoWeek, weekGroups), the same
+ * on all three.
  */
 export function parseFigures(words: readonly string[], tables: readonly QueryTable[], cap: number): QueryRequest | null {
   const w = [...words];
@@ -134,7 +141,7 @@ export function parseFigures(words: readonly string[], tables: readonly QueryTab
     if (!field || !AGGREGATE_MEASURE.has(field.type)) return null;
   }
   let by: Field | null = null;
-  let bucket: Aggregate['bucket'] = null;
+  let bucket: Aggregate['bucket'] | 'week' = null;
   if (w[0] === 'by') {
     w.shift();
     by = publicField(t, w.shift());
@@ -143,7 +150,7 @@ export function parseFigures(words: readonly string[], tables: readonly QueryTab
     if (dated) {
       const b = w.shift();
       if (b === undefined || !BUCKETS.has(b)) return null;
-      bucket = b as Aggregate['bucket'];
+      bucket = b as Aggregate['bucket'] | 'week';
     } else if (w[0] !== undefined && BUCKETS.has(w[0])) {
       return null;
     }
@@ -165,9 +172,14 @@ export function parseFigures(words: readonly string[], tables: readonly QueryTab
     where = { field: f, value };
   }
   if (w.length > 0) return null;
-  const limit = Math.min(cap, QUERY_LIMITS.groups) + 1;
-  const agg: Aggregate = { fn: fn as Aggregate['fn'], field, by, bucket, where, limit };
-  const key = JSON.stringify(['figures', t.name, fn, field?.name ?? null, by?.name ?? null, bucket, where?.field.name ?? null, where?.value ?? null, limit]);
+  const shown = Math.min(cap, QUERY_LIMITS.groups);
+  const key = JSON.stringify(['figures', t.name, fn, field?.name ?? null, by?.name ?? null, bucket, where?.field.name ?? null, where?.value ?? null, shown + 1]);
+  if (bucket === 'week') {
+    // The newest `shown` weeks hold at most 7·shown days: the newest 7·shown + 1 days hold them whole, and say whether there were more.
+    const agg: Aggregate = { fn: fn === 'avg' ? 'sum' : fn as Aggregate['fn'], field, by, bucket: 'day', where, limit: 7 * shown + 1, ...(fn === 'avg' ? { counted: true } : {}) };
+    return { kind: 'figures', table: qt, agg, key, week: { fn: fn as Aggregate['fn'], cap: shown } };
+  }
+  const agg: Aggregate = { fn: fn as Aggregate['fn'], field, by, bucket, where, limit: shown + 1 };
   return { kind: 'figures', table: qt, agg, key };
 }
 
@@ -244,6 +256,50 @@ const groupLabel = (f: Field, v: unknown): string =>
 
 const day = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The ISO 8601 week of a `YYYY-MM-DD` day, as `YYYY-Www`: weeks start on
+ * Monday, and a week belongs to the year its Thursday is in — so 2027-01-01
+ * (a Friday) is in 2026-W53, and 2024-12-30 (a Monday) in 2025-W01.
+ */
+export function isoWeek(d: string): string {
+  const [y, m, dd] = d.split('-').map(Number);
+  const t = Date.UTC(y, m - 1, dd);
+  const fromMonday = (new Date(t).getUTCDay() + 6) % 7;
+  const thursday = t + (3 - fromMonday) * DAY_MS;
+  const year = new Date(thursday).getUTCFullYear();
+  const week = 1 + Math.floor((thursday - Date.UTC(year, 0, 1)) / (7 * DAY_MS));
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
+/**
+ * Day buckets (newest first, `v` the day's measure in stored units, `n` its
+ * count of values for an average) combined into ISO weeks, newest first:
+ * a week's count or sum is its days' total, its min and max theirs, its
+ * average its days' sum over their count. The newest `cap` weeks are whole
+ * (parseFigures read enough days); `more` when there were older ones. Null
+ * when a total is past what a double holds exactly.
+ */
+export function weekGroups(rows: readonly Record<string, unknown>[], fn: Aggregate['fn'], cap: number): { groups: [string, number][]; more: boolean } | null {
+  const weeks = new Map<string, { v: number; n: number }>();
+  for (const r of rows) {
+    // A day whose measured values are all empty has no measure (SQL's NULL): it adds nothing to its week.
+    if (r.v === null || r.v === undefined) continue;
+    const label = isoWeek(String(r.g));
+    const v = Number(r.v);
+    const n = Number(r.n ?? 0);
+    if (!Number.isFinite(v) || Math.abs(v) > Number.MAX_SAFE_INTEGER) return null;
+    const was = weeks.get(label);
+    if (!was) { weeks.set(label, { v, n }); continue; }
+    was.v = fn === 'min' ? Math.min(was.v, v) : fn === 'max' ? Math.max(was.v, v) : was.v + v;
+    was.n += n;
+    if (Math.abs(was.v) > Number.MAX_SAFE_INTEGER) return null;
+  }
+  const all = [...weeks.entries()].map(([label, w]): [string, number] => [label, fn === 'avg' ? w.v / w.n : w.v]);
+  return { groups: all.slice(0, cap), more: all.length > cap };
+}
+
 /** A cell as the table shows it: numbers as numbers (money in major units), everything else as clamped text. */
 function cell(f: Field, v: unknown, digits: Readonly<Record<string, number>>): string | number | null {
   if (v === null || v === undefined) return null;
@@ -301,6 +357,18 @@ export function createQueries(o: QueriesOptions): Queries {
       const value = exact(rows[0]?.v ?? 0, digits);
       if (value === null && rows[0]?.v !== null && rows[0]?.v !== undefined) return null;
       return { kind: 'figures', unit, value, groups: null, more: false, dated: false };
+    }
+    if (req.week) {
+      const weeks = weekGroups(rows, req.week.fn, req.week.cap);
+      if (weeks === null) return null;
+      const groups: [string, number][] = [];
+      for (const [label, raw] of weeks.groups) {
+        const v = exact(raw, digits);
+        if (v === null) return null;
+        groups.push([label, v]);
+      }
+      // Read newest first, shown oldest first, as every date grouping is.
+      return { kind: 'figures', unit, value: null, groups: groups.reverse(), more: weeks.more, dated: true };
     }
     const shown = rows.slice(0, agg.limit - 1);
     const groups: [string, number][] = [];

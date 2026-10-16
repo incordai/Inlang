@@ -15,7 +15,7 @@ import { dataOf } from './data-fixture.ts';
 import { QueryTimeout, type Db } from '../src/server/db.ts';
 import { selectAggregate } from '../src/server/data-query.ts';
 import {
-  QUERY_LIMITS, createQueries, parseCards, parseFigures, parseRows, queryable, type QueryRequest, type QueryTable,
+  QUERY_LIMITS, createQueries, isoWeek, parseCards, parseFigures, parseRows, queryable, weekGroups, type QueryRequest, type QueryTable,
 } from '../src/server/chat-query.ts';
 import { clampText } from '../src/server/chat-rich.ts';
 
@@ -104,11 +104,11 @@ test('parse: the closed forms parse; private fields, owner, free text, bad bucke
     for (const ok of [
       'orders count', 'orders count by status', 'orders sum total by placed month', 'orders avg total',
       'orders min total by gift', 'orders max total by shipped year', 'orders count where status paid',
-      'orders count by placed day where gift yes',
+      'orders count by placed day where gift yes', 'orders count by placed week', 'orders avg total by shipped week',
     ]) assert.ok(parseFigures(words(ok), tables, 24), ok);
     for (const bad of [
       'orders count by note', 'orders sum note', 'orders count by owner', 'orders count by item', 'orders count by status month',
-      'orders count by placed', 'orders count by placed week', 'orders sum status', 'orders count where status refunded',
+      'orders count by placed', 'orders count by status week', 'orders count by placed fortnight', 'orders sum status', 'orders count where status refunded',
       'orders count where note x', 'orders count where gift maybe', 'orders count by status by status', 'orders count extra',
       'orders; DROP TABLE x', 'orders count by "status"', 'Orders count', '', 'orders', 'orders total',
     ]) assert.equal(parseFigures(bad === '' ? [] : words(bad), tables, 24), null, bad);
@@ -158,6 +158,78 @@ test('figures equal what a signed-out visitor computes from GET /data pages', as
     const capped = await run('orders count by status', 2);
     assert.equal(capped.groups?.length, 2);
     assert.equal(capped.more, true);
+  } finally {
+    await h.close();
+  }
+});
+
+test('isoWeek: Monday weeks, numbered by the year their Thursday is in — across year boundaries and week 53', () => {
+  // Each checked against an independent ISO calendar (the reference values in chat-block-spec §19.11).
+  const want: [string, string][] = [
+    ['2020-12-31', '2020-W53'], ['2021-01-03', '2020-W53'], ['2021-01-04', '2021-W01'],
+    ['2024-12-30', '2025-W01'], ['2025-12-28', '2025-W52'], ['2025-12-29', '2026-W01'], ['2026-01-01', '2026-W01'],
+    ['2026-12-27', '2026-W52'], ['2026-12-28', '2026-W53'], ['2026-12-31', '2026-W53'], ['2027-01-01', '2026-W53'],
+    ['2027-01-03', '2026-W53'], ['2027-01-04', '2027-W01'], ['2028-02-29', '2028-W09'],
+  ];
+  assert.deepEqual(want.map(([d]) => [d, isoWeek(d)]), want);
+});
+
+test('weekGroups: days into weeks — sums, extremes and an average of the days\' values, newest first, more past the cap', () => {
+  const days = [
+    { g: '2027-01-04', v: 5, n: 1 }, { g: '2027-01-01', v: 30, n: 2 }, { g: '2026-12-28', v: 10, n: 2 }, { g: '2026-12-27', v: 7, n: 1 },
+  ];
+  assert.deepEqual(weekGroups(days, 'sum', 24), { groups: [['2027-W01', 5], ['2026-W53', 40], ['2026-W52', 7]], more: false });
+  assert.deepEqual(weekGroups(days, 'min', 24)?.groups, [['2027-W01', 5], ['2026-W53', 10], ['2026-W52', 7]]);
+  assert.deepEqual(weekGroups(days, 'max', 24)?.groups, [['2027-W01', 5], ['2026-W53', 30], ['2026-W52', 7]]);
+  // An average is the week's values over their count, never an average of the days' averages.
+  assert.deepEqual(weekGroups(days, 'avg', 24)?.groups, [['2027-W01', 5], ['2026-W53', 10], ['2026-W52', 7]]);
+  assert.deepEqual(weekGroups(days, 'sum', 2), { groups: [['2027-W01', 5], ['2026-W53', 40]], more: true });
+  assert.equal(weekGroups([{ g: '2026-12-28', v: Number.MAX_SAFE_INTEGER, n: 1 }, { g: '2026-12-29', v: 2, n: 1 }], 'sum', 24), null, 'a total no double holds exactly');
+  // A day with no value of the measure (SQL's NULL) adds nothing: never a 0 in a minimum, never a week of its own.
+  const gaps = [{ g: '2026-12-29', v: null, n: 0 }, { g: '2026-12-28', v: 4, n: 1 }, { g: '2026-12-21', v: null, n: 0 }];
+  assert.deepEqual(weekGroups(gaps, 'min', 24)?.groups, [['2026-W53', 4]]);
+  assert.deepEqual(weekGroups(gaps, 'avg', 24)?.groups, [['2026-W53', 4]]);
+});
+
+test('figures by ISO week: what a signed-out visitor counts by week from GET /data pages — the year boundary, week 53, both date types', async () => {
+  const { h, tables } = await shop();
+  try {
+    const c = client(h.url);
+    await c.post('/auth/sign-up', { name: 'Bo', email: 'bo@studio.test', password: GOOD, passwordConfirm: GOOD });
+    // Around the turn of 2026 (a 53-week year): Sunday of W52, three days of W53 in two years, Monday of 2027-W01.
+    for (const [day, total] of [['2026-12-27', 100], ['2026-12-28', 300], ['2026-12-31', 500], ['2027-01-01', 700], ['2027-01-03', 900], ['2027-01-04', 50]] as const) {
+      const placed = Date.parse(`${day}T23:59:00Z`);
+      const r = await c.request('POST', '/data/orders', { item: 'Turn', status: 'open', total, placed, shipped: day });
+      assert.equal(r.status, 201);
+    }
+    const rows = await anonymousRows(h, 'orders');
+    const q = createQueries({ db: h.db, database: 'sqlite', publicBase: h.url });
+    const run = async (s: string, cap = 24) => {
+      const r = await q.run(must(parseFigures(words(s), tables, cap)));
+      assert.ok(r.ok && r.result.kind === 'figures', s);
+      return r.result;
+    };
+    const byWeek = (key: (r: Record<string, unknown>) => string | null, value: (r: Record<string, unknown>) => number) => {
+      const m = new Map<string, number>();
+      for (const r of rows) {
+        const k = key(r);
+        if (k !== null) m.set(isoWeek(k), (m.get(isoWeek(k)) ?? 0) + value(r));
+      }
+      return [...m].sort((a, b) => a[0].localeCompare(b[0]));
+    };
+    const placedDay = (r: Record<string, unknown>) => new Date(Number(r.placed)).toISOString().slice(0, 10);
+    const counted = await run('orders count by placed week');
+    assert.deepEqual(counted.groups, byWeek(placedDay, () => 1), 'oldest first');
+    assert.equal(counted.dated, true);
+    assert.deepEqual(counted.groups?.filter(([w]) => w >= '2026-W52'), [['2026-W52', 1], ['2026-W53', 4], ['2027-W01', 1]], 'week 53 holds days of two calendar years');
+    assert.deepEqual((await run('orders sum total by placed week')).groups, byWeek(placedDay, (r) => Number(r.total) / 100), 'money in major units');
+    // A date column, NULLs left out.
+    assert.deepEqual((await run('orders count by shipped week')).groups, byWeek((r) => (typeof r.shipped === 'string' ? r.shipped : null), () => 1));
+    const avg = await run('orders avg total by shipped week');
+    assert.deepEqual(avg.groups?.find(([w]) => w === '2026-W53'), ['2026-W53', (3 + 5 + 7 + 9) / 4]);
+    // The latest weeks are the ones kept, with `more` set.
+    const latest = await run('orders count by placed week', 2);
+    assert.deepEqual([latest.groups, latest.more], [[['2026-W53', 4], ['2027-W01', 1]], true]);
   } finally {
     await h.close();
   }

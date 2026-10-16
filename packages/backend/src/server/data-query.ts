@@ -3,7 +3,7 @@
  * Purpose: a list request's query string, allow-listed, as one parameterised SELECT with keyset paging and escaped search.
  * Spec: docs/data-spec.md §5.1, §4.7 · docs/chat-block-spec.md §20.5 (aggregations)
  * Exports: parseQuery, ListQuery, QueryError, SORTABLE, selectList, selectOne, readable, cursorOf, adminSelectList, adminSelectOne, adminCount, LIMIT_DEFAULT, LIMIT_MAX,
- *   Aggregate, AGGREGATE_MEASURE, AGGREGATE_GROUP, AGGREGATE_FILTER, selectAggregate
+ *   Aggregate, AGGREGATE_MEASURE, AGGREGATE_GROUP, AGGREGATE_FILTER, AGGREGATE_LIMIT_MAX, selectAggregate
  * Edit guide: an unknown or malformed parameter is a 400 naming it, never ignored; values only as parameters.
  * Tests: packages/backend/test/data-api.test.ts
  */
@@ -328,9 +328,18 @@ export interface Aggregate {
   /** Required on a date grouping, absent otherwise. */
   readonly bucket: 'day' | 'month' | 'year' | null;
   readonly where: { readonly field: Field; readonly value: Value } | null;
-  /** Groups to read: the cap plus one, so the caller knows there were more. */
+  /** Groups to read: the cap plus one, so the caller knows there were more (at most AGGREGATE_LIMIT_MAX). */
   readonly limit: number;
+  /**
+   * Also read, per group, how many rows had a value of the measured field
+   * (`n`): what a caller needs to combine groups' sums into an average — the
+   * ISO weeks chat-query.ts builds from days (chat-block-spec §19.11).
+   */
+  readonly counted?: boolean;
 }
+
+/** The most groups one aggregation reads: 24 ISO weeks of days, and the one more that says there were more. */
+export const AGGREGATE_LIMIT_MAX = 7 * 24 + 1;
 
 export const AGGREGATE_MEASURE: ReadonlySet<FieldType> = new Set(['number', 'money']);
 export const AGGREGATE_GROUP: ReadonlySet<FieldType> = new Set(['choice', 'flag', 'date', 'datetime']);
@@ -378,7 +387,8 @@ export function selectAggregate(d: Database, t: Table, a: Aggregate): { sql: str
   if (dated !== (a.bucket !== null)) throw new Error('selectAggregate: a bucket goes with a date grouping only');
   if (a.where && !AGGREGATE_FILTER.has(a.where.field.type)) throw new Error('selectAggregate: bad filter');
   const limit = Math.trunc(a.limit);
-  if (!(limit >= 1 && limit <= LIMIT_MAX)) throw new Error('selectAggregate: limit out of range');
+  if (!(limit >= 1 && limit <= AGGREGATE_LIMIT_MAX)) throw new Error('selectAggregate: limit out of range');
+  if (a.counted && (a.field === null || a.by === null)) throw new Error('selectAggregate: a count of values goes with a measure and a grouping');
 
   const measure = a.field === null ? 'COUNT(*)' : `${a.fn.toUpperCase()}(${q(d, a.field.name)})`;
   const where: string[] = [];
@@ -396,8 +406,9 @@ export function selectAggregate(d: Database, t: Table, a: Aggregate): { sql: str
   const g = q(d, 'g');
   const v = q(d, 'v');
   const order = a.bucket ? `${g} DESC` : `${v} DESC, ${g} ASC`;
+  const counted = a.counted && a.field ? `, COUNT(${q(d, a.field.name)}) AS ${q(d, 'n')}` : '';
   return {
-    sql: `SELECT ${group} AS ${g}, ${measure} AS ${v} FROM ${table} WHERE ${where.join(' AND ')} GROUP BY ${group} ORDER BY ${order} LIMIT ${limit}`,
+    sql: `SELECT ${group} AS ${g}, ${measure} AS ${v}${counted} FROM ${table} WHERE ${where.join(' AND ')} GROUP BY ${group} ORDER BY ${order} LIMIT ${limit}`,
     params,
   };
 }
