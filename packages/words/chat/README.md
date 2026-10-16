@@ -69,7 +69,7 @@ None in this release.
 | `greeting` | string |  |  | 1–200 characters | the first message, shown before anyone asks; never sent to the model |
 | `allow` | enum | `signedin` / `anyone` | `signedin` |  | who may send a message; a signed-out visitor sees **Sign in to ask** |
 | `limit` | int | 1–50 | `20` |  | questions per conversation before the panel says to start a new chat |
-| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` |  | at most 9 | what an answer may hold besides text (below); a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270; a public table named `tool` beside a component that takes `from` is AZ1272 (`from tool` is the server's data tools) |
+| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` `explore` |  | at most 10 | what an answer may hold besides text (below); a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270; a public table named `tool` beside a component that takes `from` is AZ1272 (`from tool` is the server's data tools) |
 | `knows` | list | table names |  | at most 3 | tables whose rows the answers draw on (below): each must be `allow anyone read` (AZ1252) and filled only by the site's admins (AZ1253); named twice or a fourth is AZ1258, not a table AZ1271 |
 
 ## Children
@@ -111,6 +111,7 @@ answers — they are not page words:
 | `stats` | 1–4 key figures with their change, in a sign, a glyph and words — never colour alone |
 | `cards` | 1–4 cards: a title, text, a link to a declared destination, and an image that is only a gallery image of this site (by key) or a public row's image — never an address the model writes |
 | `dashboard` | 2–6 stats, charts, tables or cards under one title |
+| `explore` | one data set the visitor explores in the page (chat-block-spec §21.3): the model's rows (labelled AI-generated), a public table's `from`, or a tool's; up to 4 controls — a slider, a date, a toggle, a form of fields that applies them or asks a question built from them, shown on its button before it is sent; and up to 4 views — a table, a stat or a chart, each with one `where` and one of `count`, `sum`, `avg`, `min`, `max`. The page recomputes the views as a control moves, with no request; nothing is a formula, nothing is evaluated |
 
 A visitor can **share** one finished answer: only then is that answer
 stored, under an unguessable link to `/chat/shared`, for 30 days
@@ -197,7 +198,7 @@ The full floor is in the spec (§9).
 
 ## Status
 
-C1 to C6 of the spec: a `panel` or a `float` (on every page from
+C1 to C7 of the spec: a `panel` or a `float` (on every page from
 `site`, left out with `chat none`) whose answers are prose and the
 components `show` lists — the site's own blocks, and charts, tables, stats,
 image cards and dashboards — with share links, grounded on the site's pages
@@ -208,7 +209,9 @@ formatted prose, follow-up questions, and the conversation kept in the
 visitor's browser (spec §21.1); and C6 — charts, tables and stats whose
 figures come `from tool` one of the operator's own HTTP endpoints, declared
 in the server's `.env` and shown with its label, their rows never sent to
-the model (spec §21.2). Before going live, `az backend probe server` asks
+the model (spec §21.2); and C7 — explores, whose sliders, dates, toggles
+and forms recompute their tables, stats and charts in the page over a
+closed set of computations (spec §21.3). Before going live, `az backend probe server` asks
 the configured model the real prompt, one question per component, calls
 each tool once with its sample, and reports what it streamed, what the
 filter dropped and what each tool answered.

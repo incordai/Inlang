@@ -554,9 +554,13 @@ input/output token counts for a fixed set of answers in each form, through
 And in practice the quote form makes most of it moot: the model writes
 `show pricing /pricing` (21 bytes), not the plans.
 
-**Measured in tokens (C2, `pnpm bench:tokens`, `o200k_base`; `cl100k_base`
-within 4%; docs/token-benchmark.md §7).** The same answers, each `.az`
-form checked by the real parser to hold exactly the JSON form's blocks:
+**Measured in tokens (`pnpm bench:tokens`, `o200k_base`, re-run
+2026-10-16; docs/token-benchmark.md §7 holds the table and how it is
+measured).** The same answers, each `.az` form checked by the real parser to
+hold exactly the JSON form's blocks — C2's six and, since C2b, a dashboard,
+a model chart, two tables and two kinds of cards. With `cl100k_base` the
+`.az` and markdown totals are the same and the JSON total is 4% lower (676
+against 703); no single cell moves by more than 6 tokens:
 
 | Answer | `.az` subset | compact JSON | markdown |
 |---|---:|---:|---:|
@@ -566,14 +570,20 @@ form checked by the real parser to hold exactly the JSON form's blocks:
 | cta | 8 | 18 (2.25×) | 8 (1.00×) |
 | feature, 3 items | 58 | 62 (1.07×) | 48 (0.83×) |
 | prose + faq (2) + cta | 86 | 101 (1.17×) | 76 (0.88×) |
-| the six together | 279 | 340 (1.22×) | 299 (1.07×) |
+| dashboard: a stat, 2 server charts, a model chart | 78 | 136 (1.74×) | 131 (1.68×) |
+| model chart, 2 series of 3 | 67 | 76 (1.13×) | 51 (0.76×) |
+| tables: a server table, a model table | 46 | 85 (1.85×) | 81 (1.76×) |
+| cards: model cards, server cards | 44 | 66 (1.50×) | 70 (1.59×) |
+| the ten together | 514 | 703 (1.37×) | 632 (1.23×) |
 | composed two-plan pricing (§5.2's case; refused in answers) | 50 | 76 (1.52×) | 58 (1.16×) |
 
-So: the subset is 18% fewer tokens than JSON over the answers an answer may
-hold, and fewer on every one; markdown is smaller for composed lists (no
-`item`/`text` keywords) but cannot quote, and its links, images and raw HTML
-are exactly what §6 must refuse. The decision (a) stands on safety and on the
-quote, not on size alone.
+So: the subset is 27% fewer tokens than JSON over the ten, and fewer on
+every one; markdown is smaller for composed lists and a model chart's points
+(no `item`/`text`/`point` keywords) but cannot quote or ask the server for
+figures, and its links, images and raw HTML are exactly what §6 must refuse.
+The decision (a) stands on safety, on the quote and on `from`, not on size
+alone. (C2's first run, 2026-10-15, measured the first six only: 279 / 340 /
+299, with `cl100k_base` then within 4% on every row.)
 
 ### 5.3 The answer grammar
 
@@ -1039,13 +1049,17 @@ replaces these with numbers. The default budget (300 000 tokens/day) is
 therefore on the order of 30 answers a day — deliberately small; the
 operator raises it knowingly.
 
-**Measured (C2, `pnpm bench:tokens`, `o200k_base`).** For the chat e2e site
-(8 pages, every component shown): `prompt.txt` 553 tokens (2 346
-characters, 4.24 per token), `context.json` 732 tokens (2 887 characters,
-3.94 per token). Answers in the subset run 3.99 characters per token, so the
-server's fallback of 3 (§6.5) over-charges by about a third when a provider
-reports no usage — the intended direction. A context at its 24 000-character
-cap is therefore about 6 100 tokens, and the prompt about 550, not 2 000.
+**Measured (`pnpm bench:tokens`, `o200k_base`, re-run 2026-10-16;
+docs/token-benchmark.md §7).** For the chat e2e site (8 pages, a chat that
+shows every component): `prompt.txt` 731 tokens (3 132 characters, 4.28 per
+token), `context.json` 750 tokens (2 964 characters, 3.95 per token).
+Answers in the subset run 3.79 characters per token, so the server's
+fallback of 3 (§6.5) over-charges by about a quarter when a provider reports
+no usage — the intended direction. A context at its 24 000-character cap is
+therefore about 6 100 tokens, and the prompt about 730, not 2 000. (C2's
+first run, 2026-10-15, before the rich components and C5's follow-ups were
+taught: `prompt.txt` 553 tokens, `context.json` 732.) C7's
+`explore` form adds to the prompt only of a site whose chat shows it.
 These are one tokenizer's counts; a provider's own are what `az backend
 probe` reports. The README prints the formula with the
 operator's own per-token prices as placeholders (`<PRICE_PER_INPUT_TOKEN>`),
@@ -1173,7 +1187,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0, C1, C2, C2b, C3, C4, C5 and C6 as built — deviations and findings (2026-10-15/16), and the limits fixed after them (§19.11)
+## 19. C0, C1, C2, C2b, C3, C4, C5, C6 and C7 as built — deviations and findings (2026-10-15/16), and the limits fixed after C6 (§19.11)
 
 ### 19.1 Against §14's C1 list
 
@@ -1659,6 +1673,99 @@ otherwise, this section supersedes it; the superseded lines say so.
 | 14 | No committed baseline for the answered-state snapshots | **kept as self-comparison — decided by evidence.** The 48 PNGs of three `test:chat` runs on this machine (Chromium 153, one day) were compared byte for byte: all 48 identical in all three — determinism across runs here is proven. A committed baseline would still be flaky: the dashboard state draws the server's read day ("From the site's data · Oct 16, 2026", the stat's date), which the server's clock sets, so tomorrow's picture differs whatever the machine; and the pixels are bound to the machine's fonts and rasterizer, which the gate's own screenshots avoid for the same reason. So the snapshots stay as built in C3: each state rendered twice from a fresh page and byte-compared, light and dark told apart; a committed baseline would need the server's clock fixed for the run first | the three runs' comparison, above |
 
 What was measured (2026-10-16, rebased on `a1e22bb`): `pnpm verify` (3 033 tests), `pnpm lint`, `pnpm verify:build` (207 checks, the three generated type-checks among them), `pnpm test:chat` (533 checks, up from 440, in Chromium, Firefox and WebKit), `pnpm test:backend-db` (269 checks on PostgreSQL 18.6 and MySQL 8.4.11, up from 249) and `pnpm gate words/chat` (all 12 points). Every new or changed unit test file was run against `e601b30` first and fails there — most at import, since the code they test did not exist; the rest on the behaviour (the blocked column, `from`, 7-day tags, replays, the en-US formatter, the account id, AZ1272, doctor's file bodies, the generated type-check).
+
+### 19.12 C7 as built (2026-10-16)
+
+Against §21.3 (its tests, §21.3.7), with §21.3.8's recommendations taken:
+control positions are never saved (O9); a computation past the five is a
+new closed name, later, never a formula (O10); a control never re-queries —
+it changes only what the page holds (O11).
+
+| Item | State |
+|---|---|
+| `show explore` | built: a value of `show`, never a word (core `CHAT_RICH_WORDS`; the manifest's `show` takes ten values; a page that writes `explore …` is refused as an unknown word). A dashboard cannot hold one — AZ1270 counts only chart, table, stats and cards; AZ1272 (a table named `tool`) applies to it, since it takes `from`. A site whose chat shows it gets the six series colours (`usesSeries`) and the figure, table, stats and paint templates |
+| the answer format | built: `server/chat-explore.ts`, read with `chat-rich.ts`'s own reader (its strings, numbers, `from` and `from tool`), held by `chat-answer.ts` like every rich component (`explore STRING` alone is the head; any other line starting with the word is prose). Every line one level in, in order: the data (`columns` and its `row`s; or one `from <table> columns f… [sort f [desc]]`; or one `from tool <name> {param value} columns f…`), then the controls, then the views. Up to 213 child lines (the columns, 200 rows, 4 controls, 4 forms, 4 views); a deeper line, a line out of order or none of the forms drops the explore |
+| data | built: 1–6 columns, 1–200 rows. The model's rows are typed by column — all bare numbers (the answer grammar's numbers only: no NaN, Infinity, exponent or separator), all bare real days (`2024-02-29` yes, `2023-02-29` no), or all strings; any mix is no explore. A site table's rows are the anonymous list's (`parseQuery` → `selectList(…, null, false)` → `outRow`, paged by the list's own keyset cursor, at most 100 a page and 200 in all, each page under the 2 s deadline), a `date` or `datetime` field a day; a tool's are its checked reply's (≤ 200, `date` fields days, `bool` "Yes"/"No"). Text cells are categories: at most 24 code points, clamped at a grapheme boundary |
+| controls | built: ≤ 4 inputs (`slider`, `date`, `toggle`, `field`), names `[a-z][a-z0-9]{0,15}`, unique; a slider's min < max, 0 < step ≤ max − min, ≤ 1 000 steps, its value (default its min) on the step grid; a date's bounds and value (default its min) within 1900-01-01–2100-12-31; a toggle's 2–4 options of ≤ 24, unique; a `field … number min max` (starts at its min) or `field … choice` of 2–8 options (starts at its first); a `form "legend" apply` or `form "legend" send "question"` owns the fields written since the form before it — a field with no form after it, or a form with none, is no explore |
+| views | built: 1–4 — `view table [where …]`, `view stat "label" <aggregate> [where …] [unit …]`, `view chart <kind> "title" <aggregate> by <column> [where …] [unit …]`; `where <column> <op> <operand>`, `op` one of the six, the operand one `$variable`, string, number or day; the aggregate `count` or `sum`/`avg`/`min`/`max` of a number column. Each view is bound on the server to column indexes and typed operands; one that names a column, a variable or a type that does not fit — or holds a second operator, a parenthesis, a function, an unknown aggregate — is dropped by itself (`view`, a new `DropReason`), the rest of the explore standing; none left drops it. The model's own rows bind as the answer is read, so its record holds only the views that stand; a server's or a tool's bind when the rows come, and a view lost then is counted the same |
+| the event | built: `{ explore: { title, src, asOf?, source?, columns, rows, controls, views } }` — `src` `model`, `site` with the day, or `tool` with the operator's label and minute, set by the server only; a send form's question is a list of literal parts and `{ var }` holes. One that would pass 40 KB (inside the answer's 48 KB) is the "could not be loaded" note for a server's or tool's rows, and dropped for the model's — never cut, which would change its figures. The share store and the kept conversation take the key (`BLOCK_KEYS`, `RICH_BLOCKS`) and re-check it with the page's validator |
+| the computation | built: `overlay/runtime/chat-explore.ts`, pure — `validExplore` (every cap, every index, every type, again), `computeView(data, view, vars)`: the rows the one `where` keeps, then the closed aggregate, by a `switch` over the closed names on numbers and days already parsed; figures held to 15 significant digits and 10¹⁵ (past it, "These figures are too large to show."); `controlValue` (a slider's number snapped to its step and bounds, a day or a number within its bounds, an option). No eval, no `Function`, no expression: the sink scan (overlay `chat.test.ts`) covers both new files |
+| rendering | built: `overlay/runtime/chat-explore-draw.ts` clones the word's `explore` template (`words/chat/figures.ts`): an `input[type=range]` with its `<label for>` and an `<output for>`; an `input[type=date]` with `min`/`max`; a toggle as a fieldset of real radios; a form as a fieldset with its legend, labelled number and choice fields and one submit. Values through properties only (`.value`, `.min`, `.max`, `.step`, `.checked`), words through `textContent`, ids made by the page. On `input` the views are recomputed at most once a frame and drawn again with `chat-draw.ts` (a table's first 20 rows and how many match, a stat card, a chart with its summary and table equivalent); a redrawn chart's width watcher replaces the old one's. No style, no inline handler, the CSP unchanged |
+| the send form | built: its button reads "Ask: <the question>", the template filled with its own fields' values (a number as the page writes numbers) and checked by `visitorText`, updated as the fields change; Enter or a click submits it, and the words shown are exactly what `ask()` sends — the same path as typing them. Nothing else in an explore reaches the network |
+| accessibility | built: the explore a labelled section (the title, `aria-labelledby`); every control labelled; the toggle's arrow keys move between options; the date and number inputs keep the browser's own keyboard; on a change the first view's summary is said at most once in 1.5 s (the latest one); the explore itself is said once when drawn ("Explore: Plan cost, 1 control and 3 views, AI-generated figures."); focus alone changes nothing |
+| provenance | built: the model's rows carry the "AI-generated figures" label on every view computed from them; a site table's views the site's line, a tool's the operator's label and minute |
+| storage and shares | built: positions are not saved (O9) — a restored explore starts at its written values; a shared explore's controls work signed out, in the page, and a send form is not drawn there (nothing can be asked on the shared page) |
+| the prompt | built: `RICH_FORMS.explore` teaches the form from the reader's own caps, ending "nothing else is computed, so never write a formula"; only a site whose chat shows explore is taught it; `az backend probe` asks one explore question |
+
+Where the build differs from §21.3:
+
+- **A view that does not fit is dropped alone, for any reason.** §21.3.3
+  says so of a missing variable; the build does the same for an unknown
+  column, a type that does not fit, an attempted expression and an unknown
+  aggregate, so one bad view never costs the model's whole data set. A line
+  that is none of the forms, or out of order (a control after a view), still
+  drops the explore.
+- **Text compares only as equal or not** (`=`, `!=`): a text column is a
+  category, and an order over it would be the browser's collation, not the
+  data's.
+- **An empty cell matches nothing** (SQL's rule, for a site row with no
+  value): not `=`, not `!=`; a measure leaves it out; a group whose measure
+  has no value is left out. The notes are fixed copy: "No rows match.", "No
+  figures for these rows.", "These figures are too large to show.", "Too few
+  figures to draw this chart."
+- **A chart's groups**: text in the order the data first names them,
+  numbers and days ascending; the grouping is checked over the whole data set
+  when the view is bound (≤ 24, a pie ≤ 6; a line or area ≥ 2; a pie of a
+  measure that can be negative is dropped), since filtering only ever removes
+  groups.
+- **`unit`**: a table view takes none (one would drop that view); a stat or
+  chart without one takes its measured column's own (a site table's money).
+- **The form's string is its legend**, not its button: the button's words
+  are fixed copy — "Apply", or "Ask: <the question>" — so a model can label
+  a fieldset but never a button that sends. A send form's fields are not
+  variables a view reads (they only ever ask); its question has 1–8 holes,
+  each one of its own fields, in at most 160 code points, one line.
+- **≤ 4 controls counts the inputs**; a form is its fields' button.
+- **A table view shows its first 20 matching rows** (§20.2's table) and
+  says how many match: "143 rows match; the first 20 are shown."
+- **An explore's data is not counted against the answer's 240 points**:
+  §21.3.3 gives it its own caps (200 rows × 6 columns), and the model's rows
+  are bounded by the record's 12 000 characters as well.
+- **The section is a `group`**, not a landmark: a transcript may hold
+  several explores, and each table view is a region labelled by its caption,
+  so two landmarks of one name would be a lint failure and a screen reader's
+  noise (axe `landmark-unique` in `test:chat`).
+- **A date that is out of bounds or unfinished is not used**: the views keep
+  the last good day, and an input that reports a change the explore cannot
+  take is set back to that day.
+- **Every label is clamped by code point** (at a grapheme boundary, never
+  splitting an emoji or a mark): the page counts every label in code points,
+  so the server must never send one it would refuse. `clampText` counted
+  graphemes, so a C2b label of 24 flags (48 code points) passed the server
+  and was refused by the page, the whole component with it; it now counts
+  code points for every component, the explore's and C2b's alike
+  (`chat-query.test.ts`, `chat-rich.test.ts`).
+- **`RowsResult` columns may be `date`**; a table still shows a day as text.
+
+What was measured (2026-10-16, rebased on `14cb1ca`): `pnpm verify`
+(3 063 tests, up from 3 033), `pnpm lint`, `pnpm verify:build` (208 checks,
+the chat pages' policies the plain page's, hashes aside), `pnpm bench:tokens`
+(the figures of §5.2 and §13, unchanged: the e2e site's measured chat does
+not show explore), `pnpm test:chat` (635 checks, up from 533, in
+Chromium, Firefox and WebKit: the explores of §21.3.7 — a slider by
+keyboard changing a table, a stat and a chart, the toggle by arrow keys, a
+date, a form applied on Enter and one sent, its request carrying exactly the
+shown words; a site table's and a tool's rows with their sources; the
+injection cases; positions not kept after a reload; a shared explore signed
+out; no request but the backend's, none at all while a control moves; axe in
+every state; no CSP violation) and `pnpm gate words/chat` (all 12 points).
+Every new or changed unit test file was run against `1d817eb` (the C6
+limits' docs commit) first and fails there: the two explore test files at
+import (`chat-explore.ts` does not exist on either side), the rest on the
+behaviour — the sink scan's file list, the rows limit and date type, the
+code-point clamp, the prompt's form, `show explore`, AZ1254's list, the
+explore template, the series colours, the audit's file count and the
+doctor's tools line.
 
 ---
 
@@ -2290,7 +2397,7 @@ dashboard in each theme, both schemes (gate item 3's method).
 
 **Status** specified 2026-10-16 on the owner's approval of that day (§17,
 Q16–Q19) · **C5 built 2026-10-16** (§19.9: what was built, and where it
-differs) · **C6 built 2026-10-16** (§19.10) · C7, C8 specified, not built · C8's map
+differs) · **C6 built 2026-10-16** (§19.10) · **C7 built 2026-10-16** (§19.12) · C8 specified, not built · C8's map
 library and tile source vetted and decided 2026-10-16 (§17 Q19a–Q19h) ·
 builds on C2's parser, events and templates (§5.3, §5.4) and C2b's rich
 components (§20), which it extends and never forks.
@@ -2772,6 +2879,8 @@ date; a form `apply` and a form `send` (the next request carries the shown
 words); axe; zero CSP violations; no request but the backend's.
 
 #### 21.3.8 Open questions
+
+Each recommendation below was taken when C7 was built (§19.12).
 
 | # | Question | Recommendation |
 |---|---|---|

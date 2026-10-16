@@ -1800,7 +1800,8 @@ each choice with its `.az` line (the shape `az_palette` returns).
 A chart in a chat answer (chat-block-spec §20.4) needs up to six colours a
 theme never chose: one per series of a bar, line or area chart, one per pie
 slice. They are **derived**, never written, by `packages/theme/src/series.ts`,
-and exist only on a site whose chat shows `chart`, `stats` or `dashboard` —
+and exist only on a site whose chat shows `chart`, `stats`, `dashboard` or
+`explore` (chat-block-spec §21.3, whose views draw charts) —
 the way `accent2` exists only on a pair site (§13.4), so every other site
 declares exactly what it did before.
 
