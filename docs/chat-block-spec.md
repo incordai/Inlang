@@ -1,8 +1,8 @@
 # Chat — an AI chat block that answers in az's own components
 
 **Status** proposed 2026-10-15 · **approved by the owner 2026-10-15, every
-recommendation** (§17) · **C0, C1 and C2 built 2026-10-15** (§19: what was
-built, and where it differs) · C3–C4 not started · **C2b specified and built
+recommendation** (§17) · **C0, C1, C2 and C3 built 2026-10-15** (§19: what was
+built, and where it differs; C3 is §19.7) · C4 not started · **C2b specified and built
 2026-10-15** (§20: charts, tables, stats, image cards, dashboards and share
 links in answers, on the owner's Q13–Q15; §19.6: as built) · Extends backend-spec.md,
 data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12)
@@ -188,9 +188,8 @@ page /login
     alt "Back to Acme" /
 ```
 
-`show` compiles since C2 (§19.5). The whole design, once C3 (`float`,
-`knows`) lands — until then a site-level `chat` is refused as not available
-yet (AZ1214), `float` is not a variant (AZ1204) and `knows` is not a key:
+`show` compiles since C2 (§19.5); the whole design — `float` under `site`,
+`knows` — since C3 (§19.7):
 
 ```
 az 1
@@ -221,6 +220,7 @@ page /
   hero center
     title "Acme"
   pricing cards
+    title    "Plans"
     currency usd
     plan "Team"
       monthly 29
@@ -314,6 +314,7 @@ Compiler classes (link stage, free slots AZ1250–AZ1259):
 | AZ1256 | warning | `chat: allow anyone — every stranger spends your model budget; the limits are in server/.env (AZ_CHAT_…)` |
 | AZ1257 | warning | `chat: the site context is 31 200 characters, max 24 000 — /blog/… is left out; shorten pages or set chat on fewer` (§8.1) |
 | AZ1258 | error | `chat: knows 'products' twice` / `knows 4 tables, max is 3` |
+| AZ1271 | error | `chat: knows 'faqs', which is not a table — declare it under site with: data faqs, or remove it` (C3: AZ1250–AZ1259 were full, so it took the next free link-stage code) |
 
 Value typing reuses AZ1412 (`model`), AZ1504 (a key set twice), AZ1205 (no
 value), AZ1411 (a credential-shaped value, `literals.ts:30`).
@@ -335,34 +336,37 @@ As built in C1 (each with a case in `packages/core/test/chat-decl.test.ts`):
 | AZ2226 | error | `title is empty — write a heading, or remove the line for the default` |
 | AZ2227 | error | `greeting is empty — write the first message, or remove the line` |
 | AZ2228 | error | `a suggested question is empty — write it, or remove the line` |
+| AZ2229 | error | `this page already has the site's chat float — remove this one, or write chat none to leave it out here` (C3; a `siteRepeats` row, core checks.ts) |
 
 `limit` outside 1–50 is the generic AZ1408 (the manifest types it `int`,
-`min` 1, `max` 50) rather than a row of its own; the `float` row waits for C3.
+`min` 1, `max` 50) rather than a row of its own.
 
-### 3.5 The manifest (as built in C1)
+### 3.5 The manifest (as built in C1, grown in C2b and C3)
 
 ```jsonc
 {
   "name": "chat", "kind": "block",
-  "variants": ["panel"], "modifiers": [],
+  "variants": ["panel", "float", "none"], "modifiers": [],
   "props": {
     "title":    { "type": "string", "default": "Ask a question" },
     "greeting": { "type": "string" },
     "allow":    { "type": "enum", "values": ["signedin", "anyone"], "default": "signedin" },
     "limit":    { "type": "int", "min": 1, "max": 50, "default": 20 },
-    "show":     { "type": "list", "max": 4 }      // refused until C2 (core chat.ts)
+    "show":     { "type": "list", "max": 9 },     // the closed set's reasons are core chat.ts's (AZ1254)
+    "knows":    { "type": "list" }                // C3: its rules and its cap of 3 are core chat.ts's (AZ1252/3/8, AZ1271)
   },
   "slots": { "ask": {} },
   "themeReads": [
-    "color.accent", "color.bg", "color.border", "color.border-strong", "color.danger", "color.focus",
-    "color.muted", "color.series-1", "color.series-2", "color.series-3", "color.series-4", "color.series-5",
-    "color.series-6", "color.surface", "color.surface-alt", "color.text", "radius.md", "radius.sm",
-    "size.gutter-sm", "size.measure-body", "size.measure-display", "size.ring", "size.ring-offset", "size.tap",
-    "space.4", "space.8", "space.12", "space.16", "space.24", "space.48", "space.96", "space.128",
-    "type.display", "type.leading-body", "type.leading-tight", "type.size.2xl", "type.size.base",
-    "type.size.sm", "type.weight-bold", "type.weight-display"
+    "breakpoint.sm", "color.accent", "color.bg", "color.border", "color.border-strong", "color.danger",
+    "color.focus", "color.muted", "color.series-1", "color.series-2", "color.series-3", "color.series-4",
+    "color.series-5", "color.series-6", "color.surface", "color.surface-alt", "color.text", "layer.dropdown",
+    "layer.modal", "motion.easeIn", "motion.easeOut", "motion.fast", "motion.slow", "radius.full", "radius.lg",
+    "radius.md", "radius.sm", "shadow.lg", "size.gutter-sm", "size.measure-body", "size.measure-display",
+    "size.ring", "size.ring-offset", "size.tap", "space.4", "space.8", "space.12", "space.16", "space.24",
+    "space.32", "space.48", "space.96", "space.128", "type.display", "type.leading-body", "type.leading-tight",
+    "type.size.2xl", "type.size.base", "type.size.sm", "type.weight-bold", "type.weight-display"
   ],
-  "checks": ["AZ2220 … AZ2228, the table above"]
+  "checks": ["AZ2220 … AZ2229, the table above"]
 }
 ```
 
@@ -1137,7 +1141,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0, C1 and C2 as built — deviations and findings (2026-10-15)
+## 19. C0, C1, C2, C2b and C3 as built — deviations and findings (2026-10-15)
 
 ### 19.1 Against §14's C1 list
 
@@ -1152,7 +1156,7 @@ described and must be re-read before C1 relies on it.
 | `/chat` route, CSRF/CORS, `allow`, limits, budget table, queue, timeouts, kill switch, HMAC history | built (`packages/backend/src/server/chat*.ts`), as §4.2 and §6.5. The request also carries `conversation` (§4.2 implied it; the server makes one on the first turn and returns it in `done`); the tag's turn index is the answer's position in `messages` |
 | `completions` and `fake` adapters | built, `fetch` only. `fake` is allowed only with `AZ_CHAT_FAKE_FILE` and a loopback `AZ_BACKEND_PUBLIC_URL` — that is the generated server's "development profile" |
 | prose-only answers | built; the page writes `textContent` into copies of the shell's templates |
-| `prompt.txt` / `context.json` from pages | built (`packages/backend/src/chat-context.ts`). A `text` body given as a file is not read into the context in C1 |
+| `prompt.txt` / `context.json` from pages | built (`packages/backend/src/chat-context.ts`). A `text` body given as a file is not read into the context in C1 (C3 reads it, §19.7) |
 | `CHAT` in the secret guard | built (`secrets.ts` `PRIVATE_NAME`); `AZ_PUBLIC_CHAT_KEY/_URL/_MODEL` fail the build, `AZ_PUBLIC_AUTH_KEY` still passes |
 | env keys, `.env.example`, `az backend init`, `loadConfig` | built; moderation keys are C4 |
 | `az dev` with `fake` | built: `.az-dev/chat-demo.json`, unless `.az-dev/backend.env` sets `AZ_CHAT_API` |
@@ -1181,7 +1185,7 @@ described and must be re-read before C1 relies on it.
   the browser as "nobody signed in" (`scripts/visual/pipeline.mjs`) — a
   preview never reaches a real server.
 - **§9 polish left for C3:** "Jump to latest", scroll following, the
-  transcript as focusable regions.
+  transcript as focusable regions — built there (§19.7).
 
 ### 19.3 What was measured
 
@@ -1330,8 +1334,8 @@ Where the build differs from §20:
 - **Visual snapshots of the answered dashboard per theme are not built.**
   `test:chat` checks the drawn DOM, the labels, axe and the policy in
   three engines; `pnpm gate --every-variant` and the thumbnails cover the
-  words as before. A pixel snapshot of each answer state is left for C3,
-  with §9's other visual states.
+  words as before. A pixel snapshot of each answer state was left for C3,
+  with §9's other visual states — built there (§19.7).
 
 What was measured (2026-10-15): `pnpm verify` (2 815 tests), `pnpm
 test:chat` (231 checks in three engines: a dashboard with a server chart
@@ -1348,6 +1352,68 @@ test:auth`, `pnpm lint`, `node scripts/thumbnails.mjs --verify`, and `pnpm
 bench:tokens` (the rich answers in `.az` take 0.54–0.88 of their compact
 JSON's tokens; a dashboard of two server charts and a model chart is 78
 o200k tokens against 136 in JSON and 131 in markdown).
+
+### 19.7 C3 as built (2026-10-15)
+
+Against §14's C3 row:
+
+| Item | State |
+|---|---|
+| `chat float` under `site`, inherited | built: `INHERITABLE` gains `chat` (core spec.ts) and a float is placed at the page's end, after the footer — a launcher fixed to the inline-end bottom corner. The site's block holds `chat.route` `''`; `blocksFor` gives each page's copy that page's route, so every page asks as itself, and every place that looked for a page's chat now asks `blocksFor` (target-web chat.ts and emit.ts, backend chat-context.ts). Only a float is inherited: a `chat panel` under `site` is AZ1202 (`… only nav, footer, scene backdrop and chat float are`), and site-level `chat`'s AZ1214 is gone. GRAMMAR §5.2 says so |
+| `chat none`, one chat per page | built: `none` suppresses the float; a page's own `chat panel` **replaces** it there too (a page shows one chat, AZ2220), and a page's own `chat float` under the site's is **AZ2229**, a new `siteRepeats` check kind (core checks.ts). `chat none` asks nothing of the backend: it neither needs `model default` (AZ1250) nor counts as a use of it (AZ1251) |
+| overlay presets | built, in the chat runtime: below the shell's `narrow` width (the theme's `sm`, in the config) the dialog opens with `showModal()` as the overlay engine's `sheet` — page inert and locked (`lockScroll`), Tab and Shift+Tab cycled inside (`FOCUSABLE`, `trapIndex`), a backdrop tap closes it, its handle (shown below `sm` only) drags it down to dismiss through the engine's own `wireSheetDrag`, and it keeps 60–85 svh so it does not grow under the reader — and above it with `show()` as a side panel whose policy is `dropdown`'s (not modal, focus returns, nothing held). The choice is `POLICY[floatPreset(width, narrow)]`, never a width in the runtime. The engine's own dialog wiring is modal-only, so the dialog carries `data-az-overlay="sheet"` (its backdrop rule) but not `data-az-behaviour="dialog"` |
+| `knows` | built: up to three tables (core chat.ts) — **AZ1252** a table signed-out visitors can't read, or none of whose fields they can · **AZ1253** a table anyone may add rows to *or change* (`allow anyone\|signedin create`, any `edit`), named by its rule · **AZ1258** a table named twice, or a fourth · **AZ1271** (new: AZ1250–AZ1259 were full) a name that is no table. The Spec carries each known table's public non-image fields and their `search` marks; `context.json` lists them under `knows`; `prompt.txt` then says the site rows are data too |
+| rows at request time (§8.2) | built: `server/chat-knows.ts`, shipped only with chat **and** tables. Each question, after the rate limits and before the budget check (whose estimate counts them), the page's chat's tables are read through the anonymous list's own code — `parseQuery` with `q` (the visitor's words, whitespace collapsed, control characters gone, cut to 100) when the table has public `search` fields, else the newest — `selectList(…, null, false)`, `outRow(…, null)`; only the fields both the build listed and the server's model hold public and non-image; money in major units with its code, a datetime as ISO. 20 rows, 2 000 characters a row (its longest text cut), 12 000 a table; `allWithin` the 2 s list deadline (past it, nothing, and a log line); cached 60 s per (table, words), 500 entries. Sent after `<site-content>` as one `<site-rows table="…">` section per table, one JSON object per line, `<`, `>` and `&` written as escapes so no row can close its section. `main.ts` (and `az dev`) refuse to start when `context.json` names a table the server has no model of, one a stranger cannot list, one others than admins write, or a field that is private there; `createKnows` re-checks before every read |
+| AZ1257's `knows` half | **not raised**: rows are bounded at request time (above), not at build, so there is nothing for the build to leave out; the `knows` schemas are a few hundred characters outside the 24 000-character page cap |
+| §9 polish | built: the transcript is its own scroll region (inline: capped at 60 svh; in a float: the panel's height), a keyboard stop; it follows the newest words only while at its end (within one line, `END_SLACK_PX`); scrolled up, it stays put and **Jump to latest** (a real button, hidden until then) appears; that returns to the end — smoothly, or at once under reduced motion — hides itself and leaves focus in the input. An answer that holds components becomes a Tab stop named "Answer" (`tabindex="0"`, `aria-label`; the item keeps its list role). Escape stops an answer, then closes a float; opening focuses the input (Close when signed out), closing returns focus to the launcher. Under reduced motion the target's net leaves only the fade |
+| `text` bodies kept in files | built: `chatBackend(spec, { bodyText })`; `az build` reads the file through the same sandbox as the page (`readProjectText`, `safeAssetPath`) and hands its plain text (`markdownText`, target-web markdown.ts: each block a line, a blank line between; link words kept, **every** address dropped — stricter than §8.1's "declared destinations"; images, raw HTML and definitions add nothing). Without a reader (a test, a tool) the body is left out as before |
+| visual snapshots | built into `test:chat` (Chromium, as the gate's screenshots): the same site built in all six themes on its own origins, one server answering all of them; four answered states — the float wide and as a sheet, an answer with the site's components, a dashboard — in light and dark, each rendered twice from a fresh page (reduced motion, fonts loaded, nothing running, the pointer away, two frames painted) and byte-compared; light and dark must differ. The 48 PNGs go to `.visual-out/chat/` for review (gitignored), **not** compared against a committed baseline: a pixel baseline is machine- and font-bound, which the gate's own screenshots avoid too |
+
+Where the build differs from the text above:
+
+- **`float` on a page** is legal where the site declares none; it is that
+  page's own (§3.2 said "or on a page").
+- **The launcher ships hidden** and the runtime shows it: with JavaScript
+  off there is nothing it could open (§7 named only the panel's noscript line).
+  Its wrapper is `display: contents` — it holds only what is fixed to the
+  viewport, so it takes no place in the page's flow or frame.
+- **The words a table is searched by** are the visitor's latest message as
+  the list route's `q` (§8.2); when no row holds them, the newest rows are
+  sent instead of none — a whole question rarely appears in a row.
+- **The fake adapter gained `system`**: an answer chosen only when the
+  system text holds a string — how `test:chat` proves a `knows` row reached
+  the model and a private column did not, without the adapter ever echoing
+  what it was given.
+- **An unreachable backend is a console error the page cannot prevent.**
+  The session read and every chat request catch their failures and log
+  nothing, but each engine reports the failed load itself (measured
+  2026-10-15 with a caught `fetch` to an unresolvable host: Chromium
+  "Failed to load resource: net::ERR_NAME_NOT_RESOLVED", Firefox "Cross-Origin
+  Request Blocked … CORS request did not succeed", WebKit "A server with the
+  specified hostname could not be found"). A deployment whose backend is down
+  shows that in the console and in Lighthouse's best-practices; preview
+  builds point at `https://backend.invalid` and every browser harness —
+  `test:lighthouse` too, since C3, through a Playwright connection to the
+  audited browser — answers it as a backend with nobody signed in
+  (`scripts/visual/pipeline.mjs` `answerPreviewBackend`).
+
+What was measured (2026-10-15/16): `pnpm verify` (2 866 tests), `pnpm
+lint`, `pnpm verify:build` (204 checks: a float's pages ship the launcher
+hidden and the dialog closed, asking from their own route; `chat none`'s
+page has none; their policy is the plain page's, hashes aside), `pnpm
+test:data`, `pnpm test:auth`, `node scripts/thumbnails.mjs --verify` (39
+targets, `chat/float` among them), `pnpm gate --every-variant` (the float's
+sheet drags to dismiss in three engines), `pnpm test:chat` (322 checks in Chromium,
+Firefox and WebKit: the float on every page and not where `chat none` is,
+keyboard open, the sheet's trap and the panel's lack of one, Escape's two
+steps, focus return, Jump to latest, reduced motion, the grounded answer and
+no private column, axe in every float state, no request off the site and its
+backend, no CSP violation; 48 snapshots stable and told apart by scheme),
+`pnpm test:backend-db` (245 checks; `knows` on PostgreSQL 18.6 and MySQL
+8.4.11: search case-insensitive, `%` literal, the newest rows, no private
+value, an owner-only table refused), and `node scripts/lighthouse.mjs chat
+chat.float cta` (100 in every category for each; the chat preview's
+best-practices was 96 before the harness answered the preview backend).
 
 ---
 

@@ -483,10 +483,17 @@ as built §19.6): charts, tables, stat cards, image cards and dashboards
 inside answers only — no new word — with figures computed by the server
 from public tables, an "AI-generated figures" label on the model's own
 numbers, six theme-derived series colours, and opt-in share links that
-expire after 30 days. Open: a curl-probe of a real candidate model before
-one is pinned, visual snapshots of answered states (C3), C3 (`float`,
-`knows`, §9's scroll polish), C4 (doctor/audit checks, moderation, a second
-adapter if wanted).
+expire after 30 days. C3 (built 2026-10-15, chat-block-spec §19.7): `chat
+float` under `site`, on every page (a page's own panel replaces it, `chat
+none` leaves it out, a second float is AZ2229), opening as the overlay
+engine's sheet below `sm` and a non-modal side panel above; `knows` — up to
+three public tables only the site fills (AZ1252, AZ1253, AZ1258, AZ1271)
+whose rows the server reads per question through the anonymous list; §9's
+Jump to latest, scroll following and focusable answers; a `text` body kept
+in a file in the context; pixel snapshots of answered states in every theme
+and scheme in `test:chat`. Open: a curl-probe of a real candidate model
+before one is pinned, C4 (doctor/audit checks, moderation, a second adapter
+if wanted).
 
 **M5 — not started.**
 
