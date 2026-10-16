@@ -89,6 +89,21 @@ test('AZ1270: a dashboard with nothing it can hold', () => {
   assert.deepEqual(errors(`${HEAD}${page('dashboard stats')}`), [], 'CONTROL');
 });
 
+test('AZ1272: a public table named tool, where a chat shows a component with from — that word is the data tools\'', () => {
+  const TOOL = DATA.replace('  data orders', '  data tool');
+  const r = run(`${HEAD}${TOOL}${page('chart')}`);
+  const d = r.diagnostics.filter((x) => x.severity === 'error');
+  assert.deepEqual(d.map((x) => x.code), ['AZ1272']);
+  assert.match(d[0].message, /chat: answers read "from tool" as the server's data tools, so the table 'tool' could never give figures — rename it, then run: az backend schema <file\.az> --rename tool=<new name>/);
+  // At the chat's show line, where the reader sees which chat it is.
+  assert.equal(d[0].pos.line, `${HEAD}${TOOL}`.split('\n').length - 1 + 8);
+  for (const show of ['table', 'stats', 'cards', 'dashboard stats']) assert.deepEqual(errors(`${HEAD}${TOOL}${page(show)}`), ['AZ1272'], show);
+  // CONTROL: no component that takes figures, or a table no answer could read, or another name.
+  assert.deepEqual(errors(`${HEAD}${TOOL}${page('faq cta')}`), [], 'no from in faq or cta');
+  assert.deepEqual(errors(`${HEAD}${DATA.replace('  data notes', '  data tool')}${page('chart')}`), [], 'an owner-only table named tool is never figures');
+  assert.deepEqual(errors(`${HEAD}${DATA.replace('  data orders', '  data tools')}${page('chart')}`), [], 'tools is another name');
+});
+
 test('AZ1259: the shared-answer page is the chat\'s own, in any case', () => {
   assert.deepEqual(errors(`${HEAD}${page('chart', 'page /chat/shared\n  hero center\n    title "Mine"')}`), ['AZ1259']);
   assert.deepEqual(errors(`${HEAD}${page('chart', 'page /Chat/Shared\n  hero center\n    title "Mine"')}`), ['AZ1259']);

@@ -2,7 +2,7 @@
  * @az module chat
  * Purpose: the file-wide rules of a `chat` block: a backend that talks to a model, what an answer may show and quote and link to, who may ask.
  * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §8.2, §14 (C1, C2, C2b, C3), §20
- * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, CHAT_REFUSED, SHARED_ROUTE, KNOWS_MAX, chatOf, chatAnswers, withAnswer, knowsTables, chatDiagnostics, sharedRouteDiagnostics, ChatAnswers
+ * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, TOOLS_WORD, CHAT_REFUSED, SHARED_ROUTE, KNOWS_MAX, chatOf, chatAnswers, withAnswer, knowsTables, chatDiagnostics, sharedRouteDiagnostics, ChatAnswers
  * Edit guide: rules that need the whole file live here; a rule about one chat block alone is a word.json check (AZ2220–AZ2239).
  * Tests: packages/core/test/chat-decl.test.ts, packages/core/test/chat-answer-decl.test.ts, packages/core/test/chat-float-decl.test.ts
  */
@@ -41,6 +41,8 @@ export const CHAT_WORD = 'chat';
 
 /** The rich components (chat-block-spec §20): answer-only, never page words. */
 export const CHAT_RICH_WORDS: readonly string[] = ['chart', 'table', 'stats', 'cards', 'dashboard'];
+/** The word that, after `from`, names the operator's data tools in an answer (chat-block-spec §21.2.3) — never a table (AZ1272). */
+export const TOOLS_WORD = 'tool';
 
 /** The words an answer may contain (chat-block-spec §3.2, §20.1), in this order everywhere. */
 export const CHAT_ANSWER_WORDS: readonly string[] = ['pricing', 'faq', 'cta', 'feature', ...CHAT_RICH_WORDS];
@@ -244,6 +246,8 @@ export function withAnswer(block: SpecBlock, answers: ChatAnswers): SpecBlock {
  * the operator's budget on strangers), and `knows` (§8.2): AZ1271 (not a
  * table), AZ1252 (signed-out visitors can't read it, or none of its fields),
  * AZ1253 (strangers write to it), AZ1258 (named twice, or more than three).
+ * AZ1272: a table named `tool` an answer could take figures from, where a
+ * chat shows a component with `from` — that word is the data tools' (§21.2.3).
  * `quotable` is how many pricing blocks a signed-out visitor can see
  * (chatAnswers).
  */
@@ -281,6 +285,13 @@ export function chatDiagnostics(
     }
     const knows = c.props.knows;
     if (knows) out.push(...knowsDiagnostics(knows, tables));
+  }
+  // `from tool …` is always a request to the operator's data tools (§21.2.3): a table named `tool` that an answer
+  // could take figures from would be read the other way, so it is refused where a chat shows a component with `from`.
+  const toolTable = tables.find((t) => t.name === TOOLS_WORD);
+  const rich = chats.find((c) => (c.props.show?.value.split(LIST_SEPARATOR) ?? []).some((w) => CHAT_RICH_WORDS.includes(w)));
+  if (toolTable && chatTable(toolTable) !== null && rich?.props.show) {
+    err('AZ1272', `${CHAT_WORD}: answers read "from ${TOOLS_WORD}" as the server's data tools, so the table '${TOOLS_WORD}' could never give figures — rename it, then run: az backend schema <file.az> --rename ${TOOLS_WORD}=<new name>`, rich.props.show.pos);
   }
   if (model && chats.length === 0) {
     warn('AZ1251', `backend: model default but no page shows chat — remove it, or add under site: chat float`, model.pos);
