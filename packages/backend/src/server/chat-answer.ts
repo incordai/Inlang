@@ -19,10 +19,10 @@
  *     feature                        a short list, composed
  *       item "Fast" "Pages are pre-rendered."
  *     ask "How do I cancel?"         a follow-up question, a button (C5)
- *     use monthly                    the author's own answer preset (§19.14)
+ *     use monthly                    the author's own answer preset (§19.15)
  *
  * An item's text may also be its own line under it (`    text "…"`), the
- * long form; the model is taught the one-line form only (§19.14), and both
+ * long form; the model is taught the one-line form only (§19.15), and both
  * read the same, under the same caps.
  *
  * The model is an untrusted author, so its text is read here, on the
@@ -50,7 +50,7 @@
  * Caps per answer: ANSWER_LIMITS. Past the prose cap or the component cap
  * the parser ends (`ended`), and the route stops reading the model.
  *
- * Two copies of the answer are kept as it is read (chat-block-spec §19.14):
+ * Two copies of the answer are kept as it is read (chat-block-spec §19.15):
  * `record`, the prose and every shown component's canonical lines, which
  * every cap is judged on; and `history`, what the model is sent back on its
  * next question — the same prose, each long component as a one-line
@@ -104,7 +104,7 @@ export type AnswerWord = (typeof ANSWER_WORDS)[number];
 /**
  * A block the site lets answers quote, as context.json lists it: its word,
  * its page, its position there, its title; and for an faq or a feature list
- * (chat-block-spec §19.14) the author's own items, which a quote shows whole
+ * (chat-block-spec §19.15) the author's own items, which a quote shows whole
  * or one by its number.
  */
 export interface AnswerQuote {
@@ -113,7 +113,7 @@ export interface AnswerQuote {
   readonly items?: readonly { readonly title: string; readonly text: string }[];
 }
 
-/** The words an answer may quote from the site's own pages (§5.3, §19.14). */
+/** The words an answer may quote from the site's own pages (§5.3, §19.15). */
 export const QUOTE_WORDS: readonly AnswerWord[] = ['pricing', 'faq', 'feature'];
 
 /** What one chat page's answers may show, quote and link to (from context.json). */
@@ -127,11 +127,11 @@ export interface AnswerRules {
   readonly tools?: readonly ChatToolShape[];
   /** AZ_GEOCODER_URL is set: a map's `place` may be looked up (§21.4.2). */
   readonly geocoder?: boolean;
-  /** The chat's answer presets (§19.14): `use <name>` shows one, read here from the author's own text. None when absent. */
+  /** The chat's answer presets (§19.15): `use <name>` shows one, read here from the author's own text. None when absent. */
   readonly presets?: readonly AnswerPreset[];
 }
 
-/** An author's answer preset (`answer <name>` in the .az file, §19.14): its name and its one component, as written. */
+/** An author's answer preset (`answer <name>` in the .az file, §19.15): its name and its one component, as written. */
 export interface AnswerPreset { readonly name: string; readonly text: string }
 
 /** One component, validated: exactly what the page's templates are filled with. */
@@ -306,7 +306,7 @@ export interface AnswerParser {
   /** The answer whole: prose, and each shown component's canonical lines — what every cap is judged on. */
   readonly record: string;
   /**
-   * The answer as the model is sent it back (§19.14): prose, a stand-in for
+   * The answer as the model is sent it back (§19.15): prose, a stand-in for
    * each shown component, a note for each one dropped whole. `lost` names the
    * components the route dropped after the parser passed them (their figures
    * failed, the answer was full): each is its note instead. Never longer than
@@ -370,7 +370,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     for (; !extra && k < piece.length; k++) if (piece[k] !== ' ') extra = true;
   };
   let record = '';
-  /** The answer as the model reads it back, in parts (§19.14). */
+  /** The answer as the model reads it back, in parts (§19.15). */
   const parts: HistoryPart[] = [];
   /**
    * The history's length without its notes, a line break counted before each
@@ -433,7 +433,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     say(cleanText(all.slice(0, cut)));
   };
 
-  /** A drop counted; with `word`, a whole component, noted in the history by its word and reason (§19.14). */
+  /** A drop counted; with `word`, a whole component, noted in the history by its word and reason (§19.15). */
   const drop = (reason: DropReason, word?: string) => {
     dropped.push(reason);
     if (word !== undefined) parts.push({ kind: 'note', line: droppedNote(word, reason) });
@@ -510,7 +510,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
         emit({ quote: 'pricing', route, n: nth }, `show pricing ${at}\n`, b.word);
         return;
       }
-      // An faq or a feature list: the author's own items, whole, or the one `#n` names (§19.14), under the composed form's caps.
+      // An faq or a feature list: the author's own items, whole, or the one `#n` names (§19.15), under the composed form's caps.
       const all = quote.items ?? [];
       const k = item === undefined ? -1 : /^#[1-9][0-9]?$/.test(item) ? Number(item.slice(1)) - 1 : -2;
       if (k === -2 || k >= all.length) { drop('no_quote', b.word); return; }
@@ -531,7 +531,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       return;
     }
     if (b.kind === 'use') {
-      // The author's own component (§19.14), read as an answer would be, under this page's rules — never another preset.
+      // The author's own component (§19.15), read as an answer would be, under this page's rules — never another preset.
       const name = b.head[1].value;
       const preset = (rules.presets ?? []).find((p) => p.name === name);
       if (!preset) { drop('no_quote', b.word); return; }
@@ -613,7 +613,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     if (b.kind !== 'faq' && b.kind !== 'feature') { b.broken = 'shape'; return; }
     const tokens = lineTokens(raw.slice(indent));
     const one = tokens !== null && tokens.length === 2 && tokens[0].kind === 'bare' && tokens[1].kind === 'string';
-    // The one-line form (§19.14): `item "title" "text"`, the text in the same line.
+    // The one-line form (§19.15): `item "title" "text"`, the text in the same line.
     const both = tokens !== null && tokens.length === 3 && tokens[0].kind === 'bare' && tokens[1].kind === 'string' && tokens[2].kind === 'string';
     if (indent === 2 && (one || both) && tokens![0].value === 'item') {
       if (b.items.length >= ANSWER_LIMITS.items) { b.broken = 'too_many'; return; }
@@ -649,7 +649,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
         return;
       case 'show':
         // The note names the quoted word only when it is one an answer may hold; the route is the model's and never noted.
-        // `show <word> <route>`, or with a list's item: `show faq /help #2` (§19.14).
+        // `show <word> <route>`, or with a list's item: `show faq /help #2` (§19.15).
         if ((rest.length === 2 || (rest.length === 3 && rest[2].value.startsWith('#'))) && rest.every((r) => r.kind === 'bare')) {
           open = { kind: 'show', word: (ANSWER_WORDS as readonly string[]).includes(rest[0].value) ? rest[0].value : 'show', head: t, items: [], lines: [], broken: null };
         } else asProse();

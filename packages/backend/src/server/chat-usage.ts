@@ -108,7 +108,7 @@ export const CHAT_MIGRATIONS: {
       },
     },
     {
-      // chat-block-spec §19.14: the input tokens the provider read from its prompt cache, a part of input_tokens;
+      // chat-block-spec §19.15: the input tokens the provider read from its prompt cache, a part of input_tokens;
       // 0 where the provider says nothing of a cache. Days counted before this have 0.
       version: 6,
       sql: {
@@ -227,7 +227,7 @@ export const REPORT_DAYS = 30;
 export interface UsageDay {
   readonly day: string;
   readonly input: number;
-  /** The part of `input` the provider read from its prompt cache (chat-block-spec §19.14); 0 when it said nothing. */
+  /** The part of `input` the provider read from its prompt cache (chat-block-spec §19.15); 0 when it said nothing. */
   readonly cached: number;
   readonly output: number;
   readonly messages: number;

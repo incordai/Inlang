@@ -142,7 +142,7 @@ export interface ChatDecl {
   readonly presets?: readonly PresetDecl[];
 }
 
-/** The fill an author writes an answer preset with (chat-block-spec §19.14): `answer <name>`, one component indented under it. */
+/** The fill an author writes an answer preset with (chat-block-spec §19.15): `answer <name>`, one component indented under it. */
 export const PRESET_WORD = 'answer';
 /** A preset's name: what the model writes after `use`. */
 export const PRESET_NAME = /^[a-z][a-z0-9]{0,31}$/;
@@ -178,7 +178,7 @@ const presetHead = (body: string): { word: string; quoted: boolean } => {
 };
 
 /**
- * A chat's answer presets (chat-block-spec §19.14): AZ1273 a preset with no
+ * A chat's answer presets (chat-block-spec §19.15): AZ1273 a preset with no
  * name, or one that is not lowercase letters and digits; AZ1274 a name
  * written twice; AZ1275 a body that is not exactly one component (none
  * indented, or two at its margin); AZ1276 a component the chat does not

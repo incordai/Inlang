@@ -83,7 +83,7 @@ ${FORMATTING}
 ${FOLLOW_UPS}${words.length === 0 ? '' : answerFormat(words)}${presets.length === 0 ? '' : presetList(presets)}`;
 
 /**
- * The chat's answer presets (chat-block-spec §19.14), each by name and what
+ * The chat's answer presets (chat-block-spec §19.15), each by name and what
  * it shows — its component's first line — never its body: the server reads
  * that from context.json when the model writes `use <name>`.
  */
@@ -295,7 +295,7 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
   if (Object.keys(chats).length === 0) return undefined;
 
   const protect = new Set((spec.site.scoped.auth?.protect ?? '').split(',').map((r) => r.trim()).filter(Boolean));
-  // The site's faq and feature lists an answer may quote (§19.14): on public pages, numbered per page, the author's items.
+  // The site's faq and feature lists an answer may quote (§19.15): on public pages, numbered per page, the author's items.
   const lists = (['faq', 'feature'] as const).filter((w) => shown.has(w));
   if (lists.length > 0) quotes = [...quotes, ...listQuotes(spec, protect, lists)];
   const pages: Json[] = [];

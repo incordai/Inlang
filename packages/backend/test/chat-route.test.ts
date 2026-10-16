@@ -254,7 +254,7 @@ test('the budget: a request whose largest cost would cross it is refused before 
     const c = client(s.url);
     // 'price' reports 912 tokens: within the budget before, over it after.
     assert.equal((await events(await ask(c, [say('price?')]))).at(-1)!.event, 'done');
-    assert.deepEqual(await createUsage(s.db).row(utcDay(Date.now())), { input: 900, cached: 640, output: 12, messages: 1, dropped: 0, blocked: 0 }, 'the cached part of the input counted with it (§19.14)');
+    assert.deepEqual(await createUsage(s.db).row(utcDay(Date.now())), { input: 900, cached: 640, output: 12, messages: 1, dropped: 0, blocked: 0 }, 'the cached part of the input counted with it (§19.15)');
     const calls = s.fake.calls();
     for (let i = 0; i < 2; i++) {
       const r = await ask(c, [say('hello')]);

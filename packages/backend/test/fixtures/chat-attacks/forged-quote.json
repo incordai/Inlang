@@ -1,6 +1,6 @@
 {
   "name": "forged-quote",
-  "threat": "Quote forgery (chat-block-spec §19.14): a list the site does not have, an item past its end, an item of a pricing block, a number that is no number; each dropped by its code, nothing drawn",
+  "threat": "Quote forgery (chat-block-spec §19.15): a list the site does not have, an item past its end, an item of a pricing block, a number that is no number; each dropped by its code, nothing drawn",
   "ask": "attack forged-quote",
   "answer": "Quotes.\nshow faq /pricing\nshow faq /pricing #1\nshow pricing /pricing #1\nshow feature /contact #2\nshow faq /pricing #-1\nshow faq /evil.example/x #1\nshow pricing /pricing",
   "expect": {

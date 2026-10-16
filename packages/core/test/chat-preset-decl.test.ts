@@ -1,5 +1,5 @@
 /**
- * Answer presets (chat-block-spec §19.14): `answer <name>` under a chat
+ * Answer presets (chat-block-spec §19.15): `answer <name>` under a chat
  * keeps its indented lines as written — one component in the answer forms,
  * never linked as words — in its Spec fill, and the file-wide rules judge
  * them: AZ1273 a name, AZ1274 a name twice, AZ1275 one component, AZ1276 a
@@ -47,7 +47,7 @@ const MONTHLY = `    answer monthly
 
 const codes = (r: ReturnType<typeof compile>) => r.diagnostics.filter((d) => d.severity === 'error').map((d) => d.code);
 
-test('§19.14: an answer preset keeps its body as written, two spaces a level, strings quoted — and nothing under it is linked as a word', () => {
+test('§19.15: an answer preset keeps its body as written, two spaces a level, strings quoted — and nothing under it is linked as a word', () => {
   const r = compile(site(`${MONTHLY}\n    answer talk\n      cta "Talk \\"now\\"" /`), { manifests });
   assert.deepEqual(codes(r), [], JSON.stringify(r.diagnostics));
   const chat = r.spec!.pages[0].blocks.find((b) => b.word === 'chat')!;
@@ -60,7 +60,7 @@ test('§19.14: an answer preset keeps its body as written, two spaces a level, s
   assert.ok(codes(compile(site('').replace('page /\n', 'page /\n  dashboard "This month"\n'), { manifests })).includes('AZ1201'));
 });
 
-test('§19.14: AZ1273 a preset without a lowercase name; AZ1274 a name twice', () => {
+test('§19.15: AZ1273 a preset without a lowercase name; AZ1274 a name twice', () => {
   assert.deepEqual(codes(compile(site('    answer\n      cta "Go" /'), { manifests })), ['AZ1273']);
   assert.deepEqual(codes(compile(site('    answer "monthly"\n      cta "Go" /'), { manifests })), ['AZ1273'], 'a name, not copy');
   assert.deepEqual(codes(compile(site(`    answer m${'x'.repeat(32)}\n      cta "Go" /`), { manifests })), ['AZ1273'], 'at most 32');
@@ -71,7 +71,7 @@ test('§19.14: AZ1273 a preset without a lowercase name; AZ1274 a name twice', (
   assert.deepEqual(codes(compile(site('    answer talk\n      cta "Go" /\n    answer more\n      cta "Again" /'), { manifests })), []);
 });
 
-test('§19.14: AZ1275 a preset is exactly one component; AZ1276 one the chat shows', () => {
+test('§19.15: AZ1275 a preset is exactly one component; AZ1276 one the chat shows', () => {
   assert.deepEqual(codes(compile(site('    answer empty'), { manifests })), ['AZ1275']);
   assert.deepEqual(codes(compile(site('    answer two\n      cta "One" /\n      cta "Two" /'), { manifests })), ['AZ1275']);
   assert.deepEqual(codes(compile(site('    answer faq\n      faq\n        item "Q?" "A."'), { manifests })), ['AZ1276'], 'faq is not in show');
@@ -85,7 +85,7 @@ test('§19.14: AZ1275 a preset is exactly one component; AZ1276 one the chat sho
   assert.deepEqual(codes(compile(site('    answer talk\n      cta "Go" /'), { manifests })), []);
 });
 
-test('§19.14: AZ1277 a body the chat server\'s parser would drop, judged with the chat\'s own rules — only when the caller gives the parser', () => {
+test('§19.15: AZ1277 a body the chat server\'s parser would drop, judged with the chat\'s own rules — only when the caller gives the parser', () => {
   const seen: { rules: Parameters<AnswerCheck>[0]; text: string }[] = [];
   const check: AnswerCheck = (rules, text) => { seen.push({ rules, text }); return text.includes('nowhere') ? 'destination' : null; };
   const bad = site('    answer lost\n      cta "Go" /nowhere');

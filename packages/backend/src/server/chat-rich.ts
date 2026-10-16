@@ -468,7 +468,7 @@ function reader(rules: RichRules, clean: Clean) {
     const round = kind === 'pie' || kind === 'donut';
     let u: Unit = null;
     const series: { name: string; points: [string, number][] }[] = [];
-    /** `point "label" n`, or the one-line form `points "label" n "label" n …` (§19.14): the same labels, numbers and caps. */
+    /** `point "label" n`, or the one-line form `points "label" n "label" n …` (§19.15): the same labels, numbers and caps. */
     const pointsOf = (n: Node): [string, number][] => {
       if (n.children.length > 0) fail('shape');
       if (bare(n.tokens[0], 'point') && n.tokens.length === 3) return [[label(n.tokens[1], RICH_LIMITS.label), num(n.tokens[2])]];
@@ -756,7 +756,7 @@ const sourceOf = (x: object): string => ('from' in x ? 'site data' : 'tool' in x
 
 /**
  * A rich component as the model reads it back in the history (chat-block-spec
- * §19.14): one line that names it — its word, kind and title, where its
+ * §19.15): one line that names it — its word, kind and title, where its
  * figures came from — and none of its rows, points or cells, which the page
  * keeps. `[shown: chart bar "Orders by status" (site data)]`.
  */

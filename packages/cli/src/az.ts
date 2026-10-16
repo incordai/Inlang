@@ -297,7 +297,7 @@ export const wordsFor = (options: Omit<BuildOptions, 'outDir'>, code = true) => 
 export function build(options: BuildOptions): BuildOutcome {
   const src = options.sourceText ?? readFileSync(options.source, 'utf8');
   const words = wordsFor(options);
-  // A chat's answer presets are judged by the chat server's own parser (chat-block-spec §19.14, AZ1277).
+  // A chat's answer presets are judged by the chat server's own parser (chat-block-spec §19.15, AZ1277).
   const compileOptions = { manifests: words.manifests, lock: lockOption(options.source), readBytes: compileReader(options.source), checkAnswer: checkPreset };
   const { strict, preview } = options.preview
     ? compilePreview(src, compileOptions)

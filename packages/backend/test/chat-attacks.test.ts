@@ -104,7 +104,7 @@ test('the corpus through POST /chat: every case streams exactly its events; drop
         .map((e) => (e.event === 'text' ? { type: 'text', s: JSON.parse(e.data).s } : { type: 'block', block: JSON.parse(e.data) }));
       assert.deepEqual(outcome(events), { text: x.expect.text, blocks: x.expect.blocks }, x.name);
       const done = JSON.parse(raw.at(-1)!.data) as { tag: string; conversation: string; text: string };
-      // The history is tagged: it is what the page may send back, and nothing it may not (§19.14).
+      // The history is tagged: it is what the page may send back, and nothing it may not (§19.15).
       assert.ok(checkTag(historyKey(loaded.config.secret), done.conversation, 1, done.text, done.tag), x.name);
       if (x.expect.history !== undefined) assert.equal(done.text, x.expect.history, `${x.name}: the history the model is sent back`);
       dropped += x.expect.dropped.length;

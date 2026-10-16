@@ -150,7 +150,7 @@ test('a tool chart, table and stat arrive as src tool with the operator\'s label
     const done = ev.at(-1)!;
     assert.equal(done.event, 'done');
     const record = done.data.text as string;
-    // §19.14: the history the model is sent back names each component and where its figures came from — never a row.
+    // §19.15: the history the model is sent back names each component and where its figures came from — never a row.
     assert.equal(record, 'The standings.\n[shown: chart bar "Points" (tool data)]\n[shown: table "Rows" (tool data)]\n[shown: stats "Most"]\n', 'the history holds stand-ins only');
     // The next question carries that answer back as history.
     const next = await events(await c.post('/chat', {
@@ -174,7 +174,7 @@ test('a tool chart, table and stat arrive as src tool with the operator\'s label
   } finally { await s.close(); }
 });
 
-test('§19.14: a component the route drops after the parser passed it is a note in the history, in its place — counted the same', async () => {
+test('§19.15: a component the route drops after the parser passed it is a note in the history, in its place — counted the same', async () => {
   const s = await start();
   try {
     const c = client(s.url);
@@ -200,7 +200,7 @@ test('§19.14: a component the route drops after the parser passed it is a note 
   } finally { await s.close(); }
 });
 
-test('§19.14: use <name> through POST /chat — the author\'s component reaches the page, its line the history; a name the chat lacks is a note', async () => {
+test('§19.15: use <name> through POST /chat — the author\'s component reaches the page, its line the history; a name the chat lacks is a note', async () => {
   const s = await start();
   try {
     const ev = await events(await client(s.url).post('/chat', { page: '/', messages: [say('a preset please')] }));
@@ -230,7 +230,7 @@ test('an invented tool is dropped and nothing is called; the fourth call of an a
     assert.deepEqual(blocks(invented), []);
     assert.equal(s.tool.seen.length, 0);
     assert.ok(s.log.some((l) => /^chat: done .* dropped 1 \(tool\)$/.test(l)), s.log.join('\n'));
-    // §19.14: the model is told, in its history, that the chart was dropped and why — not the tool it named, not the city.
+    // §19.15: the model is told, in its history, that the chart was dropped and why — not the tool it named, not the city.
     assert.equal(invented.at(-1)!.data.text, '(dropped: chart, tool)\nNo such tool.\n');
 
     const four = await events(await c.post('/chat', { page: '/', messages: [say('four tables')] }));

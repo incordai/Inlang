@@ -40,7 +40,7 @@ const manifests = new Map<string, Manifest>(dirs.map((d) => {
 
 interface SlotDef {
   readonly line?: unknown;
-  /** Its indented lines are kept as written for the chat server (chat's `answer`, chat-block-spec §19.14): never drawn. */
+  /** Its indented lines are kept as written for the chat server (chat's `answer`, chat-block-spec §19.15): never drawn. */
   readonly verbatim?: boolean;
   readonly props?: Record<string, { type: string }>;
   readonly slots?: Record<string, SlotDef>;

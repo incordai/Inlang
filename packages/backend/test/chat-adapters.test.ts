@@ -59,7 +59,7 @@ test('completions: posts the shape with the bearer key, streams deltas and usage
   } finally { await m.close(); }
 });
 
-test('completions §19.14: the input read from the provider\'s prompt cache is reported as part of the input; the request asks for no cache', async () => {
+test('completions §19.15: the input read from the provider\'s prompt cache is reported as part of the input; the request asks for no cache', async () => {
   const usage = (u: Record<string, unknown>) => (_q: unknown, res: import('node:http').ServerResponse) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.end(`${delta('x')}data: ${JSON.stringify({ choices: [], usage: u })}\n\ndata: [DONE]\n\n`);

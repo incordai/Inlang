@@ -16,7 +16,7 @@
  * of `{ model, messages, stream, max_tokens }` answered by `data:` lines of
  * JSON deltas ending with `data: [DONE]`. Hosted APIs and local model
  * servers speak it. Its common hosted form caches a long prompt prefix by
- * itself, with no field in the request (chat-block-spec §19.14): the server
+ * itself, with no field in the request (chat-block-spec §19.15): the server
  * keeps the system text's prefix byte-identical across questions (chat.ts
  * systemText), and the usage's `prompt_tokens_details.cached_tokens`, when
  * the stream carries it, is reported as the input tokens read from cache. `fake` replays scripted answers for tests and local

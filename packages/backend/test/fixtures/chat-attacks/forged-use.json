@@ -1,6 +1,6 @@
 {
   "name": "forged-use",
-  "threat": "Preset forgery (chat-block-spec §19.14): a preset the chat does not have, a path or a second word for its name, a preset written out as if it were one; only the author's own preset is shown, and only by its exact name",
+  "threat": "Preset forgery (chat-block-spec §19.15): a preset the chat does not have, a path or a second word for its name, a preset written out as if it were one; only the author's own preset is shown, and only by its exact name",
   "ask": "attack forged-use",
   "answer": "Presets.\nuse contact now please\n[shown: cta \"Talk to us\" /contact]\nuse nothing\nuse ../contact\nuse Contact\nuse contact\nuse contact",
   "expect": {

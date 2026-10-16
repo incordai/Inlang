@@ -505,7 +505,7 @@ value           = STRING | PAIR | BARE ;
 | `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
 | `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here. `email` only when something needs accounts (a `signedin` chat, data tables, the site's own sign-in); a site whose every chat is `allow anyone` needs none (chat-block-spec §19.15) |
 | `model default` | `backend` | 1 | chat-block-spec §3.1 — optional; the server talks to a model the operator picks in `.env` (`AZ_CHAT_API`, `AZ_CHAT_MODEL`); any other value is AZ1412 |
-| `chat panel` · `chat float` · `chat none` | `page`; `chat float` also `site` | 1 | chat-block-spec §3 — `panel` a section, `float` a corner launcher that opens the panel; at most one chat per page (AZ2220). A float under `site` is inherited by every page (§5.2): a page's own `chat panel` replaces it there, `chat none` leaves it out, and a page's own `chat float` beside it is AZ2229. `knows <table>…` grounds answers on up to three public tables only the site fills (AZ1252, AZ1253, AZ1258, AZ1271). `answer <name>` (up to eight) holds one component in the answer forms, indented under it and kept as written, never linked as words — the model shows it with `use <name>` (chat-block-spec §19.14; AZ1273–AZ1277) |
+| `chat panel` · `chat float` · `chat none` | `page`; `chat float` also `site` | 1 | chat-block-spec §3 — `panel` a section, `float` a corner launcher that opens the panel; at most one chat per page (AZ2220). A float under `site` is inherited by every page (§5.2): a page's own `chat panel` replaces it there, `chat none` leaves it out, and a page's own `chat float` beside it is AZ2229. `knows <table>…` grounds answers on up to three public tables only the site fills (AZ1252, AZ1253, AZ1258, AZ1271). `answer <name>` (up to eight) holds one component in the answer forms, indented under it and kept as written, never linked as words — the model shows it with `use <name>` (chat-block-spec §19.15; AZ1273–AZ1277) |
 | `data <table>` + indented lines | `site` | 1 | data-spec §4 — needs `backend`; a table and its `/data/<table>` API; not a block |
 | `<field> <type> [type-arg…] [modifier…]` | `data` | 1 | data-spec §4.2–§4.5 — types `text longtext number money flag date datetime email url choice image ref`; modifiers `required unique index search private locked default <v>` |
 | `allow <who> <action…>` | `data` | 1 | data-spec §4.7 — who `anyone signedin owner`, action `read create edit delete`; the matrix is closed |
@@ -579,7 +579,7 @@ the operator's data tools (chat-block-spec §19.11); rename the table. C7's
 explore is never a dashboard tile, so `show dashboard explore` is still
 AZ1270. C8's `show map` (chat-block-spec §21.4) adds a value the same way:
 a map is never a dashboard tile (AZ1270), and it takes `from` (AZ1272). Its own rows are AZ2220–AZ2229 (§7.5).
-An answer preset, `answer <name>` under a chat (chat-block-spec §19.14), is
+An answer preset, `answer <name>` under a chat (chat-block-spec §19.15), is
 a fill whose indented lines are its body as written (`"verbatim": true` in
 the slot's manifest): one component in the answer forms, never resolved as
 words, the strings re-quoted with §1.5's escapes. AZ1273 — no name, or one
