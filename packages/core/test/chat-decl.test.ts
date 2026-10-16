@@ -86,7 +86,7 @@ test('AZ1254: a word an answer can never show is refused with its reason', () =>
   const src = site(chat('    show auth\n'));
   assert.deepEqual(errors(src), ['AZ1254']);
   assert.equal(message(src, 'AZ1254'),
-    "chat: 'auth' can't be in an answer (a sign-in form placed by a model is a phishing form) — show takes pricing, faq, cta, feature, chart, table, stats, cards, dashboard, explore or map");
+    "chat: 'auth' can't be in an answer (a sign-in form placed by a model is a phishing form) — show takes pricing, faq, cta, feature, chart, table, stats, cards, dashboard, explore or map, or a group: all, figures, sections");
   assert.deepEqual(errors(site(chat('    show banana\n'))), ['AZ1254'], 'an unknown word too');
 });
 

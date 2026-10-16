@@ -31,7 +31,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createApp, type ChatRoutes, type DataRoutes } from '../../backend/src/server/app.ts';
 import { createAdapter } from '../../backend/src/server/chat-adapters.ts';
@@ -40,6 +40,8 @@ import { createQueries, figuresRun } from '../../backend/src/server/chat-query.t
 import { createKnows, knowsProblems } from '../../backend/src/server/chat-knows.ts';
 import { migrateChat, usageReport } from '../../backend/src/server/chat-usage.ts';
 import { createShareStore } from '../../backend/src/server/chat-share.ts';
+import { createTiles, openTiles, TilesProblem, type Tiles } from '../../backend/src/server/chat-tiles.ts';
+import { BASEMAP_SOURCE } from '../../backend/src/emit.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
 import { createData, parseAdminEmails } from '../../backend/src/server/data-api.ts';
 import { migrateData, type DataStep } from '../../backend/src/server/data-migrate.ts';
@@ -103,7 +105,7 @@ export interface DevPorts {
  * not turn the dev server into a client of something real.
  */
 export function devBackendEnv(
-  ports: DevPorts, secret: string, sqlitePath: string, mailboxKey: string, extra: Record<string, string> = {},
+  ports: DevPorts, secret: string, sqlitePath: string, mailboxKey: string | null, extra: Record<string, string> = {},
 ): Record<string, string> {
   return {
     ...extra,
@@ -115,9 +117,12 @@ export function devBackendEnv(
     AZ_TRUST_PROXY: 'false',
     AZ_COOKIE_SAMESITE: 'lax',
     AZ_SQLITE_PATH: sqlitePath,
-    AZ_EMAIL_FROM: extra.AZ_EMAIL_FROM || 'Local dev <dev@localhost>',
-    AZ_EMAIL_API_URL: `http://${LOOPBACK}:${ports.mailbox}/send`,
-    AZ_EMAIL_API_KEY: mailboxKey,
+    // A server that keeps accounts mails into the mailbox; one without (no mailbox key, §19.15) sends nothing.
+    ...(mailboxKey !== null ? {
+      AZ_EMAIL_FROM: extra.AZ_EMAIL_FROM || 'Local dev <dev@localhost>',
+      AZ_EMAIL_API_URL: `http://${LOOPBACK}:${ports.mailbox}/send`,
+      AZ_EMAIL_API_KEY: mailboxKey,
+    } : {}),
   };
 }
 
@@ -279,8 +284,8 @@ export function chatDemoFile(dir: string): string {
   return file;
 }
 
-/** The build's chat files (`server/chat/`), when a page shows a chat. */
-export interface DevChat { readonly prompt: string; readonly context: string }
+/** The build's chat files (`server/chat/`), when a page shows a chat; `map` when a chat shows maps (its tiles are served too). */
+export interface DevChat { readonly prompt: string; readonly context: string; readonly map?: boolean }
 
 export interface DevBackend {
   readonly url: string;
@@ -290,11 +295,13 @@ export interface DevBackend {
 /**
  * Start the site's backend for local development: the real app, store,
  * migrations and mailer, over SQLite in `.az-dev/`, mailing into the mailbox.
+ * Without a mailbox the server keeps no accounts, as the site's own does when
+ * nothing on it needs one (chat-block-spec §19.15): no sign-in routes, no mail.
  * Refuses to start — naming each problem — exactly as the production server
  * would, if `.az-dev/backend.env` holds something invalid.
  */
 export async function startDevBackend(
-  projectDir: string, siteName: string, ports: DevPorts, mailbox: Mailbox, print: (line: string) => void,
+  projectDir: string, siteName: string, ports: DevPorts, mailbox: Mailbox | null, print: (line: string) => void,
   /** The build's `server/data.json`, when the site declares tables. */
   dataJson?: string,
   /** The build's chat files, when a page shows a chat. */
@@ -304,10 +311,13 @@ export async function startDevBackend(
   const extra = readEnvFile(join(dir, 'backend.env'));
   // A chat answers from the scripted demo unless backend.env names a real model.
   const chatEnv: Record<string, string> = chat && !extra.AZ_CHAT_API ? { AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: chatDemoFile(dir) } : {};
-  const env = devBackendEnv(ports, devSecret(dir), join(dir, 'dev.db'), mailbox.key, { ...chatEnv, ...extra });
-  // The dev profile always runs SQLite and the mailbox, whatever the site
+  const env = devBackendEnv(ports, devSecret(dir), join(dir, 'dev.db'), mailbox?.key ?? null, { ...chatEnv, ...extra });
+  // The dev profile always runs SQLite and, with accounts, the mailbox, whatever the site
   // declares for production — so its checks are the ones for that setup.
-  const loaded = loadConfig(env, { database: 'sqlite', email: 'api', ...(chat ? { chat: true } : {}) }, siteName);
+  // A chat that shows maps draws the default world basemap (chat-block-spec §19.15) unless backend.env names an archive.
+  const loaded = loadConfig(env, {
+    database: 'sqlite', ...(mailbox ? { email: 'api' as const } : {}), ...(chat ? { chat: true } : {}), ...(chat?.map ? { map: true } : {}),
+  }, siteName, { bundledWorld: chat?.map ? BASEMAP_SOURCE : null });
   if (!loaded.ok) {
     throw new Error(`the dev backend cannot start — fix these in ${DEV_DIR}/backend.env:\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}`);
   }
@@ -365,13 +375,26 @@ export async function startDevBackend(
     });
     print(`az dev: chat answers from ${config.chat.api === 'fake' ? `the demo script in ${DEV_DIR}/chat-demo.json` : 'the model set in .az-dev/backend.env'}`);
   }
+  // The maps' tiles, as the generated server serves them (chat-tiles.ts); a path in backend.env is from the project's folder.
+  let tiles: Tiles | undefined;
+  if (config.map) {
+    const m = config.map;
+    const at = (p: string | null) => (p === null || isAbsolute(p) ? p : join(projectDir, p));
+    try {
+      tiles = createTiles(await openTiles({ ...m, world: at(m.world), region: at(m.region), glyphs: at(m.glyphs), sprites: at(m.sprites) }));
+    } catch (e) {
+      if (e instanceof TilesProblem) throw new Error(`the dev backend cannot start — fix this in ${DEV_DIR}/backend.env:\n  - ${e.message}`);
+      throw e;
+    }
+    print(`az dev: maps draw ${m.bundled ? 'the bundled world basemap (land, lakes, borders; no place names)' : 'the archive set in .az-dev/backend.env'}`);
+  }
   const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }, ownedRows);
   const app = createApp({
     config, store,
     ...(data ? { data } : {}),
     ...(chatRoutes ? { chat: chatRoutes } : {}),
-    mailer: await createMailer(config),
-    oidc: createOidc((...a) => fetch(...a)),
+    ...(tiles ? { tiles } : {}),
+    ...(mailbox ? { mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)) } : {}),
     log: (line) => print(`backend: ${line}`),
     // Cookies here go out without Secure (loopbackCookies), and the __Host- /
     // __Secure- prefixes require it — so dev uses the bare names.

@@ -202,13 +202,13 @@ async function main(argv: readonly string[]): Promise<number> {
   const { loadConfig } = await import('./env.ts');
   const { createAdapter } = await import('./chat-adapters.ts');
   const { parseChatContext } = await import('./chat.ts');
-  const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string; database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api'; images?: boolean; chat?: boolean };
+  const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string; database: 'sqlite' | 'postgres' | 'mysql'; email?: 'smtp' | 'api'; images?: boolean; chat?: boolean };
   if (site.chat !== true) {
     process.stderr.write('backend: this site shows no chat — there is no model to probe\n');
     return 1;
   }
   if (existsSync('.env')) process.loadEnvFile('.env');
-  const loaded = loadConfig(process.env, { database: site.database, email: site.email, ...(site.images ? { images: true } : {}), chat: true }, site.siteName);
+  const loaded = loadConfig(process.env, { database: site.database, ...(site.email !== undefined ? { email: site.email } : {}), ...(site.images ? { images: true } : {}), chat: true }, site.siteName);
   if (!loaded.ok) {
     process.stderr.write(`backend: cannot probe — fix these in .env (see .env.example):\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}\n`);
     return 1;

@@ -1,6 +1,6 @@
 /**
  * @az module az
- * Purpose: the az binary: build, dev, spec, check, lint, migrate, eject, backend, mcp, explain, palette, prompt, doctor, audit.
+ * Purpose: the az binary: build, dev, spec, check, add, lint, migrate, eject, backend, mcp, explain, palette, prompt, doctor, audit.
  * Spec: docs/PRD.md §6.7 · docs/ARCHITECTURE.md §1a
  * Exports: main, build, specOf, wordsFor, promptInput, parseDotenv, DOTENV_FILES, EXIT
  * Edit guide: filesystem work lives here, never in core; a new command needs USAGE, COMMANDS and a test; a module only it needs is imported through later().
@@ -39,9 +39,10 @@ import { CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../../target-web/src/chat
 import { SvgError } from '../../target-web/src/svg.ts';
 import { IconError } from '../../target-web/src/head.ts';
 import { MarkdownError, markdownText } from '../../target-web/src/markdown.ts';
-import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
+import { AUTH_DIR, BACKEND_URL_FILES, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
-import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
+import { backendFiles, BASEMAP_SOURCE, SERVER_DIR } from '../../backend/src/emit.ts';
+import { BUNDLED_WORLD } from '../../backend/src/server/env.ts';
 import { CONTEXT_MAX, chatBackend, type BackendChat } from '../../backend/src/chat-context.ts';
 import type { Served } from './serve.ts';
 import { BUNDLED_WORDS, eject, loadWords, wordExamples } from './words.ts';
@@ -91,6 +92,13 @@ export interface BuildOptions {
    * "still writing" banner on every page. Every other caller leaves it unset.
    */
   readonly preview?: boolean;
+  /**
+   * The file's text when the caller holds an edit not yet written (`az add
+   * chat` checks it as `az check` would before writing a byte); read from
+   * `source` otherwise. Everything else — the lock, assets, words — is still
+   * found beside `source`.
+   */
+  readonly sourceText?: string;
 }
 
 export interface BuildOutcome {
@@ -287,7 +295,7 @@ export const wordsFor = (options: Omit<BuildOptions, 'outDir'>, code = true) => 
   { code });
 
 export function build(options: BuildOptions): BuildOutcome {
-  const src = readFileSync(options.source, 'utf8');
+  const src = options.sourceText ?? readFileSync(options.source, 'utf8');
   const words = wordsFor(options);
   const compileOptions = { manifests: words.manifests, lock: lockOption(options.source), readBytes: compileReader(options.source) };
   const { strict, preview } = options.preview
@@ -359,6 +367,8 @@ export function build(options: BuildOptions): BuildOutcome {
     // the bundler's own tags are put in (stylesheets before scripts), which reads pages with the same scanner.
     ...copied('../../target-web/src/', GUARD_DIR, (f) => f === 'csp.ts' || f === 'html-scan.ts' || f === 'named-references.ts' || f === 'head-order.ts'),
     ...(project.auth ? copied('../../auth-runtime/src/runtime/', AUTH_DIR) : []),
+    // A chat on a backend without accounts: only the backend address check the build guard imports (§19.15).
+    ...(project.backendUrlCheck ? copied('../../auth-runtime/src/runtime/', AUTH_DIR, (f) => BACKEND_URL_FILES.includes(f)) : []),
     // The 3D runtime only with a site whose pages declare a 3D view (scene-spec §5).
     ...(project.three ? copied('../../scene-runtime/src/runtime/', THREE_DIR) : []),
     // The built-in backend only with a site that declares one (backend-spec §8);
@@ -417,6 +427,8 @@ export function build(options: BuildOptions): BuildOutcome {
       ...modules.map((m, i) => ({ path: `${USER_DIR}/${m}`, copyFrom: components.sources[i] })),
       // The resized copies the pages' srcsets name, from the cache.
       ...(resizer?.files() ?? []).map((f) => ({ path: `public/${f.path}`, copyFrom: f.copyFrom })),
+      // A chat that shows maps: the default world basemap, drawn when the server's AZ_MAP_WORLD is unset (chat-block-spec §19.15).
+      ...(chat?.map ? [{ path: `${SERVER_DIR}/${BUNDLED_WORLD}`, copyFrom: BASEMAP_SOURCE }] : []),
     ]);
     if (!written.ok) {
       return { ok: false, files: [], assets: [], report: [report, ...written.problems].filter(Boolean).join('\n'), exit: EXIT.config };
@@ -498,6 +510,11 @@ const USAGE = `az — Incord Intelligent Language (inlang): words to a website
                                    a site with a backend runs it locally too
   az spec  <file.az>               print the Spec as JSON
   az check <file.az>               report diagnostics only, write nothing
+  az add chat <file.az> [--page /route | --float] [--show all|<word,…>]
+                                   add a working chat in place: the backend
+                                   lines, a chat with a greeting and suggested
+                                   questions, the model keys for az dev;
+                                   backs the file up, ends with az check passing
   az lint  [words-dir]             theme-token check of every word pack
   az migrate <file.az>             upgrade the file to this grammar version
   az eject <word> [--dir project]  take ownership of a word's source — one-way
@@ -531,7 +548,7 @@ const USAGE = `az — Incord Intelligent Language (inlang): words to a website
                                    check a build's output; changes nothing
 `;
 
-const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'palette', 'prompt', 'doctor', 'audit']);
+const COMMANDS = new Set(['build', 'dev', 'spec', 'check', 'add', 'lint', 'migrate', 'eject', 'backend', 'mcp', 'explain', 'palette', 'prompt', 'doctor', 'audit']);
 
 /**
  * Runs a command that imports its own modules, so that no other command
@@ -1004,6 +1021,62 @@ function runMigrate(file: string): number {
 }
 
 /**
+ * `az add chat <file.az> [--page /route | --float] [--show …]` (chat-block-spec
+ * §19.15): the edit is add-chat.ts's; here only the arguments, and what it
+ * did, said a line each. Exit 0 done (or nothing to add), 1 refused with
+ * nothing changed, 2 usage.
+ */
+async function runAdd(what: string, args: string[]): Promise<number> {
+  const { addChat, ADD_CHAT_USAGE } = await import('./add-chat.ts');
+  const usage = (why: string) => {
+    process.stderr.write(`az: add: ${why}\n\n${ADD_CHAT_USAGE}`);
+    return EXIT.config;
+  };
+  if (what === '--help' || what === '-h') {
+    process.stdout.write(ADD_CHAT_USAGE);
+    return EXIT.ok;
+  }
+  if (what !== 'chat') return usage(`'${what}' is not something az can add — try: az add chat site.az`);
+  let file: string | null = null;
+  let float = false;
+  let page: string | null = null;
+  let show: string[] | null = null;
+  let outDir = '.az-build';
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const next = args[i + 1];
+    if (a === '--help' || a === '-h') {
+      process.stdout.write(ADD_CHAT_USAGE);
+      return EXIT.ok;
+    } else if (a === '--float') float = true;
+    else if (a === '--page' || a === '--show' || a === '--out') {
+      if (next === undefined || next.startsWith('--')) return usage(`${a} needs a value`);
+      if (a === '--page') page = next;
+      else if (a === '--out') outDir = next;
+      else show = next.split(',').map((w) => w.trim()).filter(Boolean);
+      i++;
+    } else if (a.startsWith('--')) return usage(`unknown option '${a}'`);
+    else if (file === null) file = a;
+    else return usage(`one file at a time — '${a}' is a second`);
+  }
+  if (file === null) return usage('needs a file — try: az add chat site.az');
+  if (float && page !== null) return usage('--float is on every page; --page puts a panel on one — pick one');
+  if (show !== null && show.length === 0) return usage('--show needs a component or a group, e.g. --show all');
+  const r = addChat({ file, float, page, show, wordsDir: process.env.AZ_WORDS ?? BUNDLED_WORDS, outDir });
+  if (!r.ok) {
+    process.stderr.write(`az: add chat: ${r.message}\n`);
+    return r.exit;
+  }
+  for (const line of r.changes) process.stdout.write(`az: ${line}\n`);
+  for (const line of r.kept) process.stdout.write(`az: ${line} — kept as it is\n`);
+  if (r.changes.length === 0) process.stdout.write(`az: nothing to add — ${file} already has its chat\n`);
+  for (const b of r.backups) process.stdout.write(`az: backed up to ${b}\n`);
+  process.stdout.write(`${r.check}\n`);
+  if (r.changes.length > 0) process.stdout.write(`az: next: az dev ${file} — the chat answers from a demo script until a model is set\n`);
+  return EXIT.ok;
+}
+
+/**
  * `az dev`: compile on every save and, unless `--no-serve`, serve the result
  * — the site on Vite's dev server, and for a site that declares `backend`,
  * the backend with its development profile (serve.ts, dev-backend.ts).
@@ -1047,11 +1120,14 @@ async function runDev(file: string, outDir: string, wordsDir: string, rest: stri
       // A chat's prompt and context, as the build wrote them (docs/chat-block-spec.md §8.1).
       const prompt = outcome.files.find((f) => f.path === 'server/chat/prompt.txt')?.content;
       const context = outcome.files.find((f) => f.path === 'server/chat/context.json')?.content;
-      const backend = config
+      const server = config ? JSON.parse(config.content) as { siteName: string; email?: string; map?: boolean } : null;
+      const backend = server
         ? {
-            siteName: (JSON.parse(config.content) as { siteName: string }).siteName,
+            siteName: server.siteName,
+            // No email: the site needs no accounts, and its dev server keeps none either (chat-block-spec §19.15).
+            accounts: server.email !== undefined,
             ...(dataJson !== undefined ? { data: dataJson } : {}),
-            ...(prompt !== undefined && context !== undefined ? { chat: { prompt, context } } : {}),
+            ...(prompt !== undefined && context !== undefined ? { chat: { prompt, context, ...(server.map === true ? { map: true } : {}) } } : {}),
           }
         : null;
       started = serve({ source: file, outDir, sitePort, open: rest.includes('--open'), backend, print })
@@ -1105,6 +1181,7 @@ export function main(argv: string[]): number {
     return EXIT.config;
   }
   if (cmd === 'migrate') return runMigrate(file);
+  if (cmd === 'add') return later(cmd, () => runAdd(file, rest));
   if (cmd === 'backend') return runBackend(file, rest);
   if (cmd === 'eject') {
     const dirFlag = rest.indexOf('--dir');

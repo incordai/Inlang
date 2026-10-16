@@ -114,8 +114,15 @@ depend on it (backend-spec §11).
 
 A chat that shows `map` (chat-block-spec §21.4) draws its maps from tiles
 **this server** serves under `/tiles/` — to the site's origins only, by HTTP
-Range — so no third party learns where a visitor looks. Until an archive is
-set, every map shows its list of places only (`az doctor` says so).
+Range — so no third party learns where a visitor looks.
+
+**Out of the box** `az build` puts a small default basemap in the server,
+`server/tiles/world.pmtiles` (1.1 MB: land, lakes and country borders to
+zoom 6, from public-domain data, its credit in its own metadata —
+chat-block-spec §19.15), and the server draws it when `AZ_MAP_WORLD` is
+unset: maps are never a blank box, with nothing to download or set. It has
+no place names. For streets, places and labels, use your own archive — it
+replaces the default:
 
 1. **Get a basemap archive.** The maps read one PMTiles v3 file in the schema
    of the `@protomaps/basemaps` styles (stack-evaluation §19). Download a
@@ -151,7 +158,9 @@ set, every map shows its list of places only (`az doctor` says so).
 
    Data derived from the usual open source of world map data is under the
    ODbL, which requires its attribution under every map; the server will not
-   start with an archive and no `AZ_MAP_ATTRIBUTION`. Each file is opened at
+   start with an archive of yours (or a region) and no `AZ_MAP_ATTRIBUTION`.
+   A region alone may be drawn over the default world; its credit is shown
+   before the default's. Each file is opened at
    start: a missing or foreign one stops the server, named by its key.
 6. **Optionally, a geocoder** (`AZ_GEOCODER_URL`, https), so an answer may
    place an address: the server sends `GET <url>?q=<address>` and reads the

@@ -929,10 +929,11 @@ if (warnings.length > 0) {
  *   archive's origin only when the build names one.
  */
 function pageNeeds(
-  spec: Spec, pages: readonly { route: string; nodes: EmittedNode[] }[], admin: readonly string[], dataIcon: boolean,
+  spec: Spec, pages: readonly { route: string; nodes: EmittedNode[] }[], admin: readonly string[], dataIcon: boolean, publicChat = false,
 ): Record<string, PageNeeds> {
   const plan = authPlan(spec);
-  const connect = plan?.adapter === 'hosted' ? [HOSTED_ENV[0]] : plan?.adapter === 'azbackend' ? [BACKEND_ENV[0]] : [];
+  // A chat on a backend without accounts reaches it from every page, as an azbackend site's pages do (§19.15).
+  const connect = plan?.adapter === 'hosted' ? [HOSTED_ENV[0]] : plan?.adapter === 'azbackend' || publicChat ? [BACKEND_ENV[0]] : [];
   const images = (spec.site.data ?? []).some((t) => t.fields.some((f) => f.type === 'image')) ? [BACKEND_ENV[0]] : [];
   // A `from` block reads rows; a chat showing image cards may show a row's image (chat-block-spec §20.6).
   const reads = new Set(spec.pages.filter((p) => p.blocks.some((b) => b.from) || showsCards(blocksFor(spec, p))).map((p) => p.route));
@@ -969,6 +970,13 @@ export interface EmittedProject {
   readonly modules: string[];
   /** The site uses auth: the caller copies the auth runtime into AUTH_DIR (M4). */
   readonly auth: boolean;
+  /**
+   * A chat on a backend without accounts (chat-block-spec §19.15): no auth
+   * runtime, but the build guard checks the backend's address with the
+   * `azbackend` adapter's own check — the caller copies BACKEND_URL_FILES of
+   * the auth runtime into AUTH_DIR, which the guard imports and no page does.
+   */
+  readonly backendUrlCheck: boolean;
   /** The site uses 3D: the caller copies the 3D runtime into THREE_DIR (scene-spec §5). */
   readonly three: boolean;
   /**
@@ -1103,14 +1111,16 @@ export function emitProject(source: Spec, options: EmitOptions = {}): EmittedPro
   }
   // The tables `from` blocks read (data-spec §10.3); none, and no rows runtime is wired.
   const rowTables = spec.site.data ? fromTables(spec) : [];
-  // A chat panel (chat-block-spec §7) needs the auth adapter for its session; core refuses chat without it (AZ1250, AZ1507).
-  const chat = usesChat(spec) && plan !== null;
+  // A chat panel (chat-block-spec §7) talks to the backend core requires for it (AZ1250); on a backend with accounts
+  // it reads the auth adapter's session, on one without (every chat allow anyone, §19.15) nobody is signed in.
+  const chat = usesChat(spec) && spec.site.backend !== undefined;
+  const publicChat = chat && plan === null;
   // A chat that shows maps (§21.4): the map runtime, its three libraries and its popup rules, on this site only.
   const map = chat && usesMap(spec);
   const files: EmittedFile[] = [
     { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme, plan, admin, rowTables.length > 0, chat) },
     // The build guard, for every site (auth-spec §4): nothing may ship a key.
-    { path: `${GUARD_DIR}/guard.ts`, content: guardTs(requiredEnv(plan), plan?.adapter ?? null) },
+    { path: `${GUARD_DIR}/guard.ts`, content: guardTs(requiredEnv(plan, publicChat), plan?.adapter ?? null, publicChat) },
     ...(plan ? [
       { path: `${AUTH_DIR}/config.ts`, content: authConfig(plan, USER_DIR.replace(/^src\//, '')) },
       { path: `${AUTH_DIR}/react.tsx`, content: authReact() },
@@ -1118,14 +1128,14 @@ export function emitProject(source: Spec, options: EmitOptions = {}): EmittedPro
     // The typed data client only with tables (data-spec §7).
     ...(spec.site.data ? [{ path: `${DATA_DIR}/client.ts`, content: dataClient(spec.site.data, chat) }] : []),
     ...(rowTables.length > 0 ? [{ path: ROWS_FILE, content: rowsTsx(rowTables, RUNTIME_DIR) }] : []),
-    ...(chat ? [{ path: CHAT_FILE, content: chatTsx(RUNTIME_DIR, map) }] : []),
+    ...(chat ? [{ path: CHAT_FILE, content: chatTsx(RUNTIME_DIR, map, plan !== null) }] : []),
     ...(spec.site.data && admin.length > 0 ? [
       { path: ADMIN_FILE, content: adminTsx(chat) },
       { path: ADMIN_VALUES_FILE, content: adminValuesTs(spec.site.data) },
     ] : []),
     { path: 'src/runtime.tsx', content: runtimeTsx() },
     { path: 'src/entry-server.tsx', content: entryServer() },
-    { path: 'az-vite/build.mjs', content: buildScript(pageNeeds(spec, pages, admin, icon === null)) },
+    { path: 'az-vite/build.mjs', content: buildScript(pageNeeds(spec, pages, admin, icon === null, publicChat)) },
     {
       path: 'src/main.tsx',
       content: seeded.used ? threeMain(generated('browser entry: hydrates the page, then loads 3D if a view needs it')) : `${generated('browser entry: hydrates the pre-rendered page')}import { StrictMode } from "react";
@@ -1297,7 +1307,7 @@ export default defineConfig({
         pages: pages.map((p) => ({ route: p.route, file: htmlFileFor(p.route), nodes: p.nodes })),
         dirs: { runtime: RUNTIME_DIR, user: USER_DIR, auth: AUTH_DIR, guard: GUARD_DIR, three: THREE_DIR },
         auth: plan && { adapter: plan.adapter, profile: plan.profile, protect: plan.protect },
-        publicEnv: requiredEnv(plan),
+        publicEnv: requiredEnv(plan, publicChat),
         three: seeded.used,
         modules: moduleList,
         assets: [...used].sort(),
@@ -1317,6 +1327,7 @@ export default defineConfig({
     assets: [...used].sort(byPath),
     modules: moduleList,
     auth: plan !== null,
+    backendUrlCheck: publicChat,
     three: seeded.used,
     rows: rowTables.length > 0,
     chat,

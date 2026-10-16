@@ -40,11 +40,12 @@
  *   context builder (az.ts chatContextFor), text bodies kept in files read.
  */
 
+import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseEnv } from 'node:util';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
-import { loadConfig, toolKey, type Setup } from '../../backend/src/server/env.ts';
+import { BUNDLED_WORLD, loadConfig, toolKey, type Setup } from '../../backend/src/server/env.ts';
 import type { Check, CheckResult, DoctorContext } from './doctor.ts';
 import { readRegular } from './shipped.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
@@ -64,9 +65,10 @@ async function chatServer(serverDir: string): Promise<ChatServer | null> {
   }
   const { database, email } = o ?? {};
   if (database !== 'sqlite' && database !== 'postgres' && database !== 'mysql') return null;
-  if (email !== 'smtp' && email !== 'api') return null;
+  // No email: a server without accounts (chat-block-spec §19.15); any other value is not a config az wrote.
+  if (email !== undefined && email !== 'smtp' && email !== 'api') return null;
   return {
-    database, email, ...(o.data === true ? { data: true } : {}), ...(o.images === true ? { images: true } : {}), chat: o.chat === true,
+    database, ...(email !== undefined ? { email } : {}), ...(o.data === true ? { data: true } : {}), ...(o.images === true ? { images: true } : {}), chat: o.chat === true,
     ...(o.map === true ? { map: true } : {}),
   };
 }
@@ -342,7 +344,11 @@ const chatToolsCheck: Check = {
 export type MapState =
   | { readonly kind: 'refused'; readonly keys: readonly string[] }
   | { readonly kind: 'unreadable'; readonly problem: string }
-  | { readonly kind: 'ok'; readonly world: number | null; readonly region: number | null; readonly glyphs: boolean; readonly sprites: boolean; readonly geocoder: boolean };
+  | {
+    readonly kind: 'ok'; readonly world: number | null; readonly region: number | null; readonly glyphs: boolean; readonly sprites: boolean; readonly geocoder: boolean;
+    /** The world is the basemap the build bundled (chat-block-spec §19.15), not the operator's AZ_MAP_WORLD. */
+    readonly bundled: boolean;
+  };
 
 /**
  * The map keys as the server reads them, and their files opened as it opens
@@ -350,7 +356,10 @@ export type MapState =
  * the server's folder, where it runs. Key names only, never a value.
  */
 export async function chatMapState(setup: ChatServer, env: Readonly<Record<string, string>>, server: string): Promise<MapState> {
-  const loaded = loadConfig(env, { database: setup.database, email: setup.email, ...(setup.images === true ? { images: true } : {}), chat: true, map: true }, 'site');
+  // The basemap the build copied, as the server finds it beside its src/ (§19.15).
+  const bundled = join(server, BUNDLED_WORLD);
+  const loaded = loadConfig(env, { database: setup.database, email: setup.email, ...(setup.images === true ? { images: true } : {}), chat: true, map: true }, 'site',
+    { bundledWorld: existsSync(bundled) ? bundled : null });
   const refused = loaded.ok ? [] : [...new Set(loaded.problems.map((p) => /^AZ_(?:MAP|GEOCODER)_[A-Z_]+/.exec(p)?.[0] ?? '').filter((k) => k !== ''))];
   if (refused.length > 0) return { kind: 'refused', keys: refused };
   if (!loaded.ok || !loaded.config.map) return { kind: 'refused', keys: [] };
@@ -362,6 +371,7 @@ export async function chatMapState(setup: ChatServer, env: Readonly<Record<strin
     return {
       kind: 'ok', world: files.archives.world?.header.maxZoom ?? null, region: files.archives.region?.header.maxZoom ?? null,
       glyphs: files.glyphs !== null, sprites: files.sprites !== null, geocoder: loaded.config.chat?.geocoder !== null && loaded.config.chat?.geocoder !== undefined,
+      bundled: m.bundled,
     };
   } catch (e) {
     if (e instanceof TilesProblem) return { kind: 'unreadable', problem: e.message };
@@ -402,12 +412,13 @@ const chatMap: Check = {
     }
     if (state.world === null && origin === null) {
       return {
-        status: 'warn', line: 'chat map: AZ_MAP_WORLD is not set — every map shows its list of places only',
-        fix: ['make a world archive (zoom 0–6) and set AZ_MAP_WORLD and AZ_MAP_ATTRIBUTION; docs/self-hosting.md says how'],
+        status: 'warn', line: `chat map: AZ_MAP_WORLD is not set and the server has no ${BUNDLED_WORLD} — every map shows its list of places only`,
+        fix: ['rebuild the site: az build copies the default world basemap into the server', 'or make a world archive (zoom 0–6) and set AZ_MAP_WORLD and AZ_MAP_ATTRIBUTION; docs/self-hosting.md says how'],
       };
     }
     const parts = [
-      origin !== null ? 'the world archive from a third party' : `the world archive to zoom ${state.world}`,
+      origin !== null ? 'the world archive from a third party'
+        : state.bundled ? `the bundled world basemap to zoom ${state.world} (land, lakes, borders)` : `the world archive to zoom ${state.world}`,
       ...(state.region !== null ? [`a regional extract to zoom ${state.region}`] : []),
       state.glyphs ? 'labels' : 'no labels (AZ_MAP_GLYPHS unset)',
       state.sprites ? 'icons' : 'no icons (AZ_MAP_SPRITES unset)',

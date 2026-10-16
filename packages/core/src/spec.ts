@@ -25,13 +25,14 @@
 
 import type { BackendDatabase, BackendEmail, BackendModel, SpecBackend } from './backend.ts';
 import { buildTables, type SpecTable } from './data.ts';
+import { accountDiagnostics } from './accounts.ts';
 import type { Diagnostic, Pos } from './lex.ts';
 import type { SpecBlock } from './spec-block.ts';
 import { LIST_SEPARATOR, type LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
 import { buildFrom, GALLERY_FROM_REFUSED, type FromContext } from './from.ts';
 import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
-import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, knowsTables, sharedRouteDiagnostics, withAnswer } from './chat.ts';
+import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, knowsTables, sharedRouteDiagnostics, withAnswer, withShowGroups } from './chat.ts';
 
 /**
  * Where each block was written. A SpecBlock carries no position — it is the
@@ -269,10 +270,12 @@ function routeProblem(arg: { readonly kind: string; readonly value: string } | u
 
 export function buildSpec(
   version: string | null,
-  root: LinkedWord[],
+  linked: LinkedWord[],
   manifests: Map<string, Manifest>,
 ): SpecResult {
   const diagnostics: Diagnostic[] = [];
+  // A chat's `show` groups (`show all`, `show figures`) stand for their components: expanded before anything reads them (chat.ts).
+  const root = withShowGroups(linked);
 
   const siteWord = root.find((w) => w.word === 'site');
   const pageWords = root.filter((w) => w.word === 'page');
@@ -429,27 +432,36 @@ export function buildSpec(
     diagnostics.push({ code: 'AZ1506', message: 'backend: declared twice — keep one', pos: extra.pos, severity: 'error' });
   }
   const declared = backendWords[0];
-  const backend: SpecBackend | null = declared && declared.props.database && declared.props.email
+  // `email` only when written: a server nothing needs accounts from sends no mail (accounts.ts).
+  const backend: SpecBackend | null = declared && declared.props.database
     ? {
         database: declared.props.database.value as BackendDatabase,
-        email: declared.props.email.value as BackendEmail,
+        ...(declared.props.email ? { email: declared.props.email.value as BackendEmail } : {}),
         ...(declared.props.model ? { model: declared.props.model.value as BackendModel } : {}),
       }
     : null;
-  // The built-in backend IS an azbackend (auth-spec §3.4): a site that
-  // declares one but signs in some other way would ship a server nothing uses.
-  if (declared && site.get('auth')?.adapter !== 'azbackend') {
-    diagnostics.push({
-      code: 'AZ1507',
-      message: "backend: the site's auth must use it — add at site level: auth / adapter azbackend",
-      pos: declared.pos,
-      severity: 'error',
-    });
-  }
   // ---- data tables (data-spec §4) ---------------------------------------
   const dataReport = buildTables(kids.filter((w) => w.word === 'data'), backend !== null || declared !== undefined);
   diagnostics.push(...dataReport.diagnostics);
   const tables = dataReport.tables;
+  // The built-in backend keeps accounts only when something needs them (accounts.ts): then it needs email (AZ1225)
+  // and the site's auth must sign in with it (AZ1507). A chat open to anyone, alone, needs neither.
+  if (declared) {
+    const authWord = kids.find((w) => w.word === 'auth');
+    const auth = site.get('auth');
+    diagnostics.push(...accountDiagnostics(
+      { pos: declared.pos, email: declared.props.email?.value, emailWritten: declared.children.some((c) => c.word === 'email') },
+      {
+        auth: auth !== undefined || authWord !== undefined ? { adapter: auth?.adapter, pos: authWord?.pos ?? declared.pos } : undefined,
+        chats: [
+          ...kids.filter((w) => w.word === CHAT_WORD && w.variant !== 'none').map((w) => ({ allow: w.props.allow?.value, route: null, pos: w.pos })),
+          ...pageWords.flatMap((p) => p.children.filter((w) => w.word === CHAT_WORD && w.variant !== 'none')
+            .map((w) => ({ allow: w.props.allow?.value, route: p.args[0]?.value ?? '/', pos: w.pos }))),
+        ],
+        tables: kids.filter((w) => w.word === 'data').map((w) => ({ name: w.args[0]?.value ?? '', pos: w.pos })),
+      },
+    ));
+  }
   // data-spec §11: with tables, the build generates /admin and /admin/<table>;
   // an author's page there would collide with them (AZ1268).
   if (tables.length > 0) {

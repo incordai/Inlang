@@ -41,8 +41,16 @@ value: *the operator picks* — the wire shape, URL, key and model id live in
 `chat` needs it; the build then writes the chat files (§8) and the server
 gains `POST /chat`.
 
+`email` is needed only by a server that **keeps accounts** — when the
+site's `auth` uses `adapter azbackend`, a chat is for signed-in visitors
+(`allow signedin`, the default) or the site has `data` tables. A site whose
+every chat is `allow anyone` and that has none of those declares
+`database` (and `model default`) only: its server keeps no accounts — no
+`/auth` routes, no mail, no session keys — and needs no `auth` either
+(chat-block-spec §19.15).
+
 `backend` is a site-level **structure keyword**, not a block — it renders
-nothing and does not count against the eleven-block cap. Its two settings are
+nothing and does not count against the eleven-block cap. Its settings are
 **closed choices**; a value outside them is AZ1412. An address or key written
 here — `database postgres://user:pass@…` — is refused with a message saying
 it belongs in the backend's `.env` (§4): the mistake this prevents is a
@@ -52,10 +60,10 @@ password committed in a `.az` file.
 |---|---|
 | AZ1223 | `backend` anywhere but directly under `site` |
 | AZ1224 | a setting other than `database` or `email` |
-| AZ1225 | a setting missing |
+| AZ1225 | `database` missing; or `email` missing while something needs accounts — the message names it |
 | AZ1412 | a value outside its choices |
 | AZ1506 | declared twice |
-| AZ1507 | the site's `auth` does not use `adapter azbackend` (the server would be unused) |
+| AZ1507 | the site's `auth` uses another adapter; or something needs accounts and the site declares no `auth` (the message names it); or `email` is written and nothing signs in |
 
 **Location with search.** The sign-up form's optional location field offers
 type-ahead suggestions from a built-in list of 257 country and territory
@@ -161,22 +169,22 @@ one schema for all three readers:
 
 | Key | Needed | Meaning |
 |---|---|---|
-| `AZ_SESSION_SECRET` | always | ≥ 32 random bytes; keys every stored token digest |
+| `AZ_SESSION_SECRET` | always | ≥ 32 random bytes; keys every stored token digest, and the chat's answer tags and rate-limit counts |
 | `AZ_BACKEND_PUBLIC_URL` | always | this server's public URL (https; http only on loopback) |
 | `AZ_ALLOWED_ORIGINS` | always | the exact site origin(s); also the only redirect targets |
 | `AZ_HOST`, `AZ_PORT` | optional | listen address (127.0.0.1:8787) |
 | `AZ_TRUST_PROXY` | optional | `false` (default), `true` (one proxy) or the number of proxies you control; rate limits use the X-Forwarded-For entry that many places from the right |
-| `AZ_SESSION_IDLE_MINUTES` | optional | a session unused this long ends (default 1440; ASVS L2: 30) |
-| `AZ_SESSION_MAX_HOURS` | optional | a session ends this long after sign-in (default 336; ASVS L2: 12) |
-| `AZ_COOKIE_SAMESITE` | optional | `lax` (same site, default) or `none` |
+| `AZ_SESSION_IDLE_MINUTES` | optional, with accounts | a session unused this long ends (default 1440; ASVS L2: 30) |
+| `AZ_SESSION_MAX_HOURS` | optional, with accounts | a session ends this long after sign-in (default 336; ASVS L2: 12) |
+| `AZ_COOKIE_SAMESITE` | optional, with accounts | `lax` (same site, default) or `none` |
 | `AZ_SQLITE_PATH` | sqlite | database file (`./data/app.db`) |
 | `AZ_DATABASE_URL`, `AZ_DATABASE_TLS` | postgres, mysql | connection string; `require` for TLS |
 | `AZ_DATABASE_CA_FILE` | optional | PEM root certificate for a host that signs with its own (§3.1); needs `AZ_DATABASE_TLS=require` |
-| `AZ_EMAIL_FROM` | always | the From address |
+| `AZ_EMAIL_FROM` | with accounts | the From address |
 | `AZ_SMTP_HOST`, `_PORT`, `_USER`, `_PASSWORD` | smtp | the relay |
 | `AZ_EMAIL_API_URL`, `AZ_EMAIL_API_KEY` | api | the email endpoint (§7) |
-| `AZ_RESET_PATH`, `AZ_LINK_LANDING` | optional | site paths for the two emailed links |
-| `AZ_OAUTH_PROVIDERS`, `AZ_OAUTH_SIGNUP` | optional | provider ids; `allow` lets a provider create accounts |
+| `AZ_RESET_PATH`, `AZ_LINK_LANDING` | optional, with accounts | site paths for the two emailed links |
+| `AZ_OAUTH_PROVIDERS`, `AZ_OAUTH_SIGNUP` | optional, with accounts | provider ids; `allow` lets a provider create accounts. A server without accounts refuses to start with providers set |
 | `AZ_ADMIN_EMAILS` | sites with `data` | verified addresses that may use `/admin` (data-spec §11); empty = nobody |
 | `AZ_FILES_DIR` | sites with an `image` field | where uploaded images are stored (`./data/files`), outside anything served statically (data-spec §8) |
 | `AZ_UPLOAD_MAX_MB` | sites with an `image` field | the largest upload, 1–20 MB (default 5) |
@@ -222,7 +230,7 @@ gives a server setting a public name (`AZ_PUBLIC_…PASSWORD`,
 | Chat moderation | optional (`AZ_CHAT_MODERATION_URL`, its key a bearer token): every visitor turn the model would be given is POSTed as `{ text }` before the rows, the budget and the queue; only an exact `{ "allow": true }` passes; `{ "allow": false }` is `400 blocked`; an error, a non-2xx, a redirect, no answer within 3 s (body included), a reply past 4 KB or of any other shape is `503 unavailable` — it fails closed and the model is never asked; logs carry the kind, never the text or the key (chat-block-spec §6.8, §19.8) | `chat-moderation.test.ts` against a local endpoint (allow, block, each failure, the visitor leaving); `test:chat` in three engines |
 | Chat tools | optional (`AZ_CHAT_TOOLS`, each tool's `AZ_CHAT_TOOL_<NAME>_*`, validated at start — a bad key refuses to start, named, no value quoted): a chart, table, stat or cards (chat-block-spec §19.11 — **fixed**: cards were not built; a card's image only by the site's own key) `from tool <name> …` names a **declared** tool and typed parameter values the answer parser checks against the declaration (an unknown tool, parameter or value drops the component); the server POSTs the values as JSON to the operator's fixed URL (https, or http on loopback; `redirect: 'error'`), the bearer key when set, under the tool's timeout (≤ 5 s, request and body); only a `200` `application/json` reply of ≤ 256 KB and ≤ 200 rows of exactly the declared fields and types is taken — one row wrong refuses all; 3 calls an answer, `AZ_CHAT_TOOL_CALLS_PER_ADDRESS`, a 60 s cache of 200 entries; the rows go to the page only (`src: tool` with the operator's label), **never to the model**; logs `chat: tool <name> <outcome> <ms> <rows>` only (chat-block-spec §21.2, §19.10) | `chat-tools.test.ts` (every bad declaration; every parameter type at its bounds ± 1; a local endpoint: body and key, redirect not followed, timeout, non-2xx, wrong type, 257 KB, 201 rows, missing/extra field, NaN, markup as text; the cache; the per-address limit); `chat-tools-route.test.ts` (the model's every request captured: no row in this answer's or the next's, the system text byte-equal to the one with no tool answered; the per-answer cap; an invented tool never called); `test:chat` in three engines (https with a self-signed certificate) |
 | Chat explores | an answer's `explore` (chat-block-spec §21.3, §19.12): the model's rows typed and capped (1–6 columns, 1–200 rows, text ≤ 24 code points), or a public table's rows read as the anonymous list pages them (200, keyset, each page under 2 s; `parseRows`' limit in its cache key), or a tool's checked rows (≤ 200); ≤ 4 controls and ≤ 4 views bound on the server to column indexes and typed operands — a view that does not bind dropped alone (`view`); one `where`, one of `count`/`sum`/`avg`/`min`/`max`, no expression; the event ≤ 40 KB or the unavailable note; the page recomputes in place, and only a send form's shown words are ever asked | `chat-explore.test.ts` (every form and cap ± 1; a view lost alone; an attempted expression; hostile labels; site and tool rows; 40 KB); `chat-query.test.ts` (135 rows through two pages, days typed, the limit in the key); `test:chat` in three engines |
-| Chat maps | a chat that shows maps (chat-block-spec §21.4, §19.13): `GET /tiles/map.json`, `/tiles/world.pmtiles` and `/tiles/region.pmtiles` (`AZ_MAP_WORLD`, `AZ_MAP_REGION`, each opened at start and refused by its key unless a PMTiles v3 file), `/tiles/glyphs/…` and `/tiles/sprites/…` (`AZ_MAP_GLYPHS`, `AZ_MAP_SPRITES`, closed path shapes under the operator's folders); one byte range → 206, anything else in `Range` → 416, a strong ETag, `If-Match` 412, `If-None-Match` 304, a day's `public` cache; an allowed origin only, CORS allowing `range` and `if-match` and exposing `etag` and `content-range`, no credentials; `AZ_MAP_ATTRIBUTION` required with an archive. A table map's pins from the anonymous list (coordinates in millionths of a degree). Optional `AZ_GEOCODER_URL`: `GET ?q=<address>`, https or loopback, no redirect, 2 s, 16 KB, the first result's numbers only, a day's cache, `AZ_GEOCODER_PER_ADDRESS` in the shared windows, logged without the address | `chat-tiles.test.ts` (every range form, 416s, validators, a replaced archive, CORS, paths out of the folders); `chat-geocode.test.ts` (each failure, the 2 s bound, the cache, the shared windows); `chat-map.test.ts`; `chat-query.test.ts`; `test:backend-db` (pins on both engines); `test:chat` in three engines |
+| Chat maps | a chat that shows maps (chat-block-spec §21.4, §19.13): `GET /tiles/map.json`, `/tiles/world.pmtiles` and `/tiles/region.pmtiles` (`AZ_MAP_WORLD`, `AZ_MAP_REGION`, each opened at start and refused by its key unless a PMTiles v3 file), `/tiles/glyphs/…` and `/tiles/sprites/…` (`AZ_MAP_GLYPHS`, `AZ_MAP_SPRITES`, closed path shapes under the operator's folders); one byte range → 206, anything else in `Range` → 416, a strong ETag, `If-Match` 412, `If-None-Match` 304, a day's `public` cache; an allowed origin only, CORS allowing `range` and `if-match` and exposing `etag` and `content-range`, no credentials; `AZ_MAP_ATTRIBUTION` required with an archive or region of the operator's. Without `AZ_MAP_WORLD`, the default basemap the build copies to `tiles/world.pmtiles` (chat-block-spec §19.15), credited by its own metadata. A table map's pins from the anonymous list (coordinates in millionths of a degree). Optional `AZ_GEOCODER_URL`: `GET ?q=<address>`, https or loopback, no redirect, 2 s, 16 KB, the first result's numbers only, a day's cache, `AZ_GEOCODER_PER_ADDRESS` in the shared windows, logged without the address | `chat-tiles.test.ts` (every range form, 416s, validators, a replaced archive, CORS, paths out of the folders); `chat-geocode.test.ts` (each failure, the 2 s bound, the cache, the shared windows); `chat-map.test.ts`; `chat-query.test.ts`; `test:backend-db` (pins on both engines); `test:chat` in three engines |
 | Chat usage | `GET /admin/chat` (a site with chat and data): today against the budget, the last 30 days' counts — messages, tokens, dropped components, questions the moderation hook blocked (`az_chat_usage.blocked`, chat migration 3; chat-block-spec §19.11 — **fixed**: blocks were not counted) — the shares kept; under the admin check of every /admin route, read only, no parameters, 404 without chat; never a message or a share's text; the page formats every count with `Intl.NumberFormat("en-US")`, one grouping whatever the browser's locale (§19.11 — **fixed**). `az backend usage <server-dir>` prints the same, read only (chat-block-spec §11.4) | `data-admin.test.ts` (signed out 401, unverified or unlisted 403, the admin 200 with no message text); `chat-usage.test.ts`; `test:backend-db`; `test:chat` (axe; an en-IN browser sees 100,000,000) |
 | Chat history | the page resends the conversation; every answer the server finished carries an HMAC-SHA-256 tag (conversation, turn, exact text) under a key derived from `AZ_SESSION_SECRET`; a `site` turn without its tag is `400 tampered`. A conversation past the 16 KB body cap sends its latest whole exchanges with `from`, the position of the first message sent; each answer is proven at its own position and the limit counts what was left out (chat-block-spec §19.11 — **fixed**: long conversations failed) | forged, altered, moved and untagged answers refused; a tag moved by a wrong `from` refused (`chat-text.test.ts`, `chat-route.test.ts`) |
 | Chat output | prose only (C1): every piece of model text has controls, bidi overrides and zero-width characters removed, is NFC-normalised, never decoded, and reaches the page as a `text` event the page writes with `textContent`; 4 000 characters per answer | the cap ±1, a markup string arrives as literal text |

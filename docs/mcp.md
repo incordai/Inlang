@@ -63,10 +63,12 @@ server offers no MCP prompts.
 | `az_migrate {file}` | **yes, rewrites the file** | upgrade the file's grammar version when a step changes it |
 | `az_eject {word}` | **yes, one-way** | copy a word into the project's `words/`; refuses if already there |
 | `az_backend_init {serverDir}` | **yes** | the backend's `.env` (owner read/write only); returns the path, never the secret; never overwrites |
+| `az_add_chat {file, page?, float?, show?}` | **yes, rewrites the file, and runs project code** | `az add chat`: the backend lines and a chat added in place, the model's keys (commented) in `.az-dev/backend.env` beside the file; every changed file backed up first (`<file>.bak`, never over an older backup); its `az check` builds in memory with the project's own words; refuses, changing nothing, on a file that does not compile, a link or an edit that would not pass; a second call adds nothing |
 
 Tools that write carry `readOnlyHint: false`, so a client can ask before
-running them. `az_build` and `az_migrate` also carry `destructiveHint: true`:
-the first runs the project's code, the second rewrites the author's file.
+running them. `az_build`, `az_migrate` and `az_add_chat` also carry
+`destructiveHint: true`: the first runs the project's code, the second
+rewrites the author's file, and the third does both.
 
 ## Safety model
 
@@ -74,8 +76,9 @@ the first runs the project's code, the second rewrites the author's file.
   (its `words/` folder) is code: its emitter runs when a build loads it. The
   read-only tools compile from manifests alone — plain JSON — so an agent can
   check and read a folder it does not trust without anything in it running.
-  Only `az_build` loads the project's emitters, and it is marked destructive
-  so the client asks first. Call it only on a project you trust.
+  Only `az_build` and `az_add_chat` (whose `az check` builds) load the
+  project's emitters, and both are marked destructive so the client asks
+  first. Call them only on a project you trust.
 - **One root.** Every path is resolved against `--root` and must stay inside
   it after symlinks are followed; a path that does not exist yet is judged by
   its nearest existing folder. `../x`, an absolute path elsewhere, and a

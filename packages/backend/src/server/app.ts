@@ -25,7 +25,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Config, Provider } from './env.ts';
+import { keepsAccounts, type Config, type Provider } from './env.ts';
 import { decoyHash, hashPassword, MAX_PASSWORD, MIN_PASSWORD, pkceChallenge, randomToken, safeEqual, verifyPassword } from './crypto.ts';
 import { linkMessage, resetMessage, type Mailer } from './email.ts';
 import { BodyError, clientIp, cookie, corsHeaders, createLimiter, rateKey, readCookies, readJson, readRaw, redirect, send, sendFile } from './http.ts';
@@ -161,8 +161,14 @@ const DATA_METHODS = 'GET, POST, PATCH, PUT, DELETE';
 export interface AppDeps {
   readonly config: Config;
   readonly store: Store;
-  readonly mailer: Mailer;
-  readonly oidc: Oidc;
+  /**
+   * How a server that keeps accounts mails its links, and asks providers.
+   * Both are required then (createApp refuses without them); a server
+   * without accounts (no `email`, chat-block-spec §19.15) has neither, and
+   * its /auth routes answer 404 like any unknown path.
+   */
+  readonly mailer?: Mailer;
+  readonly oidc?: Oidc;
   /** The /data routes (data-spec §5); absent, /data is 404 like any unknown path. */
   readonly data?: DataRoutes;
   /** POST /chat (docs/chat-block-spec.md §4.2); absent, /chat is 404 like any unknown path. */
@@ -244,7 +250,12 @@ const view = (u: User, expiresAt: number) => ({
 });
 
 export function createApp(deps: AppDeps) {
-  const { config, store, mailer, oidc } = deps;
+  const { config, store } = deps;
+  const accounts = keepsAccounts(config.setup);
+  if (accounts && (!deps.mailer || !deps.oidc)) throw new Error('createApp: a server that keeps accounts needs its mailer and provider client');
+  // Undefined exactly when the server keeps no accounts: its sign-in routes are then never reached.
+  const mailer = accounts ? deps.mailer : undefined;
+  const oidc = accounts ? deps.oidc : undefined;
   const names = deps.plainCookieNames ? COOKIE_NAMES.plain : COOKIE_NAMES.secure;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => process.stderr.write(`${line}\n`));
@@ -280,9 +291,9 @@ export function createApp(deps: AppDeps) {
     return { header: sessionCookie(s.token), body: { session: view(user, s.expiresAt) } };
   }
 
-  function sendMail(what: string, message: Parameters<Mailer['send']>[0]): void {
+  function sendMail(mail: Mailer, what: string, message: Parameters<Mailer['send']>[0]): void {
     // Not awaited: a known and an unknown address answer at the same speed.
-    mailer.send(message).catch((e: unknown) => log(`email (${what}) failed: ${errorClass(e)}`));
+    mail.send(message).catch((e: unknown) => log(`email (${what}) failed: ${errorClass(e)}`));
   }
 
   /* ---- fetch routes --------------------------------------------------- */
@@ -340,7 +351,7 @@ export function createApp(deps: AppDeps) {
    * cookie, its digest on the token. The cookie is set whether or not the
    * address has an account, so the answers stay identical.
    */
-  async function mailRequest(kind: 'link' | 'reset', body: Json, ip: string, site: string) {
+  async function mailRequest(mail: Mailer, kind: 'link' | 'reset', body: Json, ip: string, site: string) {
     const email = text(body.email, MAX_EMAIL);
     if (!limits.mailIp.take(ip) || (email && !limits.mailAccount.take(`${kind}:${normaliseEmail(email)}`))) {
       return { status: 429, body: { error: 'rate_limited' } };
@@ -357,11 +368,11 @@ export function createApp(deps: AppDeps) {
           const url = new URL(config.resetPath, site);
           url.searchParams.set('token', token);
           url.searchParams.set('email', user.email);
-          sendMail('reset', resetMessage(config.siteName, user.email, url.href));
+          sendMail(mail, 'reset', resetMessage(config.siteName, user.email, url.href));
         } else {
           const url = new URL(`${config.publicUrl}/auth/link/verify`);
           url.searchParams.set('token', token);
-          sendMail('link', linkMessage(config.siteName, user.email, url.href));
+          sendMail(mail, 'link', linkMessage(config.siteName, user.email, url.href));
         }
       }
     }
@@ -426,7 +437,7 @@ export function createApp(deps: AppDeps) {
     return redirect(res, `${spent.site}${config.linkLanding}`, { 'set-cookie': [s.header, clearLink] });
   }
 
-  async function oauthStart(res: ServerResponse, p: Provider, url: URL) {
+  async function oauthStart(oidc: Oidc, res: ServerResponse, p: Provider, url: URL) {
     const site = url.searchParams.get('site') ?? '';
     const next = url.searchParams.get('next') ?? '/';
     // §3.4: `site` must be an allowed origin and `next` a path on it, or 400.
@@ -456,7 +467,7 @@ export function createApp(deps: AppDeps) {
     });
   }
 
-  async function oauthCallback(req: IncomingMessage, res: ServerResponse, p: Provider, url: URL) {
+  async function oauthCallback(oidc: Oidc, req: IncomingMessage, res: ServerResponse, p: Provider, url: URL) {
     const state = url.searchParams.get('state') ?? '';
     const bound = readCookies(req).get(names.state) ?? '';
     // The state must be the one THIS browser was given, and unused.
@@ -534,13 +545,14 @@ export function createApp(deps: AppDeps) {
     if (method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true });
 
     const nav = /^\/auth\/oauth\/([a-z0-9][a-z0-9-]{0,62})\/(start|callback)$/.exec(url.pathname);
-    if (nav || url.pathname === '/auth/link/verify') {
+    // A server without accounts has no sign-in at all: every /auth path is unknown to it.
+    if (oidc && (nav || url.pathname === '/auth/link/verify')) {
       if (method !== 'GET') return send(res, 405, { error: 'unknown' });
       if (!limits.navigationIp.take(ip)) return redirect(res, failTo(home, 'rate_limited'));
       if (!nav) return linkVerify(req, res, url);
       const provider = config.providers.find((p) => p.id === nav[1]);
       if (!provider) return redirect(res, failTo(home, 'oauth_failed'));
-      return nav[2] === 'start' ? oauthStart(res, provider, url) : oauthCallback(req, res, provider, url);
+      return nav[2] === 'start' ? oauthStart(oidc, res, provider, url) : oauthCallback(oidc, req, res, provider, url);
     }
 
     const data = deps.data;
@@ -601,8 +613,9 @@ export function createApp(deps: AppDeps) {
       const chatReq: ChatRequest = {
         ip,
         cors,
+        // Without accounts there is no session to read: every visitor is nobody.
         user: async () => {
-          const token = readCookies(req).get(names.session);
+          const token = accounts ? readCookies(req).get(names.session) : undefined;
           return token ? (await store.sessionUser(token))?.user.id ?? null : null;
         },
         body: (limit) => readJson(req, limit),
@@ -629,7 +642,7 @@ export function createApp(deps: AppDeps) {
       }, res, cors);
     }
 
-    if (!url.pathname.startsWith('/auth/')) return send(res, 404, { error: 'unknown' });
+    if (!mailer || !url.pathname.startsWith('/auth/')) return send(res, 404, { error: 'unknown' });
 
     // Fetch routes: an allowed origin, always; and the CSRF header on a POST.
     const origin = req.headers.origin ?? '';
@@ -656,8 +669,8 @@ export function createApp(deps: AppDeps) {
         break;
       case 'POST /auth/sign-in': result = await signIn(req, body, ip); break;
       case 'POST /auth/sign-up': result = await signUp(req, body, ip); break;
-      case 'POST /auth/link': result = await mailRequest('link', body, ip, origin); break;
-      case 'POST /auth/reset': result = await mailRequest('reset', body, ip, origin); break;
+      case 'POST /auth/link': result = await mailRequest(mailer, 'link', body, ip, origin); break;
+      case 'POST /auth/reset': result = await mailRequest(mailer, 'reset', body, ip, origin); break;
       case 'POST /auth/password': result = await setPassword(req, body, ip); break;
       case 'POST /auth/sign-out': result = await signOut(req); break;
       default: result = { status: 404, body: { error: 'unknown' } };

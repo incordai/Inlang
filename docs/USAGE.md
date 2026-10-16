@@ -50,6 +50,7 @@ Then:
 
 ```sh
 az check site.az     # diagnostics only, writes nothing: "az: no problems found"
+az add chat site.az  # a working chat in place (--page /help, --float, --show all); backs the file up first
 az dev site.az       # build, serve on http://127.0.0.1:5173/ and reload on every save
 az build site.az     # write the project to .az-build/ (--out dir to choose)
 cd .az-build && npm install --ignore-scripts && npm run build   # the site, pre-rendered, in .az-build/dist/
@@ -148,7 +149,18 @@ site shop
   explicit flag.
 - **Chat:** `chat panel` (or `chat float` under `site`) with
   `backend … model default` adds the `/chat` route; the model is chosen in
-  the server's `.env`, never in the `.az` file. `az backend probe` asks the
+  the server's `.env`, never in the `.az` file. A chat open to anyone
+  (`allow anyone`) needs only `backend`, `database` and `model default` — no
+  `auth`, `email` or sign-in pages; a chat for signed-in visitors (the
+  default), data tables or sign-in need accounts, and `az check` says which
+  line needs them. `show all` (or a group: `figures`, `sections`) allows
+  every component at once; `az explain show all` lists them. A chat that
+  shows maps draws a small default world basemap the build puts in the
+  server, until you set your own archive. `az add chat site.az` writes all of it into the file —
+  backend lines, a chat with a greeting and suggested questions, `show`
+  with `--show all` — backs the file up to `site.az.bak`, refuses (changing
+  nothing) when the file does not compile, and ends with `az check`
+  passing; `az dev` then answers from its demo script. `az backend probe` asks the
   configured model the production prompt and `az backend usage` reports the
   daily counts and budget left ([chat-block-spec](chat-block-spec.md), §19
   for what is built).

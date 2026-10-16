@@ -2,9 +2,9 @@
  * @az server env
  * Purpose: the configuration: every key, validation, refuse to start naming bad keys.
  * Spec: docs/backend-spec.md §4 (chat keys: docs/chat-block-spec.md §11.1; tool keys: §21.2.2; map and geocoder keys: §21.4)
- * Exports: loadConfig, KEYS, urlProblem, CHAT_LIMITS, parseRate, ChatConfig, ChatRate, TOOL_KEYS, TOOL_LIMITS, TOOL_NAME, TOOL_WORD, toolKey,
+ * Exports: loadConfig, KEYS, keepsAccounts, urlProblem, CHAT_LIMITS, parseRate, ChatConfig, ChatRate, TOOL_KEYS, TOOL_LIMITS, TOOL_NAME, TOOL_WORD, toolKey,
  *   toolSecretKeys, paramValueOk, paramsProblem, isDay, ChatTool, ChatToolShape, ToolParam, ToolParamType, ToolFieldType, MapConfig,
- *   GeocoderConfig, MAP_KEYS_LIMITS
+ *   GeocoderConfig, MAP_KEYS_LIMITS, BUNDLED_WORLD, LoadOptions
  * Edit guide: server keys are never AZ_PUBLIC_; defaults are safe.
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/chat-route.test.ts
  */
@@ -27,7 +27,12 @@ export type EmailWay = 'smtp' | 'api';
 
 export interface Setup {
   readonly database: Database;
-  readonly email: EmailWay;
+  /**
+   * How mail leaves — present when the server keeps accounts (sign-up,
+   * sign-in, reset and sign-in links). Absent, the server keeps none: no
+   * /auth routes, no mail, no session keys (chat-block-spec §19.15).
+   */
+  readonly email?: EmailWay;
   /** The site declares data tables (data-spec): their keys are listed too. */
   readonly data?: boolean;
   /** A data table has an image field (data-spec §8): the upload keys are listed too. */
@@ -50,35 +55,37 @@ export interface KeySpec {
 }
 
 const always = () => true;
+/** The server keeps accounts: its sign-in, session and mail keys are read (Setup.email). */
+export const keepsAccounts = (s: Setup): boolean => s.email !== undefined;
 
 /** data-spec §8: the upload cap's default and ceiling, in MB. */
 export const UPLOAD_MB = { default: 5, max: 20 } as const;
 
 /** Every key the server reads, in the order `.env.example` lists them. */
 export const KEYS: readonly KeySpec[] = [
-  { name: 'AZ_SESSION_SECRET', about: 'Random, at least 32 bytes. Keys every stored token digest. `az backend init` generates one; never reuse it between deployments.', when: always, required: true, secret: true },
+  { name: 'AZ_SESSION_SECRET', about: 'Random, at least 32 bytes. Keys every stored token digest, the chat\'s answer tags and its rate-limit counts. `az backend init` generates one; never reuse it between deployments.', when: always, required: true, secret: true },
   { name: 'AZ_BACKEND_PUBLIC_URL', about: 'This server\'s own public base URL (https; http only for localhost). Used in emailed links and provider callbacks.', when: always, required: true, example: 'http://localhost:8787' },
   { name: 'AZ_ALLOWED_ORIGINS', about: 'The site origin(s) allowed to call this server, comma-separated, exact (https://www.example.org). Also the only places a sign-in may redirect to.', when: always, required: true, example: 'http://localhost:5173' },
   { name: 'AZ_HOST', about: 'Interface to listen on. 127.0.0.1 behind a reverse proxy; 0.0.0.0 in a container.', when: always, required: false, example: '127.0.0.1' },
   { name: 'AZ_PORT', about: 'Port to listen on.', when: always, required: false, example: '8787' },
   { name: 'AZ_TRUST_PROXY', about: 'How many reverse proxies you control sit in front and append to X-Forwarded-For: `false` (none, the default), `true` (one) or a number. Rate limits then use the address the outermost of them appended — never the client-supplied first entry.', when: always, required: false, example: 'false' },
-  { name: 'AZ_SESSION_IDLE_MINUTES', about: 'A session unused this long ends (default 1440, a day). ASVS level 2 asks for 30.', when: always, required: false, example: '1440' },
-  { name: 'AZ_SESSION_MAX_HOURS', about: 'A session ends this long after sign-in however active (default 336, two weeks). ASVS level 2 asks for 12.', when: always, required: false, example: '336' },
-  { name: 'AZ_COOKIE_SAMESITE', about: '`lax` when the site and this server share a site (recommended), `none` when they do not.', when: always, required: false, example: 'lax' },
+  { name: 'AZ_SESSION_IDLE_MINUTES', about: 'A session unused this long ends (default 1440, a day). ASVS level 2 asks for 30.', when: keepsAccounts, required: false, example: '1440' },
+  { name: 'AZ_SESSION_MAX_HOURS', about: 'A session ends this long after sign-in however active (default 336, two weeks). ASVS level 2 asks for 12.', when: keepsAccounts, required: false, example: '336' },
+  { name: 'AZ_COOKIE_SAMESITE', about: '`lax` when the site and this server share a site (recommended), `none` when they do not.', when: keepsAccounts, required: false, example: 'lax' },
   { name: 'AZ_SQLITE_PATH', about: 'SQLite database file. Created on first start.', when: (s) => s.database === 'sqlite', required: false, example: './data/app.db' },
   { name: 'AZ_DATABASE_URL', about: 'Database connection string, e.g. postgres://user:password@host:5432/db or mysql://user:password@host:3306/db.', when: (s) => s.database !== 'sqlite', required: true, secret: true },
   { name: 'AZ_DATABASE_TLS', about: '`require` to insist on an encrypted database connection (recommended off-host).', when: (s) => s.database !== 'sqlite', required: false, example: 'require' },
   { name: 'AZ_DATABASE_CA_FILE', about: 'Path to the database host\'s root certificate (PEM), when it is not one your system already trusts — managed databases often publish their own. Needs AZ_DATABASE_TLS=require; the certificate is still verified.', when: (s) => s.database !== 'sqlite', required: false, example: './certs/database-ca.pem' },
-  { name: 'AZ_EMAIL_FROM', about: 'The From address of every email this server sends.', when: always, required: true, example: 'Studio <no-reply@example.org>' },
+  { name: 'AZ_EMAIL_FROM', about: 'The From address of every email this server sends.', when: keepsAccounts, required: true, example: 'Studio <no-reply@example.org>' },
   { name: 'AZ_SMTP_HOST', about: 'SMTP server host.', when: (s) => s.email === 'smtp', required: true },
   { name: 'AZ_SMTP_PORT', about: 'SMTP port: 587 (STARTTLS) or 465 (TLS).', when: (s) => s.email === 'smtp', required: true, example: '587' },
   { name: 'AZ_SMTP_USER', about: 'SMTP user name, if the server requires sign-in.', when: (s) => s.email === 'smtp', required: false },
   { name: 'AZ_SMTP_PASSWORD', about: 'SMTP password.', when: (s) => s.email === 'smtp', required: false, secret: true },
   { name: 'AZ_EMAIL_API_URL', about: 'HTTPS endpoint that accepts POST { from, to, subject, text } as JSON (backend-spec §7).', when: (s) => s.email === 'api', required: true },
   { name: 'AZ_EMAIL_API_KEY', about: 'Sent as `Authorization: Bearer <key>` to the email endpoint.', when: (s) => s.email === 'api', required: true, secret: true },
-  { name: 'AZ_RESET_PATH', about: 'The site page that sets a new password; reset emails link there.', when: always, required: false, example: '/reset' },
-  { name: 'AZ_LINK_LANDING', about: 'Where a sign-in link lands on the site once it has signed the visitor in.', when: always, required: false, example: '/' },
-  { name: 'AZ_OAUTH_PROVIDERS', about: 'Provider ids, comma-separated (lower-case letters, digits, -). Each needs its own AZ_OAUTH_<ID>_… keys below; empty for none.', when: always, required: false, example: '' },
+  { name: 'AZ_RESET_PATH', about: 'The site page that sets a new password; reset emails link there.', when: keepsAccounts, required: false, example: '/reset' },
+  { name: 'AZ_LINK_LANDING', about: 'Where a sign-in link lands on the site once it has signed the visitor in.', when: keepsAccounts, required: false, example: '/' },
+  { name: 'AZ_OAUTH_PROVIDERS', about: 'Provider ids, comma-separated (lower-case letters, digits, -). Each needs its own AZ_OAUTH_<ID>_… keys below; empty for none.', when: keepsAccounts, required: false, example: '' },
   { name: 'AZ_ADMIN_EMAILS', about: 'Who may use /admin: verified account addresses, comma-separated. An unverified account with a listed address is not an admin. Empty: nobody.', when: (s) => s.data === true, required: false, example: '' },
   { name: 'AZ_FILES_DIR', about: 'Where uploaded images are stored, outside anything served statically. Created on first start; back it up with the database.', when: (s) => s.images === true, required: false, example: './data/files' },
   { name: 'AZ_UPLOAD_MAX_MB', about: `The largest image upload, in MB (default ${UPLOAD_MB.default}, at most ${UPLOAD_MB.max}).`, when: (s) => s.images === true, required: false, example: String(UPLOAD_MB.default) },
@@ -89,7 +96,7 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_CHAT_DAILY_TOKENS', about: 'Tokens (input + output) all chats together may spend per UTC day; past it every message answers budget_exhausted until midnight UTC (default 300000, 1000–100000000).', when: (s) => s.chat === true, required: false, example: '300000' },
   { name: 'AZ_CHAT_MAX_OUTPUT_TOKENS', about: 'The most tokens one answer may use (default 600, 100–2000).', when: (s) => s.chat === true, required: false, example: '600' },
   { name: 'AZ_CHAT_PER_ADDRESS', about: 'Messages one address may send: `<n>/hour`, `<n>/day`, or both comma-separated (default 20/hour,60/day). An IPv6 address counts as its /64.', when: (s) => s.chat === true, required: false, example: '20/hour,60/day' },
-  { name: 'AZ_CHAT_PER_ACCOUNT', about: 'Messages one signed-in account may send, in the same form (default 100/day).', when: (s) => s.chat === true, required: false, example: '100/day' },
+  { name: 'AZ_CHAT_PER_ACCOUNT', about: 'Messages one signed-in account may send, in the same form (default 100/day).', when: (s) => s.chat === true && keepsAccounts(s), required: false, example: '100/day' },
   { name: 'AZ_CHAT_CONCURRENCY', about: 'Answers streamed at once (default 4, 1–64); four times as many wait up to 10 s, then are told busy.', when: (s) => s.chat === true, required: false, example: '4' },
   { name: 'AZ_CHAT_TIMEOUT_SECONDS', about: 'The longest one answer may take, in seconds (default 60, 10–300). The first token must come within 15 s, and each next within 20 s.', when: (s) => s.chat === true, required: false, example: '60' },
   { name: 'AZ_CHAT_ENABLED', about: '`off` switches chat off at once (every message answers disabled); `on` is the default.', when: (s) => s.chat === true, required: false, example: 'on' },
@@ -97,20 +104,20 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_CHAT_SHARE_DAYS', about: 'Days a shared answer stays readable before it is deleted (default 30, 1–365).', when: (s) => s.chat === true, required: false, example: '30' },
   { name: 'AZ_CHAT_SHARE_MAX', about: 'Shared answers kept at once, all visitors together; past it a share is refused until older ones expire (default 10000, 1–1000000).', when: (s) => s.chat === true, required: false, example: '10000' },
   { name: 'AZ_CHAT_SHARES_PER_ADDRESS', about: 'Shares one address may make, in the form of AZ_CHAT_PER_ADDRESS (default 10/hour,30/day).', when: (s) => s.chat === true, required: false, example: '10/hour,30/day' },
-  { name: 'AZ_CHAT_SHARES_PER_ACCOUNT', about: 'Shares one signed-in account may make (default 30/day).', when: (s) => s.chat === true, required: false, example: '30/day' },
+  { name: 'AZ_CHAT_SHARES_PER_ACCOUNT', about: 'Shares one signed-in account may make (default 30/day).', when: (s) => s.chat === true && keepsAccounts(s), required: false, example: '30/day' },
   { name: 'AZ_CHAT_MODERATION_URL', about: 'Optional: an endpoint that judges each question before the model sees it. It is sent POST { "text": "…" } as JSON and must answer { "allow": true } or { "allow": false } within 3 s; any other answer, an error or no answer refuses the question (it fails closed). https, or plain http only for localhost.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_CHAT_MODERATION_KEY', about: 'Sent as `Authorization: Bearer <key>` to AZ_CHAT_MODERATION_URL; may be empty.', when: (s) => s.chat === true, required: false, secret: true },
   { name: 'AZ_CHAT_FAKE_FILE', about: 'With AZ_CHAT_API=fake only: a JSON file of scripted answers, for tests and local development.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_CHAT_TOOLS', about: 'Optional: the names of your own HTTP data endpoints a chart, table or stat may take figures "from tool" (lower-case letters and digits, at most 24 characters, at most 8, comma-separated). Each needs its AZ_CHAT_TOOL_<NAME>_… keys below. The server POSTs the typed parameters as JSON to the URL you set and shows the rows it answers to the visitor, labelled; the model never reads them.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_CHAT_TOOL_CALLS_PER_ADDRESS', about: 'Tool calls one address may cause, in the form of AZ_CHAT_PER_ADDRESS (default 120/hour); past it a tool\'s figures show as not loaded. A cached answer is not a call.', when: (s) => s.chat === true, required: false, example: '120/hour' },
-  { name: 'AZ_MAP_WORLD', about: 'The world tile archive the chat\'s maps draw (one PMTiles file, zoom 0–6 covers the world in about 46 MB; docs/self-hosting.md says how to make one). This server serves it to the site with HTTP Range. Unset: maps show their list of places only.', when: (s) => s.map === true, required: false, example: '' },
-  { name: 'AZ_MAP_REGION', about: 'Optional: a regional extract (one PMTiles file) drawn over the world for detail; maps zoom in as far as it goes.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_MAP_WORLD', about: 'Your own world tile archive for the chat\'s maps (one PMTiles file; zoom 0–6 of a full basemap is about 46 MB — docs/self-hosting.md says how to make one), served to the site with HTTP Range. Unset: the basemap az build copies into tiles/world.pmtiles — land, lakes and country borders to zoom 6, no place names — with its own attribution.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_MAP_REGION', about: 'Optional: a regional extract (one PMTiles file) drawn over the world — yours or the bundled one — for detail; maps zoom in as far as it goes. Needs AZ_MAP_ATTRIBUTION.', when: (s) => s.map === true, required: false, example: '' },
   { name: 'AZ_MAP_GLYPHS', about: 'Optional: a folder of map label fonts as glyph ranges (<font name>/<start>-<end>.pbf). Unset: maps draw no place names.', when: (s) => s.map === true, required: false, example: '' },
   { name: 'AZ_MAP_SPRITES', about: 'Optional: a folder of map icons (light.json, light.png, dark.json, dark.png and their @2x copies). Unset: maps draw no icons.', when: (s) => s.map === true, required: false, example: '' },
-  { name: 'AZ_MAP_ATTRIBUTION', about: 'The map data\'s attribution, shown under every map — the licence of your tile data requires it (one line, at most 200 characters). Required with AZ_MAP_WORLD.', when: (s) => s.map === true, required: false, example: '' },
+  { name: 'AZ_MAP_ATTRIBUTION', about: 'Your map data\'s attribution, shown under every map — the licence of your tile data requires it (one line, at most 200 characters). Required with AZ_MAP_WORLD or AZ_MAP_REGION; with the bundled basemap its own credit is shown after yours.', when: (s) => s.map === true, required: false, example: '' },
   { name: 'AZ_GEOCODER_URL', about: 'Optional: an endpoint that finds an address\'s coordinates, so a map may place an address. The server sends GET <url>?q=<address> and reads the first result\'s lat and lon (a JSON array, or { "results": [...] }) within 2 s and 16 KB; the browser never calls it. https, or plain http only for localhost.', when: (s) => s.map === true, required: false, example: '' },
   { name: 'AZ_GEOCODER_PER_ADDRESS', about: 'Addresses one visitor\'s address may have looked up, in the form of AZ_CHAT_PER_ADDRESS (default 60/hour); a remembered address is not a call.', when: (s) => s.map === true, required: false, example: '60/hour' },
-  { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: always, required: false, example: 'deny' },
+  { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: keepsAccounts, required: false, example: 'deny' },
 ];
 
 /**
@@ -402,8 +409,22 @@ export interface MapConfig {
   readonly region: string | null;
   readonly glyphs: string | null;
   readonly sprites: string | null;
+  /** The operator's line (AZ_MAP_ATTRIBUTION); the bundled archive's own credit is added when the tiles are opened. */
   readonly attribution: string;
+  /** `world` is the basemap the build bundled (BUNDLED_WORLD), not the operator's: its credit is read from its metadata. */
+  readonly bundled: boolean;
 }
+
+/**
+ * Where `az build` puts the default world basemap in a map site's server
+ * (chat-block-spec §19.15), from the server's folder: land, lakes and
+ * country borders to zoom 6 from public-domain data, its credit in its own
+ * metadata. Used when AZ_MAP_WORLD is unset, so a map is never a blank box.
+ */
+export const BUNDLED_WORLD = 'tiles/world.pmtiles';
+
+/** What loadConfig is told besides the environment: the bundled world archive, when the server has one. */
+export interface LoadOptions { readonly bundledWorld?: string | null }
 
 /** The operator's geocoder (chat-block-spec §21.4.2): its URL, and how many lookups one address may cause. */
 export interface GeocoderConfig { readonly url: string; readonly perAddress: ChatRate }
@@ -551,7 +572,7 @@ const isPath = (v: string) => v.startsWith('/') && !v.startsWith('//') && !/[\s\
  * Read and check the environment. Every problem is collected, so one start
  * names everything missing rather than one key per attempt.
  */
-export function loadConfig(env: Readonly<Record<string, string | undefined>>, setup: Setup, siteName: string):
+export function loadConfig(env: Readonly<Record<string, string | undefined>>, setup: Setup, siteName: string, options: LoadOptions = {}):
   { ok: true; config: Config } | { ok: false; problems: string[] } {
   const problems: string[] = [];
   const get = (k: string) => (env[k] ?? '').trim();
@@ -586,6 +607,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
     problems.push(`AZ_TRUST_PROXY must be false, true or a number of proxies (0–${MAX_PROXY_HOPS})`);
   }
 
+  const accounts = keepsAccounts(setup);
   const idleMinutes = Number(get('AZ_SESSION_IDLE_MINUTES') || '1440');
   const maxHours = Number(get('AZ_SESSION_MAX_HOURS') || '336');
   if (!Number.isInteger(idleMinutes) || idleMinutes < 1) problems.push('AZ_SESSION_IDLE_MINUTES must be a whole number of minutes, at least 1');
@@ -627,7 +649,12 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
   if (signup !== 'allow' && signup !== 'deny') problems.push('AZ_OAUTH_SIGNUP must be allow or deny');
 
   const providers: Provider[] = [];
-  const ids = get('AZ_OAUTH_PROVIDERS').split(',').map((s) => s.trim()).filter(Boolean);
+  const listed = get('AZ_OAUTH_PROVIDERS').split(',').map((s) => s.trim()).filter(Boolean);
+  // A server without accounts signs nobody in: a provider set for it is a mistake, said rather than ignored.
+  if (!accounts && listed.length > 0) {
+    problems.push('AZ_OAUTH_PROVIDERS is set, but this server keeps no accounts (the site\'s backend declares no email) — remove it');
+  }
+  const ids = accounts ? listed : [];
   for (const id of ids) {
     if (!PROVIDER_ID.test(id)) {
       problems.push(`AZ_OAUTH_PROVIDERS: '${id}' is not a provider id (lower-case letters, digits, -)`);
@@ -676,7 +703,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, se
   }
 
   const chat = setup.chat === true ? chatConfig(env, get, publicUrl, problems, setup.map === true) : null;
-  const map = setup.chat === true && setup.map === true ? mapConfig(get, problems) : null;
+  const map = setup.chat === true && setup.map === true ? mapConfig(get, problems, options.bundledWorld ?? null) : null;
 
   if (problems.length > 0) return { ok: false, problems };
   return {
@@ -731,24 +758,31 @@ function onLoopback(value: string): boolean {
 /** A path as .env gives it: one line, no NUL; its file is opened when the server starts (main.ts), named if it cannot be. */
 const pathOk = (v: string) => v.length <= 4096 && !/[\u0000-\u001f]/.test(v);
 
-/** The map keys (chat-block-spec §21.4.3), every problem named — never a value quoted. */
-function mapConfig(get: (k: string) => string, problems: string[]): MapConfig {
+/**
+ * The map keys (chat-block-spec §21.4.3), every problem named — never a
+ * value quoted. Without AZ_MAP_WORLD the world is `bundledWorld`, the
+ * basemap the build copied (§19.15), when the server has it.
+ */
+function mapConfig(get: (k: string) => string, problems: string[], bundledWorld: string | null): MapConfig {
   const path = (key: string): string | null => {
     const v = get(key);
     if (v === '') return null;
     if (!pathOk(v)) { problems.push(`${key} must be a path on one line`); return null; }
     return v;
   };
-  const world = path('AZ_MAP_WORLD');
+  const own = path('AZ_MAP_WORLD');
+  const bundled = own === null && bundledWorld !== null;
+  const world = own ?? (bundled ? bundledWorld : null);
   const region = path('AZ_MAP_REGION');
   const glyphs = path('AZ_MAP_GLYPHS');
   const sprites = path('AZ_MAP_SPRITES');
   const attribution = get('AZ_MAP_ATTRIBUTION');
   if (region !== null && world === null) problems.push('AZ_MAP_REGION is drawn over the world archive — set AZ_MAP_WORLD too');
   if ((glyphs !== null || sprites !== null) && world === null) problems.push('AZ_MAP_GLYPHS and AZ_MAP_SPRITES draw on the world archive — set AZ_MAP_WORLD too');
-  if (world !== null && attribution === '') problems.push('AZ_MAP_ATTRIBUTION is missing — the tile data\'s licence requires its attribution under every map');
+  // The operator's own tile data needs its credit; the bundled archive brings its own (openTiles reads it).
+  if ((own !== null || region !== null) && attribution === '') problems.push('AZ_MAP_ATTRIBUTION is missing — the tile data\'s licence requires its attribution under every map');
   else if (attribution !== '' && !plainText(attribution, MAP_KEYS_LIMITS.attribution)) problems.push(`AZ_MAP_ATTRIBUTION must be one line of at most ${MAP_KEYS_LIMITS.attribution} characters`);
-  return { world, region, glyphs, sprites, attribution };
+  return { world, region, glyphs, sprites, attribution, bundled };
 }
 
 /**

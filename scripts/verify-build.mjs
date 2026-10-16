@@ -704,6 +704,10 @@ try {
     };
     const chatProj = buildSite('chat', CHAT_SITE);
     const plainProj = buildSite('chat-plain', PLAIN_SITE);
+    // chat-block-spec §19.15: a public chat on a backend without accounts — no auth, no email.
+    const PUBLIC_SITE = 'az 1\n\nsite chatpublic\n  backend\n    database sqlite\n    model    default\n\npage /\n  hero center\n    title "Public chat"\n'
+      + '  chat panel\n    show     faq cta\n    allow    anyone\n';
+    const publicProj = buildSite('chat-public', PUBLIC_SITE);
     const chatKey = randomBytes(24).toString('base64url');
     const serverKeys = {
       AZ_PUBLIC_BACKEND_URL: 'https://api.example.org',
@@ -721,12 +725,31 @@ try {
         && ['@types/react', '@types/react-dom'].every((t) => devDependencies(chatProj)[t] === devDependencies(proj)[t])
         && devDependencies(chatProj)['@types/three'] === undefined,
       JSON.stringify({ fixture: devDependencies(proj), chat: devDependencies(chatProj) }));
-    for (const [name, dir] of [['the GRAMMAR §8 fixture', proj], ['the chat site', chatProj], ['the chat site without its chat', plainProj]]) {
+    for (const [name, dir] of [['the GRAMMAR §8 fixture', proj], ['the chat site', chatProj], ['the chat site without its chat', plainProj], ['the public chat site without accounts', publicProj]]) {
       const tsc = spawnSync(process.execPath, [join(dir, 'node_modules/typescript/bin/tsc'), '--noEmit', '-p', 'tsconfig.json'], {
         cwd: dir, encoding: 'utf8', timeout: COMMAND_MS, killSignal: 'SIGKILL',
       });
       check(`generated code type-checks: ${name} under its tsconfig.json, strict, with the real bundler types`,
         tsc.status === 0 && !tsc.error && !tsc.signal, `${tsc.status ?? tsc.signal ?? tsc.error?.message} ${(tsc.stdout + tsc.stderr).trim().split('\n').slice(0, 6).join(' | ')}`);
+    }
+    // §19.15: its build guard holds its backend address to the azbackend adapter's own check, under chat's name.
+    {
+      const publicVite = [join(publicProj, 'node_modules/vite/bin/vite.js'), 'build'];
+      const unset = failing(process.execPath, publicVite, publicProj, { AZ_PUBLIC_BACKEND_URL: '' });
+      check('§19.15: a public chat build FAILS when the backend URL is not set, saying the chat needs it',
+        unset !== null && /chat: the site's backend needs AZ_PUBLIC_BACKEND_URL/.test(unset));
+      const plainHttp = failing(process.execPath, publicVite, publicProj, { AZ_PUBLIC_BACKEND_URL: 'http://api.example.org' });
+      check('§19.15: a public chat build FAILS for a plain-http backend URL',
+        plainHttp !== null && /chat: the site's backend — 'http:\/\/api\.example\.org' must use https/.test(plainHttp));
+      // The project's own build (az-vite/build.mjs): the bundle, then each page pre-rendered with its policy.
+      let built = '';
+      try { shippedBuild(publicProj, { AZ_PUBLIC_BACKEND_URL: 'https://api.example.org' }); } catch (e) { built = e.message; }
+      const scripts = built === '' ? readdirSync(join(publicProj, 'dist/assets')).filter((f) => f.endsWith('.js')) : [];
+      const sessionRead = scripts.filter((f) => readFileSync(join(publicProj, 'dist/assets', f), 'utf8').includes('/auth/session'));
+      const page = built === '' ? readFileSync(join(publicProj, 'dist/index.html'), 'utf8') : '';
+      check('CONTROL: the public chat builds with an https backend URL, ships no session read, and its page may reach the backend',
+        built === '' && scripts.length > 0 && sessionRead.length === 0 && /connect-src[^;"]*https:\/\/api\.example\.org/.test(page),
+        built.split('\n').slice(0, 2).join(' ') || `session read in: ${sessionRead.join(' ') || 'none'}; connect-src ${/connect-src[^;"]*/.exec(page)?.[0] ?? 'absent'}`);
     }
     const shipped = readdirSync(join(chatProj, 'dist'), { recursive: true, withFileTypes: true })
       .filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name));

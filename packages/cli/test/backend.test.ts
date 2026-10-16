@@ -78,6 +78,33 @@ test('a site that declares a backend gets server/ with every source file copied 
   for (const f of ['chat-query.ts', 'chat-knows.ts']) assert.equal(readFileSync(join(both.out, 'server/src', f), 'utf8'), readFileSync(join(src, f), 'utf8'), `with both: ${f}`);
 });
 
+test('a public chat site (no auth, no email) gets a server without accounts, and of the auth runtime only the address check the guard imports', () => {
+  const p = project('az 1\nsite demo\n  backend\n    database sqlite\n    model    default\n\npage /\n  chat panel\n    allow anyone\n');
+  const r = build({ source: p.file, outDir: p.out, wordsDir: WORDS });
+  assert.ok(r.ok, r.report);
+  assert.deepEqual(readdirSync(join(p.out, 'src/az-auth')).sort(), ['azbackend.ts', 'contract.ts', 'session.ts']);
+  const config = JSON.parse(readFileSync(join(p.out, 'server/az.config.json'), 'utf8')) as Record<string, unknown>;
+  assert.equal('email' in config, false);
+  assert.equal(config.chat, true);
+  const init = az('backend', 'init', join(p.out, 'server'));
+  assert.equal(init.status, 0, init.stderr);
+  const dotenv = readFileSync(join(p.out, 'server/.env'), 'utf8');
+  assert.match(dotenv, /^AZ_SESSION_SECRET=[A-Za-z0-9_-]{43}$/m);
+  assert.doesNotMatch(dotenv, /^AZ_(EMAIL|SMTP|OAUTH)/m);
+});
+
+test('a chat that shows maps gets the default world basemap in its server (§19.15); a chat without maps does not', () => {
+  const src = (show: string) => `az 1\nsite demo\n  backend\n    database sqlite\n    model    default\n\npage /\n  chat panel\n${show}    allow anyone\n`;
+  const map = project(src('    show map\n'));
+  assert.ok(build({ source: map.file, outDir: map.out, wordsDir: WORDS }).ok);
+  const copied = join(map.out, 'server/tiles/world.pmtiles');
+  assert.ok(existsSync(copied));
+  assert.ok(readFileSync(copied).equals(readFileSync(join(ROOT, 'packages/backend/assets/basemap/world.pmtiles'))), 'byte for byte the committed basemap');
+  const plain = project(src(''));
+  assert.ok(build({ source: plain.file, outDir: plain.out, wordsDir: WORDS }).ok);
+  assert.equal(existsSync(join(plain.out, 'server/tiles')), false);
+});
+
 test('CONTROL: a site without one gets no server/ at all', () => {
   const p = project(SITE(''));
   const r = build({ source: p.file, outDir: p.out, wordsDir: WORDS });

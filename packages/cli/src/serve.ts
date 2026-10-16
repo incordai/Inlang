@@ -162,7 +162,11 @@ export interface ServeOptions {
    * The backend's site name, its `server/data.json` when the site has tables
    * and its `server/chat/` files when a page shows a chat; null without a `server/`.
    */
-  readonly backend: { readonly siteName: string; readonly data?: string; readonly chat?: DevChat } | null;
+  readonly backend: {
+    readonly siteName: string; readonly data?: string; readonly chat?: DevChat;
+    /** The server keeps accounts (its az.config.json names an email): the dev mailbox runs. False for a public chat's server (§19.15). */
+    readonly accounts: boolean;
+  } | null;
   readonly print: (line: string) => void;
 }
 
@@ -209,7 +213,7 @@ export async function serve(options: ServeOptions): Promise<Served> {
     if (options.backend) {
       const backendPort = await freePort(DEFAULT_BACKEND_PORT);
       const mailboxPort = await freePort(0);
-      mailbox = await startMailbox(mailboxPort, print);
+      if (options.backend.accounts) mailbox = await startMailbox(mailboxPort, print);
       backend = await startDevBackend(projectDir, options.backend.siteName,
         { site: sitePort, backend: backendPort, mailbox: mailboxPort }, mailbox, print, options.backend.data, options.backend.chat);
       env.AZ_PUBLIC_BACKEND_URL = backend.url;
@@ -230,10 +234,8 @@ export async function serve(options: ServeOptions): Promise<Served> {
     await waitFor(siteUrl, child);
 
     print(`az dev: site     ${siteUrl}`);
-    if (backend && mailbox) {
-      print(`az dev: backend  ${backend.url}  (SQLite in .az-dev/, dev profile)`);
-      print(`az dev: mailbox  ${mailbox.url}  (email is shown here, never sent)`);
-    }
+    if (backend) print(`az dev: backend  ${backend.url}  (SQLite in .az-dev/, dev profile${mailbox ? '' : ', no accounts'})`);
+    if (mailbox) print(`az dev: mailbox  ${mailbox.url}  (email is shown here, never sent)`);
     print('az dev: watching for changes — Ctrl-C to stop');
     if (options.open) {
       const { file, args } = openerFor(process.platform, siteUrl);

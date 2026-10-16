@@ -114,9 +114,12 @@ export function usesChat(spec: Spec): boolean {
 /**
  * The module's text; `runtimeDir` is where the behaviour runtime is copied
  * (src/az). With `map`, the panel is handed the map drawer and the build's
- * third-party tile archive, when one is set.
+ * third-party tile archive, when one is set. Without `accounts` — a backend
+ * that keeps none, every chat `allow anyone` (chat-block-spec §19.15) — the
+ * site has no auth adapter: nobody is ever signed in, so the panel is handed
+ * no session, and the chat kept in the browser is bound to the browser.
  */
-export function chatTsx(runtimeDir: string, map = false): string {
+export function chatTsx(runtimeDir: string, map = false, accounts = true): string {
   const str = (v: string) => JSON.stringify(v);
   // All three directories sit under src/, so each is one level up from here.
   const runtime = `../${runtimeDir.replace(/^src\//, '')}/chat.ts`;
@@ -124,15 +127,14 @@ export function chatTsx(runtimeDir: string, map = false): string {
   const auth = `../${AUTH_DIR.replace(/^src\//, '')}/config.ts`;
   return `${generated('connects every chat panel to the backend and the auth session (chat-block-spec §7)')}import { useLayoutEffect } from "react";
 import { attachChat } from ${str(runtime)};
-${map ? `import { drawMap } from ${str(drawer)};\n` : ''}import { adapter } from ${str(auth)};
-
+${map ? `import { drawMap } from ${str(drawer)};\n` : ''}${accounts ? `import { adapter } from ${str(auth)};\n` : ''}
 /** The backend's base URL; the panel posts to <base>/chat. */
 const BASE: string = import.meta.env.${BACKEND_ENV[0]} ?? "";
 ${map ? `
 /** A third-party tile archive the maps read instead of the backend's (chat-block-spec §21.4.3); unset, the backend's. */
 const TILES: string | null = import.meta.env.${MAP_TILES_ENV} || null;
 ` : ''}
-/**
+${accounts ? `/**
  * The signed-in account's id, or null, from the session the auth adapter
  * reads once: who may ask, and whom the chat kept in this browser is bound
  * to (only a salted hash of it is ever stored, chat-block-spec §19.11).
@@ -141,13 +143,13 @@ async function account(): Promise<string | null> {
   await adapter.ready?.();
   return adapter.session()?.user.id ?? null;
 }
-
+` : ''}
 /** Runs the page's chat panels; renders nothing. A layout effect, so it never runs in a server render. */
 export function ChatRuntime(): null {
   useLayoutEffect(() => attachChat(document, {
-    base: BASE,
+    base: BASE,${accounts ? `
     account,
-    onSession: (fn) => adapter.onChange((session) => fn(session?.user.id ?? null)),${map ? `
+    onSession: (fn) => adapter.onChange((session) => fn(session?.user.id ?? null)),` : ''}${map ? `
     drawMap: (d, data) => drawMap({ ...d, tiles: TILES }, data),` : ''}
   }), []);
   return null;

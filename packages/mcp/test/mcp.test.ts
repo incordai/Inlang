@@ -93,11 +93,11 @@ test('CONTROL: an unknown protocol version is answered with the newest supported
 test('tools/list offers every tool with a schema, and marks the ones that write', async () => {
   const [, r] = await session(project(), [INIT, { jsonrpc: '2.0', id: 1, method: 'tools/list' }]);
   const tools = r.result.tools as { name: string; inputSchema: { type: string }; annotations: { readOnlyHint: boolean } }[];
-  assert.deepEqual(tools.map((t) => t.name).sort(), ['az_audit', 'az_backend_init', 'az_build', 'az_check', 'az_doctor', 'az_eject',
+  assert.deepEqual(tools.map((t) => t.name).sort(), ['az_add_chat', 'az_audit', 'az_backend_init', 'az_build', 'az_check', 'az_doctor', 'az_eject',
     'az_explain', 'az_grammar', 'az_lint', 'az_migrate', 'az_palette', 'az_prompt', 'az_spec', 'az_word_docs', 'az_words']);
   for (const t of tools) assert.equal(t.inputSchema.type, 'object');
   const writers = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
-  assert.deepEqual(writers, ['az_backend_init', 'az_build', 'az_eject', 'az_migrate']);
+  assert.deepEqual(writers, ['az_add_chat', 'az_backend_init', 'az_build', 'az_eject', 'az_migrate']);
 });
 
 test('protocol errors: unknown tool, unknown method, bad JSON, batches; notifications get no reply', async () => {
@@ -186,6 +186,25 @@ test('az_eject copies a word into the project once, and refuses a second time', 
   assert.equal(r.structuredContent.oneWay, true);
   assert.ok(existsSync(join(root, 'words/hero/emit.web.ts')));
   assert.equal((await tool(root, 'az_eject', { word: 'hero' })).isError, true);
+});
+
+test('az_add_chat edits the file in place inside the root, backs it up, ends with az check; refuses paths outside and a broken file', async () => {
+  const root = project();
+  const before = readFileSync(join(root, 'site.az'), 'utf8');
+  const r = await tool(root, 'az_add_chat', { file: 'site.az', page: '/help', show: 'all' });
+  assert.equal(r.isError, false, JSON.stringify(r));
+  assert.deepEqual(r.structuredContent.backups, ['site.az.bak'], 'the .az file; .az-dev/backend.env is new, so it has none');
+  assert.match(r.structuredContent.check, /az: no problems found$/);
+  assert.equal(readFileSync(join(root, 'site.az.bak'), 'utf8'), before);
+  assert.match(readFileSync(join(root, 'site.az'), 'utf8'), /\npage \/help\n  chat panel\n/);
+  assert.ok(existsSync(join(root, '.az-dev/backend.env')));
+  const again = await tool(root, 'az_add_chat', { file: 'site.az', page: '/help', show: 'all' });
+  assert.deepEqual(again.structuredContent.changes, [], 'a second call adds nothing');
+  assert.equal((await tool(root, 'az_add_chat', { file: '../outside.az' })).isError, true, 'outside the root');
+  const broken = readFileSync(join(root, 'broken.az'), 'utf8');
+  assert.equal((await tool(root, 'az_add_chat', { file: 'broken.az' })).isError, true, 'a file that does not compile');
+  assert.equal(readFileSync(join(root, 'broken.az'), 'utf8'), broken, 'left as it was');
+  assert.equal(existsSync(join(root, 'broken.az.bak')), false);
 });
 
 test('az_backend_init writes an owner-only .env and never returns the secret', async () => {

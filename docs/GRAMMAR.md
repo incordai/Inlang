@@ -503,7 +503,7 @@ value           = STRING | PAIR | BARE ;
 | `page <route>` | file | 1 | PRD §6.1 — `page` or `site` nested is AZ1202 |
 | `raw <path>` | `page`, any block | 1 (M3) | PRD §6.6 |
 | `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
-| `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here |
+| `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here. `email` only when something needs accounts (a `signedin` chat, data tables, the site's own sign-in); a site whose every chat is `allow anyone` needs none (chat-block-spec §19.15) |
 | `model default` | `backend` | 1 | chat-block-spec §3.1 — optional; the server talks to a model the operator picks in `.env` (`AZ_CHAT_API`, `AZ_CHAT_MODEL`); any other value is AZ1412 |
 | `chat panel` · `chat float` · `chat none` | `page`; `chat float` also `site` | 1 | chat-block-spec §3 — `panel` a section, `float` a corner launcher that opens the panel; at most one chat per page (AZ2220). A float under `site` is inherited by every page (§5.2): a page's own `chat panel` replaces it there, `chat none` leaves it out, and a page's own `chat float` beside it is AZ2229. `knows <table>…` grounds answers on up to three public tables only the site fills (AZ1252, AZ1253, AZ1258, AZ1271) |
 | `data <table>` + indented lines | `site` | 1 | data-spec §4 — needs `backend`; a table and its `/data/<table>` API; not a block |
@@ -542,9 +542,12 @@ AZ1202); an indented line under a word that holds none (a nav `link`) is
 `link: takes no indented lines — write it on one line` (AZ1219).
 
 `backend`'s diagnostics: AZ1223 declared outside `site` · AZ1224 not a backend
-setting · AZ1225 a setting missing · AZ1412 a value outside its choices (a
-connection string is told where it belongs) · AZ1506 declared twice · AZ1507
-the site's `auth` must use `adapter azbackend`.
+setting · AZ1225 `database` missing, or `email` missing while something
+needs accounts (named in the message) · AZ1412 a value outside its choices
+(a connection string is told where it belongs) · AZ1506 declared twice ·
+AZ1507 the site's `auth` must use `adapter azbackend` — when it has another
+adapter, when something needs accounts, or when `email` is written and
+nothing signs in (core `accounts.ts`).
 
 `data`'s diagnostics are AZ1226–AZ1249 and AZ1415 at the link stage (data-spec
 §12) — AZ1236, the modifier conflict, includes `unique` with `private` (a
@@ -553,6 +556,9 @@ the site's `auth` must use `adapter azbackend`.
 `<site>.data.json` disagree, the lock is damaged, or a change needs its flag:
 AZ1708 is a read rule or a removed `private` that shows stored rows to more
 people, until `az backend schema --expose <table>` (data-spec §6, §18.7).
+A chat's `show` takes components or a group — `all`, `figures`,
+`sections` (core `chat.ts SHOW_GROUPS`) — expanded once the file is read,
+so a group never reaches the Spec (chat-block-spec §19.15).
 `chat`'s file-wide diagnostics are AZ1250–AZ1259 at the link stage
 (chat-block-spec §3.4): AZ1250 a chat without `backend … model default` ·
 AZ1251 (warning) `model default` that no page uses · AZ1254 a word an answer

@@ -36,7 +36,8 @@ export interface MapInput {
   readonly three: boolean;
   readonly modules: readonly string[];
   readonly assets: readonly string[];
-  readonly backend: { readonly database: string; readonly email: string } | null;
+  /** `email` is absent on a server that keeps no accounts (chat-block-spec §19.15). */
+  readonly backend: { readonly database: string; readonly email?: string } | null;
   /** The data tables (data-spec §4), or null without any. */
   readonly data: readonly SpecTable[] | null;
   /** Blocks with `from <table>` (data-spec §10), in page order; empty without any. */
@@ -121,7 +122,7 @@ export function azMd(m: MapInput): string {
   if (m.three) out.push(`- \`${m.dirs.three}/\` — the 3D runtime; loaded only by pages with a live 3D view`);
   if (m.modules.length > 0) out.push(`- \`${m.dirs.user}/\` — your components: ${m.modules.map((x) => `\`${x}\``).join(', ')}`);
   if (m.assets.length > 0) out.push(`- \`public/\` — your files, copied as-is: ${m.assets.map((x) => `\`${x}\``).join(', ')}`);
-  if (m.backend) out.push(`- \`server/\` — the built-in backend (${m.backend.database}, email ${m.backend.email}); see \`server/README.md\``);
+  if (m.backend) out.push(`- \`server/\` — the built-in backend (${m.backend.database}, ${m.backend.email ? `email ${m.backend.email}` : 'no accounts'}); see \`server/README.md\``);
   if (m.data) out.push(`- \`${DATA_DIR}/client.ts\` — the typed client for the data tables: \`tables.<name>.list()\`, \`get\`, \`create\`, \`update\`, \`remove\``);
   out.push('');
 
@@ -142,9 +143,15 @@ export function azMd(m: MapInput): string {
   if (m.backend) out.push('- Run `server/` separately, over https on the same site as the pages — `server/README.md`');
   if (m.backend) {
     out.push('', '## Server', '');
-    out.push(`The built-in backend (backend-spec): accounts, sessions, password reset, sign-in links and provider`);
-    out.push(`sign-in over ${m.backend.database}, email by ${m.backend.email}. The site reaches it at \`AZ_PUBLIC_BACKEND_URL\``);
-    out.push('with the `azbackend` protocol (auth-block-spec §3.4). Each `src/` file opens with an `@az` header saying what it does.', '');
+    if (m.backend.email) {
+      out.push(`The built-in backend (backend-spec): accounts, sessions, password reset, sign-in links and provider`);
+      out.push(`sign-in over ${m.backend.database}, email by ${m.backend.email}. The site reaches it at \`AZ_PUBLIC_BACKEND_URL\``);
+      out.push('with the `azbackend` protocol (auth-block-spec §3.4). Each `src/` file opens with an `@az` header saying what it does.', '');
+    } else {
+      out.push(`The built-in backend (backend-spec) over ${m.backend.database}, without accounts: nothing on the site signs in, so it`);
+      out.push('has no sign-in routes and sends no mail (chat-block-spec §19.15). The site reaches it at `AZ_PUBLIC_BACKEND_URL`.');
+      out.push('Each `src/` file opens with an `@az` header saying what it does.', '');
+    }
     out.push('- `server/README.md` — run, configure and deploy it');
     out.push('- `server/package.json` — start script, Node engine, exact driver pins; `server/az.config.json` — the .az choices');
     out.push('- `server/.env.example` — every key and its meaning; `server/.env` holds the real values and is never generated');

@@ -21,13 +21,14 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createApp, type ChatRoutes, type DataRoutes } from './app.ts';
 import type { Tiles } from './chat-tiles.ts';
 import { MigrationBusy } from './claim.ts';
 import type { DataStep } from './data-migrate.ts';
 import { migrate, openMysql, openPostgres, openSqlite, type Db } from './db.ts';
 import { createMailer } from './email.ts';
-import { loadConfig, type Setup } from './env.ts';
+import { BUNDLED_WORLD, keepsAccounts, loadConfig, type Setup } from './env.ts';
 import { createBackendServer } from './http.ts';
 import { createOidc } from './oidc.ts';
 import { createStore } from './store.ts';
@@ -41,12 +42,15 @@ const FILE_SWEEP_MS = 60 * 60 * 1000;
 const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string } & Setup;
 if (existsSync('.env')) process.loadEnvFile('.env');
 
+// The world basemap the build copied beside src/ for a map site (§19.15): the maps' world when AZ_MAP_WORLD is unset.
+const bundled = fileURLToPath(new URL(`../${BUNDLED_WORLD}`, import.meta.url));
+// No `email` in az.config.json: the site needs no accounts, so this server keeps none (chat-block-spec §19.15).
 const loaded = loadConfig(process.env, {
-  database: site.database, email: site.email,
+  database: site.database, ...(site.email !== undefined ? { email: site.email } : {}),
   ...(site.images === true ? { images: true } : {}),
   ...(site.chat === true ? { chat: true } : {}),
   ...(site.map === true ? { map: true } : {}),
-}, site.siteName);
+}, site.siteName, { bundledWorld: existsSync(bundled) ? bundled : null });
 if (!loaded.ok) {
   process.stderr.write(`backend: cannot start — fix these in .env (see .env.example):\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}\n`);
   process.exit(1);
@@ -269,8 +273,10 @@ if (args.migrate) {
 }
 
 const store = createStore(db, config.secret, Date.now, { idleMs: config.sessionIdleMs, maxMs: config.sessionMaxMs }, ownedRows);
+// Mail and provider sign-in only for a server that keeps accounts.
 const app = createApp({
-  config, store, mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)),
+  config, store,
+  ...(keepsAccounts(config.setup) ? { mailer: await createMailer(config), oidc: createOidc((...a) => fetch(...a)) } : {}),
   ...(data ? { data } : {}), ...(chat ? { chat } : {}), ...(tiles ? { tiles } : {}),
 });
 // The handler answers its own failures; requestListener is the last line.

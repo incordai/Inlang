@@ -2,7 +2,7 @@
  * @az module backend-emit
  * Purpose: the server/ files az build writes for a site that declares backend.
  * Spec: docs/backend-spec.md §2
- * Exports: backendFiles, envExample, envFile, BACKEND_PINS, SERVER_DIR
+ * Exports: backendFiles, envExample, envFile, BACKEND_PINS, SERVER_DIR, BASEMAP_SOURCE
  * Edit guide: dependencies only for the chosen database/email; pins exact.
  * Tests: packages/backend/test/emit.test.ts, packages/backend/test/chat-context.test.ts
  */
@@ -18,10 +18,11 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import type { SpecBackend } from '../../core/src/backend.ts';
 import type { SpecTable } from '../../core/src/data.ts';
 import type { LockStep } from '../../core/src/data-lock.ts';
-import { KEYS, PROVIDER_KEYS, TOOL_KEYS, toolKey, type Setup } from './server/env.ts';
+import { KEYS, keepsAccounts, PROVIDER_KEYS, TOOL_KEYS, toolKey, type Setup } from './server/env.ts';
 import { generatedJson, generatedMd } from '../../core/src/generated.ts';
 import { dataSteps } from './data-ddl.ts';
 import type { BackendChat } from './chat-context.ts';
@@ -50,6 +51,14 @@ export const BACKEND_PINS = {
 export const NODE_ENGINE = '>=22.18';
 
 export const SERVER_DIR = 'server';
+
+/**
+ * The default world basemap (chat-block-spec §19.15): made by
+ * scripts/gen-basemap.mjs from pinned public-domain data, copied by the build
+ * to `server/<BUNDLED_WORLD>` for a site whose chat shows maps. The server
+ * draws it when AZ_MAP_WORLD is unset; the operator's own archive replaces it.
+ */
+export const BASEMAP_SOURCE = fileURLToPath(new URL('../assets/basemap/world.pmtiles', import.meta.url));
 
 /** A `#`-comment file's first line — the same header as every generated file (core generated.ts). */
 const hashHeader = (what: string): string => `# GENERATED ${generatedJson(what)}\n`;
@@ -80,11 +89,14 @@ export function envExample(setup: Setup): string {
     lines.push(`${k.name}=${k.secret ? '' : k.example ?? ''}`);
     lines.push('');
   }
-  lines.push('# Provider sign-in: for each id in AZ_OAUTH_PROVIDERS, set AZ_OAUTH_<ID>_<SETTING>');
-  lines.push('# (id upper-cased, - as _). Example for an id "work":');
-  for (const p of PROVIDER_KEYS) lines.push(`#   AZ_OAUTH_WORK_${p.suffix}=    ${p.about}`);
+  // Provider sign-in only for a server that keeps accounts; one that keeps none signs nobody in.
+  if (keepsAccounts(setup)) {
+    lines.push('# Provider sign-in: for each id in AZ_OAUTH_PROVIDERS, set AZ_OAUTH_<ID>_<SETTING>');
+    lines.push('# (id upper-cased, - as _). Example for an id "work":');
+    for (const p of PROVIDER_KEYS) lines.push(`#   AZ_OAUTH_WORK_${p.suffix}=    ${p.about}`);
+  }
   if (setup.chat === true) {
-    lines.push('');
+    if (keepsAccounts(setup)) lines.push('');
     lines.push('# Chat data tools (optional): for each name in AZ_CHAT_TOOLS, set AZ_CHAT_TOOL_<NAME>_<SETTING>');
     lines.push('# (name upper-cased). Example for a tool "standings":');
     for (const t of TOOL_KEYS) lines.push(`#   ${toolKey('standings', t.suffix)}=    ${t.about}`);
@@ -98,15 +110,28 @@ export function envFile(setup: Setup): string {
   return envExample(setup).replace(/^AZ_SESSION_SECRET=$/m, `AZ_SESSION_SECRET=${secret}`);
 }
 
-function readme(siteName: string, setup: Setup, data: BackendData | undefined): string {
-  const db = { sqlite: 'SQLite (a file; no server to run)', postgres: 'PostgreSQL', mysql: 'MySQL' }[setup.database];
+/** What the server is for, in the README's first lines: its accounts and mail, or that it keeps none. */
+function readmeIntro(setup: Setup, db: string): string {
+  if (setup.email === undefined) {
+    return `The server behind this site's chat, over ${db}. It keeps **no accounts**:
+nothing on the site signs in, so it has no sign-in routes, no sessions and
+sends no mail (chat-block-spec §19.15). The site talks to it at
+\`AZ_PUBLIC_BACKEND_URL\`. A chat for signed-in visitors, data tables or the
+site's own sign-in need accounts — the \`.az\` file then declares \`email\` and
+\`auth\` / \`adapter azbackend\`, and \`az check\` says which line needs them.`;
+  }
   const email = { smtp: 'SMTP', api: 'an HTTPS email API' }[setup.email];
-  return `${generatedMd('how to run, configure and deploy the site\'s backend')}# ${siteName} — backend
-
-The server behind this site's sign-in: accounts, sessions, password reset,
+  return `The server behind this site's sign-in: accounts, sessions, password reset,
 sign-in links and provider sign-in, over ${db}, sending email through ${email}.
 It implements the \`azbackend\` protocol (auth-block-spec §3.4); the site talks
-to it at \`AZ_PUBLIC_BACKEND_URL\`.
+to it at \`AZ_PUBLIC_BACKEND_URL\`.`;
+}
+
+function readme(siteName: string, setup: Setup, data: BackendData | undefined): string {
+  const db = { sqlite: 'SQLite (a file; no server to run)', postgres: 'PostgreSQL', mysql: 'MySQL' }[setup.database];
+  return `${generatedMd('how to run, configure and deploy the site\'s backend')}# ${siteName} — backend
+
+${readmeIntro(setup, db)}
 
 ## Run it locally
 
@@ -342,17 +367,22 @@ A chat on this site may answer with a map. The map's tiles, label fonts and
 icons come from this server — never a third party unless you choose one —
 under \`/tiles/\`, to the site's origins only, by HTTP Range.
 
-- **\`AZ_MAP_WORLD\`**: one PMTiles archive the maps draw (the world to zoom 6
-  is about 46 MB). Without it, every map shows its list of places only.
+- **The default basemap**, \`tiles/world.pmtiles\`: \`az build\` put it here —
+  land, lakes and country borders to zoom 6, about 1 MB, from public-domain
+  data, credited by its own metadata. The maps draw it while
+  \`AZ_MAP_WORLD\` is unset. It has no place names.
+- **\`AZ_MAP_WORLD\`** (optional): your own PMTiles archive, drawn instead (a
+  full basemap's world to zoom 6 is about 46 MB, with places and labels).
   docs/self-hosting.md says how to make one with \`pmtiles extract\`.
-- **\`AZ_MAP_REGION\`** (optional): a regional extract drawn over the world;
-  maps zoom in as far as it goes.
+- **\`AZ_MAP_REGION\`** (optional): a regional extract drawn over the world —
+  yours or the default; maps zoom in as far as it goes.
 - **\`AZ_MAP_GLYPHS\`**, **\`AZ_MAP_SPRITES\`** (optional): the label fonts
   (\`<font>/<start>-<end>.pbf\`) and icons (\`light.json\`, \`light.png\`,
   \`dark.json\`, \`dark.png\`, their \`@2x\` copies). Without them, maps draw
   no place names or icons.
 - **\`AZ_MAP_ATTRIBUTION\`**: the line your tile data's licence requires
-  under every map. The server will not start with an archive and without it.
+  under every map. The server will not start with an archive or a region of
+  yours and without it; with the default basemap its credit follows yours.
 - **\`AZ_GEOCODER_URL\`** (optional): your geocoder, so an answer may place an
   address. The server asks it \`GET <url>?q=<address>\` and reads the first
   result's \`lat\` and \`lon\`; the browser never calls it. Each address is

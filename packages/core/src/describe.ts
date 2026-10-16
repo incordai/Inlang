@@ -17,6 +17,7 @@ import {
 } from './data.ts';
 import { FROM_SETTINGS } from './from.ts';
 import { partnersOf } from './colour.ts';
+import { CHAT_WORD, SHOW_GROUPS } from './chat.ts';
 import { closest } from './suggest.ts';
 
 /** The owner's limit: short enough for an AI to read every one cheaply. */
@@ -113,7 +114,7 @@ export const STRUCTURE_DESCRIPTIONS: Readonly<Record<string, TermInfo>> = {
     description: 'Built-in server: database, email and model choices',
     settings: {
       database: 'Database engine the server uses',
-      email: 'How the server sends email',
+      email: 'How the server sends email; only a site with accounts',
       model: 'The server talks to a model for chat (optional)',
     },
     values: {
@@ -207,6 +208,11 @@ export function explain(terms: readonly string[], manifests: ReadonlyMap<string,
       const found = resolve(s, term);
       if (found) {
         lines.push(found.line);
+        // A `show` group (chat-block-spec §19.15) lists what it expands to, one component a line.
+        const group = found.line.kind === 'value' && s.lastProp?.path === SHOW_PATH ? own(SHOW_GROUPS, term) : undefined;
+        for (const member of group ?? []) {
+          lines.push({ term: member, kind: 'component', of: `${SHOW_PATH}.${term}`, text: own(s.lastProp?.values, member) ?? '' });
+        }
         const list = s.keyword && found.line.kind === 'setting' ? own(s.keyword.lists, term) : undefined;
         if (list) {
           for (const [entry, text] of Object.entries(list.lines)) {
@@ -218,11 +224,30 @@ export function explain(terms: readonly string[], manifests: ReadonlyMap<string,
       }
     }
     if (startScope(term, i === terms.length - 1)) continue;
+    // A prop only one word has may be named alone: `az explain show all` is the chat's `show`.
+    const owner = !s ? soleOwner(term, manifests) : null;
+    if (owner) {
+      const found = resolve({ name: owner.name, manifest: owner.manifest }, term);
+      if (found) {
+        lines.push(found.line);
+        if (found.next) scope = found.next;
+        continue;
+      }
+    }
     const candidates = new Set<string>([...manifests.keys(), ...Object.keys(STRUCTURE_DESCRIPTIONS)]);
     if (s) for (const c of membersOf(s)) candidates.add(c);
     unknown.push({ term, suggestion: closest(term, candidates) });
   }
   return { lines, unknown };
+}
+
+/** The chat's `show`, whose groups explain() expands. */
+const SHOW_PATH = `${CHAT_WORD}.show`;
+
+/** The one word that declares prop `term`, or null when none or several do. */
+function soleOwner(term: string, manifests: ReadonlyMap<string, Manifest>): { name: string; manifest: Manifest } | null {
+  const owners = [...manifests].filter(([, m]) => Object.hasOwn(m.props ?? {}, term));
+  return owners.length === 1 ? { name: owners[0][0], manifest: owners[0][1] } : null;
 }
 
 /** Every term that could follow in this scope. */

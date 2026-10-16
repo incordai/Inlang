@@ -239,8 +239,9 @@ async function serverSetup(serverDir: string): Promise<ServerSetup | null> {
   }
   const { database, email } = o ?? {};
   if (database !== 'sqlite' && database !== 'postgres' && database !== 'mysql') return null;
-  if (email !== 'smtp' && email !== 'api') return null;
-  return { database, email, ...(o.data === true ? { data: true } : {}), ...(o.images === true ? { images: true } : {}) };
+  // No email: a server without accounts (chat-block-spec §19.15); any other value is not a config az wrote.
+  if (email !== undefined && email !== 'smtp' && email !== 'api') return null;
+  return { database, ...(email !== undefined ? { email } : {}), ...(o.data === true ? { data: true } : {}), ...(o.images === true ? { images: true } : {}) };
 }
 
 const isDir = (path: string) => stat(path).then((s) => s.isDirectory(), () => false);

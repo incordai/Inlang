@@ -26,6 +26,7 @@ import type { KeywordEntry, Toolbox, ToolDiagnostic, WordEntry } from '../../mcp
 import { buildPrompt, promptJson, promptOptionsFrom } from '../../core/src/prompt.ts';
 import { build, compileReader, promptInput, wordsFor } from './az.ts';
 import { initBackendEnv } from './backend-init.ts';
+import { addChat } from './add-chat.ts';
 import { lockOption } from './data-schema.ts';
 import { lintWords } from './lint.ts';
 import { GRAMMAR_VERSION, migrate } from './migrate.ts';
@@ -132,6 +133,12 @@ export function toolbox(root: string): Toolbox {
     backendInit: (serverDir) => {
       const r = initBackendEnv(serverDir);
       return r.ok ? { ok: true, path: r.path } : { ok: false, message: r.message };
+    },
+
+    // The same edit `az add chat` makes; the file is inside the root (the sandbox), and so is the .az-dev/ beside it.
+    addChat: (file, options) => {
+      const r = addChat({ file, ...options, wordsDir: wordsDir() });
+      return r.ok ? r : { ok: false, message: r.message };
     },
 
     grammar: () => readFileSync(join(REPO, 'docs/GRAMMAR.md'), 'utf8'),

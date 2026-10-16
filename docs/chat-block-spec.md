@@ -43,7 +43,7 @@ FACT, from the code at commit `c350fa2`:
 | Free compiler-class codes: AZ1250–AZ1259 and AZ1270–AZ1298 (link stage) | every AZ1xxx in `packages/` and `docs/` listed on 2026-10-15; none in those ranges |
 | Structure keywords: `site theme font page raw slot backend data` | `packages/core/src/link.ts:153` |
 | `backend` takes two closed settings, `database` and `email` | `packages/core/src/backend.ts:28-31` |
-| A site with `backend` must use `auth adapter azbackend` (AZ1507) | `packages/core/src/spec.ts:404` |
+| A site with `backend` must use `auth adapter azbackend` (AZ1507) — since §19.15 only when something on it needs accounts | `packages/core/src/spec.ts:404`, now `packages/core/src/accounts.ts` |
 | Inheritable blocks are `nav`, `footer`, `scene` | `packages/core/src/spec.ts:122` |
 | Site-level `auth` lists protected routes in `protect` | `packages/words/auth/word.json:103` |
 | `email api` is already a provider-neutral HTTP adapter: POST JSON with a bearer key to `AZ_EMAIL_API_URL` | `packages/backend/src/server/email.ts:34-44`, backend-spec §7 |
@@ -266,7 +266,7 @@ to ship).
 | `title` | string | no (default "Ask a question") | panel heading; the launcher's accessible name | 1–60 chars |
 | `greeting` | string | no | the first message, shown before the visitor types; never sent to the model | 1–200 chars |
 | `ask` | string, repeated | no | a suggested question, rendered as a button | 0–4, each 1–80 chars |
-| `show` | bare list from a closed set | no (default: text only) | the components an answer may contain | `pricing`, `faq`, `cta`, `feature`; C2b adds `chart`, `table`, `stats`, `cards`, `dashboard` — answer-only components, not words (§20) |
+| `show` | bare list from a closed set | no (default: text only) | the components an answer may contain | `pricing`, `faq`, `cta`, `feature`; C2b adds `chart`, `table`, `stats`, `cards`, `dashboard` — answer-only components, not words (§20); since §19.15 also the groups `all`, `figures`, `sections` |
 | `knows` | bare list of table names | no | tables whose public rows ground the answers (§8.2) | ≤ 3 tables |
 | `allow` | `anyone` \| `signedin` | no (default `signedin`) | who may send a message (§6.6) | — |
 | `limit` | number | no (default 20) | visitor messages per conversation before the panel says "start a new chat" | 1–50 |
@@ -295,11 +295,12 @@ backend-setting += "model" , "default" ;
 chat-block = "chat" , ( "panel" | "float" | "none" ) , NEWLINE ,
              [ INDENT , { chat-key } , DEDENT ] ;
 chat-key   = "title" , STRING | "greeting" , STRING | "ask" , STRING
-           | "show" , answer-word , { answer-word }
+           | "show" , show-word , { show-word }
            | "knows" , table , { table }
            | "allow" , ( "anyone" | "signedin" )
            | "limit" , NUMBER ;
 answer-word = "pricing" | "faq" | "cta" | "feature" ;
+show-word   = answer-word | "all" | "figures" | "sections" ;   (* §19.15: a group, expanded once the file is read *)
 ```
 
 ### 3.4 Diagnostics
@@ -717,7 +718,9 @@ word-quality-gate §5.5).
 
 No change to any policy. `connect-src` already holds the backend's origin
 on every page of an `azbackend` site (`emit.ts:903`, `csp.ts:162`); `chat`
-requires `backend`, which requires `azbackend` (AZ1507). The runtime is a
+requires `backend`, which requires `azbackend` (AZ1507) — or, since §19.15,
+a public chat's backend without accounts, whose origin every page names the
+same way. The runtime is a
 bundled module (`script-src 'self'`); templates carry no inline style (words
 emit none, word-quality-gate §5.5); no `unsafe-inline`, no `unsafe-eval`, no
 new `img-src`. The stream response itself carries `default-src 'none'`
@@ -787,7 +790,9 @@ All defaults are safe without configuration; every one is an `.env` key.
 Default `signedin` follows data-spec L1 (locked by default; public is spelled
 out): an anonymous chat is a public, metered API on the operator's card.
 The user stories that want anonymous access (U1) get it with one line.
-(Q3.) A signed-in visitor's identity is used **only** for limits; it is
+(Q3.) A site whose every chat is `allow anyone` (and that has no tables or
+sign-in of its own) needs no accounts at all: its backend declares no
+`email` and no `auth` (§19.15). A signed-in visitor's identity is used **only** for limits; it is
 never sent to the provider and never selects grounding in v1.
 
 ### 6.7 Logging, storage and privacy
@@ -1170,6 +1175,14 @@ demos ([R7]–[R10]); §21 specifies them as phases C5–C8:
 | Q19g | Pins and routes? | **Public rows' latitude/longitude, or model numbers in range with ≤ 6 decimals labelled "Approximate, AI-placed"**; optional server-side geocoding behind `AZ_GEOCODER_URL`, cached and rate-limited, never from the browser; straight polylines in v1 |
 | Q19h | Theme and fallback? | **Paint from the `--az-color-*` tokens, repainted on a scheme change; an ordered list of pins and stops, also the WebGL2-missing fallback, announced once** |
 
+**Note, 2026-10-16 (§19.15, issue #3).** Q3 is unchanged: `signedin` stays
+the default, so an anonymous chat stays explicit — `allow anyone` — and
+keeps the AZ1256 warning. What changed is only what such a chat costs to
+set up: a site whose every chat is `allow anyone`, with no tables and no
+sign-in, needs `backend` + `database` + `model default` and nothing else —
+no `auth`, no `email`, no sign-in pages. AZ1225 and AZ1507 now apply only
+when something needs accounts, and say what.
+
 ---
 
 ## 18. Research sources
@@ -1195,7 +1208,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0, C1, C2, C2b, C3, C4, C5, C6, C7 and C8 as built — deviations and findings (2026-10-15/16), and the limits fixed after C6 (§19.11)
+## 19. C0, C1, C2, C2b, C3, C4, C5, C6, C7 and C8 as built — deviations and findings (2026-10-15/16), the limits fixed after C6 (§19.11), and the chat setup (§19.15)
 
 ### 19.1 Against §14's C1 list
 
@@ -1888,6 +1901,194 @@ control, Clear history only once there is history; Jump to latest is laid
 over the transcript's foot, and is not offered over the start of an answer
 that has arrived (`offersLatest`). `test:chat` asserts the transcript has at
 least 60% of the sheet before a question and after one, in three engines.
+
+### 19.15 Chat setup (2026-10-16): a public chat without accounts, `show all`, `az add chat`, the default basemap
+
+Issue #3. The smallest public chat is now what the author meant to write:
+
+```
+az 1
+site demo
+  backend
+    database sqlite
+    model    default
+
+page /
+  chat panel
+    allow anyone
+```
+
+No `auth`, no `email`, no sign-in pages, no mail relay. Before, every
+`backend` was a server with accounts, so this file was AZ1225 (`no email`)
+and AZ1507 (`the site's auth must use it`), and the author had to add an
+auth adapter, an email way, `/signup`, `/login` and `/terms` and a relay
+the site never used.
+
+**The rule** (core `accounts.ts`). The backend keeps accounts only when
+something on the site needs one:
+
+| Needs accounts | Why |
+|---|---|
+| the site's `auth` with `adapter azbackend` | it signs people in with this server |
+| a chat with `allow signedin` — the default | only a signed-in visitor may ask |
+| any `data` table | its rows are kept on `/admin`, by signed-in admins (data-spec §11), and its rules may name owners |
+
+With none of them the server keeps no accounts: `email` is not required,
+and no `auth` is. With one, `email` is required (AZ1225) and the site's
+`auth` must use `adapter azbackend` (AZ1507), and **each message names the
+thing that needs them** — `backend: no email — the chat on / is for
+signed-in visitors only (allow signedin is the default), and accounts need
+email for sign-in links and password resets — add: email smtp|api, or under
+that chat write: allow anyone`. `email` written with nothing that signs in
+is AZ1507 too, saying to remove the line for a server without accounts. An
+`auth` with another adapter beside a backend is AZ1507 as before. `database`
+is still always required (AZ1225 at link).
+
+**Q3 holds.** `allow signedin` stays the default (§17 Q3, and the note
+after the Q19 table), so an anonymous chat is still explicit — one line,
+`allow anyone` — and still warned (AZ1256).
+
+**What a server without accounts is.** `server/az.config.json` has no
+`email`; the server (`env.ts keepsAccounts`) then:
+
+- answers every `/auth/…` path 404, as any unknown path — sign-up, sign-in,
+  session, link, reset, password, sign-out, providers and their two
+  navigations — and is built with no mailer and no provider client
+  (`createApp` refuses a server with accounts that lacks either);
+- never reads a session cookie: every visitor is nobody, so a planted
+  cookie cannot make anyone signed in;
+- lists in `.env.example` no mail key, no session-cookie key, no reset or
+  link path, no provider key and no per-account chat limit; refuses to start
+  with `AZ_OAUTH_PROVIDERS` set, naming it. `AZ_SESSION_SECRET` stays
+  required: it keys the chat's answer tags and rate-limit counts;
+- still runs the auth migration, so its tables exist empty and accounts
+  added later need no new step.
+
+The site: no auth runtime and no `AuthRuntime`; its chat module hands the
+panel no session (`chatTsx(…, accounts = false)`), so the chat kept in the
+browser is bound to the browser; every page's `connect-src` names the
+backend as an azbackend site's does; and the build guard requires
+`AZ_PUBLIC_BACKEND_URL` and checks it with the azbackend adapter's own check
+(`chat: the site's backend …`), for which the build copies just that
+adapter's three files (`BACKEND_URL_FILES`), imported by the guard and by
+no page. `az dev` runs the dev server the same way, with no mailbox.
+
+**Security, checked.**
+
+| Property | Without accounts |
+|---|---|
+| history (HMAC tags) | unchanged: the key derives from `AZ_SESSION_SECRET`, still required; an edited answer is `tampered` |
+| per-address limits | unchanged: the database windows (§19.11) every instance shares — the main control of any `allow anyone` chat (§6.6); per-account limits never apply, as no one is signed in |
+| shares | unchanged: anonymous shares were already allowed; the HMAC share tag, the per-address and live-share caps, the delete token. A share's **admin delete** (`/admin/chat/shares/<id>`) needs an admin, so it exists only on a site with accounts and data; here the operator deletes with `az backend shares <server> --delete <id>` |
+| the usage view | `/admin/chat` needs an admin (a site with data, so accounts); without accounts `az backend usage <server>` prints the same counts |
+| moderation | unchanged: the hook judges every question, signed in or not |
+| sign-in surface | none: every `/auth` path 404; no mail can be sent |
+
+Tests: `packages/core/test/accounts-decl.test.ts` (each need, each message,
+the issue's file), `packages/backend/test/accountless.test.ts` (keys, the
+404s, a cookie never read, tags, the address limit, a share),
+`packages/target-web/test/chat-public.test.ts` (no auth runtime, the module,
+the guard, `connect-src`), CLI `backend.test.ts` and `dev-serve.test.ts`,
+and `pnpm test:chat`'s public site (`scripts/chat-public-e2e.mjs`) in three
+engines with no auth page in the build.
+
+**`show all` and the groups** (issue #12, core `chat.ts` `SHOW_GROUPS`, the
+one table). Instead of listing every component, `show` takes a group:
+
+| Group | Stands for |
+|---|---|
+| `all` | every component an answer may hold (`CHAT_ANSWER_WORDS`) |
+| `figures` | `chart table stats cards dashboard` |
+| `sections` | `pricing faq cta feature` — the site's own kinds of block |
+
+A group expands once the whole file is read (`withShowGroups`, the first
+step of the spec stage — the link stage's file-wide part, as §3.4's rules
+are), so no later stage ever sees one: the Spec of `show all` is the Spec
+of the list it stands for (tested). Groups and words mix, each component
+once, in the order first written. **A group never brings a component the
+site cannot use:** `pricing` only when a page a signed-out visitor can open
+has a pricing block to quote; written by name it is still AZ1255 without
+one. A group name is never a component, a refused word or a word (tested);
+an unknown word's AZ1254 now lists the groups too. `az explain show all`
+(a prop only one word has may be named alone — `show` is the chat's) prints
+the group and then each component it stands for, a line each; `az explain
+chat show figures` the same. The chat manifest's `show` describes each group
+(`az prompt` and the words catalogue list them with the components).
+`show all` brings `map`, so a site with it loads the map library when the
+first map arrives (Q19f) and its chat page gets `worker-src 'self' blob:`.
+
+**`az add chat`** (issue #13, CLI `add-chat.ts`):
+
+```
+az add chat <file.az> [--page /route | --float] [--show all|<word>[,<word>…]]
+```
+
+edits the file in place: `backend` with `database sqlite` and `model
+default` under `site` (or `model default` under the backend it has), and a
+`chat panel` at the end of `/` (or `--page`, before its own footer, the page
+made when missing) or a `chat float` under `site`, with a title, a greeting,
+two suggested questions, `show` when asked, and `allow anyone` when the
+site keeps no accounts — a site that does keeps the default, signed-in
+visitors. The model's four keys go, commented with the server's own
+meanings (env.ts `KEYS`), into `.az-dev/backend.env` (owner-only), so `az
+dev` answers from its demo script until one is set; production keys come
+from `az backend init` after the build, as before. Safety, each tested: it
+refuses, changing nothing, a file that does not compile, a link (the file
+or `.az-dev`), a page that says `chat none`, and an edit that would not pass
+`az check` — checked in memory first (`build`'s `sourceText`); it copies
+every file it changes to `<file>.bak` first (`.bak.2`, … — never over a
+backup) and writes by rename; and it ends by running `az check` on what it
+wrote. A second run changes nothing and makes no backup. The README's
+command table, USAGE and the MCP tool `az_add_chat` (rewrites the file and
+runs project code — its check builds — so `destructiveHint: true`; the file
+and `.az-dev/` inside the root) carry it. Tests: CLI `add-chat.test.ts`,
+MCP `mcp.test.ts`, and `scripts/add-chat-e2e.mjs` in `pnpm test:dev` (a
+fresh site → `az add chat` → `az check` passes → a second run adds nothing →
+`az dev` serves it with no mailbox and no `/auth`, and a suggested question
+is answered with the demo script in Chromium; Ctrl-C leaves nothing
+running).
+
+**The default world basemap** (issue #4). Until now a map drew only when
+the operator found, made and hosted a tile archive; with the repository's
+fixture alone the stage was a blank box with a dot. Decided, with the
+evidence:
+
+| | A full basemap extract (Q19e's world z0–6) | **The bundled default** |
+|---|---|---|
+| size | ≈ 46 MB, plus glyphs and sprites | **1.1 MB** (1 141 107 bytes; 3 194 tiles, z0–6) |
+| licence | ODbL (derived from the open world map data): attribution required | **public domain** (no permission, credit optional) — credited anyway |
+| made by | downloading a planet build | `node scripts/gen-basemap.mjs`, from six pinned files (release and SHA-256 in `scripts/basemap/sources.json`); `--check` regenerates in memory and compares byte for byte |
+| look | streets, places, labels | **land, lakes and country borders**, painted from the theme's tokens like any basemap (§19.13); no place names |
+
+So `az build` copies `packages/backend/assets/basemap/world.pmtiles` to
+`server/tiles/world.pmtiles` for a site whose chat shows maps, and the
+server draws it when `AZ_MAP_WORLD` is unset (`env.ts BUNDLED_WORLD`,
+`MapConfig.bundled`): its credit is read from the archive's own metadata
+(`chat-tiles.ts readArchiveAttribution`) and shown under every map — after
+the operator's `AZ_MAP_ATTRIBUTION` when they add a region; the server
+refuses to start with a bundled archive that carries none. The operator's
+`AZ_MAP_WORLD` replaces it (then `AZ_MAP_ATTRIBUTION` is required, as
+before), and `AZ_MAP_REGION` may now be drawn over the bundled world (its
+own attribution required). `az dev` serves the same file from the
+repository, so maps look real while developing; `az doctor` names the
+bundled basemap, and warns only when a server has neither. **Glyphs and
+sprites are not bundled**: the layers have no names to label (place labels
+need a fonts pipeline and its own dependency, Rule 11), and icons serve
+only those labels; the operator's `AZ_MAP_GLYPHS` and `AZ_MAP_SPRITES` still
+draw on the bundled world, which simply has no places for them yet.
+
+The tiles are the basemap style's own layers (`earth`, `water` with lakes,
+`boundaries` with `kind_detail` 2), clipped per tile with a 64-unit buffer,
+simplified to half a pixel, coarse data to zoom 2 and finer from 3, equal
+tiles stored once, nothing compressed — so the bytes do not depend on a
+compression library's version (`scripts/lib/vector-tiles.mjs`, tested
+against the tile-archive reader: `scripts/lib/vector-tiles.test.mjs` reads
+the committed archive back, Berlin land, Lake Victoria water, the borders
+near Basel, no tile over the mid-Pacific). In `test:chat`, the public site's
+map draws it in three engines, read by HTTP Range (206) with its credit
+under it, and its pixels are two colours — land and water — each over a
+tenth of the stage (with the old code a map site had no archive and drew
+only its list).
 
 ---
 

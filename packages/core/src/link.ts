@@ -799,7 +799,10 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
         err('AZ1225', `backend: no ${key} — add: ${key} ${BACKEND_SETTINGS[key].join('|')}`, s.pos);
       }
     }
-    return { word: 'backend', variant: null, modifiers: [], args: [], props, as: s.as, children: [], pos: s.pos };
+    // The lines as written, values unread: the spec stage needs to know a setting was written even when its value
+    // was refused here — a missing `email` is its rule (accounts.ts), an unreadable one is already reported.
+    const written = (st: Statement): LinkedWord => ({ word: st.word, variant: null, modifiers: [], args: [], props: {}, as: st.as, children: [], pos: st.pos });
+    return { word: 'backend', variant: null, modifiers: [], args: [], props, as: s.as, children: s.children.map(written), pos: s.pos };
   }
 
   /**

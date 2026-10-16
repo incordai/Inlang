@@ -77,6 +77,7 @@ export async function createMailer(
   config: Config,
   env: { fetch: typeof fetch; timeoutMs?: number; deadlineMs?: number; tls?: MailerTls } = { fetch: (...a) => fetch(...a) },
 ): Promise<Mailer> {
+  if (config.setup.email === undefined) throw new Error('createMailer: this server keeps no accounts, so it sends no email');
   const timeoutMs = env.timeoutMs ?? EMAIL_TIMEOUT_MS;
   const deadlineMs = env.deadlineMs ?? EMAIL_DEADLINE_MS;
   if (config.setup.email === 'api') {

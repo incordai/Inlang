@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -301,9 +301,14 @@ function pmtiles(): Buffer {
 
 test('chat map (§21.4.3): the archive, folders and attribution as the server opens them; no archive warns; a refused key or a foreign file fails; a third-party archive is named; CONTROL passes', async () => {
   const p = built(CHAT_SITE().replace('    show     faq cta\n', '    show     faq cta map\n'));
+  // §19.15: the build copied the default world basemap, so with no AZ_MAP_WORLD the maps draw it.
+  const bundled = await check('chat-map', p);
+  assert.equal(bundled.status, 'pass', bundled.line);
+  assert.match(bundled.line, /^chat map: the bundled world basemap to zoom 6 \(land, lakes, borders\); no labels/);
+  rmSync(join(p.server, 'tiles', 'world.pmtiles'));
   const r0 = await check('chat-map', p);
   assert.equal(r0.status, 'warn', r0.line);
-  assert.equal(r0.line, 'chat map: AZ_MAP_WORLD is not set — every map shows its list of places only');
+  assert.equal(r0.line, 'chat map: AZ_MAP_WORLD is not set and the server has no tiles/world.pmtiles — every map shows its list of places only');
   // Paths are the server folder's, where it runs.
   mkdirSync(join(p.server, 'map', 'glyphs'), { recursive: true });
   mkdirSync(join(p.server, 'map', 'sprites'));

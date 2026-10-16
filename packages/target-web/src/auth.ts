@@ -46,10 +46,17 @@ export const SESSION_BASE = '/api/auth';
  */
 export const BACKEND_ENV = [`${PUBLIC_ENV_PREFIX}BACKEND_URL`] as const;
 
-/** The public variables a site's adapter cannot build without. */
-export function requiredEnv(plan: AuthPlan | null): readonly string[] {
+/**
+ * The auth runtime's files the build guard needs on a site whose chat talks
+ * to a backend without accounts (chat-block-spec §19.15): the `azbackend`
+ * adapter's address check and what it imports. No page imports them.
+ */
+export const BACKEND_URL_FILES: readonly string[] = ['azbackend.ts', 'session.ts', 'contract.ts'];
+
+/** The public variables a site's adapter cannot build without — or its chat's backend, when it has no auth (§19.15). */
+export function requiredEnv(plan: AuthPlan | null, publicChat = false): readonly string[] {
   if (plan?.adapter === 'hosted') return HOSTED_ENV;
-  if (plan?.adapter === 'azbackend') return BACKEND_ENV;
+  if (plan?.adapter === 'azbackend' || publicChat) return BACKEND_ENV;
   return [];
 }
 
@@ -262,10 +269,12 @@ export function authCss(t: ThemeLike): string {
  * so a failed build leaves nothing to deploy. The pages the pre-render fills
  * after this runs are scanned the same way by az-vite/build.mjs.
  */
-export function guardTs(required: readonly string[], adapter: string | null = null): string {
+export function guardTs(required: readonly string[], adapter: string | null = null, publicChat = false): string {
   // azbackend: the base URL must be usable, not merely present (§3.4) — the
-  // adapter's own check, imported so the build and the site agree.
-  const backend = adapter === 'azbackend';
+  // adapter's own check, imported so the build and the site agree. A chat on a
+  // backend without accounts (chat-block-spec §19.15) is held to the same check.
+  const backend = adapter === 'azbackend' || publicChat;
+  const who = adapter !== null ? `auth: adapter ${adapter}` : publicChat ? "chat: the site's backend" : 'auth: adapter hosted';
   return `${generated('build guard: refuses a build that would ship a secret')}import { loadEnv, type Plugin } from "vite";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -289,10 +298,10 @@ export function secretGuard(): Plugin {
       if (found.length > 0) throw new Error(found.map(envMessage).join("\\n"));
       const missing = REQUIRED.filter((name) => !env[name]);
       if (missing.length > 0) {
-        throw new Error(${JSON.stringify(`auth: adapter ${adapter ?? 'hosted'} needs `)} + missing.join(" and ") + ${JSON.stringify(adapter === 'azbackend' ? " — set your backend's public base URL in .env or the environment" : " — set the provider's URL and PUBLIC key in .env or the environment")});
+        throw new Error(${JSON.stringify(`${who} needs `)} + missing.join(" and ") + ${JSON.stringify(backend ? " — set your backend's public base URL in .env or the environment" : " — set the provider's URL and PUBLIC key in .env or the environment")});
       }${backend ? `
       const problem = backendUrlProblem(env[${JSON.stringify(BACKEND_ENV[0])}] ?? "");
-      if (problem) throw new Error("auth: adapter azbackend — " + problem);` : ''}
+      if (problem) throw new Error(${JSON.stringify(`${who} — `)} + problem);` : ''}
       // The public key is meant to ship; it is the one high-entropy string allowed.
       publicValues = new Set(Object.values(env).filter(Boolean));
       root = config.root;

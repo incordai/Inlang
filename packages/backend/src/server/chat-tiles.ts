@@ -2,7 +2,8 @@
  * @az server chat-tiles
  * Purpose: GET /tiles/… — the maps' tile archives with HTTP Range, their glyphs and sprites, and map.json saying what is served; CORS for the site only.
  * Spec: docs/chat-block-spec.md §21.4.3 (Q19e) · RFC 9110 §14 (ranges), §13.1 (preconditions)
- * Exports: TILE_ARCHIVES, ArchiveName, readArchiveHeader, openTiles, createTiles, Tiles, TileFiles, parseRange, ByteRange, ArchiveHeader, TilesProblem
+ * Exports: TILE_ARCHIVES, ArchiveName, readArchiveHeader, readArchiveAttribution, openTiles, createTiles, Tiles, TileFiles, parseRange, ByteRange, ArchiveHeader,
+ *   TilesProblem, ATTRIBUTION_JOIN
  * Edit guide: a path is matched against closed shapes and joined under the operator's folder only — never a name from the request
  *   used as a path as it came; one range, served from the file as it is; every answer carries its ETag; nothing here reads the database.
  * Tests: packages/backend/test/chat-tiles.test.ts
@@ -80,6 +81,41 @@ export function readArchiveHeader(bytes: Buffer): ArchiveHeader | string {
   return { minZoom, maxZoom, bounds: [e7(102), e7(106), e7(110), e7(114)] };
 }
 
+/** The bundled archive's metadata, at most: its JSON is a few hundred bytes. */
+const METADATA_MAX = 64 * 1024;
+/** How the operator's credit and the bundled archive's are shown together, in that order. */
+export const ATTRIBUTION_JOIN = ' · ';
+
+/**
+ * The credit an archive's own metadata gives (PMTiles v3 §3: the JSON
+ * metadata's `attribution`), read only from an archive with uncompressed
+ * metadata — the basemap the build bundles (§19.15) is one. Null when it
+ * has none, or none that is one line of at most 200 characters.
+ */
+export async function readArchiveAttribution(path: string): Promise<string | null> {
+  const fh = await open(path, 'r');
+  try {
+    const head = Buffer.alloc(HEADER_BYTES);
+    const { bytesRead } = await fh.read(head, 0, HEADER_BYTES, 0);
+    if (bytesRead < HEADER_BYTES || typeof readArchiveHeader(head) === 'string' || head.readUInt8(97) !== 1) return null;
+    const at = Number(head.readBigUInt64LE(24));
+    const length = Number(head.readBigUInt64LE(32));
+    if (length === 0 || length > METADATA_MAX) return null;
+    const meta = Buffer.alloc(length);
+    const read = await fh.read(meta, 0, length, at);
+    if (read.bytesRead !== length) return null;
+    let parsed: unknown;
+    try { parsed = JSON.parse(meta.toString('utf8')); } catch { return null; }
+    const credit = (parsed as { attribution?: unknown } | null)?.attribution;
+    return typeof credit === 'string' && credit.length > 0 && credit.length <= ATTRIBUTION_MAX && !/[\u0000-\u001f\u007f]/.test(credit) ? credit : null;
+  } finally {
+    await fh.close();
+  }
+}
+
+/** One attribution line, at most (the map runtime's MAP_GL.attribution and env.ts MAP_KEYS_LIMITS agree). */
+const ATTRIBUTION_MAX = 200;
+
 /** A strong validator from the file's size and modification time: it changes whenever the operator replaces the file. */
 const etagOf = (size: number, mtimeMs: number) => `"${size.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`;
 
@@ -119,7 +155,15 @@ export async function openTiles(map: MapConfig): Promise<TileFiles> {
     const s = await stat(dir).catch(() => null);
     if (!s?.isDirectory()) throw new TilesProblem(`${key} is not a folder this server can read`);
   }
-  return { archives, glyphs: map.glyphs, sprites: map.sprites, attribution: map.attribution };
+  // The bundled basemap credits its data itself (§19.15); after the operator's own line, when there is one.
+  let attribution = map.attribution;
+  if (map.bundled && map.world !== null) {
+    const credit = await readArchiveAttribution(map.world);
+    if (credit === null) throw new TilesProblem('the bundled world archive (tiles/world.pmtiles) carries no attribution — rebuild the site to copy it again, or set AZ_MAP_WORLD');
+    attribution = [map.attribution, credit].filter((a) => a !== '').join(ATTRIBUTION_JOIN);
+    if (attribution.length > ATTRIBUTION_MAX) throw new TilesProblem(`AZ_MAP_ATTRIBUTION with the bundled archive's credit is longer than ${ATTRIBUTION_MAX} characters — shorten it`);
+  }
+  return { archives, glyphs: map.glyphs, sprites: map.sprites, attribution };
 }
 
 /** One byte range of a file of `size` bytes, inclusive. */

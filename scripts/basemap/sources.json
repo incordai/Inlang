@@ -1,0 +1,15 @@
+{
+  "about": "The default world basemap's inputs (scripts/gen-basemap.mjs, docs/chat-block-spec.md §19.15): public-domain vector data at two scales, pinned by release and SHA-256. A file that does not match its hash stops the generator.",
+  "release": "v5.1.2",
+  "licence": "public domain — no permission is needed, crediting is optional; the archive still carries the credit line the data's authors suggest",
+  "attribution": "Made with Natural Earth",
+  "base": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/",
+  "files": {
+    "land-coarse": { "file": "ne_110m_land.geojson", "sha256": "9e0729ee253ca7d7a5c4ae9395fb1902264c5377c52e224d13dd85010e2835d9" },
+    "land": { "file": "ne_50m_land.geojson", "sha256": "e874b27a51d146452be360cafb3cc50c86001074a67d534113e6534682f9826b" },
+    "lakes-coarse": { "file": "ne_110m_lakes.geojson", "sha256": "eb02ecc86c82004fccbf979058bfabbbd6c2d07968c7844d38eb1c9152d2ffc9" },
+    "lakes": { "file": "ne_50m_lakes.geojson", "sha256": "d350b75978b26fe839b797c2c529b2fb8f47fb3983c03f4964e36d5df9378a52" },
+    "borders-coarse": { "file": "ne_110m_admin_0_boundary_lines_land.geojson", "sha256": "d42479fd79552cca4eec7f85fcdca717a790d29ff06be7676f1af0568c6d3f7c" },
+    "borders": { "file": "ne_50m_admin_0_boundary_lines_land.geojson", "sha256": "2faac4f6b34386f3d21b6e018cf151f241f00e5c936d44dd17d7d9bfb147fa48" }
+  }
+}

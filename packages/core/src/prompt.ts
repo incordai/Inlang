@@ -504,10 +504,12 @@ function dataSection(manifests: ReadonlyMap<string, Manifest>, info: boolean): s
     : []);
   const settings = Object.entries(backend.values ?? {}).map(([k, v]) => `${code(`${k} ${Object.keys(v).join('|')}`)}`);
   return [
-    '## Backend and data (only when the site stores data)',
+    '## Backend and data (only when the site stores data or has a chat)',
     '',
     `- ${code('backend')} under site, with ${settings.join(' and ')} indented under it. Addresses and keys live in`,
-    "  the server's `.env`, never in the file. The site's `auth` uses `adapter azbackend`.",
+    "  the server's `.env`, never in the file. Accounts (a chat for signed-in visitors, the default; data tables;",
+    "  sign-in pages) need `email` and the site's `auth` with `adapter azbackend`; a chat with `allow anyone` alone",
+    '  needs only `database` and `model default`.',
     `- ${code('data <table>')} under site: one field per line, ${code('<field> <type> [type-arg ...] [modifier ...]')}.`,
     `  Types: ${DATA_TYPES.join(' ')}.`,
     ...list(TYPE_DESCRIPTIONS, DATA_TYPES),

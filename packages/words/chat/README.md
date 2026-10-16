@@ -29,10 +29,27 @@ page /
     ask      "Do you resole?"
 ```
 
-A chat needs the built-in backend with `model default` (AZ1250), and the
-backend needs `auth adapter azbackend` (AZ1507). Only signed-in visitors may
-ask by default; `allow anyone` opens it to everyone and is warning AZ1256 —
-every stranger spends the operator's model budget.
+A chat needs the built-in backend with `model default` (AZ1250). Only
+signed-in visitors may ask by default, and accounts need `email` and `auth
+adapter azbackend` (AZ1225, AZ1507 — each says what needs them). `allow
+anyone` opens the chat to everyone and is warning AZ1256 — every stranger
+spends the operator's model budget — and a site whose every chat is `allow
+anyone` (with no tables or sign-in) needs no accounts at all:
+
+```
+az 1
+site demo
+  backend
+    database sqlite
+    model    default
+
+page /
+  chat panel
+    allow anyone
+```
+
+Its server keeps no accounts: no sign-in routes, no mail, no session keys
+(chat-block-spec §19.15).
 
 ## Variants
 
@@ -69,7 +86,7 @@ None in this release.
 | `greeting` | string |  |  | 1–200 characters | the first message, shown before anyone asks; never sent to the model |
 | `allow` | enum | `signedin` / `anyone` | `signedin` |  | who may send a message; a signed-out visitor sees **Sign in to ask** |
 | `limit` | int | 1–50 | `20` |  | questions per conversation before the panel says to start a new chat |
-| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` `explore` `map` |  | at most 11 | what an answer may hold besides text (below); a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270; a public table named `tool` beside a component that takes `from` is AZ1272 (`from tool` is the server's data tools) |
+| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` `explore` `map`, or a group: `all`, `figures` (`chart table stats cards dashboard`), `sections` (`pricing faq cta feature`) |  | at most 11 | what an answer may hold besides text (below); a group stands for its components (`az explain show all` lists them), and never brings `pricing` without a public pricing block to quote; a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270; a public table named `tool` beside a component that takes `from` is AZ1272 (`from tool` is the server's data tools) |
 | `knows` | list | table names |  | at most 3 | tables whose rows the answers draw on (below): each must be `allow anyone read` (AZ1252) and filled only by the site's admins (AZ1253); named twice or a fourth is AZ1258, not a table AZ1271 |
 
 ## Children
@@ -94,6 +111,10 @@ server's README, written by `az build`, lists them all. `az dev` runs the
     show pricing faq cta feature
 ```
 
+`show all` allows every component, `show figures` the figures; groups and
+components mix (`show figures map`). `az add chat site.az --show all` writes
+a whole working chat — backend lines included — into the file.
+
 | Word | In an answer |
 |---|---|
 | `pricing` | **quoted**: the site's own pricing block, exactly as its page renders it, billing switch and all — never prices the model wrote |
@@ -112,7 +133,7 @@ answers — they are not page words:
 | `cards` | 1–4 cards: a title, text, a link to a declared destination, and an image that is only a gallery image of this site (by key) or a public row's image — never an address the model writes |
 | `dashboard` | 2–6 stats, charts, tables or cards under one title |
 | `explore` | one data set the visitor explores in the page (chat-block-spec §21.3): the model's rows (labelled AI-generated), a public table's `from`, or a tool's; up to 4 controls — a slider, a date, a toggle, a form of fields that applies them or asks a question built from them, shown on its button before it is sent; and up to 4 views — a table, a stat or a chart, each with one `where` and one of `count`, `sum`, `avg`, `min`, `max`. The page recomputes the views as a control moves, with no request; nothing is a formula, nothing is evaluated |
-| `map` | a map (chat-block-spec §21.4): 1–24 pins and up to 2 straight routes the model writes (labelled "Approximate, AI-placed"), a public table's rows (`from`, coordinates in millionths of a degree), or addresses the server's optional geocoder places ("Approximate location"); drawn from the site's own backend's tiles, with Zoom in, Zoom out and Reset view, popups of text, the attribution the operator sets, and the ordered list of places — the whole map where WebGL2 is missing. Only a site that shows it loads the map library, when the first map arrives |
+| `map` | a map (chat-block-spec §21.4): 1–24 pins and up to 2 straight routes the model writes (labelled "Approximate, AI-placed"), a public table's rows (`from`, coordinates in millionths of a degree), or addresses the server's optional geocoder places ("Approximate location"); drawn from the site's own backend's tiles — the default basemap `az build` copies into the server (land, lakes, borders; no place names) unless the operator sets an archive of their own — with Zoom in, Zoom out and Reset view, popups of text, the attribution, and the ordered list of places — the whole map where WebGL2 is missing. Only a site that shows it loads the map library, when the first map arrives |
 
 A visitor can **share** one finished answer: only then is that answer
 stored, under an unguessable link to `/chat/shared`, for 30 days

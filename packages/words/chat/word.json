@@ -62,7 +62,10 @@
         "cards": "Up to four cards; images only from this site's galleries or tables",
         "dashboard": "Stats, charts, tables and cards under one title",
         "explore": "A data set with sliders, dates, toggles or a form that recompute its tables, stats and charts in the page",
-        "map": "A map of pins and routes from public table rows, or labelled AI-placed, with its places listed as text"
+        "map": "A map of pins and routes from public table rows, or labelled AI-placed, with its places listed as text",
+        "all": "Every component above; pricing only when a public page has a pricing block",
+        "figures": "chart table stats cards dashboard",
+        "sections": "pricing faq cta feature; pricing only with a public pricing block"
       }
     },
     "knows": {

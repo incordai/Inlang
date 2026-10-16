@@ -2,9 +2,11 @@
  * @az module chat
  * Purpose: the file-wide rules of a `chat` block: a backend that talks to a model, what an answer may show and quote and link to, who may ask.
  * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §8.2, §14 (C1, C2, C2b, C3), §20, §21.3, §21.4
- * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, TOOLS_WORD, CHAT_REFUSED, SHARED_ROUTE, KNOWS_MAX, chatOf, chatAnswers, withAnswer, knowsTables, chatDiagnostics, sharedRouteDiagnostics, ChatAnswers
+ * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, TOOLS_WORD, CHAT_REFUSED, SHARED_ROUTE, KNOWS_MAX, SHOW_GROUPS, chatOf, chatAnswers, withAnswer, knowsTables,
+ *   chatDiagnostics, sharedRouteDiagnostics, expandShow, withShowGroups, ChatAnswers
  * Edit guide: rules that need the whole file live here; a rule about one chat block alone is a word.json check (AZ2220–AZ2239).
- * Tests: packages/core/test/chat-decl.test.ts, packages/core/test/chat-answer-decl.test.ts, packages/core/test/chat-float-decl.test.ts
+ * Tests: packages/core/test/chat-decl.test.ts, packages/core/test/chat-answer-decl.test.ts, packages/core/test/chat-float-decl.test.ts,
+ *   packages/core/test/chat-show-groups.test.ts
  */
 
 /**
@@ -30,6 +32,7 @@
 
 import type { Diagnostic, Pos } from './lex.ts';
 import type { Arg } from './parse.ts';
+import type { LinkedWord } from './link.ts';
 import type { SpecBlock, SpecChatAnswer, SpecChatTable } from './spec-block.ts';
 import type { SpecTable } from './data.ts';
 import { CURRENCY_DIGITS } from './currencies.ts';
@@ -48,6 +51,60 @@ export const TOOLS_WORD = 'tool';
 
 /** The words an answer may contain (chat-block-spec §3.2, §20.1), in this order everywhere. */
 export const CHAT_ANSWER_WORDS: readonly string[] = ['pricing', 'faq', 'cta', 'feature', ...CHAT_RICH_WORDS];
+
+/**
+ * The one table of `show`'s group names (chat-block-spec §19.15): each
+ * stands for its members, in CHAT_ANSWER_WORDS' order, and is expanded once
+ * the whole file is read (withShowGroups) — no later stage ever sees a
+ * group. A group never brings a component the site cannot use: `pricing`
+ * only when a page a signed-out visitor can open has a pricing block to
+ * quote (written by name, it is still AZ1255 without one). A name here is
+ * never a component, a refused word or a page word; what each means to an
+ * author is the chat manifest's `show` valueDescriptions (a test ties them).
+ */
+export const SHOW_GROUPS: Readonly<Record<string, readonly string[]>> = {
+  all: CHAT_ANSWER_WORDS,
+  figures: ['chart', 'table', 'stats', 'cards', 'dashboard'],
+  sections: ['pricing', 'faq', 'cta', 'feature'],
+};
+
+/**
+ * `show`'s written words with each group replaced by its members, each
+ * component once, in the order first written; `quotable` is whether a
+ * page a signed-out visitor can open has a pricing block (§19.15). Words
+ * that are neither stay as written, for AZ1254 to give their reason.
+ */
+export function expandShow(written: readonly string[], quotable: boolean): string[] {
+  const out: string[] = [];
+  for (const w of written) {
+    const group = Object.hasOwn(SHOW_GROUPS, w) ? SHOW_GROUPS[w] : undefined;
+    const words = group ? group.filter((m) => m !== QUOTED_WORD || quotable) : [w];
+    for (const m of words) if (!out.includes(m)) out.push(m);
+  }
+  return out;
+}
+
+/**
+ * The linked file with every chat's `show` groups expanded (§19.15) — run
+ * first by the spec stage, which alone sees whether any public page has a
+ * pricing block to quote. A page listed in the site's `auth protect` is
+ * not public (chatAnswers' rule). Everything else is returned as it was.
+ */
+export function withShowGroups(root: readonly LinkedWord[]): LinkedWord[] {
+  const site = root.find((w) => w.word === 'site');
+  const protect = new Set((site?.children.find((w) => w.word === 'auth')?.props.protect?.value ?? '')
+    .split(LIST_SEPARATOR).map((r) => r.trim()).filter(Boolean));
+  const quotable = root.some((p) => p.word === 'page' && !protect.has(p.args[0]?.value ?? '/') && p.children.some((c) => c.word === QUOTED_WORD));
+  const grouped = (w: LinkedWord) => w.word === CHAT_WORD && (w.props.show?.value.split(LIST_SEPARATOR) ?? []).some((x) => Object.hasOwn(SHOW_GROUPS, x));
+  const expand = (w: LinkedWord): LinkedWord => {
+    if (!grouped(w)) return w;
+    const show = w.props.show!;
+    return { ...w, props: { ...w.props, show: { ...show, value: expandShow(show.value.split(LIST_SEPARATOR), quotable).join(LIST_SEPARATOR) } } };
+  };
+  return root.map((top) => (top.word === 'site' || top.word === 'page') && top.children.some(grouped)
+    ? { ...top, children: top.children.map(expand) }
+    : top);
+}
 
 /** The page the build makes for a shared answer (§20.7); an author's page there is AZ1259. */
 export const SHARED_ROUTE = '/chat/shared';
@@ -277,7 +334,7 @@ export function chatDiagnostics(
           }
         } else {
           const why = Object.hasOwn(CHAT_REFUSED, word) ? ` (${CHAT_REFUSED[word]})` : '';
-          err('AZ1254', `${CHAT_WORD}: '${word}' can't be in an answer${why} — show takes ${CHAT_ANSWER_WORDS.slice(0, -1).join(', ')} or ${CHAT_ANSWER_WORDS.at(-1)}`, show.pos);
+          err('AZ1254', `${CHAT_WORD}: '${word}' can't be in an answer${why} — show takes ${CHAT_ANSWER_WORDS.slice(0, -1).join(', ')} or ${CHAT_ANSWER_WORDS.at(-1)}, or a group: ${Object.keys(SHOW_GROUPS).join(', ')}`, show.pos);
         }
       }
     }

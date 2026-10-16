@@ -167,6 +167,7 @@ More detail: [docs/USAGE.md §6](docs/USAGE.md#6-using-az-with-an-ai-assistant).
 | `az dev <file.az> [--port N] [--open] [--no-serve]` | build, serve and reload on every save; a site with a backend runs it locally too |
 | `az spec <file.az>` | print the resolved Spec as JSON |
 | `az check <file.az>` | report diagnostics only, write nothing |
+| `az add chat <file.az> [--page /route \| --float] [--show all]` | add a working chat in place: the backend lines, a chat with a greeting and suggested questions, the model's keys (commented) for `az dev`; backs the file up, ends with `az check` passing, and a second run adds nothing |
 | `az lint [words-dir]` | theme-token check of every word pack |
 | `az migrate <file.az>` | upgrade the file to this grammar version |
 | `az eject <word> [--dir project]` | copy a word into the project's `words/` to own it — one-way |

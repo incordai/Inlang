@@ -12,7 +12,8 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createTiles, openTiles, parseRange, readArchiveHeader, TilesProblem } from '../src/server/chat-tiles.ts';
+import { fileURLToPath } from 'node:url';
+import { ATTRIBUTION_JOIN, createTiles, openTiles, parseRange, readArchiveAttribution, readArchiveHeader, TilesProblem } from '../src/server/chat-tiles.ts';
 import type { MapConfig } from '../src/server/env.ts';
 import { SITE, startBackend } from './helpers.ts';
 
@@ -47,7 +48,7 @@ function files(): { dir: string; map: MapConfig; world: Buffer } {
     dir, world,
     map: {
       world: join(dir, 'world.pmtiles'), region: join(dir, 'region.pmtiles'), glyphs: join(dir, 'glyphs'), sprites: join(dir, 'sprites'),
-      attribution: 'Map data: the operator’s',
+      attribution: 'Map data: the operator’s', bundled: false,
     },
   };
 }
@@ -252,4 +253,25 @@ test('CONTROL: a server whose chat shows no maps has no tile route at all', asyn
   } finally {
     await b.close();
   }
+});
+
+test('the bundled basemap (§19.15): its credit read from its own metadata, after the operator\'s line; an archive without one refused', async () => {
+  const basemap = fileURLToPath(new URL('../assets/basemap/world.pmtiles', import.meta.url));
+  const credit = await readArchiveAttribution(basemap);
+  assert.ok(credit && credit.length > 0 && credit.length <= 200, String(credit));
+  const bundled: MapConfig = { world: basemap, region: null, glyphs: null, sprites: null, attribution: '', bundled: true };
+  const alone = await openTiles(bundled);
+  assert.equal(alone.attribution, credit);
+  assert.deepEqual([alone.archives.world?.header.minZoom, alone.archives.world?.header.maxZoom], [0, 6]);
+  const withRegion = await openTiles({ ...bundled, attribution: 'Region data: the operator' });
+  assert.equal(withRegion.attribution, `Region data: the operator${ATTRIBUTION_JOIN}${credit}`);
+  await assert.rejects(openTiles({ ...bundled, attribution: 'x'.repeat(200) }), (e: unknown) => e instanceof TilesProblem && /longer than 200 characters/.test(e.message));
+  // An archive with no credit of its own (this file's, whose metadata is empty) is never shown uncredited.
+  const f = files();
+  try {
+    assert.equal(await readArchiveAttribution(f.map.world!), null);
+    await assert.rejects(openTiles({ ...bundled, world: f.map.world }), (e: unknown) => e instanceof TilesProblem && /carries no attribution/.test(e.message));
+    // CONTROL: an operator's archive is credited by AZ_MAP_ATTRIBUTION alone, as before.
+    assert.equal((await openTiles(f.map)).attribution, f.map.attribution);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });

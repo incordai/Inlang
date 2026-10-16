@@ -69,13 +69,13 @@ export interface OpenedChat {
  */
 export async function openChat(task: string, nothing: string): Promise<OpenedChat | number> {
   const { loadConfig } = await import('./env.ts');
-  const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string; database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api'; images?: boolean; chat?: boolean };
+  const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string; database: 'sqlite' | 'postgres' | 'mysql'; email?: 'smtp' | 'api'; images?: boolean; chat?: boolean };
   if (site.chat !== true) {
     process.stderr.write(`backend: this site shows no chat — ${nothing}\n`);
     return 1;
   }
   if (existsSync('.env')) process.loadEnvFile('.env');
-  const loaded = loadConfig(process.env, { database: site.database, email: site.email, ...(site.images ? { images: true } : {}), chat: true }, site.siteName);
+  const loaded = loadConfig(process.env, { database: site.database, ...(site.email !== undefined ? { email: site.email } : {}), ...(site.images ? { images: true } : {}), chat: true }, site.siteName);
   if (!loaded.ok) {
     process.stderr.write(`backend: cannot ${task} — fix these in .env (see .env.example):\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}\n`);
     return 1;

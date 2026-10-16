@@ -24,7 +24,7 @@ FACT, from the code as of commit `8add978`:
 | Fact | Where |
 |---|---|
 | `backend` is a site-level structure keyword, two closed settings | `packages/core/src/link.ts:145`, `packages/core/src/backend.ts` |
-| A site with `backend` must use `auth adapter azbackend` (AZ1507) | `packages/core/src/spec.ts:313` |
+| A site with `backend` must use `auth adapter azbackend` (AZ1507) — tables always need accounts, so a site with them still must (chat-block-spec §19.15, `packages/core/src/accounts.ts`) | `packages/core/src/spec.ts:313` |
 | One query interface over three engines; `?` placeholders only; values never spliced | `packages/backend/src/server/db.ts` |
 | Pooler-safe rule: every query is ONE unnamed statement; no `SET`, locks, `LISTEN`, or multi-call transactions | `db.ts:96`, backend-spec §3.1 |
 | Migrations are versioned per-engine SQL steps, applied on every start, no lock | `migrations.ts`, `db.ts:132` |

@@ -74,6 +74,14 @@ export interface Toolbox {
     { ok: true; files: string[]; note: string } | { ok: false; message: string };
   readonly backendInit: (serverDir: string) =>
     { ok: true; path: string } | { ok: false; message: string };
+  /**
+   * az add chat (chat-block-spec §19.15): the .az file edited in place — the
+   * backend lines, a chat — and the dev server's model keys beside it, each
+   * file backed up first; ends with az check. Refuses, changing nothing, on
+   * a file that does not compile or an edit that would not.
+   */
+  readonly addChat: (file: string, options: { float: boolean; page: string | null; show: string[] | null; outDir: string }) =>
+    { ok: true; changes: readonly string[]; kept: readonly string[]; backups: readonly string[]; check: string } | { ok: false; message: string };
   readonly grammar: () => string;
   /**
    * az doctor (word-quality-gate §5): this machine and the project, one line
@@ -298,6 +306,26 @@ export const TOOLS: ToolDef[] = [
       const r = box.eject(word, sb.root);
       if (!r.ok) throw new ToolFailure(r.message);
       return { word, oneWay: true, files: r.files, note: r.note };
+    },
+  },
+  {
+    name: 'az_add_chat',
+    description: 'REWRITES THE .az FILE IN PLACE, WRITES FILES AND RUNS PROJECT CODE. Add a working chat to a .az file: the backend lines it needs (database sqlite, model default), a chat panel on a page (default /, made when missing) or a chat float on every page, with a greeting and two suggested questions, open to anyone unless the site keeps accounts; and the model\'s keys, commented, in .az-dev/backend.env beside it. Backs up every file it changes (<file>.bak, never over an older backup), and ends with az check, which builds in memory with the project\'s own words. Refuses, changing nothing, when the file does not compile, is a link, or the edit would not pass az check. A second call adds nothing.',
+    inputSchema: obj({
+      file: FILE,
+      page: 'The page the chat panel goes on, e.g. /help. Default: /.',
+      float: '"true" for a chat float under site, on every page, instead of a panel.',
+      show: 'What answers may hold besides text, comma-separated: all, a group (figures, sections) or components (faq,cta,chart…).',
+    }, ['file']),
+    annotations: REWRITES_SOURCE,
+    run: ({ file, page, float, show }, box, sb) => {
+      if (float !== undefined && float !== 'true' && float !== 'false') throw new ToolFailure("'float' is \"true\" or \"false\"");
+      if (float === 'true' && page !== undefined) throw new ToolFailure('a float is on every page; page puts a panel on one — give one of them');
+      const words = show === undefined ? null : show.split(',').map((w) => w.trim()).filter(Boolean);
+      if (words !== null && words.length === 0) throw new ToolFailure("'show' needs a component or a group, e.g. all");
+      const r = box.addChat(existing(sb, file), { float: float === 'true', page: page ?? null, show: words, outDir: sb.resolve('.az-build') });
+      if (!r.ok) throw new ToolFailure(r.message);
+      return { changes: r.changes, kept: r.kept, backups: r.backups.map((b) => shown(sb.root, b)), check: r.check };
     },
   },
   {

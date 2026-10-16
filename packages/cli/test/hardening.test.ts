@@ -182,7 +182,7 @@ test('a failed dev start leaves no server listening', async () => {
   const listening = () => process.getActiveResourcesInfo().filter((r) => r === 'TCPServerWrap').length;
   const before = listening();
   await assert.rejects(serve({
-    source: p.file, outDir: p.out, sitePort: 0, open: false, backend: { siteName: 'aurora' }, print: () => {},
+    source: p.file, outDir: p.out, sitePort: 0, open: false, backend: { siteName: 'aurora', accounts: true }, print: () => {},
   }));
   // A closed handle leaves the list on a later turn of the event loop.
   await new Promise((settled) => setTimeout(settled, SETTLE_MS));

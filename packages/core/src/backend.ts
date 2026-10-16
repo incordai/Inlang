@@ -1,6 +1,6 @@
 /**
  * @az module backend
- * Purpose: the `backend` declaration as data: closed choices for database, email and model.
+ * Purpose: the `backend` declaration as data: closed choices for database, email (only a server with accounts) and model.
  * Spec: docs/backend-spec.md §2 · docs/chat-block-spec.md §3.1
  * Exports: BACKEND_SETTINGS, BACKEND_REQUIRED, BACKEND_HINTS, BACKEND_DATABASES, BACKEND_EMAIL, BACKEND_MODEL, SpecBackend
  * Edit guide: a new choice needs the server (packages/backend) to support it and a describe.ts row.
@@ -41,8 +41,13 @@ export const BACKEND_SETTINGS: Readonly<Record<string, readonly string[]>> = {
   model: BACKEND_MODEL,
 };
 
-/** The settings every declaration must name; `model` is written only by a site with chat. */
-export const BACKEND_REQUIRED: readonly string[] = ['database', 'email'];
+/**
+ * The settings every declaration must name. `email` is needed only by a
+ * server that keeps accounts (sign-in links and password resets are mailed),
+ * which the spec stage decides from the whole file (spec.ts, AZ1225); `model`
+ * is written only by a site with chat.
+ */
+export const BACKEND_REQUIRED: readonly string[] = ['database'];
 
 /**
  * What a value outside a setting's choices is told, when there is more to
@@ -55,7 +60,12 @@ export const BACKEND_HINTS: Readonly<Record<string, string>> = {
 
 export interface SpecBackend {
   readonly database: BackendDatabase;
-  readonly email: BackendEmail;
+  /**
+   * Present when the server keeps accounts. Absent only on a site where
+   * nothing needs one — every chat `allow anyone`, no tables, no `auth`
+   * (chat-block-spec §19.15): that server has no sign-in routes and sends no mail.
+   */
+  readonly email?: BackendEmail;
   /** Present only when the file writes `model default`, so a site without chat serialises as before. */
   readonly model?: BackendModel;
 }

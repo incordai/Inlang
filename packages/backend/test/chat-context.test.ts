@@ -264,10 +264,19 @@ test('the map keys (§21.4.3): paths read as given; the attribution required wit
   const setup = { database: 'sqlite' as const, email: 'smtp' as const, chat: true, map: true };
   const ok = loadConfig({ ...base, AZ_MAP_WORLD: './tiles/world.pmtiles', AZ_MAP_ATTRIBUTION: 'Map data: its source' }, setup, 's');
   assert.ok(ok.ok);
-  assert.deepEqual(ok.config.map, { world: './tiles/world.pmtiles', region: null, glyphs: null, sprites: null, attribution: 'Map data: its source' });
+  assert.deepEqual(ok.config.map, { world: './tiles/world.pmtiles', region: null, glyphs: null, sprites: null, attribution: 'Map data: its source', bundled: false });
   const none = loadConfig(base, setup, 's');
   assert.ok(none.ok, 'no archive: the server starts, its maps are lists');
-  assert.deepEqual(none.ok && none.config.map, { world: null, region: null, glyphs: null, sprites: null, attribution: '' });
+  assert.deepEqual(none.ok && none.config.map, { world: null, region: null, glyphs: null, sprites: null, attribution: '', bundled: false });
+  // §19.15: without AZ_MAP_WORLD the bundled basemap is the world, and brings its own credit (no AZ_MAP_ATTRIBUTION needed).
+  const bundled = loadConfig(base, setup, 's', { bundledWorld: '/srv/tiles/world.pmtiles' });
+  assert.ok(bundled.ok);
+  assert.deepEqual(bundled.config.map, { world: '/srv/tiles/world.pmtiles', region: null, glyphs: null, sprites: null, attribution: '', bundled: true });
+  const own = loadConfig({ ...base, AZ_MAP_WORLD: './mine.pmtiles', AZ_MAP_ATTRIBUTION: 'Mine' }, setup, 's', { bundledWorld: '/srv/tiles/world.pmtiles' });
+  assert.ok(own.ok);
+  assert.deepEqual([own.config.map?.world, own.config.map?.bundled], ['./mine.pmtiles', false], 'the operator\'s archive replaces the bundled one');
+  const region = loadConfig({ ...base, AZ_MAP_REGION: './region.pmtiles' }, setup, 's', { bundledWorld: '/srv/tiles/world.pmtiles' });
+  assert.ok(!region.ok && region.problems.some((p) => p.startsWith('AZ_MAP_ATTRIBUTION is missing')), 'a region over the bundled world is the operator\'s data: its credit is required');
   for (const [env, why] of [
     [{ AZ_MAP_WORLD: 'w.pmtiles' }, /^AZ_MAP_ATTRIBUTION is missing/],
     [{ AZ_MAP_REGION: 'r.pmtiles', AZ_MAP_ATTRIBUTION: 'x' }, /^AZ_MAP_REGION is drawn over the world archive/],

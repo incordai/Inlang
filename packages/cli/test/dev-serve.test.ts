@@ -157,6 +157,55 @@ test('az dev chats through the scripted demo, written once to .az-dev/, unless b
   }
 });
 
+test('a public chat\'s dev backend keeps no accounts: no mailbox, no mail keys, no /auth — and the demo answers anyone', async () => {
+  const project = tmp();
+  const ports = { site: await freePort(0), backend: await freePort(0), mailbox: 0 };
+  const chat = {
+    prompt: 'Answer about the demo.\n',
+    context: JSON.stringify({ site: { name: 'demo' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20 } }, routes: ['/'] }),
+  };
+  assert.equal('AZ_EMAIL_API_URL' in devBackendEnv(ports, 's'.repeat(43), ':memory:', null), false);
+  const backend = await startDevBackend(project, 'demo', ports, null, quiet, undefined, chat);
+  try {
+    const headers = { 'content-type': 'application/json', origin: `http://127.0.0.1:${ports.site}`, 'x-az-request': '1' };
+    const r = await fetch(`${backend.url}/chat`, {
+      method: 'POST', headers, body: JSON.stringify({ page: '/', messages: [{ role: 'visitor', text: 'hello' }] }), signal: AbortSignal.timeout(10_000),
+    });
+    assert.equal(r.status, 200);
+    assert.match(await r.text(), /This is the local demo answer from az dev/);
+    const signUp = await fetch(`${backend.url}/auth/sign-up`, { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(10_000) });
+    assert.equal(signUp.status, 404);
+  } finally {
+    await backend.close();
+  }
+});
+
+test('a chat that shows maps: az dev serves the bundled world basemap with its credit (§19.15)', async () => {
+  const project = tmp();
+  const ports = { site: await freePort(0), backend: await freePort(0), mailbox: 0 };
+  const printed: string[] = [];
+  const chat = {
+    prompt: 'Answer.\n',
+    context: JSON.stringify({ site: { name: 'demo' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20, show: ['map'] } }, routes: ['/'] }),
+    map: true,
+  };
+  const backend = await startDevBackend(project, 'demo', ports, null, (l) => printed.push(l), undefined, chat);
+  try {
+    const origin = `http://127.0.0.1:${ports.site}`;
+    const r = await fetch(`${backend.url}/tiles/map.json`, { headers: { origin }, signal: AbortSignal.timeout(10_000) });
+    assert.equal(r.status, 200);
+    const served = await r.json() as { archives: { name: string; maxzoom: number }[]; attribution: string };
+    assert.deepEqual(served.archives.map((a) => [a.name, a.maxzoom]), [['world', 6]]);
+    assert.ok(served.attribution.length > 0);
+    const range = await fetch(`${backend.url}/tiles/world.pmtiles`, { headers: { origin, range: 'bytes=0-126' }, signal: AbortSignal.timeout(10_000) });
+    assert.equal(range.status, 206);
+    assert.equal(Buffer.from(await range.arrayBuffer()).toString('latin1', 0, 7), 'PMTiles');
+    assert.ok(printed.some((l) => l.includes('maps draw the bundled world basemap')));
+  } finally {
+    await backend.close();
+  }
+});
+
 test('a production build carries no dev profile and no mailbox', () => {
   const dir = tmp();
   const file = join(dir, 'site.az');
