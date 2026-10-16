@@ -894,7 +894,8 @@ For each table in `knows`, per message:
 ### 8.3 What is sent, exactly
 
 `system` = the chat's `prompt-<n>.txt` + `context.json` (as text) + the
-rows of §8.2 + the current page's route; `turns` = the trimmed conversation. Nothing else. A
+current page's route and what its components may use + the operator's
+tools + the rows of §8.2, last (ordered for the prompt cache, §19.14); `turns` = the trimmed conversation. Nothing else. A
 test builds a request with a signed-in visitor, private fields and an
 owner-only table present, and asserts on the exact bytes handed to the fake
 adapter: no private value, no owner-only row, no email, no address, no
@@ -984,7 +985,9 @@ and C2's token benchmark runs through it.
 
 ### 11.4 Observability — no third-party telemetry
 
-- One stderr line per answer: outcome code, duration, tokens, dropped count.
+- One stderr line per answer: outcome code, duration, tokens (and `cached n`
+  when the provider read part of the input from its prompt cache, §19.14),
+  dropped count.
 - `az_chat_usage` per day; when the site has `data`, `/admin` shows a usage
   tile (today, last 30 days, budget left) to listed admins; otherwise `az
   backend usage <server-dir>` prints it.
@@ -2113,6 +2116,28 @@ dearest chat's file). The prompt no longer says "use only the components
 the page allows (said at the end)", and the per-request text no longer
 lists them: what a chat's prompt teaches is all it may show.
 `server/chat/prompt.txt` is gone.
+
+**The system text is ordered for the prompt cache (§8.3 changed).** What
+changes least comes first, so the long prefix is the same bytes for every
+question on a page: the chat's prompt, the site content, the page line and
+what its components may use (quotes, destinations, tables, images), the
+operator's tools and the geocoder's place line — all fixed while the server
+runs — and last the `knows` rows, the one part read per question
+(`ROWS_HEADING`). A test builds the text for three questions and checks
+that the one without rows is the start of each of the others, byte for
+byte. The `completions` wire shape needs no request field for this: its
+common hosted form caches a prompt prefix of 1 024 tokens or more by itself
+(the provider's prompt-caching guide and its chat-completions streaming
+reference, read 2026-10-16), so the adapter stays as it was and sends no
+cache marker — a marker of one provider's own shape would not be the common
+shape. The reply's `usage.prompt_tokens_details.cached_tokens` (documented
+in the streamed chunk, a part of `prompt_tokens`) is read when present: a
+count no larger than the input is the answer's `cached` tokens, anything
+else is ignored. They are added up per day in `az_chat_usage.cached_tokens`
+(chat migration 6, 0 for days before it), shown as "cached input" in
+`az backend usage` and as "Cached input tokens" on `/admin`, and logged as
+`cached n`. They count in the budget as input like any other — what the
+provider charges for them is the operator's price, not the server's.
 
 ---
 

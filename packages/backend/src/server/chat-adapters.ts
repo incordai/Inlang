@@ -15,7 +15,11 @@
  * `completions` speaks the common chat-completions streaming shape: a POST
  * of `{ model, messages, stream, max_tokens }` answered by `data:` lines of
  * JSON deltas ending with `data: [DONE]`. Hosted APIs and local model
- * servers speak it. `fake` replays scripted answers for tests and local
+ * servers speak it. Its common hosted form caches a long prompt prefix by
+ * itself, with no field in the request (chat-block-spec §19.14): the server
+ * keeps the system text's prefix byte-identical across questions (chat.ts
+ * systemText), and the usage's `prompt_tokens_details.cached_tokens`, when
+ * the stream carries it, is reported as the input tokens read from cache. `fake` replays scripted answers for tests and local
  * development; the server refuses it outside a loopback deployment (env.ts).
  *
  * Copied into a generated server; imports only its siblings and node built-ins.
@@ -35,7 +39,8 @@ const FAKE_DELAY_MAX = 2_000;
 
 export interface ChatChunk {
   readonly text?: string;
-  readonly usage?: { readonly input: number; readonly output: number };
+  /** The provider's counts; `cached` is the part of `input` read from its prompt cache, when it says (never more than `input`). */
+  readonly usage?: { readonly input: number; readonly output: number; readonly cached?: number };
 }
 
 export interface ChatStreamRequest {
@@ -120,12 +125,14 @@ export function createCompletionsAdapter(
         const c = chunk as { choices?: unknown; usage?: unknown };
         const choice = Array.isArray(c.choices) ? c.choices[0] as { delta?: { content?: unknown } } | undefined : undefined;
         const text = choice?.delta?.content;
-        const u = c.usage as { prompt_tokens?: unknown; completion_tokens?: unknown } | null | undefined;
+        const u = c.usage as { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } | null } | null | undefined;
         const input = count(u?.prompt_tokens);
         const output = count(u?.completion_tokens);
+        // A part of the input: a count past the input is no count.
+        const cached = count(u?.prompt_tokens_details?.cached_tokens);
         return [
           ...(typeof text === 'string' && text !== '' ? [{ text }] : []),
-          ...(input !== null && output !== null ? [{ usage: { input, output } }] : []),
+          ...(input !== null && output !== null ? [{ usage: { input, output, ...(cached !== null && cached <= input ? { cached } : {}) } }] : []),
         ];
       };
       try {
@@ -167,7 +174,7 @@ export interface FakeAnswer {
   readonly chunks: readonly string[];
   /** A pause before each chunk, ms. */
   readonly delayMs?: number;
-  readonly usage?: { readonly input: number; readonly output: number };
+  readonly usage?: { readonly input: number; readonly output: number; readonly cached?: number };
   /** Fail as if the provider answered this HTTP status. */
   readonly fail?: number;
   /** Never answer — for timeout and disconnect checks. */
@@ -195,8 +202,9 @@ export function parseFakeScript(text: string): FakeScript | string {
     if (x.system !== undefined && (typeof x.system !== 'string' || x.system === '')) return `${where}: system must be text`;
     if (!Array.isArray(x.chunks) || !x.chunks.every((c) => typeof c === 'string')) return `${where}: chunks must be a list of text`;
     if (x.delayMs !== undefined && !(count(x.delayMs) !== null && (x.delayMs as number) <= FAKE_DELAY_MAX)) return `${where}: delayMs must be 0–${FAKE_DELAY_MAX}`;
-    const u = x.usage as { input?: unknown; output?: unknown } | undefined;
+    const u = x.usage as { input?: unknown; output?: unknown; cached?: unknown } | undefined;
     if (u !== undefined && (count(u?.input) === null || count(u?.output) === null)) return `${where}: usage must be { input, output } counts`;
+    if (u?.cached !== undefined && !(count(u.cached) !== null && (u.cached as number) <= (u.input as number))) return `${where}: usage.cached must be a count no larger than input`;
     if (x.fail !== undefined && !(count(x.fail) !== null && (x.fail as number) >= 400 && (x.fail as number) <= 599)) return `${where}: fail must be an HTTP error status`;
     if (x.stall !== undefined && typeof x.stall !== 'boolean') return `${where}: stall must be true or false`;
   }

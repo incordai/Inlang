@@ -33,7 +33,7 @@ const CONTEXT = JSON.stringify({
 
 const SCRIPT: FakeScript = (() => {
   const s = parseFakeScript(JSON.stringify({ answers: [
-    { when: 'price', chunks: ['Plans start ', `at nine. ${MARKER}`], usage: { input: 900, output: 12 } },
+    { when: 'price', chunks: ['Plans start ', `at nine. ${MARKER}`], usage: { input: 900, cached: 640, output: 12 } },
     { when: 'stall', chunks: [], stall: true },
     { when: 'slow', chunks: ['one ', 'two'], delayMs: 300 },
     { when: 'broken', chunks: [], fail: 503 },
@@ -254,7 +254,7 @@ test('the budget: a request whose largest cost would cross it is refused before 
     const c = client(s.url);
     // 'price' reports 912 tokens: within the budget before, over it after.
     assert.equal((await events(await ask(c, [say('price?')]))).at(-1)!.event, 'done');
-    assert.deepEqual(await createUsage(s.db).row(utcDay(Date.now())), { input: 900, output: 12, messages: 1, dropped: 0, blocked: 0 });
+    assert.deepEqual(await createUsage(s.db).row(utcDay(Date.now())), { input: 900, cached: 640, output: 12, messages: 1, dropped: 0, blocked: 0 }, 'the cached part of the input counted with it (§19.14)');
     const calls = s.fake.calls();
     for (let i = 0; i < 2; i++) {
       const r = await ask(c, [say('hello')]);
@@ -358,7 +358,7 @@ test('no message text, answer text, address or account ever reaches the log', as
     await events(await ask(c, [say(`broken ${MARKER}`)]));
     assert.ok(s.log.length >= 2, 'something was logged');
     assert.ok(s.log.every((l) => !l.includes(MARKER) && !l.includes('127.0.0.1') && !l.includes('nine')), s.log.join(' | '));
-    assert.ok(s.log.some((l) => /^chat: done \d+ms tokens 900\/12$/.test(l)), s.log.join(' | '));
+    assert.ok(s.log.some((l) => /^chat: done \d+ms tokens 900\/12 cached 640$/.test(l)), s.log.join(' | '));
   } finally { await s.close(); }
 });
 

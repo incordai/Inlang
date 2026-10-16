@@ -139,6 +139,8 @@ export interface ChatUsageDay {
   readonly day: string;
   readonly messages: number;
   readonly input: number;
+  /** The part of input the provider read from its prompt cache; 0 when it said nothing. */
+  readonly cached: number;
   readonly output: number;
   readonly dropped: number;
   /** Questions the moderation hook blocked: the model was never asked. */

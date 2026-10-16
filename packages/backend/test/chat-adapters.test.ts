@@ -59,6 +59,31 @@ test('completions: posts the shape with the bearer key, streams deltas and usage
   } finally { await m.close(); }
 });
 
+test('completions §19.14: the input read from the provider\'s prompt cache is reported as part of the input; the request asks for no cache', async () => {
+  const usage = (u: Record<string, unknown>) => (_q: unknown, res: import('node:http').ServerResponse) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end(`${delta('x')}data: ${JSON.stringify({ choices: [], usage: u })}\n\ndata: [DONE]\n\n`);
+  };
+  const cases: [Record<string, unknown>, ChatChunk['usage']][] = [
+    [{ prompt_tokens: 2100, completion_tokens: 40, prompt_tokens_details: { cached_tokens: 1920 } }, { input: 2100, output: 40, cached: 1920 }],
+    [{ prompt_tokens: 2100, completion_tokens: 40, prompt_tokens_details: { cached_tokens: 0 } }, { input: 2100, output: 40, cached: 0 }],
+    // A count past the input, or not a count, is no count of the cache; the input and output still stand.
+    [{ prompt_tokens: 100, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 101 } }, { input: 100, output: 4 }],
+    [{ prompt_tokens: 100, completion_tokens: 4, prompt_tokens_details: { cached_tokens: '90' } }, { input: 100, output: 4 }],
+    [{ prompt_tokens: 100, completion_tokens: 4, prompt_tokens_details: null }, { input: 100, output: 4 }],
+    [{ prompt_tokens: 100, completion_tokens: 4 }, { input: 100, output: 4 }],
+  ];
+  for (const [u, want] of cases) {
+    const m = await modelServer(usage(u));
+    try {
+      const chunks = await collect(ask(createCompletionsAdapter({ url: m.url, key: 'k', model: 'm' })));
+      assert.deepEqual(chunks.at(-1), { usage: want }, JSON.stringify(u));
+      // The common shape caches a long prefix by itself: nothing about a cache is sent.
+      assert.deepEqual(Object.keys(m.seen[0].body as object).sort(), ['max_tokens', 'messages', 'model', 'stream', 'stream_options']);
+    } finally { await m.close(); }
+  }
+});
+
 test('completions: no key, no Authorization header (a local model server)', async () => {
   const m = await modelServer((_q, res) => { res.writeHead(200); res.end(`${delta('x')}data: [DONE]\n\n`); });
   try {

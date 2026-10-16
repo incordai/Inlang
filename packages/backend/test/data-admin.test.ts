@@ -329,8 +329,8 @@ test('SECURITY chat usage: GET /admin/chat answers admins only — signed out 40
     const ana = await signUp(h, 'Ana', true);
     const today = new Date(h.clock.now).toISOString().slice(0, 10);
     const usage = createUsage(h.db);
-    await usage.add(today, 1200, 80, 1);
-    await usage.add(today, 300, 20, 0);
+    await usage.add(today, 1200, 80, 1, 0);
+    await usage.add(today, 300, 20, 0, 0);
     await usage.block(today);
     // A share holds a question and an answer's text: the view counts it and reads neither.
     const shares = createShareStore({ db: h.db, days: 30, max: 100, now: () => h.clock.now });
@@ -347,7 +347,7 @@ test('SECURITY chat usage: GET /admin/chat answers admins only — signed out 40
       usage: {
         today,
         budget: { daily: 300_000, spent: 1600, left: 298_400 },
-        days: [{ day: today, input: 1500, output: 100, messages: 2, dropped: 1, blocked: 1, shares: 1 }],
+        days: [{ day: today, input: 1500, cached: 0, output: 100, messages: 2, dropped: 1, blocked: 1, shares: 1 }],
         shares: { enabled: true, kept: 1 },
       },
     });

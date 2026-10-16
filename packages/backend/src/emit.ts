@@ -325,7 +325,8 @@ readable), to the model named in \`.env\`, and streams the answer back. The
   outcome, a duration and token counts — never a message, an address or an
   account.
 - **Usage.** \`az backend usage <this folder>\` prints today's spend against
-  the budget, the last 30 days' messages, tokens, dropped components,
+  the budget, the last 30 days' messages, tokens (with the input the
+  provider read from its prompt cache, when it says), dropped components,
   questions the moderation hook blocked and shares, and the shares kept — counts only, read from the database without
   changing it. A site with data tables shows the same on \`/admin\` to the
   addresses in \`AZ_ADMIN_EMAILS\` (\`GET /admin/chat\`, admins only).

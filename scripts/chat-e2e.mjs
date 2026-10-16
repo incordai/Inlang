@@ -2657,7 +2657,7 @@ async function adminFlow(b, name, origins) {
     const todayRow = view.rows.find((r) => r[0] === today);
     check(`${name}: /admin shows the chat's usage to its admin — today's messages and tokens, the budget left`,
       Boolean(todayRow) && Number(todayRow[1].replace(/\D/g, '')) > 0 && /tokens spent, [\d,.\s  ]+ left\./.test(view.text)
-      && JSON.stringify(view.heads) === JSON.stringify(['Day', 'Messages', 'Input tokens', 'Output tokens', 'Dropped components', 'Blocked by moderation', 'Shares made']),
+      && JSON.stringify(view.heads) === JSON.stringify(['Day', 'Messages', 'Input tokens', 'Cached input tokens', 'Output tokens', 'Dropped components', 'Blocked by moderation', 'Shares made']),
       JSON.stringify(view).slice(0, 300));
     const whole = await page.evaluate(() => document.body.textContent ?? '');
     check(`${name}: the usage view holds no visitor's or model's words`, !whole.includes(VISITOR_MARK) && !whole.includes(ANSWER_MARK) && !whole.includes(MODERATE_BLOCK) && !whole.includes('lumens'));

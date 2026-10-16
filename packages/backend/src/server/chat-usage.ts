@@ -107,6 +107,16 @@ export const CHAT_MIGRATIONS: {
         mysql: ['ALTER TABLE az_chat_shares ADD COLUMN proof CHAR(64)', 'CREATE UNIQUE INDEX az_chat_shares_proof ON az_chat_shares (proof)'],
       },
     },
+    {
+      // chat-block-spec §19.14: the input tokens the provider read from its prompt cache, a part of input_tokens;
+      // 0 where the provider says nothing of a cache. Days counted before this have 0.
+      version: 6,
+      sql: {
+        sqlite: ['ALTER TABLE az_chat_usage ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0'],
+        postgres: ['ALTER TABLE az_chat_usage ADD COLUMN cached_tokens BIGINT NOT NULL DEFAULT 0'],
+        mysql: ['ALTER TABLE az_chat_usage ADD COLUMN cached_tokens BIGINT NOT NULL DEFAULT 0'],
+      },
+    },
   ],
 };
 
@@ -155,15 +165,15 @@ export const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0
 
 /** One answer's counts, as one statement (§6.5): the day's row made or added to. */
 function upsert(dialect: Db['dialect']): string {
-  const cols = 'day, input_tokens, output_tokens, messages, dropped, blocked';
+  const cols = 'day, input_tokens, output_tokens, messages, dropped, blocked, cached_tokens';
   if (dialect === 'mysql') {
-    return `INSERT INTO az_chat_usage (${cols}) VALUES (?, ?, ?, 1, ?, 0) AS n ON DUPLICATE KEY UPDATE `
+    return `INSERT INTO az_chat_usage (${cols}) VALUES (?, ?, ?, 1, ?, 0, ?) AS n ON DUPLICATE KEY UPDATE `
       + 'input_tokens = az_chat_usage.input_tokens + n.input_tokens, output_tokens = az_chat_usage.output_tokens + n.output_tokens, '
-      + 'messages = az_chat_usage.messages + 1, dropped = az_chat_usage.dropped + n.dropped';
+      + 'messages = az_chat_usage.messages + 1, dropped = az_chat_usage.dropped + n.dropped, cached_tokens = az_chat_usage.cached_tokens + n.cached_tokens';
   }
-  return `INSERT INTO az_chat_usage (${cols}) VALUES (?, ?, ?, 1, ?, 0) ON CONFLICT (day) DO UPDATE SET `
+  return `INSERT INTO az_chat_usage (${cols}) VALUES (?, ?, ?, 1, ?, 0, ?) ON CONFLICT (day) DO UPDATE SET `
     + 'input_tokens = az_chat_usage.input_tokens + excluded.input_tokens, output_tokens = az_chat_usage.output_tokens + excluded.output_tokens, '
-    + 'messages = az_chat_usage.messages + 1, dropped = az_chat_usage.dropped + excluded.dropped';
+    + 'messages = az_chat_usage.messages + 1, dropped = az_chat_usage.dropped + excluded.dropped, cached_tokens = az_chat_usage.cached_tokens + excluded.cached_tokens';
 }
 
 /** One blocked question, as one statement: the day's row made with nothing spent, or its `blocked` added to. */
@@ -176,12 +186,12 @@ function blockUpsert(dialect: Db['dialect']): string {
 export interface Usage {
   /** Tokens (input + output) spent on `day`. */
   spent(day: string): Promise<number>;
-  /** Count one answer on `day`. */
-  add(day: string, input: number, output: number, dropped: number): Promise<void>;
+  /** Count one answer on `day`; `cached` is the part of `input` the provider read from its prompt cache. */
+  add(day: string, input: number, output: number, dropped: number, cached: number): Promise<void>;
   /** Count one question the moderation hook blocked on `day` (§6.8): no tokens, no message. */
   block(day: string): Promise<void>;
   /** The day's row, for a report: null when nothing was counted. */
-  row(day: string): Promise<{ input: number; output: number; messages: number; dropped: number; blocked: number } | null>;
+  row(day: string): Promise<{ input: number; cached: number; output: number; messages: number; dropped: number; blocked: number } | null>;
   /** Remove days older than USAGE_KEEP_DAYS before `now`; how many went. */
   sweep(now: number): Promise<number>;
 }
@@ -194,15 +204,17 @@ export function createUsage(db: Db): Usage {
       const r = await db.get('SELECT input_tokens, output_tokens FROM az_chat_usage WHERE day = ?', [day]);
       return r ? Number(r.input_tokens) + Number(r.output_tokens) : 0;
     },
-    async add(day, input, output, dropped) {
-      await db.run(sql, [day, input, output, dropped]);
+    async add(day, input, output, dropped, cached) {
+      await db.run(sql, [day, input, output, dropped, cached]);
     },
     async block(day) {
       await db.run(blocked, [day]);
     },
     async row(day) {
-      const r = await db.get('SELECT input_tokens, output_tokens, messages, dropped, blocked FROM az_chat_usage WHERE day = ?', [day]);
-      return r ? { input: Number(r.input_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped), blocked: Number(r.blocked) } : null;
+      const r = await db.get('SELECT input_tokens, cached_tokens, output_tokens, messages, dropped, blocked FROM az_chat_usage WHERE day = ?', [day]);
+      return r ? {
+        input: Number(r.input_tokens), cached: Number(r.cached_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped), blocked: Number(r.blocked),
+      } : null;
     },
     sweep: (now) => db.run('DELETE FROM az_chat_usage WHERE day < ?', [utcDay(now - USAGE_KEEP_DAYS * DAY_MS)]),
   };
@@ -215,6 +227,8 @@ export const REPORT_DAYS = 30;
 export interface UsageDay {
   readonly day: string;
   readonly input: number;
+  /** The part of `input` the provider read from its prompt cache (chat-block-spec §19.14); 0 when it said nothing. */
+  readonly cached: number;
   readonly output: number;
   readonly messages: number;
   readonly dropped: number;
@@ -245,7 +259,7 @@ export async function usageReport(db: Db, config: { readonly dailyTokens: number
   const today = utcDay(now);
   const from = utcDay(now - (REPORT_DAYS - 1) * DAY_MS);
   const rows = await db.all(
-    'SELECT day, input_tokens, output_tokens, messages, dropped, blocked FROM az_chat_usage WHERE day >= ? AND day <= ? ORDER BY day DESC',
+    'SELECT day, input_tokens, cached_tokens, output_tokens, messages, dropped, blocked FROM az_chat_usage WHERE day >= ? AND day <= ? ORDER BY day DESC',
     [from, today],
   );
   // The shares still kept, by the day they were made: counted per day number, never read.
@@ -259,13 +273,13 @@ export async function usageReport(db: Db, config: { readonly dailyTokens: number
   for (const r of rows) {
     const day = String(r.day);
     byDay.set(day, {
-      day, input: Number(r.input_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped), blocked: Number(r.blocked),
+      day, input: Number(r.input_tokens), cached: Number(r.cached_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped), blocked: Number(r.blocked),
       shares: sharesOn.get(day) ?? 0,
     });
   }
   // A day with shares made and no answer counted still shows (an answer's count and its share are separate writes).
   for (const [day, n] of sharesOn) {
-    if (!byDay.has(day)) byDay.set(day, { day, input: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: n });
+    if (!byDay.has(day)) byDay.set(day, { day, input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: n });
   }
   const days = [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
   const todayRow = byDay.get(today);

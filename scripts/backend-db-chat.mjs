@@ -217,11 +217,11 @@ export async function knowsChecks(engine, db, check) {
 export async function usageReportChecks(engine, db, check) {
   const now = Date.UTC(2031, 0, 20, 12);
   const usage = createUsage(db);
-  await usage.add('2031-01-20', 900, 90, 1);
-  await usage.add('2031-01-20', 100, 10, 0);
+  await usage.add('2031-01-20', 900, 90, 1, 0);
+  await usage.add('2031-01-20', 100, 10, 0, 0);
   await usage.block('2031-01-20');
-  await usage.add('2030-12-22', 5, 5, 0);
-  await usage.add('2030-12-21', 7, 7, 0);
+  await usage.add('2030-12-22', 5, 5, 0, 0);
+  await usage.add('2030-12-21', 7, 7, 0, 0);
   const words = 'shared-words-the-report-never-reads';
   await createShareStore({ db, days: 30, max: 10_000, now: () => now }).create(JSON.stringify([{ type: 'text', s: words }]), words);
   await createShareStore({ db, days: 30, max: 10_000, now: () => Date.UTC(2031, 0, 18, 23, 59, 59, 999) }).create('[]', null);
@@ -232,10 +232,10 @@ export async function usageReportChecks(engine, db, check) {
     today: '2031-01-20',
     budget: { daily: 1_500, spent: 1_100, left: 400 },
     days: [
-      { day: '2031-01-20', input: 1000, output: 100, messages: 2, dropped: 1, blocked: 1, shares: 1 },
-      { day: '2031-01-19', input: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
-      { day: '2031-01-18', input: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
-      { day: '2030-12-22', input: 5, output: 5, messages: 1, dropped: 0, blocked: 0, shares: 0 },
+      { day: '2031-01-20', input: 1000, cached: 0, output: 100, messages: 2, dropped: 1, blocked: 1, shares: 1 },
+      { day: '2031-01-19', input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
+      { day: '2031-01-18', input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
+      { day: '2030-12-22', input: 5, cached: 0, output: 5, messages: 1, dropped: 0, blocked: 0, shares: 0 },
     ],
   };
   const { shares, ...rest } = r;
@@ -377,20 +377,20 @@ export async function twoInstanceChecks(engine, db, other, check, url) {
 }
 
 export async function chatSuite(engine, db, openAgain, check, url) {
-  check(`${engine} chat: the usage, share, blocked, limits and share-proof migrations apply`, (await migrateChat(db)).join() === '1,2,3,4,5');
+  check(`${engine} chat: the usage, share, blocked, limits, share-proof and cached-input migrations apply`, (await migrateChat(db)).join() === '1,2,3,4,5,6');
   check(`${engine} chat: …and is a no-op the second time`, (await migrateChat(db)).length === 0);
 
   const usage = createUsage(db);
   const day = utcDay(Date.UTC(2026, 9, 15, 23, 59, 59));
-  await usage.add(day, 100, 20, 0);
-  await usage.add(day, 50, 5, 1);
+  await usage.add(day, 100, 20, 0, 0);
+  await usage.add(day, 50, 5, 1, 30);
   const row = await usage.row(day);
-  check(`${engine} chat: one row per day, added to by one statement`, JSON.stringify(row) === JSON.stringify({ input: 150, output: 25, messages: 2, dropped: 1, blocked: 0 }), JSON.stringify(row));
+  check(`${engine} chat: one row per day, added to by one statement — the cached input too`, JSON.stringify(row) === JSON.stringify({ input: 150, cached: 30, output: 25, messages: 2, dropped: 1, blocked: 0 }), JSON.stringify(row));
   await usage.block(day);
   await usage.block(utcDay(Date.UTC(2026, 9, 13)));
   check(`${engine} chat: a blocked question adds to the day's blocked count, spending nothing; a day that starts with one has its own row`,
-    JSON.stringify(await usage.row(day)) === JSON.stringify({ input: 150, output: 25, messages: 2, dropped: 1, blocked: 1 })
-      && JSON.stringify(await usage.row(utcDay(Date.UTC(2026, 9, 13)))) === JSON.stringify({ input: 0, output: 0, messages: 0, dropped: 0, blocked: 1 }));
+    JSON.stringify(await usage.row(day)) === JSON.stringify({ input: 150, cached: 30, output: 25, messages: 2, dropped: 1, blocked: 1 })
+      && JSON.stringify(await usage.row(utcDay(Date.UTC(2026, 9, 13)))) === JSON.stringify({ input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 1 }));
 
   // Two answers finishing at once, from two connections: both counted.
   const other = await openAgain();
@@ -398,7 +398,7 @@ export async function chatSuite(engine, db, openAgain, check, url) {
     const fresh = utcDay(Date.UTC(2026, 9, 14));
     const second = createUsage(other);
     await Promise.all([
-      ...Array.from({ length: 10 }, () => usage.add(fresh, 7, 3, 0)),
+      ...Array.from({ length: 10 }, () => usage.add(fresh, 7, 3, 0, 0)),
       ...Array.from({ length: 10 }, () => second.add(fresh, 7, 3, 0)),
     ]);
     const both = await usage.row(fresh);
@@ -409,7 +409,7 @@ export async function chatSuite(engine, db, openAgain, check, url) {
   }
 
   const next = utcDay(Date.UTC(2026, 9, 16, 0, 0, 0));
-  await usage.add(next, 1, 1, 0);
+  await usage.add(next, 1, 1, 0, 0);
   check(`${engine} chat: the day rolls over at 00:00 UTC into its own row`, (await usage.spent(next)) === 2 && (await usage.spent(day)) === 175);
 
   const now = Date.UTC(2026, 9, 16);
@@ -438,7 +438,7 @@ export async function chatSuite(engine, db, openAgain, check, url) {
   }));
   const chat = createChat({
     config: loaded.config.chat, secret: loaded.config.secret, db, prompts: { 'prompt-1.txt': 'Answer.' }, context,
-    adapter: createFakeAdapter({ answers: [{ chunks: ['Hello.\ncta "Claim" https://evil.example/\n'], usage: { input: 40, output: 2 } }] }), log: () => {},
+    adapter: createFakeAdapter({ answers: [{ chunks: ['Hello.\ncta "Claim" https://evil.example/\n'], usage: { input: 40, cached: 0, output: 2 } }] }), log: () => {},
   });
   const app = createApp({ config: loaded.config, store: createStore(db, loaded.config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: () => {}, chat });
   const server = createServer((q, r) => { void app.handler(q, r); });

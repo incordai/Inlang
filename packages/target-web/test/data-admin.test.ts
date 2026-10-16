@@ -100,6 +100,8 @@ test('a site with tables and a chat: /admin shows the chat\'s usage (chat-block-
   assert.match(tsx, /<th scope="col">Messages<\/th>/);
   assert.match(tsx, /<th scope="col">Blocked by moderation<\/th>/);
   assert.match(tsx, /<td>\{n\(d\.blocked\)\}<\/td>/);
+  // §19.14: the input the provider read from its prompt cache, beside the input.
+  assert.match(tsx, /<th scope="col">Cached input tokens<\/th>[\s\S]*<td>\{n\(d\.input\)\}<\/td>\s*<td>\{n\(d\.cached\)\}<\/td>/);
   // One fixed grouping in every engine and every visitor's locale (chat-block-spec §19.11): never the browser's own.
   assert.match(tsx, /const COUNTS = new Intl\.NumberFormat\("en-US"\);/);
   assert.match(tsx, /const n = \(v: number\) => COUNTS\.format\(v\);/);

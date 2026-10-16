@@ -213,7 +213,7 @@ test('az backend usage (chat-block-spec §11.4): the built server\'s daily count
   try {
     await migrate(db);
     await migrateChat(db);
-    await createUsage(db).add(utcDay(Date.now()), 4_200, 310, 1);
+    await createUsage(db).add(utcDay(Date.now()), 4_200, 310, 1, 0);
     await createUsage(db).block(utcDay(Date.now()));
     await createShareStore({ db, days: 30, max: 10, now: Date.now }).create(JSON.stringify([{ type: 'text', s: words }]), words);
   } finally { await db.close(); }
@@ -221,7 +221,7 @@ test('az backend usage (chat-block-spec §11.4): the built server\'s daily count
   const text = az('backend', 'usage', server);
   assert.equal(text.status, 0, text.stderr);
   assert.match(text.stdout, /^chat usage — today is \d{4}-\d{2}-\d{2} \(UTC\)\n {2}budget 300,000 tokens a day · spent today 4,510 · left 295,490\n {2}shared answers: on · 1 kept now\n/);
-  assert.match(text.stdout, / {2}day +messages +input tokens +output tokens +dropped +blocked +shares\n {2}\d{4}-\d{2}-\d{2} +1 +4,200 +310 +1 +1 +1\n$/);
+  assert.match(text.stdout, / {2}day +messages +input tokens +cached input +output tokens +dropped +blocked +shares\n {2}\d{4}-\d{2}-\d{2} +1 +4,200 +0 +310 +1 +1 +1\n$/);
   const json = az('backend', 'usage', server, '--json');
   assert.equal(json.status, 0, json.stderr);
   const r = JSON.parse(json.stdout) as { budget: { spent: number }; days: { messages: number; blocked: number; shares: number }[]; shares: { kept: number } };
