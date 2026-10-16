@@ -1801,7 +1801,8 @@ A chart in a chat answer (chat-block-spec §20.4) needs up to six colours a
 theme never chose: one per series of a bar, line or area chart, one per pie
 slice. They are **derived**, never written, by `packages/theme/src/series.ts`,
 and exist only on a site whose chat shows `chart`, `stats`, `dashboard` or
-`explore` (chat-block-spec §21.3, whose views draw charts) —
+`explore` (chat-block-spec §21.3, whose views draw charts) or `map` (§21.4,
+whose pins and routes are series colours read as paint) —
 the way `accent2` exists only on a pair site (§13.4), so every other site
 declares exactly what it did before.
 

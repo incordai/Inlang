@@ -1187,7 +1187,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0, C1, C2, C2b, C3, C4, C5, C6 and C7 as built — deviations and findings (2026-10-15/16), and the limits fixed after C6 (§19.11)
+## 19. C0, C1, C2, C2b, C3, C4, C5, C6, C7 and C8 as built — deviations and findings (2026-10-15/16), and the limits fixed after C6 (§19.11)
 
 ### 19.1 Against §14's C1 list
 
@@ -1766,6 +1766,85 @@ behaviour — the sink scan's file list, the rows limit and date type, the
 code-point clamp, the prompt's form, `show explore`, AZ1254's list, the
 explore template, the series colours, the audit's file count and the
 doctor's tools line.
+
+### 19.13 C8 as built (2026-10-16)
+
+Against §21.4 (its tests, §21.4.6), with §21.4.7's decisions: no
+third-party tile host by default (O12), geocoding optional and server-side
+(O13), routes as straight lines (O14).
+
+| Item | State |
+|---|---|
+| `show map` | built: a value of `show`, never a word (core `CHAT_RICH_WORDS`; the manifest's `show` takes eleven values; `map …` on a page is an unknown word). A dashboard cannot hold one (AZ1270 counts chart, table, stats and cards only); AZ1272 applies, since it takes `from`. A site whose chat shows it gets the series colours (`usesSeries`), the map and popup templates, the map runtime files and the three map packages — and no other site does |
+| the libraries (Q19a) | built: `maplibre-gl` **6.13.0**, `pmtiles` 4.5.0, `@protomaps/basemaps` 5.7.2, pinned exactly in a map site's `package.json` (target-web `PINS`, `pins.test.ts` against stack-evaluation §13's VERIFIED rows and the repository's own development dependencies); vetted again in stack-evaluation §19 — licences, `npm audit` 0, `pnpm audit` clean |
+| the answer format | built: `server/chat-map.ts`, read with `chat-rich.ts`'s reader. `map "title"` with `pin`, `place` and `route` lines (`point`s one level under a route), or `map "title" from <table> label f lat f lon f [where f v]`. 1–24 pins and places, 0–2 routes of 2–50 points, labels clamped to 40 code points, a title to 80; a coordinate is the answer grammar's number within ±90/±180 with at most six decimals, or its pin — or its route — goes alone (`number`); a map with no pin left is dropped. A `place` without `AZ_GEOCODER_URL` drops alone (`not_shown`), an address past 120 code points too (`too_long`); three places an answer. Pins and route points count toward the answer's 240 points. The record holds the canonical lines; nothing the model writes is a zoom, a centre or a URL |
+| the event | built: `{ map: { title, src, asOf?, pins: [{ label, lat, lon, src }], routes } }` — `src` `model` (pins `model` or `geocoded`, no day) or `site` (pins `site`, the day, no route), set by the server only; re-checked whole by the page (`overlay/runtime/chat-map.ts validMap`), the share store and the kept conversation (`RICH_BLOCKS`, `BLOCK_KEYS`) |
+| from a table | built: `chat-query.ts parsePins` — the label a text or choice field, the coordinates `number` fields, never money, never private; `where` a choice or a flag, sent as the list route's own equality parameter; up to 24 rows of the anonymous list, newest first; a row without both coordinates in range is no pin; no row is the unavailable note |
+| geocoding (Q19g) | built: `server/chat-geocode.ts` — `GET <AZ_GEOCODER_URL>?q=<address>` (the operator's own query kept, a `q` of its own refused at start), https or loopback, `redirect: 'error'`, 2 s for the request and the body, ≤ 16 KB, a 200 JSON reply only: a list or `{ results }`, the first result's `lat` and `lon` (or `lng`) as numbers or decimal strings, in range — nothing else read; a day's cache per normalised address (found and not found alike, 1 000 entries); `AZ_GEOCODER_PER_ADDRESS` (default 60/hour) in the database windows every instance shares, a cached address not a call; the log `chat: geocode <found|none|why> <ms>` — never the address. A place found nowhere is dropped (`place`, a new `DropReason`); a map whose places all failed is the note. The browser never calls it; the model never reads what it found |
+| tiles, glyphs, sprites (Q19e) | built: `server/chat-tiles.ts`, mounted by `app.ts` at `/tiles/` only when a chat shows maps. `map.json` (the archives by name and zoom range, whether glyphs and sprites are served, the attribution; `no-cache`); `world.pmtiles` and `region.pmtiles` (`AZ_MAP_WORLD`, `AZ_MAP_REGION`, each opened at start and refused by its key unless a PMTiles v3 file); `glyphs/<font>[,<font>…]/<a>-<a+255>.pbf` (the first font of the stack the folder has); `sprites/<name>[@2x].(json|png)`. One byte range (`bytes=a-b`, `a-`, `-n`; a last byte past the end is the end) answered 206 with `Content-Range`; a first byte past the end, several ranges, another unit or a malformed header is 416 with the size alone; a strong ETag (size and modification time, read at each request), `Last-Modified`, `Cache-Control: public, max-age=86400`; `If-Match` naming another version 412, `If-None-Match` naming this one 304. An allowed origin only (403 otherwise); CORS `GET, HEAD`, `range` and `if-match` allowed, `etag` and `content-range` exposed, no credentials. Paths matched against closed shapes, joined under the operator's folders only |
+| the worker (Q19b) | built: `overlay/runtime/chat-map-gl.ts` makes the runtime's one object URL — a blob of one line importing the site's own worker file (`maplibre-gl/dist/maplibre-gl-worker.mjs?url`, a hashed build file) — and hands it to `setWorkerUrl`; kept for the page's life, since the library starts its workers again after its last map. Held by a sink test (`overlay chat.test.ts`) like `setDestination` |
+| loading (Q19f) | built: the generated chat module hands the panel `drawMap` (`chat-map-draw.ts`) on a map site only; the drawer imports `chat-map-gl.ts` — the library, its stylesheet and the archive reader, one chunk — when the first map event arrives. Measured: 292 KB + the worker 144 KB + the stylesheet 10 KB gzipped (446 KB); a chat page that shows no maps, and a map page before a map arrives, request none of it (`test:chat` reads the network log) |
+| rendering | built: the view fitted to every pin and route point, capped at the region's deepest zoom or 6; az's own Zoom in, Zoom out, Reset view — each zoom button `aria-disabled` at its limit — never the library's controls (Q19c); the arrow keys pan and + − zoom on the stage (the library's keyboard, scroll zoom and rotation off); pins a circle layer in `series-1` ringed in `bg` (the open one ringed in `focus`), routes `series-2` and a dashed `series-3`; the basemap's layers for each archive, its own details in the light or dark set the page's `bg` calls for, earth, water, labels and borders from the tokens — every colour read with `getComputedStyle` at draw time and again on a scheme change (`setStyle`, diffed), set as paint (Q19h); labels only with glyphs, icons only with sprites |
+| popups (Q19d) | built: a pin's click, or its list entry's "Show on the map", opens a popup whose content is the word's `map-popup` part — the label and its source's label by `textContent` — given by `setDOMContent`; no close button (the library writes its × as markup); the box and tip in the theme by `mapCss`, two classes deep in the site's stylesheet. A sink test forbids `setHTML`/`setText` in the runtime and `az audit` reads the map runtime for `setHTML` |
+| attribution | built: the operator's line, `AZ_MAP_ATTRIBUTION`, under every map, from `map.json` — see below |
+| the text equivalent | built: an ordered list of the places, each its label, its coordinates in words ("52.520008 degrees north, 13.404954 degrees east") and its source's label, and each route's stops, in a `<details>`; the whole component without WebGL2, or when the module, `map.json` or the tiles fail: the stage, buttons and attribution removed, the note shown, the list opened, said once |
+| accessibility | built: the map a labelled figure; the stage `role="img"` named by its summary ("Map: Where to find us, 2 places, 1 route."), focusable, the canvas out of the Tab order and hidden; drawn, the status region hears the summary and its labels once; under reduced motion every camera move is a jump and a repaint a cut (`transition` 0) |
+| the CSP | built: `PageNeeds.map` — `worker-src 'self' blob:` on a page whose chat shows maps (and the shared-answer page of such a site), nothing else; `connect-src` gains a third-party archive's origin only from `AZ_PUBLIC_MAP_TILES_URL` |
+| `az doctor` | built: the `chat map` line — the map keys as the server reads them and their files opened as it opens them; no archive a warning (maps are lists); a third-party archive named by its origin, a warning |
+| operations | built: the keys in `.env.example` for a map site only, the server README's Maps section, docs/self-hosting.md §9 (`pmtiles extract … --maxzoom=6`, `--bbox`) |
+
+Where the build differs from §21.4:
+
+- **`maplibre-gl` is 6.13.0, not R11's 6.14.0**: 6.14.0 was published
+  2026-10-11, five days before the build, inside the workspace's 7-day
+  `minimumReleaseAge`; 6.13.0 is the newest release past it
+  (stack-evaluation §19). The bump is a later, one-line change.
+- **The attribution is the operator's (`AZ_MAP_ATTRIBUTION`), not fixed
+  copy from the build**: what must be credited depends on the tile data the
+  operator serves, which the build cannot know, and naming a data source in
+  az's code would put a third party's name in it. The server refuses to start
+  with an archive and no attribution, so a drawn map always carries one.
+- **A table's coordinates are whole millionths of a degree**: a `number`
+  field is whole (data-spec §3; Q9 plans `decimal` as a fixed-scale
+  integer), so `latitude 52520008` is 52.520008° — the map's own six
+  decimals exactly.
+- **`map.json`** says which archives, glyphs and sprites the server has, so
+  the style asks only for files that exist; without an archive a map is its
+  list, and the server still starts.
+- **A third-party archive is the world's only** (`AZ_PUBLIC_MAP_TILES_URL`,
+  a build variable, since the page's policy is built); the region, glyphs and
+  sprites stay the backend's.
+- **Range**: anything but one satisfiable byte range is 416 rather than
+  ignored — no client of the route sends one, and a whole archive is never
+  sent for a header it did not understand. The tile route answers an allowed
+  origin only.
+- **The popup has no close button**; a click elsewhere or Reset view closes
+  it. Each place in the list has "Show on the map" — the keyboard's way to a
+  popup.
+- **The build's secret guard** read the library's minified bundle as keys
+  (`NAME=value` runs in shader code, a path of words in a message link, the
+  worker file's hashed name). `core/secrets.ts` now reads `=` only as a
+  key's trailing padding, skips a `/` path no segment of which mixes letters
+  and digits, and allows the build's own file names (`ownNames`, in the build
+  guard and `az audit`); a key in each of those places is still found
+  (`secrets.test.ts`).
+- **A map is ended when its answer leaves the page** (a new chat, a failed
+  answer), freeing its GL context; one watcher per page.
+- **Static hosts must serve `.mjs` as JavaScript** — the worker is a module;
+  the test servers do, and docs/self-hosting.md §9 says so.
+
+What was measured (2026-10-16): `pnpm verify` (3 123 tests, up from 3 063),
+`pnpm lint`, `pnpm verify:build` (214 checks: the map page's policy the plain
+chat page's plus exactly `worker-src 'self' blob:`, a map site's chat page
+without maps and every non-chat page unchanged, the map chunk, stylesheet
+and worker apart from the page's own files, the map runtime only on the map
+site), `pnpm test:chat` (724 checks, up from 635, in Chromium — software
+WebGL — Firefox and WebKit: §21.4.6's list, a shared map signed out, the
+request and worker logs on map pages), `pnpm test:backend-db` (285 checks:
+C7's explore paged to 200 through two list pages on PostgreSQL and MySQL,
+and a table map's pins with a choice and a flag `where`) and
+`pnpm gate words/chat` (all 12 points). Every new or changed unit test file
+was run against `698a833` first and fails there.
 
 ---
 
@@ -2397,7 +2476,7 @@ dashboard in each theme, both schemes (gate item 3's method).
 
 **Status** specified 2026-10-16 on the owner's approval of that day (§17,
 Q16–Q19) · **C5 built 2026-10-16** (§19.9: what was built, and where it
-differs) · **C6 built 2026-10-16** (§19.10) · **C7 built 2026-10-16** (§19.12) · C8 specified, not built · C8's map
+differs) · **C6 built 2026-10-16** (§19.10) · **C7 built 2026-10-16** (§19.12) · **C8 built 2026-10-16** (§19.13) · C8's map
 library and tile source vetted and decided 2026-10-16 (§17 Q19a–Q19h) ·
 builds on C2's parser, events and templates (§5.3, §5.4) and C2b's rich
 components (§20), which it extends and never forks.
@@ -2889,6 +2968,10 @@ Each recommendation below was taken when C7 was built (§19.12).
 | O11 | Controls over the server's live figures (re-query on change)? | **No** — a control changes only what the page already holds; a re-query is a new question |
 
 ### 21.4 C8 — maps in answers
+
+**Built 2026-10-16** — §19.13 lists what was built and where it differs
+(`maplibre-gl` 6.13.0 under the release-age rule, the operator's
+attribution line, a table's coordinates in millionths of a degree).
 
 #### 21.4.1 The owner's decisions
 

@@ -102,3 +102,61 @@ provider; labels come from your `.env`, never from az's code.
 
 Have the server reviewed by someone outside the project before real accounts
 depend on it (backend-spec §11).
+
+## 9. Maps in chat answers
+
+A chat that shows `map` (chat-block-spec §21.4) draws its maps from tiles
+**this server** serves under `/tiles/` — to the site's origins only, by HTTP
+Range — so no third party learns where a visitor looks. Until an archive is
+set, every map shows its list of places only (`az doctor` says so).
+
+1. **Get a basemap archive.** The maps read one PMTiles v3 file in the schema
+   of the `@protomaps/basemaps` styles (stack-evaluation §19). Download a
+   planet build of that schema once, on a machine with the space for it.
+2. **Cut the world to zoom 6** (about 46 MB) with the `pmtiles` command-line
+   tool ([its documentation](https://docs.protomaps.com/pmtiles/cli)):
+
+   ```sh
+   pmtiles extract planet.pmtiles world.pmtiles --maxzoom=6
+   ```
+
+3. **Optionally, a regional extract** for detail where your visitors look —
+   the maps then zoom as deep as it goes:
+
+   ```sh
+   pmtiles extract planet.pmtiles region.pmtiles --bbox=MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
+   ```
+
+   (`--region=area.geojson` takes a polygon instead of a box.)
+4. **Optionally, label fonts and icons**: a folder of glyph ranges
+   (`<font name>/<start>-<end>.pbf`, the fonts the basemap styles name) and a
+   folder of sprites (`light.json`, `light.png`, `dark.json`, `dark.png` and
+   their `@2x` copies). Without them maps draw no place names or icons.
+5. **Set them in `server/.env`**, paths from the server's folder:
+
+   ```sh
+   AZ_MAP_WORLD=./tiles/world.pmtiles
+   AZ_MAP_REGION=./tiles/region.pmtiles
+   AZ_MAP_GLYPHS=./tiles/glyphs
+   AZ_MAP_SPRITES=./tiles/sprites
+   AZ_MAP_ATTRIBUTION=<the attribution your tile data's licence requires>
+   ```
+
+   Data derived from the usual open source of world map data is under the
+   ODbL, which requires its attribution under every map; the server will not
+   start with an archive and no `AZ_MAP_ATTRIBUTION`. Each file is opened at
+   start: a missing or foreign one stops the server, named by its key.
+6. **Optionally, a geocoder** (`AZ_GEOCODER_URL`, https), so an answer may
+   place an address: the server sends `GET <url>?q=<address>` and reads the
+   first result's `lat` and `lon`; addresses are remembered a day and
+   `AZ_GEOCODER_PER_ADDRESS` bounds the lookups one visitor causes.
+
+Serve the site's built files with JavaScript's MIME type for `.mjs` as well
+as `.js`: the map's worker is an `.mjs` module. A table a map reads stores
+its coordinates as whole **millionths of a degree** in `number` fields
+(`52520008` is 52.520008°): a `number` is whole (data-spec §3).
+
+To read tiles from a host of your own choosing instead, build the site with
+`AZ_PUBLIC_MAP_TILES_URL` set to that archive's URL: its origin enters the
+map pages' `connect-src`, and `az doctor` names it — that host then sees
+where every visitor's maps look.
