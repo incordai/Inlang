@@ -541,6 +541,6 @@ built.
 **M5 — not started.**
 
 Still outstanding and not answerable by writing code — PRD §11: open-source
-vs internal, a real client site for the M5 dogfood, and the license (to be
-decided; the repository has no license file yet). (The
+vs internal and a real client site for the M5 dogfood. The license is decided:
+Apache License 2.0 (2026-10-17, [LICENSE](../LICENSE)). (The
 backend project continues — decided 2026-09-23.)

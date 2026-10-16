@@ -1,5 +1,6 @@
 {
   "name": "az",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.2",

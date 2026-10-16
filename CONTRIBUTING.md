@@ -255,3 +255,13 @@ files and dependencies a site gets.
 - A PR lists the checks you ran and their results, anything you did not
   run and why, and any snapshot or thumbnail change with what changed
   visually. Never blind-accept a snapshot update.
+
+## Conduct, security and license
+
+- Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+- Never report a security problem in a public issue or pull request. Report
+  it privately as [SECURITY.md](SECURITY.md) describes.
+- az is licensed under the [Apache License 2.0](LICENSE). By submitting a
+  contribution you agree it is licensed under the same terms, as the
+  license's section 5 states. Only submit work you have the right to
+  contribute.

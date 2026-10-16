@@ -1,5 +1,6 @@
 {
   "name": "az-spike-m0",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "description": "M0 spike \u2014 one hand-built hero, three motion tiers, runtime tier probe. No compiler, no abstraction. See docs/ROADMAP.md M0.",

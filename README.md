@@ -226,5 +226,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md): setup, which checks to run for each
 kind of change, the house rules, and where things live in the repository.
 Before any change, `pnpm verify` must pass.
 
-**License:** to be decided. The repository has no license file yet
-([PRD §11](docs/PRD.md#11-open-questions--answer-before-m1)).
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+Report security problems privately, as [SECURITY.md](SECURITY.md) describes —
+never in a public issue.
+
+**License:** [Apache License 2.0](LICENSE). See also [NOTICE](NOTICE).

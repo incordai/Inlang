@@ -1,1 +1,1 @@
-{ "name": "@az/scene-runtime", "version": "0.0.0", "private": true, "type": "module" }
+{ "name": "@az/scene-runtime", "version": "0.0.0", "private": true, "license": "Apache-2.0", "type": "module" }
