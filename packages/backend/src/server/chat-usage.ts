@@ -2,9 +2,9 @@
  * @az server chat-usage
  * Purpose: the chat's daily counters — the az_chat_usage table, one upsert per answer, the 400-day sweep — and every chat table's migrations (az_chat_shares too, chat-share.ts).
  * Spec: docs/backend-spec.md §3, §5 (docs/chat-block-spec.md §6.5, §6.7)
- * Exports: CHAT_MIGRATIONS, migrateChat, createUsage, utcDay, Usage, USAGE_KEEP_DAYS
- * Edit guide: counts only, never text or a person; one statement per answer (pooler-safe); append a step, never edit a shipped one.
- * Tests: packages/backend/test/chat-usage.test.ts
+ * Exports: CHAT_MIGRATIONS, migrateChat, createUsage, usageReport, utcDay, Usage, UsageDay, UsageReport, USAGE_KEEP_DAYS, REPORT_DAYS
+ * Edit guide: counts only, never text or a person; one statement per answer (pooler-safe); append a step, never edit a shipped one; the report never reads a share's events or question.
+ * Tests: packages/backend/test/chat-usage.test.ts, packages/backend/test/data-admin.test.ts, scripts/backend-db-chat.mjs
  */
 
 /**
@@ -154,5 +154,72 @@ export function createUsage(db: Db): Usage {
       return r ? { input: Number(r.input_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped) } : null;
     },
     sweep: (now) => db.run('DELETE FROM az_chat_usage WHERE day < ?', [utcDay(now - USAGE_KEEP_DAYS * DAY_MS)]),
+  };
+}
+
+/** The days the operator's usage view covers, today included (chat-block-spec §11.4). */
+export const REPORT_DAYS = 30;
+
+/** One day's counts as the usage view shows them. */
+export interface UsageDay {
+  readonly day: string;
+  readonly input: number;
+  readonly output: number;
+  readonly messages: number;
+  readonly dropped: number;
+  /** Shared answers made that day that are still kept (one past its expiry is gone, so it is not counted). */
+  readonly shares: number;
+}
+
+/**
+ * The operator's view of what chat spent (chat-block-spec §11.4): today and
+ * the budget left, and every day of the last REPORT_DAYS with anything in
+ * it, newest first; the shares kept now. Counts only — it reads no share's
+ * events or question, and nothing in it names a person.
+ */
+export interface UsageReport {
+  readonly today: string;
+  readonly budget: { readonly daily: number; readonly spent: number; readonly left: number };
+  readonly days: readonly UsageDay[];
+  readonly shares: { readonly enabled: boolean; readonly kept: number };
+}
+
+/** A share's UTC day number from its `created` (ms): whole-number division on each engine. */
+const dayNumber = (dialect: Db['dialect']) => (dialect === 'mysql' ? 'created DIV 86400000' : 'created / 86400000');
+
+/** The usage report for the UTC day `now` falls on: three bounded reads, none of a share's text. */
+export async function usageReport(db: Db, config: { readonly dailyTokens: number; readonly sharesEnabled: boolean }, now: number): Promise<UsageReport> {
+  const today = utcDay(now);
+  const from = utcDay(now - (REPORT_DAYS - 1) * DAY_MS);
+  const rows = await db.all(
+    'SELECT day, input_tokens, output_tokens, messages, dropped FROM az_chat_usage WHERE day >= ? AND day <= ? ORDER BY day DESC',
+    [from, today],
+  );
+  // The shares still kept, by the day they were made: counted per day number, never read.
+  const made = await db.all(
+    `SELECT ${dayNumber(db.dialect)} AS n, COUNT(*) AS c FROM az_chat_shares WHERE expires > ? AND created >= ? GROUP BY ${dayNumber(db.dialect)}`,
+    [now, Date.parse(`${from}T00:00:00Z`)],
+  );
+  const sharesOn = new Map(made.map((r) => [utcDay(Number(r.n) * DAY_MS), Number(r.c)]));
+  const kept = await db.get('SELECT COUNT(*) AS c FROM az_chat_shares WHERE expires > ?', [now]);
+  const byDay = new Map<string, UsageDay>();
+  for (const r of rows) {
+    const day = String(r.day);
+    byDay.set(day, {
+      day, input: Number(r.input_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped), shares: sharesOn.get(day) ?? 0,
+    });
+  }
+  // A day with shares made and no answer counted still shows (an answer's count and its share are separate writes).
+  for (const [day, n] of sharesOn) {
+    if (!byDay.has(day)) byDay.set(day, { day, input: 0, output: 0, messages: 0, dropped: 0, shares: n });
+  }
+  const days = [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+  const todayRow = byDay.get(today);
+  const spent = todayRow ? todayRow.input + todayRow.output : 0;
+  return {
+    today,
+    budget: { daily: config.dailyTokens, spent, left: Math.max(0, config.dailyTokens - spent) },
+    days,
+    shares: { enabled: config.sharesEnabled, kept: Number(kept?.c ?? 0) },
   };
 }

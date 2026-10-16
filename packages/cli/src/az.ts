@@ -495,6 +495,9 @@ const USAGE = `az — words to a website
   az backend probe <server-dir> [--json]
                                    ask the configured chat model the production
                                    prompt; times, tokens, what was dropped
+  az backend usage <server-dir> [--json]
+                                   the chat's daily counts and budget left;
+                                   reads only, never a message
   az mcp  [--root dir]            serve these tools to an AI agent (MCP, stdio)
   az explain <term...>             one line per term: az explain hero center
   az palette [--theme t] [--accent h] [--out dir]
@@ -550,8 +553,9 @@ function runBackend(sub: string, rest: string[]): number {
   }
   if (sub === 'images' && rest[0]) return runBackendImages(resolve(rest[0]), rest.slice(1));
   if (sub === 'probe' && rest[0]) return runBackendProbe(resolve(rest[0]), rest.slice(1));
+  if (sub === 'usage' && rest[0]) return runBackendUsage(resolve(rest[0]), rest.slice(1));
   if (sub !== 'init' || !rest[0]) {
-    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az, az backend schema site.az, az backend images <server-dir> or az backend probe <server-dir>\n');
+    process.stderr.write('az: try: az backend init <server-dir>  (the server/ folder of a build), az backend plan site.az, az backend schema site.az, az backend images <server-dir>, az backend probe <server-dir> or az backend usage <server-dir>\n');
     return EXIT.config;
   }
   const r = initBackendEnv(resolve(rest[0]));
@@ -623,6 +627,34 @@ function runBackendProbe(dir: string, flags: readonly string[]): number {
   });
   if (r.error || r.signal) {
     process.stderr.write(`az: the probe stopped (${r.signal ?? r.error?.name}) after ${PROBE_CHILD_MS / 60_000} minutes at most — check AZ_CHAT_URL is reachable\n`);
+    return EXIT.missing;
+  }
+  return r.status === 0 ? EXIT.ok : EXIT.missing;
+}
+
+/** The usage report reads three bounded queries; past this its database did not answer, and the child is killed. */
+export const USAGE_CHILD_MS = 60 * 1000;
+
+/**
+ * `az backend usage <server-dir> [--json]` (chat-block-spec §11.4): the
+ * built server's own report, run in its folder so it reads its `.env` and
+ * its database — today's spend against the daily budget, the last 30 days'
+ * counts, the shared answers kept. It reads only and prints counts only.
+ */
+function runBackendUsage(dir: string, flags: readonly string[]): number {
+  if (flags.some((f) => f !== '--json')) {
+    process.stderr.write('az: try: az backend usage <server-dir> [--json]\n');
+    return EXIT.config;
+  }
+  if (!existsSync(join(dir, 'az.config.json')) || !existsSync(join(dir, 'src/chat-report.ts'))) {
+    process.stderr.write(`az: no built server with a chat in ${dir} — point at the server/ folder az build wrote for a site that shows chat\n`);
+    return EXIT.missing;
+  }
+  const r = spawnSync(process.execPath, ['src/chat-report.ts', ...flags], {
+    cwd: dir, stdio: 'inherit', timeout: USAGE_CHILD_MS, killSignal: 'SIGKILL',
+  });
+  if (r.error || r.signal) {
+    process.stderr.write(`az: the usage report stopped (${r.signal ?? r.error?.name}) after ${USAGE_CHILD_MS / 1000} s at most — check the database is reachable\n`);
     return EXIT.missing;
   }
   return r.status === 0 ? EXIT.ok : EXIT.missing;

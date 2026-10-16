@@ -85,6 +85,29 @@ test('a site with tables gets /admin and /admin/<table>: noindex, inside <Protec
   assert.match(md, /`\/admin\/products`, `\/admin\/reviews`, `\/admin\/notes`/);
 });
 
+test('a site with tables and a chat: /admin shows the chat\'s usage (chat-block-spec §11.4) — the route, its types, a table with a caption; CONTROL without chat, none', () => {
+  const chat = SITE(DATA).replace('    email smtp\n', '    email smtp\n    model default\n').replace('    title "Hi"\n', '    title "Hi"\n  chat panel\n    allow anyone\n');
+  const r = compile(chat, { manifests });
+  assert.ok(r.ok, JSON.stringify(r.diagnostics));
+  const withChat = new Map(emitProject(r.spec!, { emitters: {} }).files.map((f) => [f.path, f.content]));
+  const tsx = withChat.get('src/data/admin.tsx')!;
+  const client = withChat.get('src/data/client.ts')!;
+  assert.match(client, /chatUsage: \(\) => call<\{ usage: ChatUsage \}>\("GET", "\/admin\/chat"\),/);
+  assert.match(client, /export interface ChatUsage \{/);
+  assert.match(tsx, /import \{ admin, type AdminRow, type AuditEntry, type ChatUsage, type DataErrorCode, type TableName \} from "\.\/client\.ts";/);
+  assert.match(tsx, /<\/section>\n {10}<ChatUsageView \/>\n {10}<Audit \/>/);
+  assert.match(tsx, /<caption id="az-admin-chat-days">The last 30 days, newest first \(UTC\)<\/caption>/);
+  assert.match(tsx, /<th scope="col">Messages<\/th>/);
+  // Counts only: nothing in the view could hold a message.
+  assert.doesNotMatch(tsx, /question|events|\.text\b/);
+  // CONTROL: a site with tables and no chat gets exactly what it got before.
+  const plain = files(DATA);
+  assert.equal(plain.get('src/data/admin.tsx'), adminTsx());
+  assert.equal(adminTsx(), adminTsx(false));
+  assert.doesNotMatch(plain.get('src/data/admin.tsx')!, /ChatUsage|\/admin\/chat/);
+  assert.doesNotMatch(plain.get('src/data/client.ts')!, /ChatUsage|\/admin\/chat/);
+});
+
 test('CONTROL: a site without tables has no admin page, module, route or style', () => {
   const out = files('');
   assert.ok(![...out.keys()].some((p) => p.startsWith('admin/') || p.startsWith('src/data/')));

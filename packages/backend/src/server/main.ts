@@ -1,6 +1,6 @@
 /**
  * @az server main
- * Purpose: start the backend: config, migrations, store, routes (and the chat route when the site has one), HTTP server; --migrate --confirm for data steps; --images [--confirm] for the image backfill.
+ * Purpose: start the backend: config, migrations, store, routes (and the chat route, and its admins' usage view, when the site has one), HTTP server; --migrate --confirm for data steps; --images [--confirm] for the image backfill.
  * Spec: docs/backend-spec.md §8 · docs/data-spec.md §6.3, §8
  * Exports: (none — entry point)
  * Edit guide: refuse to start on invalid config or an unconfirmed destructive step; never let a handler rejection crash the process.
@@ -150,10 +150,16 @@ if (existsSync(dataFile)) {
   const images = config.setup.images === true
     ? await (await import('./data-images.ts')).createImages({ dir: config.filesDir })
     : undefined;
+  // A site with chat: its admins see the chat's daily counts at GET /admin/chat (chat-block-spec §11.4).
+  const chatConfig = config.chat;
+  const usageReport = chatConfig ? (await import('./chat-usage.ts')).usageReport : undefined;
   const api = createData({
     db, tables, admins: admins.emails, publicUrl: config.publicUrl,
     ...(images ? { images, uploadLimit: config.uploadLimit } : {}),
     log: (line) => process.stderr.write(`backend: ${line}\n`),
+    ...(chatConfig && usageReport
+      ? { chatUsage: () => usageReport(db, { dailyTokens: chatConfig.dailyTokens, sharesEnabled: chatConfig.shares.enabled }, Date.now()) }
+      : {}),
   });
   data = api;
   if (images) sweepImages = api.sweepImages;

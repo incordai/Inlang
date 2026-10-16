@@ -38,7 +38,7 @@ import { createAdapter } from '../../backend/src/server/chat-adapters.ts';
 import { createChat, parseChatContext } from '../../backend/src/server/chat.ts';
 import { createQueries, figuresRun } from '../../backend/src/server/chat-query.ts';
 import { createKnows, knowsProblems } from '../../backend/src/server/chat-knows.ts';
-import { migrateChat } from '../../backend/src/server/chat-usage.ts';
+import { migrateChat, usageReport } from '../../backend/src/server/chat-usage.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
 import { createData, parseAdminEmails } from '../../backend/src/server/data-api.ts';
 import { migrateData, type DataStep } from '../../backend/src/server/data-migrate.ts';
@@ -331,7 +331,12 @@ export async function startDevBackend(
     const tables = loadTables(model);
     dataTables = tables;
     ownedRows = ownedRowDeletes(db.dialect, tables);
-    data = createData({ db, tables, admins: admins.emails });
+    // A site with chat: the dev admins see its daily counts too (chat-block-spec §11.4).
+    const chatConfig = chat ? config.chat : null;
+    data = createData({
+      db, tables, admins: admins.emails,
+      ...(chatConfig ? { chatUsage: () => usageReport(db, { dailyTokens: chatConfig.dailyTokens, sharesEnabled: chatConfig.shares.enabled }, Date.now()) } : {}),
+    });
   }
   let chatRoutes: ChatRoutes | undefined;
   if (chat && config.chat) {

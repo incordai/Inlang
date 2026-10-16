@@ -11,6 +11,8 @@ import assert from 'node:assert/strict';
 import { client, startBackend, type Harness } from './helpers.ts';
 import { dataOf } from './data-fixture.ts';
 import { parseAdminEmails } from '../src/server/data-api.ts';
+import { createShareStore } from '../src/server/chat-share.ts';
+import { createUsage } from '../src/server/chat-usage.ts';
 
 const GOOD = 'a-long-enough-password';
 const MINUTE = 60 * 1000;
@@ -313,5 +315,53 @@ test('limits: admin writes 300 per 10 minutes per account; refused admin writes 
     const statuses: number[] = [];
     for (let i = 0; i < 61; i++) statuses.push((await ana.c.request('POST', '/admin/data/notes', { body: 'x' })).status);
     assert.deepEqual([statuses[0], statuses[59], statuses[60]], [403, 403, 429]);
+  } finally { await h.close(); }
+});
+
+/* ---- the chat's usage view (chat-block-spec §11.4) ---------------------- */
+
+test('SECURITY chat usage: GET /admin/chat answers admins only — signed out 401, unverified or unlisted 403 — with counts and never a message', async () => {
+  const words = 'visitor-words-that-must-never-show';
+  const h = await startBackend({}, { data: dataOf(SHOP), admins: ['boss@studio.test', 'fake@studio.test'], chatUsage: { dailyTokens: 300_000, sharesEnabled: true } });
+  try {
+    const boss = await signUp(h, 'Boss', true);
+    const fake = await signUp(h, 'Fake', false);
+    const ana = await signUp(h, 'Ana', true);
+    const today = new Date(h.clock.now).toISOString().slice(0, 10);
+    const usage = createUsage(h.db);
+    await usage.add(today, 1200, 80, 1);
+    await usage.add(today, 300, 20, 0);
+    // A share holds a question and an answer's text: the view counts it and reads neither.
+    const shares = createShareStore({ db: h.db, days: 30, max: 100, now: () => h.clock.now });
+    await shares.create(JSON.stringify([{ type: 'text', s: words }]), words);
+    const out = client(h.url);
+    assert.deepEqual([(await out.get('/admin/chat')).status, await body(await out.get('/admin/chat'))], [401, { error: 'signin_required' }]);
+    assert.equal((await fake.c.get('/admin/chat')).status, 403, 'listed but unverified is not an admin');
+    assert.equal((await ana.c.get('/admin/chat')).status, 403, 'verified but unlisted is not an admin');
+    const ok = await boss.c.get('/admin/chat');
+    assert.equal(ok.status, 200, 'CONTROL: the admin reads it');
+    const text = await ok.text();
+    assert.ok(!text.includes(words), 'no message text, no shared answer, in the response');
+    assert.deepEqual(JSON.parse(text), {
+      usage: {
+        today,
+        budget: { daily: 300_000, spent: 1600, left: 298_400 },
+        days: [{ day: today, input: 1500, output: 100, messages: 2, dropped: 1, shares: 1 }],
+        shares: { enabled: true, kept: 1 },
+      },
+    });
+    // Read only, no parameters: anything else is refused or absent.
+    assert.equal((await boss.c.get('/admin/chat?day=x')).status, 400);
+    assert.equal((await boss.c.request('POST', '/admin/chat', {})).status, 404);
+    assert.equal((await boss.c.get('/admin/chat/x')).status, 404);
+  } finally { await h.close(); }
+});
+
+test('CONTROL chat usage: a server without chat has no /admin/chat — 404 even to an admin', async () => {
+  const h = await startBackend({}, { data: dataOf(SHOP), admins: ['boss@studio.test'] });
+  try {
+    const boss = await signUp(h, 'Boss', true);
+    assert.equal((await boss.c.get('/admin/data')).status, 200);
+    assert.equal((await boss.c.get('/admin/chat')).status, 404);
   } finally { await h.close(); }
 });

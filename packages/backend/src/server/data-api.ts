@@ -1,12 +1,12 @@
 /**
  * @az server data-api
  * Purpose: the /data/<table> routes and the /admin routes: rules in every statement, allow-listed bodies, closed codes, audit, limits, image uploads.
- * Spec: docs/data-spec.md §4.7, §5, §8, §11
+ * Spec: docs/data-spec.md §4.7, §5, §8, §11 (and docs/chat-block-spec.md §11.4: GET /admin/chat)
  * Exports: createData, parseAdminEmails, grant, DATA_BODY_LIMIT, DATA_LIMITS, UPLOAD_LIMIT_DEFAULT, LIST_DEADLINE_MS, isForeignKeyViolation, DataApi
  * Edit guide: deny unless a rule grants; the owner check lives in the SQL; unreadable is answered exactly like absent (404).
  *   Admins (verified, listed) bypass rules, never validation; every admin write is audited without values.
  *   An image's file is written before its row names it and removed only after the row stops naming it.
- * Tests: packages/backend/test/data-api.test.ts
+ * Tests: packages/backend/test/data-api.test.ts, packages/backend/test/data-admin.test.ts
  */
 
 /**
@@ -142,6 +142,12 @@ export interface DataDeps {
   readonly uploadLimit?: number;
   /** Operational log: never a value, key or address. */
   readonly log?: (line: string) => void;
+  /**
+   * The chat's usage report (chat-usage.ts usageReport), on a site with chat:
+   * `GET /admin/chat` answers it to admins only (chat-block-spec §11.4).
+   * Counts only — no message text exists to be in it.
+   */
+  readonly chatUsage?: () => Promise<unknown>;
 }
 
 /** An audit row as the admin area lists it — ids, names and times, never a value. */
@@ -671,6 +677,12 @@ export function createData(deps: DataDeps): DataApi {
     if (parts[2] === 'audit') {
       if (parts.length !== 3 || !isRead) return NOT_FOUND;
       return adminAudit(req.url.searchParams);
+    }
+    // The chat's daily counts (chat-block-spec §11.4): a site with chat only, read only, no parameters.
+    if (parts[2] === 'chat') {
+      if (!deps.chatUsage || parts.length !== 3 || !isRead) return NOT_FOUND;
+      const stray = req.url.searchParams.keys().next().value;
+      return stray === undefined ? { status: 200, body: { usage: await deps.chatUsage() } } : fail(400, 'bad_query', stray);
     }
     if (parts[2] !== 'data' || parts.length < 3 || parts.length > 6) return NOT_FOUND;
     if (parts.length === 3) {

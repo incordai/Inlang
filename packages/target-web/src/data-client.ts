@@ -133,8 +133,33 @@ function tableRoutes(t: SpecTable): string {
   return `  /** \`${t.name}\` — ${what}. */\n  ${t.name}: {\n${ops.join('\n')}\n  },`;
 }
 
-/** The client module's text for these tables. */
-export function dataClient(tables: readonly SpecTable[]): string {
+/** The admin's view of the chat's counts (chat-block-spec §11.4), on a site with chat only. */
+const CHAT_USAGE_TYPE = `/** One day of chat, as the server counts it (chat-block-spec §11.4): counts only, never a message. */
+export interface ChatUsageDay {
+  readonly day: string;
+  readonly messages: number;
+  readonly input: number;
+  readonly output: number;
+  readonly dropped: number;
+  readonly shares: number;
+}
+
+/** Today's spend against the day's budget, the last 30 days with anything counted (newest first), the shares kept. */
+export interface ChatUsage {
+  readonly today: string;
+  readonly budget: { readonly daily: number; readonly spent: number; readonly left: number };
+  readonly days: readonly ChatUsageDay[];
+  readonly shares: { readonly enabled: boolean; readonly kept: number };
+}
+
+`;
+
+const CHAT_USAGE_ROUTE = `
+  /** The chat's daily counts and the budget left (chat-block-spec §11.4) — never a message. */
+  chatUsage: () => call<{ usage: ChatUsage }>("GET", "/admin/chat"),`;
+
+/** The client module's text for these tables; `chat`: the site shows a chat, so its admins may read its usage. */
+export function dataClient(tables: readonly SpecTable[], chat = false): string {
   // Only a site with image fields gets the image type and raw-body uploads, so the others' client is unchanged.
   const images = hasImages(tables);
   return `${generated('the typed client for the site\'s data tables: list/get/create/update/remove per table (data-spec §7)')}
@@ -257,7 +282,7 @@ export interface AdminRow {
   readonly [field: string]: unknown;
 }
 
-/** One admin write: who, which row, when — never a value (data-spec §11). */
+${chat ? CHAT_USAGE_TYPE : ''}/** One admin write: who, which row, when — never a value (data-spec §11). */
 export interface AuditEntry {
   readonly id: string;
   readonly table: TableName;
@@ -291,7 +316,7 @@ export const admin = {
   upload: (table: TableName, id: string, field: string, file: Blob) =>
     toRow<{ item: AdminRow }>("PUT", adminRow(table, id, field), file),
   clear: (table: TableName, id: string, field: string) =>
-    toRow<{ item: AdminRow }>("DELETE", adminRow(table, id, field)),
+    toRow<{ item: AdminRow }>("DELETE", adminRow(table, id, field)),${chat ? CHAT_USAGE_ROUTE : ''}
 } as const;
 `;
 }

@@ -1085,11 +1085,11 @@ export function emitProject(source: Spec, options: EmitOptions = {}): EmittedPro
       { path: `${AUTH_DIR}/react.tsx`, content: authReact() },
     ] : []),
     // The typed data client only with tables (data-spec §7).
-    ...(spec.site.data ? [{ path: `${DATA_DIR}/client.ts`, content: dataClient(spec.site.data) }] : []),
+    ...(spec.site.data ? [{ path: `${DATA_DIR}/client.ts`, content: dataClient(spec.site.data, chat) }] : []),
     ...(rowTables.length > 0 ? [{ path: ROWS_FILE, content: rowsTsx(rowTables, RUNTIME_DIR) }] : []),
     ...(chat ? [{ path: CHAT_FILE, content: chatTsx(RUNTIME_DIR) }] : []),
     ...(spec.site.data && admin.length > 0 ? [
-      { path: ADMIN_FILE, content: adminTsx() },
+      { path: ADMIN_FILE, content: adminTsx(chat) },
       { path: ADMIN_VALUES_FILE, content: adminValuesTs(spec.site.data) },
     ] : []),
     { path: 'src/runtime.tsx', content: runtimeTsx() },

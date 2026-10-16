@@ -523,7 +523,7 @@ export function createApp(deps: AppDeps) {
     const data = deps.data;
     // The admin routes (data-spec §11) are fetch routes too, with the same edge.
     const dataPath = url.pathname === '/data' || url.pathname.startsWith('/data/')
-      || url.pathname === '/admin/data' || url.pathname.startsWith('/admin/data/') || url.pathname === '/admin/audit';
+      || url.pathname === '/admin/data' || url.pathname.startsWith('/admin/data/') || url.pathname === '/admin/audit' || url.pathname === '/admin/chat';
     if (data && dataPath) {
       // A fetch route like /auth: an allowed origin always, and the CSRF
       // header on EVERY method that can change something (data-spec §5.4).

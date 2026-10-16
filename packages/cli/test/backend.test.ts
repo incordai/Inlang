@@ -1,5 +1,5 @@
 /**
- * `az build` with and without a backend, and `az backend init` (backend-spec §4, §8).
+ * `az build` with and without a backend, `az backend init` and `az backend usage` (backend-spec §4, §8; chat-block-spec §11.4).
  */
 
 import { test } from 'node:test';
@@ -151,4 +151,55 @@ test('a chat site\'s context holds a text body kept in a file, as its plain text
   const ctx = JSON.parse(readFileSync(join(p.out, 'server/chat/context.json'), 'utf8')) as { pages: { route: string; blocks: { body?: string }[] }[] };
   assert.equal(ctx.pages.find((x) => x.route === '/about')?.blocks[0].body, 'Our shop\n\nWe resole any pair, see the form.');
   assert.ok(!JSON.stringify(ctx).includes('forms.example'));
+});
+
+test('az backend usage (chat-block-spec §11.4): the built server\'s daily counts, read only — never the key, never a message', async () => {
+  // Refused: a folder that is no chat server, and any flag but --json.
+  const empty = az('backend', 'usage', mkdtempSync(join(tmpdir(), 'az-be-empty-')));
+  assert.equal(empty.status, 1);
+  assert.match(empty.stderr, /no built server with a chat in .* — point at the server\/ folder az build wrote/);
+  assert.equal(az('backend', 'usage', mkdtempSync(join(tmpdir(), 'az-be-empty-')), '--all').status, 2);
+
+  const p = project(SITE(`${BACKEND}    model default\n`).replace('    title "Hi"\n', '    title "Hi"\n  chat panel\n    allow anyone\n'));
+  assert.equal(az('build', p.file, '--out', p.out).status, 0);
+  const server = join(p.out, 'server');
+  assert.equal(az('backend', 'init', server).status, 0);
+  const key = `planted-model-key-${Date.now()}`;
+  const envFile = join(server, '.env');
+  writeFileSync(envFile, readFileSync(envFile, 'utf8')
+    .replace(/^AZ_SMTP_HOST=$/m, 'AZ_SMTP_HOST=smtp.invalid')
+    .replace(/^AZ_CHAT_URL=$/m, 'AZ_CHAT_URL=https://models.example.test/v1')
+    .replace(/^AZ_CHAT_MODEL=$/m, 'AZ_CHAT_MODEL=model-a')
+    .replace(/^AZ_CHAT_KEY=$/m, `AZ_CHAT_KEY=${key}`));
+  // Before the server ever started there is no database, and none is made.
+  const before = az('backend', 'usage', server);
+  assert.equal(before.status, 1);
+  assert.match(before.stderr, /no database at \.\/data\/app\.db yet — start the server once/);
+  assert.ok(!existsSync(join(server, 'data/app.db')), 'a report makes no database');
+
+  // The tables as the server makes them, and a day of answers and a share in them.
+  const { openSqlite, migrate } = await import('../../backend/src/server/db.ts');
+  const { createUsage, migrateChat, utcDay } = await import('../../backend/src/server/chat-usage.ts');
+  const { createShareStore } = await import('../../backend/src/server/chat-share.ts');
+  const db = await openSqlite(join(server, 'data/app.db'));
+  const words = 'a-visitor-question-never-printed';
+  try {
+    await migrate(db);
+    await migrateChat(db);
+    await createUsage(db).add(utcDay(Date.now()), 4_200, 310, 1);
+    await createShareStore({ db, days: 30, max: 10, now: Date.now }).create(JSON.stringify([{ type: 'text', s: words }]), words);
+  } finally { await db.close(); }
+
+  const text = az('backend', 'usage', server);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /^chat usage — today is \d{4}-\d{2}-\d{2} \(UTC\)\n {2}budget 300,000 tokens a day · spent today 4,510 · left 295,490\n {2}shared answers: on · 1 kept now\n/);
+  assert.match(text.stdout, / {2}\d{4}-\d{2}-\d{2} +1 +4,200 +310 +1 +1\n$/);
+  const json = az('backend', 'usage', server, '--json');
+  assert.equal(json.status, 0, json.stderr);
+  const r = JSON.parse(json.stdout) as { budget: { spent: number }; days: { messages: number; shares: number }[]; shares: { kept: number } };
+  assert.deepEqual([r.budget.spent, r.days[0].messages, r.days[0].shares, r.shares.kept], [4_510, 1, 1, 1]);
+  for (const out of [text.stdout + text.stderr, json.stdout + json.stderr]) {
+    assert.ok(!out.includes(key), 'the model key is never printed');
+    assert.ok(!out.includes(words), 'no message text');
+  }
 });

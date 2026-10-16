@@ -242,8 +242,64 @@ export const hrefOf = (table: string, row?: string) => "/admin/" + table + (row 
 `;
 }
 
-/** src/data/admin.tsx: the pages, the same for every site (the tables are in admin-values.ts). */
-export function adminTsx(): string {
+/**
+ * The chat's usage on /admin (chat-block-spec §11.4), on a site with chat:
+ * today against the daily budget, the last 30 days' counts, the shares kept.
+ * The server answers it to admins only; it never holds a message.
+ */
+const CHAT_USAGE_VIEW = `/** The chat's daily counts (chat-block-spec §11.4): counts only — no message is kept to be shown. */
+function ChatUsageView() {
+  const [usage, setUsage] = useState<ChatUsage | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | DataErrorCode>("loading");
+  useEffect(() => {
+    let alive = true;
+    void admin.chatUsage().then((r) => {
+      if (!alive) return;
+      if (r.ok) { setUsage(r.usage); setState("ready"); } else setState(r.code);
+    });
+    return () => { alive = false; };
+  }, []);
+  const n = (v: number) => v.toLocaleString();
+  return (
+    <section aria-labelledby="az-admin-chat">
+      <h2 id="az-admin-chat">Chat usage</h2>
+      {state !== "ready" && state !== "loading" ? <p role="alert">{problemText(state)}</p> : null}
+      <p role="status" className="az-admin-status">{state === "loading" ? "Loading the chat's counts…" : ""}</p>
+      {usage ? (
+        <>
+          <p>{"Today (" + usage.today + ", UTC): " + n(usage.budget.spent) + " of " + n(usage.budget.daily) + " tokens spent, " + n(usage.budget.left) + " left."}</p>
+          <p>{(usage.shares.kept === 1 ? "1 shared answer" : n(usage.shares.kept) + " shared answers") + " kept" + (usage.shares.enabled ? "." : "; new shares are off (AZ_CHAT_SHARES=off).")}</p>
+          {usage.days.length === 0 ? <p>Nothing counted in the last 30 days.</p> : (
+            <div className="az-admin-scroll" role="region" aria-labelledby="az-admin-chat-days" tabIndex={0}>
+              <table className="az-admin-table">
+                <caption id="az-admin-chat-days">The last 30 days, newest first (UTC)</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Day</th><th scope="col">Messages</th><th scope="col">Input tokens</th>
+                    <th scope="col">Output tokens</th><th scope="col">Dropped components</th><th scope="col">Shares made</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usage.days.map((d) => (
+                    <tr key={d.day}>
+                      <th scope="row">{d.day}</th><td>{n(d.messages)}</td><td>{n(d.input)}</td>
+                      <td>{n(d.output)}</td><td>{n(d.dropped)}</td><td>{n(d.shares)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+`;
+
+/** src/data/admin.tsx: the pages, the same for every site (the tables are in admin-values.ts); `chat` adds the chat's usage to /admin. */
+export function adminTsx(chat = false): string {
   return `${generated('the /admin pages: tables, rows, editor, delete confirm, audit (data-spec §11)')}/*
  * data-spec §11 — the admin pages are UX, not security.
  *
@@ -253,7 +309,7 @@ export function adminTsx(): string {
  * <Protected> around it only spares a signed-out visitor an empty page.
  */
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { admin, type AdminRow, type AuditEntry, type DataErrorCode, type TableName } from "./client.ts";
+import { admin, type AdminRow, type AuditEntry, ${chat ? 'type ChatUsage, ' : ''}type DataErrorCode, type TableName } from "./client.ts";
 import {
   cellText, columnsOf, fromInput, hrefOf, imageOf, label, money, PAGE_SIZE, problemText, rowName, TABLES, toInput, UUID,
   type FieldInfo, type TableInfo,
@@ -342,7 +398,7 @@ function Home() {
                 </li>
               ))}
             </ul>
-          </section>
+          </section>${chat ? '\n          <ChatUsageView />' : ''}
           <Audit />
         </>
       )}
@@ -350,7 +406,7 @@ function Home() {
   );
 }
 
-const ACTION_TEXT: Record<AuditEntry["action"], string> = { create: "created", edit: "edited", delete: "deleted" };
+${chat ? CHAT_USAGE_VIEW : ''}const ACTION_TEXT: Record<AuditEntry["action"], string> = { create: "created", edit: "edited", delete: "deleted" };
 
 /** The audit log, newest first: who changed which row, when — never a value. */
 function Audit() {

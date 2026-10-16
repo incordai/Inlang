@@ -95,10 +95,10 @@ const IMAGES = `  data products
 const CLASHES = ['records', 'promises', 'responses', 'requests', 'errors', 'maps', 'box', 'boxes']
   .map((t) => `  data ${t}\n    label text required\n    allow anyone read\n    allow signedin create\n    allow owner edit delete\n`).join('');
 
-test('the generated client type-checks under strict TypeScript — with and without image fields, and tables named like built-ins', () => {
-  for (const data of [DATA, IMAGES, CLASHES]) {
+test('the generated client type-checks under strict TypeScript — with and without image fields, tables named like built-ins, and a chat\'s usage route', () => {
+  for (const [data, chat] of [[DATA, false], [IMAGES, false], [CLASHES, false], [DATA, true]] as const) {
     const dir = mkdtempSync(join(tmpdir(), 'az-client-'));
-    writeFileSync(join(dir, 'client.ts'), dataClient(specOf(data).site.data!));
+    writeFileSync(join(dir, 'client.ts'), dataClient(specOf(data).site.data!, chat));
     // A module beside it that uses the client AND the built-ins the tables are named after.
     if (data === CLASHES) {
       writeFileSync(join(dir, 'use.ts'), [

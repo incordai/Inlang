@@ -7,6 +7,7 @@
 import { createServer, type Server } from 'node:http';
 import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { createApp } from '../src/server/app.ts';
+import { migrateChat, usageReport } from '../src/server/chat-usage.ts';
 import { migrate, openSqlite, type Db } from '../src/server/db.ts';
 import { createData } from '../src/server/data-api.ts';
 import type { Images } from '../src/server/data-images.ts';
@@ -106,6 +107,8 @@ export async function startBackend(
     /** Image storage, for tables with an image field, and its upload cap in bytes. */
     images?: Images;
     uploadLimit?: number;
+    /** A site with chat: its tables made, and its usage report at GET /admin/chat (chat-block-spec §11.4). */
+    chatUsage?: { readonly dailyTokens: number; readonly sharesEnabled: boolean };
   } = {},
 ): Promise<Harness> {
   const clock = { now: Date.now() };
@@ -122,6 +125,8 @@ export async function startBackend(
   const db = await openSqlite(':memory:');
   await migrate(db);
   if (over.data) await migrateData(db, over.data.steps, { confirm: Infinity });
+  if (over.chatUsage) await migrateChat(db);
+  const chatUsage = over.chatUsage;
   const mail: Message[] = [];
   let config = loaded.config;
   const server = createServer();
@@ -137,6 +142,7 @@ export async function startBackend(
       data: createData({
         db, tables: over.data.tables, admins: over.admins ?? [], now: () => clock.now, publicUrl: url,
         ...(over.images ? { images: over.images } : {}), ...(over.uploadLimit ? { uploadLimit: over.uploadLimit } : {}),
+        ...(chatUsage ? { chatUsage: () => usageReport(db, chatUsage, clock.now) } : {}),
       }),
     } : {}),
   });
