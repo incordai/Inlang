@@ -192,20 +192,27 @@ The full floor is in the spec (§9).
 
 ## Status
 
-C1, C2, C2b and C3 of the spec: a `panel` or a `float` (on every page from
+C1 to C6 of the spec: a `panel` or a `float` (on every page from
 `site`, left out with `chat none`) whose answers are prose and the
 components `show` lists — the site's own blocks, and charts, tables, stats,
 image cards and dashboards — with share links, grounded on the site's pages
 (a `text` body kept in a file included, as plain text) and on the public
-tables it `knows`; and C5 — formatted prose, follow-up questions, and the
-conversation kept in the visitor's browser (spec §21.1). Before going live, `az backend probe server` asks the configured
-model the real prompt, one question per component, and reports what it streamed
-and what the filter dropped.
+tables it `knows`; C4's operations — the moderation hook, the `az doctor` and
+`az audit` chat checks, the usage view and `az backend usage`; C5 —
+formatted prose, follow-up questions, and the conversation kept in the
+visitor's browser (spec §21.1); and C6 — charts, tables and stats whose
+figures come `from tool` one of the operator's own HTTP endpoints, declared
+in the server's `.env` and shown with its label, their rows never sent to
+the model (spec §21.2). Before going live, `az backend probe server` asks
+the configured model the real prompt, one question per component, calls
+each tool once with its sample, and reports what it streamed, what the
+filter dropped and what each tool answered.
 
 Known gaps:
 
 - a quote is of `pricing` only; `faq`, `cta` and `feature` are composed, never quoted
-- the operations of C4 (a second wire shape, the moderation hook, `az doctor` checks) are not built
+- one wire shape (`completions`); a second is added only when a deployment needs it (spec §19.8)
+- the model never reads a tool's rows, so it cannot comment on them (spec §21.2.8 O6); interactive controls (C7) and maps (C8) are not built
 
 ## Tested
 
@@ -217,4 +224,5 @@ What is automated today:
 - `packages/backend/test/chat-knows.test.ts` reads `knows` rows through the anonymous list on SQLite and holds the exact bytes the model is given; `pnpm test:backend-db` does the same on PostgreSQL and MySQL
 - `words.test.ts` runs the theme lint over the emitter (also `az lint`)
 - `pnpm test:chat` runs the real generated server with the `fake` adapter in Chromium, Firefox and WebKit, components and the injection corpus included — and the float on every page, its keyboard and focus, Jump to latest, reduced motion, answers grounded on a `knows` table, and pixel snapshots of answered states in every theme and scheme
+- `packages/backend/test/chat-tools.test.ts` holds the tool declarations, every parameter type at its bounds, and the call against a local endpoint (redirects, timeouts, oversized, malformed and mis-shaped replies refused); `chat-tools-route.test.ts` the route with a tool, the per-answer cap, the cache, the per-address limit, and that no row ever reaches the model
 - `packages/backend/test/chat-answer.test.ts` and `chat-attacks.test.ts` hold the answer parser to every form, cap and split, and to the injection corpus (`packages/backend/test/fixtures/chat-attacks/`)

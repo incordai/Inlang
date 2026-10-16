@@ -1171,7 +1171,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0, C1, C2, C2b, C3, C4 and C5 as built — deviations and findings (2026-10-15/16)
+## 19. C0, C1, C2, C2b, C3, C4, C5 and C6 as built — deviations and findings (2026-10-15/16)
 
 ### 19.1 Against §14's C1 list
 
@@ -1555,6 +1555,80 @@ policies still the plain page's, hashes aside) and `pnpm gate words/chat`
 against the C4 code (`78c6b45`) first: the parser's follow-up and fence
 tests and the prompt's fail there, and the overlay tests fail to import
 (`chat-markdown.ts`, `chat-history.ts` do not exist).
+
+### 19.10 C6 as built (2026-10-16)
+
+Against §21.2 (its tests, §21.2.7), with §21.2.8's recommendations taken:
+every chat whose `show` has `chart`, `table` or `stats` may use the tools
+(O5); the model never reads a tool's rows (O6); `POST` only (O7); no
+provider-native function calling — the `from tool` line is the subset's
+(O8).
+
+| Item | State |
+|---|---|
+| declarations (`.env`) | built: `server/env.ts` — `AZ_CHAT_TOOLS` (`[a-z][a-z0-9]{0,23}`, ≤ 8, no repeat), `AZ_CHAT_TOOL_<NAME>_URL` (https, or http on loopback; no user name or password, no `#`; the query string is the operator's), `_KEY` (`TOOL_KEYS` `secret: true`; never in `.env.example`), `_PARAMS` (≤ 6; `int`/`number`/`date` with `min`/`max`, `enum` with 1–24 `values`, `text` with `maxLength` ≤ 80, `bool`; `required`; any other key refused), `_FIELDS` (1–8 of `text`/`number`/`date`/`bool`), `_LABEL` (1–40, one line), `_ABOUT` (≤ 200), `_TIMEOUT_MS` (100–5 000, default 2 000), `_SAMPLE` (checked by the same `paramsProblem` every call's body is), `AZ_CHAT_TOOL_CALLS_PER_ADDRESS` (default `120/hour`). Validated by `loadConfig` at start: the server refuses to run naming each bad key, and no message quotes a value |
+| the answer format | built: `server/chat-rich.ts` — `from tool <name> {<param> <value>} (count \| sum\|avg\|min\|max <field>) [by <field>]` in a `chart`, `stat` (also a dashboard's tiles) or `table`, and `… columns <field>…` in a `table`. The name must be a declared tool, each parameter declared and given once, every required one there, each value of its type and in its bounds (`int`/`number` by the answer grammar's numbers, `bool` `yes`/`no`, `date` a real `YYYY-MM-DD`, `enum` exactly a declared value, bare or quoted, `text` a quoted one-line string within `maxLength`); otherwise the component is dropped as **`tool`** (a new `DropReason`). The record holds the canonical request line, never a row |
+| no invented tool | built: only the tools the server started with are names; `forAnswer` refuses any other before a socket opens (`chat-tools-route.test.ts`: an invented tool is dropped and the endpoint never asked) |
+| the call | built: `server/chat-tools.ts` `callTool` — the body re-checked, then `POST` of the values as a JSON object to the declared URL, `authorization: Bearer <key>` when set, `redirect: 'error'`, one `AbortSignal.timeout` for the request and the body, joined with the visitor leaving; read only from exactly `200` with `content-type: application/json`, through `outbound.ts`'s `readCapped` at 256 KB; a JSON array of ≤ 200 rows, each exactly the declared fields, each value its type (text cleaned as the model's is and ≤ 200 characters, numbers finite and ≤ 10¹⁵, dates real days) — one row wrong refuses the reply |
+| aggregation | built: `aggregateTool` — `count`, `sum`/`avg`/`min`/`max` of a number field, `by` a text field (largest first, ≤ 24 or 6 for a pie, `more`) or a date field (the latest days, oldest first); a table's `columns` are the first 20 rows; values kept to 15 significant digits, a figure past 10¹⁵ is the note |
+| limits | built: 3 `from tool` per answer (`RICH_LIMITS.answerCalls`, inside the 6 requests; the 4th is `too_many`), a 60 s cache of 200 entries per (tool, parameters) — the checked rows, so one call serves several aggregates —, the per-address allowance (only a call counts, not a cache hit), the tool's timeout, the chat queue (calls one after another) |
+| rendering | built: the figures carry `src: tool`, `source` (the operator's label) and `asOf` (the UTC minute, `YYYY-MM-DDTHH:MMZ`), set by the server only. The page (`chat-chart.ts` `sourceOf`, used by `validChart`, `validTable`, `validStats`) takes `tool` only with both, and a label on nothing else; `chat-draw.ts` removes the AI label and writes "From <label> · <date, time> UTC" with `textContent` in the source line — and in a stat card's label slot. Shares and the kept conversation carry them through the same validators |
+| results never to the model | built, structurally: `toolsText` (the per-request system text) is generated from the declarations — names, parameters, fields, the `ABOUT` sentence, never a URL, key or label — and nothing a tool answered is ever added. Tested by capturing every request the model is sent across two turns: no row, no key, no URL, and the system text byte-equal to `systemText(…)` with no tool answered (`chat-tools-route.test.ts`); in `test:chat` the fake model answers "LEAKED" if a row is ever in its system text |
+| logs | built: `chat: tool <name> <outcome> <ms>ms <rows> rows` — `ok`, `timeout`, `aborted`, `redirect`, `network`, `status <n>`, `type`, `too_large`, `malformed`, `shape`, `params`, `limited` — never a parameter, a value or the key |
+| `az doctor` | built: a **chat tools** line between chat .env and chat budget — the server's own validation of every `AZ_CHAT_TOOL*` key by name (fail), a tool with required parameters and no `_SAMPLE` (warn: the probe cannot call it), tools on a site where no chat shows a chart, table or stats (warn); **chat budget** counts the tools' system text; **chat .env** leaves the tool keys to the new line |
+| `az audit` | built: **server keys** looks for the exact value of each `AZ_CHAT_TOOL_<NAME>_KEY` the `.env` (or the environment) declares, in every shipped file (`toolSecretKeys`); the `CHAT` private-name rule already covered an `AZ_PUBLIC_…CHAT…` variable |
+| `az backend probe` | built: after the model's questions, each tool is called once with its `_SAMPLE` (or with none when it requires none) and reported — `PASS tool standings · outcome ok · total 12ms · rows 2`; a failing tool or one with no sample it needs (`no_sample`) fails the probe. The model's questions are asked with the tools in the system text, as the route asks |
+| README, `.env.example` | built: the generated server's README has a data-tools section (what is sent, what is needed back, that the endpoint must treat the parameters as untrusted input, the log line) and runbook items for a tool's key and a misbehaving tool; `.env.example` lists the per-tool keys as comments under a "Chat data tools" heading |
+
+Where the build differs from §21.2:
+
+- **`from tool` is always a tool request.** A site table named `tool` can
+  no longer be asked `from tool …` as a table; the grammar of §21.2.3 reads
+  that word first.
+- **Names.** Parameter and field names are `[a-z][a-z0-9_]{0,31}` (§21.2.2
+  named none); `count`, `sum`, `avg`, `min`, `max`, `columns`, `by`,
+  `from` and `tool` cannot be parameter names, or a request would read two
+  ways.
+- **`_PARAMS`, `_ABOUT` and `_SAMPLE` are optional**: no `_PARAMS` is a tool
+  without parameters; `az doctor` warns and the probe fails when a tool that
+  requires parameters has no sample.
+- **A tool key for a name not in `AZ_CHAT_TOOLS` refuses the start** (a
+  typo in a name would otherwise leave a tool silently undeclared).
+- **`by` is a text or date field only** (not `bool`); a chart needs one; a
+  stat takes only a date one (the latest day, with its change — §20.5's
+  rule that a stat over categories is no stat). A grouping has no bucket: a
+  date groups by its day. Blank text groups are left out, as NULL groups are
+  from the site's tables, and two groups whose labels are the same once
+  clamped to 24 characters make the figures the note, not a merged bar.
+- **A table's rows are the first 20 the endpoint answered**, in its order
+  (the grammar has no `sort`); cells clamped to §20.2's 120 characters.
+- **`at` is a minute, in UTC, and said so** ("· 16 Oct 2026, 14:05 UTC"):
+  §21.2.4 said "<time>"; every visitor sees the same words.
+- **The label is not in the model's system text** — it is the page's copy;
+  the model is told the name, the `ABOUT` sentence, the parameters and the
+  fields.
+- **A cache hit is not counted** against the address; a failure is not
+  cached; the calls are counted per answer when the answer is parsed (three
+  requests, even when the cache answers them).
+- **Tool calls stop when the visitor leaves**, not when an answer reaches a
+  cap: components already sent are still filled.
+- **A redirect is told from a network failure** by fetch's own refusal
+  (`redirect: 'error'` rejects with a cause saying so); either way nothing
+  is followed (the unit test asserts the redirect's target is never asked).
+- **https with a self-signed certificate is exercised in `test:chat`**, the
+  server trusting the run's certificate through `NODE_EXTRA_CA_CERTS`; the
+  unit tests use loopback http (the node test runner has no way to trust a
+  certificate for `fetch` without a dependency).
+- **`cards from tool` is not built** — §21.2.3 names charts, tables and
+  stats.
+
+What was measured (2026-10-16): `pnpm verify` (2 946 tests), `pnpm lint`, `pnpm test:chat` (440 checks, up from 412, in Chromium, Firefox and WebKit: a tool chart, table and stat with "From Race results service · <date>, <time> UTC" and no AI label, a row holding `<img …>` and an instruction drawn as cell text with no element made, the next question answered as if no row had been seen (the fake model says "LEAKED" when a row is in its system text), a slow loopback-http tool and one answering the wrong shape each the "could not be loaded" note, an invented tool nothing, axe in each state, no request off the site and its backend, no CSP violation; the https tool behind this run's self-signed certificate POSTed `{ season, series }` with its bearer key, the invented tool never called, the log holding `chat: tool standings ok`, `slowpoke timeout`, `broken shape` and no parameter, row or key), `pnpm verify:build` (204 checks) and `pnpm gate words/chat` (all 12 points). Every new unit test was run
+against the C5 code (`1cd3af6`) first: `chat-tools.test.ts` and
+`chat-tools-route.test.ts` fail to import (`chat-tools.ts` does not exist),
+the probe's tool test fails (no tool line), the doctor's fails (no `chat
+tools` check), the audit's fails (the tool key is not looked for), the
+overlay's fails (`src: tool` is refused), and the env test fails (no
+`tools` in the config).
 
 ---
 
@@ -2184,7 +2258,7 @@ dashboard in each theme, both schemes (gate item 3's method).
 
 **Status** specified 2026-10-16 on the owner's approval of that day (§17,
 Q16–Q19) · **C5 built 2026-10-16** (§19.9: what was built, and where it
-differs) · C6, C7, C8 specified, not built · C8's map
+differs) · **C6 built 2026-10-16** (§19.10) · C7, C8 specified, not built · C8's map
 library and tile source vetted and decided 2026-10-16 (§17 Q19a–Q19h) ·
 builds on C2's parser, events and templates (§5.3, §5.4) and C2b's rich
 components (§20), which it extends and never forks.
