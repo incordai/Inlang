@@ -155,6 +155,9 @@ export function chatBackend(spec: Spec): BackendChat | undefined {
   const shown = new Set<AnswerWord>();
   let quotes: Json[] = [];
   let destinations: string[] = [];
+  /** With a rich word: the public tables' schema; with cards: the gallery images by key (chat-block-spec §20.5, §20.6). */
+  let tables: Json[] | null = null;
+  let images: Json[] | null = null;
   for (const page of spec.pages) {
     const chat = page.blocks.find((b) => b.word === 'chat');
     if (!chat) continue;
@@ -164,6 +167,9 @@ export function chatBackend(spec: Spec): BackendChat | undefined {
     // The site's quotes and destinations are the same for every chat; a chat carries those its show uses.
     if (answer && answer.quotes.length > 0) quotes = answer.quotes.map((q) => ({ word: 'pricing', route: q.route, n: q.n }));
     if (answer && answer.destinations.length > 0) destinations = [...answer.destinations];
+    if (answer?.tables) tables = answer.tables.map((t) => ({ name: t.name, fields: t.fields.map((f) => given({ ...f, choices: f.choices ? [...f.choices] : undefined })) }));
+    // The key and the author's alt: the file itself is the build's, never the model's to name.
+    if (answer?.images) images = answer.images.map((i) => ({ key: i.key, alt: i.alt }));
     chats[page.route] = {
       allow: chat.props.allow ?? 'signedin', limit: Number(chat.props.limit ?? '20'),
       ...(show.length > 0 ? { show } : {}),
@@ -195,7 +201,7 @@ export function chatBackend(spec: Spec): BackendChat | undefined {
     chats,
     routes: spec.pages.map((p) => p.route).sort(),
     // Only when a chat may show components, so a prose-only chat's context is as it was.
-    ...(shown.size > 0 ? { answer: { quotes, destinations } } : {}),
+    ...(shown.size > 0 ? { answer: { quotes, destinations, ...(tables ? { tables } : {}), ...(images ? { images } : {}) } } : {}),
   });
   return {
     prompt: CHAT_PROMPT(spec.site.name, ANSWER_WORDS.filter((w) => shown.has(w))),

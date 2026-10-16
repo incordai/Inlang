@@ -1,6 +1,6 @@
 /**
  * @az server chat-usage
- * Purpose: the chat's daily counters — the az_chat_usage table, its migrations, one upsert per answer, the 400-day sweep.
+ * Purpose: the chat's daily counters — the az_chat_usage table, one upsert per answer, the 400-day sweep — and every chat table's migrations (az_chat_shares too, chat-share.ts).
  * Spec: docs/backend-spec.md §3, §5 (docs/chat-block-spec.md §6.5, §6.7)
  * Exports: CHAT_MIGRATIONS, migrateChat, createUsage, utcDay, Usage, USAGE_KEEP_DAYS
  * Edit guide: counts only, never text or a person; one statement per answer (pooler-safe); append a step, never edit a shipped one.
@@ -48,6 +48,25 @@ export const CHAT_MIGRATIONS: {
         sqlite: ['CREATE TABLE az_chat_usage (day TEXT PRIMARY KEY, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, messages INTEGER NOT NULL, dropped INTEGER NOT NULL)'],
         postgres: ['CREATE TABLE az_chat_usage (day VARCHAR(10) PRIMARY KEY, input_tokens BIGINT NOT NULL, output_tokens BIGINT NOT NULL, messages BIGINT NOT NULL, dropped BIGINT NOT NULL)'],
         mysql: [`CREATE TABLE az_chat_usage (day VARCHAR(10) PRIMARY KEY, input_tokens BIGINT NOT NULL, output_tokens BIGINT NOT NULL, messages BIGINT NOT NULL, dropped BIGINT NOT NULL) ${MYSQL}`],
+      },
+    },
+    {
+      // chat-block-spec §20.7: one shared answer per row, under an unguessable
+      // id; no column for who shared it. Read by id, swept by `expires`.
+      version: 2,
+      sql: {
+        sqlite: [
+          'CREATE TABLE az_chat_shares (id TEXT PRIMARY KEY, events TEXT NOT NULL, question TEXT, created INTEGER NOT NULL, expires INTEGER NOT NULL, delete_hash TEXT NOT NULL)',
+          'CREATE INDEX az_chat_shares_expires ON az_chat_shares (expires)',
+        ],
+        postgres: [
+          'CREATE TABLE az_chat_shares (id VARCHAR(22) PRIMARY KEY, events TEXT NOT NULL, question TEXT, created BIGINT NOT NULL, expires BIGINT NOT NULL, delete_hash CHAR(64) NOT NULL)',
+          'CREATE INDEX az_chat_shares_expires ON az_chat_shares (expires)',
+        ],
+        mysql: [
+          `CREATE TABLE az_chat_shares (id VARCHAR(22) PRIMARY KEY, events MEDIUMTEXT NOT NULL, question TEXT, created BIGINT NOT NULL, expires BIGINT NOT NULL, delete_hash CHAR(64) NOT NULL) ${MYSQL}`,
+          'CREATE INDEX az_chat_shares_expires ON az_chat_shares (expires)',
+        ],
       },
     },
   ],

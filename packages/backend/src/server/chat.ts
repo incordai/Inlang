@@ -1,7 +1,7 @@
 /**
  * @az server chat
  * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer parsed into typed events and streamed to the page.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §20.5, §20.7)
  * Exports: createChat, parseChatContext, rulesFor, systemText, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS
  * Edit guide: every limit is the server's, never the request's; nothing the model wrote reaches the page but chat-answer.ts's events; abort upstream whenever the answer stops; logs carry codes and counts, never text.
  * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts
@@ -22,6 +22,13 @@
  * answer's record (its prose and its components' canonical lines) is
  * tagged, so the page can send it back as history.
  *
+ * A rich component (§20) is resolved before it is written: numbers the
+ * model wrote are marked `src: model`; each `from` request is answered by
+ * the server's own read of a public table (`figures`, chat-query.ts) and
+ * marked `src: site`. When shares are on, `done` also carries the share tag
+ * over the answer's events as sent (chat-share.ts), so the page can keep
+ * exactly this answer under a link if the visitor asks.
+ *
  * The upstream request is aborted the moment the answer stops for any
  * reason — the visitor left, a timeout, a cap — so an abandoned answer
  * stops costing tokens. Nothing is stored but the day's counts.
@@ -32,7 +39,9 @@
 import type { ServerResponse } from 'node:http';
 import type { ChatRequest, ChatRoutes } from './app.ts';
 import type { ChatAdapter } from './chat-adapters.ts';
-import { ANSWER_WORDS, createAnswerParser, type AnswerEvent, type AnswerQuote, type AnswerRules, type AnswerWord } from './chat-answer.ts';
+import { ANSWER_WORDS, createAnswerParser, type AnswerBlock, type AnswerEvent, type AnswerQuote, type AnswerRules, type AnswerWord, type DropReason } from './chat-answer.ts';
+import { RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
+import { createShareRoutes, createShareStore, mergeText, shareKey, shareTag, SHARE_LIMITS } from './chat-share.ts';
 import { createQueue, createRateLimits } from './chat-limits.ts';
 import { sseEvent } from './chat-sse.ts';
 import { historyKey, readChatRequest, tagTurn, trimHistory } from './chat-text.ts';
@@ -61,8 +70,56 @@ export interface ChatContext {
   /** The blocks answers may quote, and every destination a cta may point at (chat-block-spec §5.3, §6.2). */
   readonly quotes: readonly AnswerQuote[];
   readonly destinations: readonly string[];
+  /** The build images an image card may name, by key, with the author's alt (§20.6). */
+  readonly images: readonly { readonly key: string; readonly alt: string }[];
+  /** The tables an answer may ask figures of, as the model is told them (§20.5): public fields only. */
+  readonly tables: readonly ContextTable[];
   /** Everything else in the file: the site's public content, sent to the model as data. */
   readonly content: unknown;
+}
+
+/** A queryable table as context.json lists it: each public field's name and type, its choices or currency, a money field's digits. */
+export interface ContextTable {
+  readonly name: string;
+  readonly fields: readonly { readonly name: string; readonly type: string; readonly choices?: readonly string[]; readonly currency?: string; readonly digits?: number }[];
+}
+
+const NAME = /^[a-z][a-z0-9]*$/;
+
+/** context.json's `answer.tables`, or null when malformed. */
+function contextTables(v: unknown): ContextTable[] | null {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) return null;
+  const out: ContextTable[] = [];
+  for (const t of v) {
+    const x = t as { name?: unknown; fields?: unknown } | null;
+    if (!x || typeof x.name !== 'string' || !NAME.test(x.name) || !Array.isArray(x.fields)) return null;
+    const fields: ContextTable['fields'][number][] = [];
+    for (const f of x.fields) {
+      const y = f as { name?: unknown; type?: unknown; choices?: unknown; currency?: unknown; digits?: unknown } | null;
+      if (!y || typeof y.name !== 'string' || !NAME.test(y.name) || typeof y.type !== 'string' || !NAME.test(y.type)) return null;
+      if (y.choices !== undefined && !(Array.isArray(y.choices) && y.choices.every((c) => typeof c === 'string'))) return null;
+      if (y.currency !== undefined && (typeof y.currency !== 'string' || !/^[a-z]{3}$/.test(y.currency))) return null;
+      if (y.digits !== undefined && !(Number.isInteger(y.digits) && (y.digits as number) >= 0 && (y.digits as number) <= 4)) return null;
+      fields.push({
+        name: y.name, type: y.type, ...(y.choices ? { choices: y.choices as string[] } : {}),
+        ...(y.currency ? { currency: y.currency } : {}), ...(y.digits !== undefined ? { digits: y.digits as number } : {}),
+      });
+    }
+    out.push({ name: x.name, fields });
+  }
+  return out;
+}
+
+/** context.json's `answer.images`, or null when malformed. */
+function contextImages(v: unknown): { key: string; alt: string }[] | null {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) return null;
+  const ok = v.every((i) => {
+    const x = i as { key?: unknown; alt?: unknown } | null;
+    return !!x && typeof x.key === 'string' && /^[a-z0-9][a-z0-9-]{0,31}$/.test(x.key) && typeof x.alt === 'string' && x.alt.length <= 300;
+  });
+  return ok ? (v as { key: string; alt: string }[]).map((i) => ({ key: i.key, alt: i.alt })) : null;
 }
 
 const isRoute = (v: unknown): v is string => typeof v === 'string' && v.startsWith('/') && !v.startsWith('//') && v.length <= 2048;
@@ -90,7 +147,7 @@ export function parseChatContext(text: string): ChatContext | string {
     chats[route] = { allow: x.allow, limit: x.limit as number, show: show as AnswerWord[] };
   }
   // Present when a chat may show components; without it answers are prose only.
-  const answer = (r.answer ?? { quotes: [], destinations: [] }) as { quotes?: unknown; destinations?: unknown };
+  const answer = (r.answer ?? { quotes: [], destinations: [] }) as { quotes?: unknown; destinations?: unknown; tables?: unknown; images?: unknown };
   const quotes = answer.quotes;
   if (!Array.isArray(quotes) || !quotes.every((q) => {
     const x = q as Partial<AnswerQuote> | null;
@@ -100,14 +157,22 @@ export function parseChatContext(text: string): ChatContext | string {
   if (!Array.isArray(destinations) || !destinations.every((d) => typeof d === 'string' && d.length > 0 && d.length <= 2048)) {
     return 'answer.destinations is not a list of destinations';
   }
-  return { chats, quotes: quotes as AnswerQuote[], destinations: destinations as string[], content: { site: r.site, pages: r.pages } };
+  const tables = contextTables(answer.tables);
+  if (tables === null) return 'answer.tables is not a list of { name, fields }';
+  const images = contextImages(answer.images);
+  if (images === null) return 'answer.images is not a list of { key, alt }';
+  return { chats, quotes: quotes as AnswerQuote[], destinations: destinations as string[], images, tables, content: { site: r.site, pages: r.pages } };
 }
 
 /** What one chat page's answers may show: its own `show`, the site's quotes and destinations. */
 export function rulesFor(context: ChatContext, page: string): AnswerRules {
   const show = Object.hasOwn(context.chats, page) ? context.chats[page].show : [];
-  return { show, quotes: context.quotes, destinations: context.destinations };
+  return { show, quotes: context.quotes, destinations: context.destinations, images: context.images.map((i) => i.key) };
 }
+
+/** A table as the model reads it: `orders: status (choice: paid, open), total (money usd), placed (datetime)`. */
+const tableLine = (t: ContextTable) => `${t.name}: ${t.fields.map((f) =>
+  `${f.name} (${f.type}${f.choices ? `: ${f.choices.join(', ')}` : ''}${f.currency ? ` ${f.currency}` : ''})`).join(', ')}`;
 
 /** A quote as the model writes it: `show pricing /pricing`, `#2` for a page's second. */
 const quoteLine = (q: AnswerQuote) => `show ${q.word} ${q.route}${q.n > 0 ? `#${q.n + 1}` : ''}`;
@@ -129,7 +194,18 @@ export function systemText(prompt: string, context: ChatContext, page: string): 
       const quotes = rules.quotes.filter((q) => q.word === 'pricing').map(quoteLine);
       lines.push(quotes.length > 0 ? `The pricing blocks you may show: ${quotes.join(' · ')}.` : 'There is no pricing block to show.');
     }
-    if (rules.show.includes('cta')) lines.push(`The destinations a cta may use, written exactly so: ${rules.destinations.join(' ')}.`);
+    if (rules.show.includes('cta') || rules.show.includes('cards')) lines.push(`The destinations a cta or a card's link may use, written exactly so: ${rules.destinations.join(' ')}.`);
+    const rich = rules.show.filter((w) => (RICH_WORDS as readonly string[]).includes(w));
+    if (rich.length > 0) {
+      lines.push(context.tables.length > 0
+        ? `The tables "from" may count, sum, average, or list (by field, a date by day, month or year; "where" a choice or flag field equals one value):\n${context.tables.map(tableLine).join('\n')}`
+        : 'There are no tables to take figures "from": any figure is your own, and is shown labelled as AI-generated.');
+    }
+    if (rules.show.includes('cards')) {
+      lines.push(context.images.length > 0
+        ? `The site images a card may show, by key: ${context.images.map((i) => `${i.key} (${JSON.stringify(i.alt)})`).join(' · ')}.`
+        : 'There are no site images: a card has no image.');
+    }
   }
   // prompt.txt opens with the generated-file line, which is for the operator, not the model.
   return `${prompt.replace(/^# GENERATED BY AZ[^\n]*\n/, '').trimEnd()}\n\n<site-content>\n${JSON.stringify(context.content)}\n</site-content>\n\n${lines.join('\n')}\n`;
@@ -146,13 +222,18 @@ export interface ChatOptions {
   readonly now?: () => number;
   readonly log?: (line: string) => void;
   readonly timing?: ChatTiming;
+  /** Answers a rich component's `from` request from the public tables (chat-query.ts); absent on a site without data. */
+  readonly figures?: FiguresRun;
 }
 
 /** A whole-number token estimate for `chars` characters. */
 const estimate = (chars: number) => Math.ceil(chars / CHARS_PER_TOKEN);
 
-/** One parsed event as the page receives it. */
-const wire = (e: AnswerEvent): string => (e.type === 'text' ? sseEvent('text', { s: e.s }) : sseEvent('block', e.block));
+/** One event as the page receives it: prose, or a component ready to fill. */
+type Sent = { readonly type: 'text'; readonly s: string } | { readonly type: 'block'; readonly block: Record<string, unknown> };
+const wire = (e: Sent): string => (e.type === 'text' ? sseEvent('text', { s: e.s }) : sseEvent('block', e.block));
+
+const isRich = (b: AnswerBlock): b is RichBlock => (RICH_WORDS as readonly string[]).some((w) => Object.hasOwn(b, w));
 
 export function createChat(o: ChatOptions): ChatRoutes {
   const now = o.now ?? Date.now;
@@ -162,6 +243,12 @@ export function createChat(o: ChatOptions): ChatRoutes {
   const usage = createUsage(o.db);
   const limits = createRateLimits(o.config.perAddress, o.config.perAccount, now);
   const queue = createQueue(o.config.concurrency);
+  const shareTagKey = shareKey(o.secret);
+  const shareStore = createShareStore({ db: o.db, days: o.config.shares.days, max: o.config.shares.max, now });
+  const shares = createShareRoutes({
+    store: shareStore, key: shareTagKey, config: o.config.shares, now,
+    allowOf: (page) => (Object.hasOwn(o.context.chats, page) ? o.context.chats[page].allow : null),
+  });
   /** The day the budget last ran out, so it is logged once per day. */
   let exhaustedOn = '';
 
@@ -182,8 +269,29 @@ export function createChat(o: ChatOptions): ChatRoutes {
     // The page learns at once that its answer is coming, before the first token.
     res.flushHeaders();
     const parser = createAnswerParser(rulesFor(o.context, page));
-    // Nothing is written to a connection the visitor already closed.
-    const write = (events: readonly AnswerEvent[]) => { if (!res.destroyed) for (const e of events) res.write(wire(e)); };
+    /** Every event sent, as the share tag covers them; and what a rich component's resolving dropped. */
+    const sent_: Sent[] = [];
+    const resolvedDrops: DropReason[] = [];
+    let bytes = 0;
+    const day = utcDay(started);
+    // In order, each rich component resolved first; nothing is written to a connection the visitor already closed.
+    const write = async (events: readonly AnswerEvent[]) => {
+      for (const e of events) {
+        let out: Sent;
+        if (e.type === 'text') out = e;
+        else if (isRich(e.block)) {
+          const r = await resolveRich(e.block, o.figures ?? null, day);
+          if (r === null) { resolvedDrops.push('figures'); continue; }
+          out = { type: 'block', block: r };
+        } else out = { type: 'block', block: e.block as unknown as Record<string, unknown> };
+        // The whole answer stays within what one share may hold (§20.7).
+        const size = Buffer.byteLength(JSON.stringify(out), 'utf8');
+        if (bytes + size > SHARE_LIMITS.eventsBytes) { if (out.type === 'block') resolvedDrops.push('too_long'); continue; }
+        bytes += size;
+        sent_.push(out);
+        if (!res.destroyed) res.write(wire(out));
+      }
+    };
     let reported: { input: number; output: number } | null = null;
     let outcome: 'done' | 'capped' | 'unavailable' | 'gone' | 'empty' = 'done';
     try {
@@ -192,7 +300,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
         idle = setTimeout(stop, timing.betweenMs);
         if (chunk.usage) reported = chunk.usage;
         if (!chunk.text) continue;
-        write(parser.push(chunk.text));
+        await write(parser.push(chunk.text));
         // A cap passed (prose, components): stop reading, and stop the model.
         if (parser.ended) {
           outcome = 'capped';
@@ -211,20 +319,27 @@ export function createChat(o: ChatOptions): ChatRoutes {
       req.closed.removeEventListener('abort', stop);
     }
     // The last line and any component still open, once the answer is whole.
-    if (outcome === 'done' || outcome === 'capped') write(parser.end());
+    if (outcome === 'done' || outcome === 'capped') await write(parser.end());
     const record = parser.record;
     if ((outcome === 'done' || outcome === 'capped') && record.trim() === '') outcome = 'empty';
     // A connection the visitor closed has nobody left to tell.
     if (!res.destroyed) {
+      const question = turns.at(-1)?.text ?? '';
+      const events = mergeText(sent_);
+      const at = now();
+      // With shares on, the tags that let the page keep exactly this answer under a link (§20.7).
+      const share = o.config.shares.enabled && events.length > 0
+        ? { share: { at, tag: shareTag(shareTagKey, conversation, index, at, events, null), tagq: shareTag(shareTagKey, conversation, index, at, events, question) } }
+        : {};
       const last = outcome === 'done' || outcome === 'capped'
-        ? sseEvent('done', { tag: tagTurn(key, conversation, index, record), left, conversation, text: record })
+        ? sseEvent('done', { tag: tagTurn(key, conversation, index, record), left, conversation, text: record, ...share })
         : outcome === 'gone' ? '' : sseEvent('error', { code: 'unavailable' });
       res.end(last);
     }
     // Spent whatever happened: the provider's count when it gave one, else an estimate.
     const input = reported?.input ?? estimate(system.length + sent.reduce((n, t) => n + t.text.length, 0));
     const output = reported?.output ?? estimate(record.length);
-    const dropped = parser.dropped;
+    const dropped = [...parser.dropped, ...resolvedDrops];
     await usage.add(utcDay(started), input, output, dropped.length);
     // Codes and counts only: why components were dropped, never what they said.
     log(`chat: ${outcome} ${now() - started}ms tokens ${input}/${output}${dropped.length > 0 ? ` dropped ${dropped.length} (${[...new Set(dropped)].sort().join(',')})` : ''}`);
@@ -274,7 +389,8 @@ export function createChat(o: ChatOptions): ChatRoutes {
 
   return {
     handle,
-    sweep: () => limits.sweep(),
-    prune: () => usage.sweep(now()),
+    sweep: () => { limits.sweep(); shares.sweep(); },
+    prune: async () => (await usage.sweep(now())) + (await shareStore.sweep()),
+    shares,
   };
 }

@@ -89,6 +89,11 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_CHAT_CONCURRENCY', about: 'Answers streamed at once (default 4, 1–64); four times as many wait up to 10 s, then are told busy.', when: (s) => s.chat === true, required: false, example: '4' },
   { name: 'AZ_CHAT_TIMEOUT_SECONDS', about: 'The longest one answer may take, in seconds (default 60, 10–300). The first token must come within 15 s, and each next within 20 s.', when: (s) => s.chat === true, required: false, example: '60' },
   { name: 'AZ_CHAT_ENABLED', about: '`off` switches chat off at once (every message answers disabled); `on` is the default.', when: (s) => s.chat === true, required: false, example: 'on' },
+  { name: 'AZ_CHAT_SHARES', about: '`off` stops new share links (chat-block-spec §20.7): the Share button is not offered and a share is refused; links already made keep working until they expire. `on` is the default.', when: (s) => s.chat === true, required: false, example: 'on' },
+  { name: 'AZ_CHAT_SHARE_DAYS', about: 'Days a shared answer stays readable before it is deleted (default 30, 1–365).', when: (s) => s.chat === true, required: false, example: '30' },
+  { name: 'AZ_CHAT_SHARE_MAX', about: 'Shared answers kept at once, all visitors together; past it a share is refused until older ones expire (default 10000, 1–1000000).', when: (s) => s.chat === true, required: false, example: '10000' },
+  { name: 'AZ_CHAT_SHARES_PER_ADDRESS', about: 'Shares one address may make, in the form of AZ_CHAT_PER_ADDRESS (default 10/hour,30/day).', when: (s) => s.chat === true, required: false, example: '10/hour,30/day' },
+  { name: 'AZ_CHAT_SHARES_PER_ACCOUNT', about: 'Shares one signed-in account may make (default 30/day).', when: (s) => s.chat === true, required: false, example: '30/day' },
   { name: 'AZ_CHAT_FAKE_FILE', about: 'With AZ_CHAT_API=fake only: a JSON file of scripted answers, for tests and local development.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: always, required: false, example: 'deny' },
 ];
@@ -132,6 +137,11 @@ export const CHAT_LIMITS = {
   perAccount: '100/day',
   /** A model id is text passed through; this is its longest. */
   modelMax: 200,
+  /** chat-block-spec §20.7: share links. */
+  shareDays: { default: 30, min: 1, max: 365 },
+  shareMax: { default: 10_000, min: 1, max: 1_000_000 },
+  sharesPerAddress: '10/hour,30/day',
+  sharesPerAccount: '30/day',
 } as const;
 
 /** A message allowance per hour and per day; an absent window is not limited. */
@@ -164,6 +174,14 @@ export interface ChatConfig {
   readonly timeoutMs: number;
   readonly enabled: boolean;
   readonly fakeFile: string;
+  /** Share links (chat-block-spec §20.7): whether new ones may be made, how long they last, how many at once, how often. */
+  readonly shares: {
+    readonly enabled: boolean;
+    readonly days: number;
+    readonly max: number;
+    readonly perAddress: ChatRate;
+    readonly perAccount: ChatRate;
+  };
 }
 
 export interface Provider {
@@ -453,6 +471,8 @@ function chatConfig(get: (k: string) => string, publicUrl: string, problems: str
   };
   const enabled = (get('AZ_CHAT_ENABLED') || 'on').toLowerCase();
   if (enabled !== 'on' && enabled !== 'off') problems.push('AZ_CHAT_ENABLED must be on or off');
+  const shares = (get('AZ_CHAT_SHARES') || 'on').toLowerCase();
+  if (shares !== 'on' && shares !== 'off') problems.push('AZ_CHAT_SHARES must be on or off');
   return {
     api: api === 'fake' ? 'fake' : 'completions',
     url: url.replace(/\/+$/, ''),
@@ -466,5 +486,12 @@ function chatConfig(get: (k: string) => string, publicUrl: string, problems: str
     timeoutMs: bounded(get, 'AZ_CHAT_TIMEOUT_SECONDS', CHAT_LIMITS.timeoutSeconds, problems) * 1000,
     enabled: enabled !== 'off',
     fakeFile,
+    shares: {
+      enabled: shares !== 'off',
+      days: bounded(get, 'AZ_CHAT_SHARE_DAYS', CHAT_LIMITS.shareDays, problems),
+      max: bounded(get, 'AZ_CHAT_SHARE_MAX', CHAT_LIMITS.shareMax, problems),
+      perAddress: rate('AZ_CHAT_SHARES_PER_ADDRESS', CHAT_LIMITS.sharesPerAddress),
+      perAccount: rate('AZ_CHAT_SHARES_PER_ACCOUNT', CHAT_LIMITS.sharesPerAccount),
+    },
   };
 }

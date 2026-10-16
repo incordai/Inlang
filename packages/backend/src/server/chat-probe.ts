@@ -43,6 +43,11 @@ export const PROBE_QUESTIONS: Readonly<Record<'prose' | AnswerWord, string>> = {
   faq: 'What do people usually ask? Answer as a few questions and answers.',
   cta: 'How do I get started? Give me a button to the right page.',
   feature: 'What are the main features? List a few.',
+  chart: 'Show me a chart of the site\'s figures.',
+  table: 'Put the main facts in a table.',
+  stats: 'Give me the key numbers as stat cards.',
+  cards: 'Show a few things worth a look, as cards.',
+  dashboard: 'Give me a small dashboard of the key figures.',
 };
 
 export interface ProbeAnswer {

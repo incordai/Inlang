@@ -2,7 +2,7 @@
  * @az server data-api
  * Purpose: the /data/<table> routes and the /admin routes: rules in every statement, allow-listed bodies, closed codes, audit, limits, image uploads.
  * Spec: docs/data-spec.md §4.7, §5, §8, §11
- * Exports: createData, parseAdminEmails, DATA_BODY_LIMIT, DATA_LIMITS, UPLOAD_LIMIT_DEFAULT, isForeignKeyViolation, DataApi
+ * Exports: createData, parseAdminEmails, grant, DATA_BODY_LIMIT, DATA_LIMITS, UPLOAD_LIMIT_DEFAULT, LIST_DEADLINE_MS, isForeignKeyViolation, DataApi
  * Edit guide: deny unless a rule grants; the owner check lives in the SQL; unreadable is answered exactly like absent (404).
  *   Admins (verified, listed) bypass rules, never validation; every admin write is audited without values.
  *   An image's file is written before its row names it and removed only after the row stops naming it.
@@ -121,7 +121,7 @@ type Grant = { ok: true; ownerOnly: boolean } | { ok: false; result: Result };
  * their own rows. No rule at all is 403 for everyone (signing in would not
  * help); a rule that needs a session is 401 without one.
  */
-function grant(who: readonly Who[], user: string | null): Grant {
+export function grant(who: readonly Who[], user: string | null): Grant {
   if (who.includes('anyone')) return { ok: true, ownerOnly: false };
   if (who.length === 0) return { ok: false, result: fail(403, 'forbidden') };
   if (user === null) return { ok: false, result: fail(401, 'signin_required') };

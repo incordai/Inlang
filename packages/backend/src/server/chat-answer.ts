@@ -1,7 +1,7 @@
 /**
  * @az server chat-answer
  * Purpose: the answer parser: a model's text, read line by line, becomes the closed set of page events — prose, or a component validated whole.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2)
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3)
  * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, lineTokens, quoteKey
  * Edit guide: linear in the characters read, no regular expression that can backtrack; a line that does not parse is prose; a component that breaks a rule is dropped whole and never shown as syntax.
  * Tests: packages/backend/test/chat-answer.test.ts, packages/backend/test/chat-attacks.test.ts
@@ -40,8 +40,14 @@
  * Caps per answer: ANSWER_LIMITS. Past the prose cap or the component cap
  * the parser ends (`ended`), and the route stops reading the model.
  *
- * Copied into a generated server; imports nothing.
+ * The rich components — chart, table, stats, cards, dashboard (§20) — are
+ * held the same way and read whole by chat-rich.ts; their `from` figures are
+ * filled by the route (chat.ts) before the page sees them.
+ *
+ * Copied into a generated server; imports only chat-rich.ts.
  */
+
+import { RICH_FORMS, RICH_LIMITS, RICH_WORDS, richBlock, richLines, type RichBlock, type RichLine, type RichWord } from './chat-rich.ts';
 
 /** Every cap the parser holds (chat-block-spec §5.3, §6.1). The prompt is generated from these too. */
 export const ANSWER_LIMITS = {
@@ -66,8 +72,8 @@ export const ANSWER_LIMITS = {
   record: 12_000,
 } as const;
 
-/** The components an answer may hold — the closed list `show` takes (chat-block-spec §3.2). */
-export const ANSWER_WORDS = ['pricing', 'faq', 'cta', 'feature'] as const;
+/** The components an answer may hold — the closed list `show` takes (chat-block-spec §3.2, §20.1). */
+export const ANSWER_WORDS = ['pricing', 'faq', 'cta', 'feature', ...RICH_WORDS] as const;
 export type AnswerWord = (typeof ANSWER_WORDS)[number];
 
 /** A block the site lets answers quote, as context.json lists it: its word, its page, its position there. */
@@ -78,6 +84,8 @@ export interface AnswerRules {
   readonly show: readonly AnswerWord[];
   readonly quotes: readonly AnswerQuote[];
   readonly destinations: readonly string[];
+  /** The build's image keys an image card may name (§20.6); none when absent. */
+  readonly images?: readonly string[];
 }
 
 /** One component, validated: exactly what the page's templates are filled with. */
@@ -85,7 +93,8 @@ export type AnswerBlock =
   | { readonly quote: 'pricing'; readonly route: string; readonly n: number }
   | { readonly faq: readonly { readonly q: string; readonly a: string }[] }
   | { readonly cta: { readonly label: string; readonly to: string } }
-  | { readonly feature: readonly { readonly title: string; readonly text: string }[] };
+  | { readonly feature: readonly { readonly title: string; readonly text: string }[] }
+  | RichBlock;
 
 export type AnswerEvent =
   | { readonly type: 'text'; readonly s: string }
@@ -94,7 +103,7 @@ export type AnswerEvent =
 /** Why a component was dropped — counted and logged by kind, never with its text. */
 export type DropReason =
   | 'not_shown' | 'no_quote' | 'composed_pricing' | 'destination' | 'shape'
-  | 'too_long' | 'too_many' | 'empty' | 'components' | 'record';
+  | 'too_long' | 'too_many' | 'empty' | 'components' | 'record' | 'number' | 'image' | 'figures';
 
 /**
  * Each form the model is taught, in the order the prompt lists them: what
@@ -118,6 +127,7 @@ export const ANSWER_FORMS: Readonly<Record<AnswerWord, { readonly lines: readonl
     lines: ['feature', `  item "A title, at most ${ANSWER_LIMITS.title} characters"`, `    text "One or two sentences, at most ${ANSWER_LIMITS.text} characters"`],
     about: `a short list, 1 to ${ANSWER_LIMITS.items} items; the text line is optional`,
   },
+  ...RICH_FORMS,
 };
 
 /** The key a quote is found by, in context.json and the page's templates: `/pricing#0`. */
@@ -137,7 +147,7 @@ export const stripText = (s: string): string => s.replace(STRIPPED, '');
 export const cleanText = (s: string): string => stripText(s).normalize('NFC');
 
 /** The first words a line may start a component with; any other first word makes the line prose at once. */
-const KEYWORDS: readonly string[] = ['text', 'show', 'faq', 'cta', 'feature', 'pricing'];
+const KEYWORDS: readonly string[] = ['text', 'show', 'faq', 'cta', 'feature', 'pricing', ...RICH_WORDS];
 const LONGEST_KEYWORD = Math.max(...KEYWORDS.map((k) => k.length));
 const isKeywordPrefix = (s: string) => KEYWORDS.some((k) => k.startsWith(s));
 
@@ -204,13 +214,18 @@ const quoted = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g,
 /** Whether `ch` (one code point) is a combining mark — it may still join the character before it. */
 const MARK = /\p{M}/u;
 
-type BlockKind = 'faq' | 'feature' | 'cta' | 'show' | 'pricing' | 'dropped';
+type BlockKind = 'faq' | 'feature' | 'cta' | 'show' | 'pricing' | 'rich' | 'dropped';
+
+/** The chart kinds a `chart` head line names (chat-block-spec §20.2). */
+const CHART_KINDS: readonly string[] = ['bar', 'line', 'area', 'pie', 'donut'];
 
 /** A component being read: its first line, its items, and the first rule it broke. */
 interface Open {
   readonly kind: BlockKind;
   readonly head: readonly LineToken[];
   readonly items: { title: string; text: string | null }[];
+  /** A rich component's child lines, depth 1 or 2 (chat-rich.ts reads them whole). */
+  readonly lines: RichLine[];
   broken: DropReason | null;
 }
 
@@ -246,6 +261,9 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
   let prose = 0;
   let shown = 0;
   let record = '';
+  /** Data points and `from` requests across the answer's rich components (§20.2). */
+  let points = 0;
+  let queries = 0;
   const dropped: DropReason[] = [];
   let out: AnswerEvent[] = [];
   let pendingText = '';
@@ -323,6 +341,17 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     // A pricing block the model wrote is refused for what it is, whatever its shape (L8).
     if (b.kind === 'pricing') { drop('composed_pricing'); return; }
     if (b.kind === 'dropped' || b.broken) { drop(b.broken ?? 'shape'); return; }
+    if (b.kind === 'rich') {
+      const read = richBlock(b.head, b.lines, { show: rules.show, destinations: rules.destinations, images: rules.images ?? [] }, cleanText);
+      if (!read.ok) { drop(read.why); return; }
+      for (let i = 0; i < read.lostImages; i++) drop('image');
+      // The answer's own caps: points across its components, requests the server will run.
+      if (points + read.points > RICH_LIMITS.answerPoints || queries + read.queries > RICH_LIMITS.answerQueries) { drop('too_many'); return; }
+      points += read.points;
+      queries += read.queries;
+      emit(read.block, richLines(read.block));
+      return;
+    }
     if (b.kind === 'show') {
       const word = b.head[1].value;
       const dest = b.head[2].value;
@@ -369,9 +398,17 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     const b = open!;
     if (b.broken) return;
     if (over) { b.broken = 'too_long'; return; }
-    if (b.kind !== 'faq' && b.kind !== 'feature') { b.broken = 'shape'; return; }
     let indent = 0;
     while (indent < raw.length && raw[indent] === ' ') indent++;
+    if (b.kind === 'rich') {
+      // Two levels under the head, two spaces each; the lines are read whole when the block ends.
+      const lexed = lineTokens(raw.slice(indent));
+      if ((indent !== 2 && indent !== 4) || lexed === null || lexed.length === 0) { b.broken = 'shape'; return; }
+      if (b.lines.length >= RICH_LIMITS.lines) { b.broken = 'too_many'; return; }
+      b.lines.push({ depth: indent / 2, tokens: lexed });
+      return;
+    }
+    if (b.kind !== 'faq' && b.kind !== 'feature') { b.broken = 'shape'; return; }
     const tokens = lineTokens(raw.slice(indent));
     const one = tokens !== null && tokens.length === 2 && tokens[0].kind === 'bare' && tokens[1].kind === 'string';
     if (indent === 2 && one && tokens![0].value === 'item') {
@@ -392,7 +429,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     const asProse = () => say(cleanText(raw) + (newline ? '\n' : ''));
     if (over) {
       // Too long to be a component; too long to show as the line it is.
-      open = { kind: 'dropped', head: [], items: [], broken: 'too_long' };
+      open = { kind: 'dropped', head: [], items: [], lines: [], broken: 'too_long' };
       return;
     }
     const t = lineTokens(raw);
@@ -406,11 +443,11 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
         else asProse();
         return;
       case 'show':
-        if (rest.length === 2 && bare(0) && bare(1)) open = { kind: 'show', head: t, items: [], broken: null };
+        if (rest.length === 2 && bare(0) && bare(1)) open = { kind: 'show', head: t, items: [], lines: [], broken: null };
         else asProse();
         return;
       case 'cta':
-        if (rest.length === 2 && str(0) && bare(1)) open = { kind: 'cta', head: t, items: [], broken: null };
+        if (rest.length === 2 && str(0) && bare(1)) open = { kind: 'cta', head: t, items: [], lines: [], broken: null };
         else asProse();
         return;
       case 'faq':
@@ -418,8 +455,25 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       case 'pricing': {
         const words = OPENER_WORDS[first.value];
         if (rest.every((r) => r.kind === 'bare' && words.includes(r.value)) && rest.length <= 2) {
-          open = { kind: first.value, head: t, items: [], broken: null };
+          open = { kind: first.value, head: t, items: [], lines: [], broken: null };
         } else asProse();
+        return;
+      }
+      case 'chart':
+      case 'table':
+      case 'stats':
+      case 'cards':
+      case 'dashboard': {
+        // A line with a rich component's first-line shape is held as one; any other is a sentence that starts with the word.
+        const shaped: Record<RichWord, boolean> = {
+          chart: bare(0) && CHART_KINDS.includes(rest[0].value) && str(1),
+          table: str(0),
+          stats: rest.length === 0,
+          cards: rest.length === 0 || (bare(0) && rest[0].value === 'from'),
+          dashboard: rest.length === 1 && str(0),
+        };
+        if (shaped[first.value as RichWord]) open = { kind: 'rich', head: t, items: [], lines: [], broken: null };
+        else asProse();
         return;
       }
       default:

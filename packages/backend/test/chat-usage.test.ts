@@ -16,7 +16,7 @@ test('the chat migration creates az_chat_usage once; a second run is a no-op; th
   try {
     await migrate(db);
     assert.equal(await db.get("SELECT 1 AS x FROM sqlite_schema WHERE name = 'az_chat_usage'"), undefined, 'not part of the auth schema');
-    assert.deepEqual(await migrateChat(db), [1]);
+    assert.deepEqual(await migrateChat(db), [1, 2]);
     assert.deepEqual(await migrateChat(db), []);
     assert.ok(await db.get("SELECT 1 AS x FROM sqlite_schema WHERE name = 'az_chat_usage'"));
   } finally { await db.close(); }

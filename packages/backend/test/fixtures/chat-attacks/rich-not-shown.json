@@ -1,0 +1,18 @@
+{
+  "name": "rich-not-shown",
+  "threat": "Forged chart data and smuggled images on a page whose show lists no rich component: every one is dropped, none drawn",
+  "ask": "attack rich",
+  "answer": "Figures follow.\nchart bar \"Revenue\" from orders sum total by status\nchart bar \"Mine\"\n  point \"a\" 1\n  point \"b\" 2\ntable \"T\"\n  columns \"a\"\n  row 1\nstats\n  stat \"x\" 3\ncards\n  card \"c\"\n    image https://evil.example/x.png\ndashboard \"D\"\n  stat \"a\" 1\n  stat \"b\" 2\n",
+  "expect": {
+    "text": "Figures follow.\n",
+    "blocks": [],
+    "dropped": [
+      "not_shown",
+      "not_shown",
+      "not_shown",
+      "not_shown",
+      "not_shown",
+      "not_shown"
+    ]
+  }
+}

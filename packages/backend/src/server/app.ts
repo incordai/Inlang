@@ -91,8 +91,8 @@ export interface ChatRequest {
   readonly cors: Record<string, string>;
   /** The signed-in account's id, or null. Used for limits only — never sent to a model. */
   user(): Promise<string | null>;
-  /** The JSON body (16 KB cap); throws BodyError. */
-  body(): Promise<Record<string, unknown>>;
+  /** The JSON body (16 KB cap unless `limit` says otherwise); throws BodyError. */
+  body(limit?: number): Promise<Record<string, unknown>>;
   /** Aborts when the client goes away before the answer has ended. */
   readonly closed: AbortSignal;
 }
@@ -102,9 +102,18 @@ export interface ChatRoutes {
   handle(req: ChatRequest, res: ServerResponse): Promise<void>;
   /** Forget old limiter keys; also on the sweep timer. */
   sweep(): void;
-  /** Remove usage rows past their retention; how many went. */
+  /** Remove usage rows past their retention, and expired shares; how many went. */
   prune(): Promise<number>;
+  /** Share links (chat-block-spec §20.7): POST /chat/share, GET and DELETE /chat/share/<id>. */
+  readonly shares?: {
+    create(req: ChatRequest, res: ServerResponse): Promise<void>;
+    read(id: string, req: ChatRequest, res: ServerResponse): Promise<void>;
+    remove(id: string, req: ChatRequest, res: ServerResponse): Promise<void>;
+  };
 }
+
+/** `/chat/share` and `/chat/share/<id>` (chat-block-spec §20.7); the id's own shape is the share route's check. */
+const SHARE_PATH = /^\/chat\/share(?:\/([^/]{1,64}))?$/;
 
 /** `GET /data/<t>/<id>/<field>` and its admin twin: an image, loaded by `<img>`, which sends no Origin. */
 const IMAGE_GET = /^\/(?:admin\/)?data\/[^/]+\/[^/]+\/[^/]+$/;
@@ -549,29 +558,37 @@ export function createApp(deps: AppDeps) {
       return send(res, result.status, result.body, req.complete ? cors : { ...cors, connection: 'close' });
     }
 
-    if (deps.chat && url.pathname === '/chat') {
+    const share = deps.chat?.shares ? SHARE_PATH.exec(url.pathname) : null;
+    if (deps.chat && (url.pathname === '/chat' || share)) {
       // The /data edge (chat-block-spec §4.2): an allowed origin always, exact
-      // CORS, and the CSRF header on the one method that does anything.
+      // CORS, and the CSRF header on every method that changes anything.
       const origin = req.headers.origin ?? '';
       if (!allowed.has(origin)) return send(res, 403, { error: 'unknown' });
-      const cors = corsHeaders(origin, 'POST');
+      // A share link (§20.7) is read with GET and deleted with DELETE; it is made, like an answer, with POST.
+      const methods = !share ? 'POST' : share[1] === undefined ? 'POST' : 'GET, DELETE';
+      const cors = corsHeaders(origin, methods);
       if (method === 'OPTIONS') return send(res, 204, undefined, cors);
-      if (method !== 'POST') return send(res, 405, { error: 'unknown' }, cors);
-      if (req.headers['x-az-request'] !== '1') return send(res, 403, { error: 'unknown' }, cors);
+      if (!methods.split(', ').includes(method)) return send(res, 405, { error: 'unknown' }, cors);
+      if (method !== 'GET' && req.headers['x-az-request'] !== '1') return send(res, 403, { error: 'unknown' }, cors);
       // The visitor leaving — the connection closing before the answer is
       // written out — stops the answer and its upstream request.
       const left = new AbortController();
       res.once('close', () => { if (!res.writableFinished) left.abort(); });
-      return deps.chat.handle({
+      const chatReq: ChatRequest = {
         ip,
         cors,
         user: async () => {
           const token = readCookies(req).get(names.session);
           return token ? (await store.sessionUser(token))?.user.id ?? null : null;
         },
-        body: () => readJson(req),
+        body: (limit) => readJson(req, limit),
         closed: left.signal,
-      }, res);
+      };
+      if (share && deps.chat.shares) {
+        if (share[1] === undefined) return deps.chat.shares.create(chatReq, res);
+        return method === 'GET' ? deps.chat.shares.read(share[1], chatReq, res) : deps.chat.shares.remove(share[1], chatReq, res);
+      }
+      return deps.chat.handle(chatReq, res);
     }
 
     if (!url.pathname.startsWith('/auth/')) return send(res, 404, { error: 'unknown' });

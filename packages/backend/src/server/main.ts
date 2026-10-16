@@ -128,12 +128,15 @@ let data: DataRoutes | undefined;
 let sweepImages: (() => Promise<number>) | undefined;
 // Claiming an unverified account deletes the rows it wrote (store.ts).
 let ownedRows: string[] = [];
+/** The tables, for a chat's figures too (chat-block-spec §20.5). */
+let dataTables: import('./data-values.ts').Table[] | undefined;
 if (existsSync(dataFile)) {
   const { loadTables, ownedRowDeletes } = await import('./data-values.ts');
   const { migrateData, DestructivePending, GuardFailed } = await import('./data-migrate.ts');
   const { createData, parseAdminEmails } = await import('./data-api.ts');
   const model = JSON.parse(readFileSync(dataFile, 'utf8')) as { steps: DataStep[] };
   const tables = loadTables(model);
+  dataTables = tables;
   ownedRows = ownedRowDeletes(db.dialect, tables);
   // AZ_ADMIN_EMAILS (data-spec §11): a malformed entry stops the server, named.
   const admins = parseAdminEmails(process.env.AZ_ADMIN_EMAILS);
@@ -185,9 +188,16 @@ if (config.chat) {
     process.stderr.write(`backend: cannot start — fix this in .env (see .env.example):\n  - ${(e as Error).message.startsWith('AZ_CHAT_FAKE_FILE') ? (e as Error).message : `AZ_CHAT_FAKE_FILE cannot be read (${(e as Error).name})`}\n`);
     process.exit(1);
   }
+  // A chat's figures come from the public tables, only on a site that has them (§20.5).
+  let figures;
+  if (dataTables) {
+    const { createQueries, figuresRun } = await import('./chat-query.ts');
+    const queries = createQueries({ db, database: db.dialect, publicBase: config.publicUrl, log: (line) => process.stderr.write(`backend: ${line}\n`) });
+    figures = figuresRun(queries, dataTables, context.tables);
+  }
   chat = createChat({
     config: config.chat, secret: config.secret, db, prompt: read('prompt.txt'), context, adapter,
-    log: (line) => process.stderr.write(`backend: ${line}\n`),
+    log: (line) => process.stderr.write(`backend: ${line}\n`), ...(figures ? { figures } : {}),
   });
 }
 if (args.images !== null) {
@@ -215,7 +225,7 @@ const sweep = setInterval(() => app.sweep(), SWEEP_MS);
 sweep.unref();
 const prune = setInterval(() => {
   store.prune().catch((e: unknown) => process.stderr.write(`backend: prune failed: ${(e as Error).name}\n`));
-  chat?.prune().catch((e: unknown) => process.stderr.write(`backend: chat usage sweep failed: ${(e as Error).name}\n`));
+  chat?.prune().catch((e: unknown) => process.stderr.write(`backend: chat usage and share sweep failed: ${(e as Error).name}\n`));
 }, PRUNE_MS);
 prune.unref();
 const fileSweep = sweepImages && setInterval(() => {

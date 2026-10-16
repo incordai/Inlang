@@ -92,7 +92,7 @@ test('a chat server starts, migrates az_chat_usage, and answers POST /chat as a 
     assert.equal(r.status, 200);
     const body = await r.text();
     // Prose streams through the answer parser: each piece but its last character, which waits for what may combine with it.
-    assert.match(body, /^event: text\ndata: \{"s":"Hi"\}\n\nevent: text\ndata: \{"s":" from the fake"\}\n\nevent: text\ndata: \{"s":"\."\}\n\nevent: done\ndata: \{"tag":"[A-Za-z0-9_-]+","left":4,"conversation":"[A-Za-z0-9_-]+","text":"Hi from the fake\."\}\n\n$/);
+    assert.match(body, /^event: text\ndata: \{"s":"Hi"\}\n\nevent: text\ndata: \{"s":" from the fake"\}\n\nevent: text\ndata: \{"s":"\."\}\n\nevent: done\ndata: \{"tag":"[A-Za-z0-9_-]+","left":4,"conversation":"[A-Za-z0-9_-]+","text":"Hi from the fake\.","share":\{"at":\d+,"tag":"[A-Za-z0-9_-]{43}","tagq":"[A-Za-z0-9_-]{43}"\}\}\n\n$/);
   } finally {
     await stop(child);
     rmSync(dir, { recursive: true, force: true });

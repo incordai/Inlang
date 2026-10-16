@@ -1,8 +1,9 @@
 /**
  * @az server data-query
  * Purpose: a list request's query string, allow-listed, as one parameterised SELECT with keyset paging and escaped search.
- * Spec: docs/data-spec.md §5.1, §4.7
- * Exports: parseQuery, ListQuery, QueryError, SORTABLE, selectList, selectOne, readable, cursorOf, adminSelectList, adminSelectOne, adminCount, LIMIT_DEFAULT, LIMIT_MAX
+ * Spec: docs/data-spec.md §5.1, §4.7 · docs/chat-block-spec.md §20.5 (aggregations)
+ * Exports: parseQuery, ListQuery, QueryError, SORTABLE, selectList, selectOne, readable, cursorOf, adminSelectList, adminSelectOne, adminCount, LIMIT_DEFAULT, LIMIT_MAX,
+ *   Aggregate, AGGREGATE_MEASURE, AGGREGATE_GROUP, AGGREGATE_FILTER, selectAggregate
  * Edit guide: an unknown or malformed parameter is a 400 naming it, never ignored; values only as parameters.
  * Tests: packages/backend/test/data-api.test.ts
  */
@@ -314,5 +315,89 @@ export function selectOne(d: Database, t: Table, id: string, user: string | null
   return {
     sql: `SELECT ${cols.sql} FROM ${q(d, physical(t.name))} WHERE ${q(d, 'id')} = ?${ownerOnly ? ` AND ${q(d, 'owner')} = ?` : ''}`,
     params: [...cols.params, id, ...(ownerOnly ? [user] : [])],
+  };
+}
+
+/** An aggregation chat may ask for (chat-block-spec §20.5): one measure, at most one grouping and one filter. */
+export interface Aggregate {
+  readonly fn: 'count' | 'sum' | 'avg' | 'min' | 'max';
+  /** The measured field — `number` or `money`; null for `count`. */
+  readonly field: Field | null;
+  /** The grouping field — `choice`, `flag`, `date` or `datetime`; null for one figure. */
+  readonly by: Field | null;
+  /** Required on a date grouping, absent otherwise. */
+  readonly bucket: 'day' | 'month' | 'year' | null;
+  readonly where: { readonly field: Field; readonly value: Value } | null;
+  /** Groups to read: the cap plus one, so the caller knows there were more. */
+  readonly limit: number;
+}
+
+export const AGGREGATE_MEASURE: ReadonlySet<FieldType> = new Set(['number', 'money']);
+export const AGGREGATE_GROUP: ReadonlySet<FieldType> = new Set(['choice', 'flag', 'date', 'datetime']);
+export const AGGREGATE_FILTER: ReadonlySet<FieldType> = new Set(['choice', 'flag']);
+
+/** strftime / to_char / DATE_FORMAT patterns per bucket. */
+const BUCKET_FORMAT = {
+  sqlite: { day: '%Y-%m-%d', month: '%Y-%m', year: '%Y' },
+  postgres: { day: 'YYYY-MM-DD', month: 'YYYY-MM', year: 'YYYY' },
+  mysql: { day: '%Y-%m-%d', month: '%Y-%m', year: '%Y' },
+} as const;
+const BUCKET_CHARS = { day: 10, month: 7, year: 4 } as const;
+
+/**
+ * A datetime column (epoch ms, UTC) or a date column (`YYYY-MM-DD`) as its
+ * bucket's text. No time zone is involved on any engine: SQLite's
+ * `unixepoch` is UTC, and the other two add the milliseconds to the epoch
+ * as a plain timestamp, so the three agree (test:backend-db measures it).
+ */
+function bucketOf(d: Database, f: Field, bucket: 'day' | 'month' | 'year'): string {
+  const col = q(d, f.name);
+  if (f.type === 'date') return `substr(${col}, 1, ${BUCKET_CHARS[bucket]})`;
+  const fmt = BUCKET_FORMAT[d][bucket];
+  if (d === 'sqlite') return `strftime('${fmt}', ${col} / 1000, 'unixepoch')`;
+  if (d === 'postgres') return `to_char(TIMESTAMP '1970-01-01 00:00:00' + ${col} * INTERVAL '1 millisecond', '${fmt}')`;
+  return `DATE_FORMAT(DATE_ADD('1970-01-01 00:00:00', INTERVAL ${col} DIV 1000 SECOND), '${fmt}')`;
+}
+
+/**
+ * One aggregation as one parameterised SELECT. Identifiers come only from
+ * the table model, quoted; the filter value is a parameter; the formats and
+ * LIMIT are the server's own. A private field is never read: the caller
+ * cannot name one (chat-query.ts validates against the public schema) and
+ * this refuses it again. Rows whose group is NULL are left out. A date
+ * grouping returns the latest buckets first; a category grouping the
+ * largest first, ties by name.
+ */
+export function selectAggregate(d: Database, t: Table, a: Aggregate): { sql: string; params: Value[] } {
+  for (const f of [a.field, a.by, a.where?.field]) {
+    if (f && (f.private || !t.fields.includes(f))) throw new Error('selectAggregate: a field outside the public schema');
+  }
+  if ((a.fn === 'count') !== (a.field === null) || (a.field && !AGGREGATE_MEASURE.has(a.field.type))) throw new Error('selectAggregate: bad measure');
+  if (a.by && !AGGREGATE_GROUP.has(a.by.type)) throw new Error('selectAggregate: bad grouping');
+  const dated = a.by !== null && (a.by.type === 'date' || a.by.type === 'datetime');
+  if (dated !== (a.bucket !== null)) throw new Error('selectAggregate: a bucket goes with a date grouping only');
+  if (a.where && !AGGREGATE_FILTER.has(a.where.field.type)) throw new Error('selectAggregate: bad filter');
+  const limit = Math.trunc(a.limit);
+  if (!(limit >= 1 && limit <= LIMIT_MAX)) throw new Error('selectAggregate: limit out of range');
+
+  const measure = a.field === null ? 'COUNT(*)' : `${a.fn.toUpperCase()}(${q(d, a.field.name)})`;
+  const where: string[] = [];
+  const params: Value[] = [];
+  if (a.where) {
+    where.push(`${q(d, a.where.field.name)} = ?`);
+    params.push(a.where.value);
+  }
+  const table = q(d, physical(t.name));
+  if (a.by === null) {
+    return { sql: `SELECT ${measure} AS ${q(d, 'v')} FROM ${table}${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`, params };
+  }
+  where.push(`${q(d, a.by.name)} IS NOT NULL`);
+  const group = a.bucket ? bucketOf(d, a.by, a.bucket) : q(d, a.by.name);
+  const g = q(d, 'g');
+  const v = q(d, 'v');
+  const order = a.bucket ? `${g} DESC` : `${v} DESC, ${g} ASC`;
+  return {
+    sql: `SELECT ${group} AS ${g}, ${measure} AS ${v} FROM ${table} WHERE ${where.join(' AND ')} GROUP BY ${group} ORDER BY ${order} LIMIT ${limit}`,
+    params,
   };
 }
