@@ -14,13 +14,14 @@
  */
 
 import { parentPort, workerData } from 'node:worker_threads';
-import { analyseSite } from './audit.ts';
+import { analyseSite, type ServerKey } from './audit.ts';
 
-/** What the worker is given: the output folder, and the public values the build inlined. */
+/** What the worker is given: the output folder, the public values the build inlined, and the server keys that must not ship. */
 export interface SiteJob {
   readonly outDir: string;
   readonly allow: readonly string[];
+  readonly keys: readonly ServerKey[];
 }
 
 const job = workerData as SiteJob;
-parentPort?.postMessage(await analyseSite(job.outDir, job.allow));
+parentPort?.postMessage(await analyseSite(job.outDir, job.allow, job.keys));

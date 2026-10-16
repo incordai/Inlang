@@ -1,8 +1,8 @@
 /**
  * @az module audit
- * Purpose: az audit — the built output's checks: secrets in the shipped files, dependency advisories, page and backend CSP, new-tab links.
+ * Purpose: az audit — the built output's checks: secrets in the shipped files, dependency advisories, page and backend CSP, new-tab links, and the chat's (audit-chat.ts).
  * Spec: docs/word-quality-gate.md §2 B, §4 rule 2, §5 (and §5.5, what is built)
- * Exports: AUDIT_CHECKS, audit, analyseSite, cspProblems, backendHeaderProblems, readAdvisory, AuditContext, AuditOptions, SiteReport
+ * Exports: AUDIT_CHECKS, audit, analyseSite, cspProblems, backendHeaderProblems, readAdvisory, AuditContext, AuditOptions, SiteReport, ServerKey
  * Edit guide: read-only — nothing here writes, fixes or installs; a secret is reported by file, offset and shape, never by value; files are read through fs/promises, bounded; the built pages are read in a worker (audit-site.ts), never on the main thread.
  * Tests: packages/cli/test/audit.test.ts
  */
@@ -32,12 +32,14 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
+import { KEYS } from '../../backend/src/server/env.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
 import { ownDigests } from '../../target-web/src/csp.ts';
 import { decodeAttribute, startTags } from '../../target-web/src/html-scan.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
 import { FILE_MAX_BYTES, MAX_FILES, readRegular, shippedSecrets, walkShipped, type Shipped } from './shipped.ts';
 import type { SiteJob } from './audit-site.ts';
+import { CHAT_AUDIT_CHECKS } from './audit-chat.ts';
 import {
   CHILD_MS, report, runChecks, runWorker, shellQuote,
   type Check, type CheckResult, type DoctorReport, type Probe, type RunResult,
@@ -54,6 +56,21 @@ const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json'] as const;
 const DIST = 'dist';
 /** Written by every az build (output.ts); its absence means the folder is not one. */
 const BUILD_MANIFEST = '.az-manifest.json';
+
+/** The page a shared chat answer opens on (chat-block-spec §20.7), as the build writes it. */
+const SHARED_PAGE = `${DIST}/chat/shared/index.html`;
+
+/**
+ * The server keys az audit looks for, by exact value, in what ships: every
+ * key the server's schema marks secret (env.ts KEYS) — the chat's model key
+ * and moderation key among them (chat-block-spec §11.2).
+ */
+const SERVER_SECRET_KEYS = KEYS.filter((k) => k.secret === true).map((k) => k.name);
+/** A value shorter than this would be found by chance in any bundle; it is not looked for, and the line says so. */
+const KEY_MIN_CHARS = 8;
+
+/** A server key's value to look for in the built site: never printed, never sent anywhere. */
+export interface ServerKey { readonly name: string; readonly value: string }
 
 /** How many locations a line lists before "and N more". */
 const SHOW = 5;
@@ -92,6 +109,10 @@ export type SiteReport =
     /** Links that open a new tab, and those that can redirect this page. */
     readonly newTab: number;
     readonly openers: readonly string[];
+    /** `file (KEY_NAME)` per shipped file holding the exact value of a server key that must never ship (chat-block-spec §11.2). */
+    readonly serverKeys: readonly string[];
+    /** The shared-answer page (chat-block-spec §20.7), when the build has one: its policy's gaps, and whether it says noindex. */
+    readonly shared: { readonly policies: number; readonly gaps: readonly string[]; readonly noindex: boolean } | null;
   };
 
 export interface AuditContext {
@@ -104,6 +125,10 @@ export interface AuditContext {
   readonly online: boolean;
   /** What the built site under dist/ holds, read once in a worker and shared. */
   readonly site: () => Promise<SiteReport>;
+  /** The server keys whose values were looked for in the built site, by name (serverKeys); empty when none was set. */
+  readonly keyNames: () => Promise<readonly string[]>;
+  /** Server keys set to a value too short to look for (KEY_MIN_CHARS), by name. */
+  readonly shortKeys: () => Promise<readonly string[]>;
 }
 
 const shown = (cwd: string, abs: string) => {
@@ -164,6 +189,26 @@ async function publicValues(ctx: AuditContext): Promise<Set<string>> {
   return new Set(Object.entries(merged).filter(([k, v]) => k.startsWith(PUBLIC_ENV_PREFIX) && v).map(([, v]) => v as string));
 }
 
+/**
+ * The server's secret keys as it would read them: its `.env` (server/.env in
+ * the output folder), then the process environment, which wins as it does
+ * for the server. Values stay in this process — the worker that searches the
+ * built site for them is this process's own thread.
+ */
+async function serverKeys(ctx: AuditContext): Promise<{ keys: ServerKey[]; short: string[] }> {
+  const file: Record<string, string> = {};
+  const text = await readRegular(join(ctx.outDir, SERVER_DIR, '.env'));
+  if (text !== null) parseDotenv(text, file);
+  const keys: ServerKey[] = [];
+  const short: string[] = [];
+  for (const name of SERVER_SECRET_KEYS) {
+    const value = (ctx.probe.env[name] ?? file[name] ?? '').trim();
+    if (value === '') continue;
+    if (value.length < KEY_MIN_CHARS) short.push(name); else keys.push({ name, value });
+  }
+  return { keys, short };
+}
+
 const bundleSecrets: Check<AuditContext> = {
   id: 'bundle-secrets',
   title: 'bundle secrets',
@@ -192,6 +237,36 @@ const bundleSecrets: Check<AuditContext> = {
     }
     const copies = site.published > 0 ? `; ${count(site.published, 'file')} a package published judged by key shape only` : '';
     return { status: 'pass', line: `bundle secrets: none in ${count(site.files, 'shipped text file')} — the build guard's patterns, after pre-render${copies}` };
+  },
+};
+
+/**
+ * A server key's exact value in the built site (chat-block-spec §11.2): the
+ * shape scan above finds a key by how it looks; this finds the server's own
+ * keys — the chat's model key among them — however they look. Names and
+ * files only.
+ */
+const serverKeysCheck: Check<AuditContext> = {
+  id: 'server-keys',
+  title: 'server keys',
+  run: async (ctx) => {
+    const [names, short] = await Promise.all([ctx.keyNames(), ctx.shortKeys()]);
+    const site = await ctx.site();
+    if (site.kind === 'missing') return { status: 'skip', line: 'server keys: no built site — see the bundle secrets line' };
+    if (site.kind === 'unanswered') return notRead('server keys');
+    if (site.serverKeys.length > 0) {
+      const keys = [...new Set(site.serverKeys.map((h) => /\((AZ_[A-Z0-9_]+)\)$/.exec(h)?.[1] ?? 'a key'))];
+      return {
+        status: 'fail',
+        line: `server keys: ${keys.join(', ')} ${keys.length === 1 ? 'is' : 'are'} in the built site — anyone who loads it can read ${keys.length === 1 ? 'it' : 'them'}`,
+        fix: [...more(site.serverKeys), 'remove it from the source and every public variable, rebuild, and rotate the key — it is out'],
+      };
+    }
+    if (names.length === 0) {
+      return { status: 'skip', line: `server keys: none set in ${shown(ctx.cwd, join(ctx.outDir, SERVER_DIR, '.env'))} or the environment — nothing to look for` };
+    }
+    const tooShort = short.length > 0 ? `; ${short.join(', ')} too short to look for (under ${KEY_MIN_CHARS} characters)` : '';
+    return { status: short.length > 0 ? 'warn' : 'pass', line: `server keys: ${names.join(', ')} in none of ${count(site.files, 'shipped text file')}${tooShort}` };
   },
 };
 
@@ -561,7 +636,7 @@ const newTabLinks: Check<AuditContext> = {
  * where the synchronous scans can be stopped; `allow` is the public values
  * the build inlined (publicValues).
  */
-export async function analyseSite(outDir: string, allow: readonly string[]): Promise<SiteReport> {
+export async function analyseSite(outDir: string, allow: readonly string[], keys: readonly ServerKey[] = []): Promise<SiteReport> {
   const site = await walkSite(outDir);
   if (site.kind === 'missing') return site;
   const allowed = new Set(allow);
@@ -577,6 +652,7 @@ export async function analyseSite(outDir: string, allow: readonly string[]): Pro
   const styled: string[] = [];
   let newTab = 0;
   const openers: string[] = [];
+  let shared: { policies: number; gaps: string[]; noindex: boolean } | null = null;
   for (const p of pages) {
     const found = tags(p.text, ['meta', 'a']);
     const policies = (found.get('meta') ?? [])
@@ -590,6 +666,16 @@ export async function analyseSite(outDir: string, allow: readonly string[]): Pro
       const open = each[0].filter((x) => each.every((list) => list.includes(x)));
       if (open.length > 0) (open.every((x) => x === STYLE_INLINE) ? styled : weak).push(`${route(p.path)}: ${open.join('; ')}`);
     }
+    // The page a shared answer opens on (chat-block-spec §20.7): read by strangers, so never indexed and as strict as any page.
+    if (p.path === SHARED_PAGE) {
+      const each = policies.map(cspProblems);
+      const robots = (found.get('meta') ?? []).filter((a) => a.get('name')?.toLowerCase() === 'robots').map((a) => (a.get('content') ?? '').toLowerCase());
+      shared = {
+        policies: policies.length,
+        gaps: each.length === 0 ? [] : each[0].filter((x) => each.every((list) => list.includes(x))),
+        noindex: robots.some((c) => c.split(',').map((w) => w.trim()).includes('noindex')),
+      };
+    }
     for (const a of found.get('a') ?? []) {
       if (a.get('target')?.toLowerCase() !== '_blank') continue;
       newTab++;
@@ -598,6 +684,11 @@ export async function analyseSite(outDir: string, allow: readonly string[]): Pro
       // A link may carry a token in its query: printed only when it is not shaped like one.
       if (!rel.includes('noopener') && !rel.includes('noreferrer')) openers.push(`${route(p.path)}: ${quotable(a.get('href') ?? '(no href)')}`);
     }
+  }
+  // A server key's exact value in a shipped file: named by key and file, never by a character of it.
+  const serverKeys: string[] = [];
+  for (const f of site.files) {
+    for (const k of keys) if (f.text.includes(k.value)) serverKeys.push(`${named(f.path)} (${k.name})`);
   }
   return {
     kind: 'site',
@@ -613,6 +704,8 @@ export async function analyseSite(outDir: string, allow: readonly string[]): Pro
     styled,
     newTab,
     openers,
+    serverKeys,
+    shared,
   };
 }
 
@@ -620,7 +713,7 @@ export async function analyseSite(outDir: string, allow: readonly string[]): Pro
 const SITE_READER = new URL('./audit-site.ts', import.meta.url);
 
 /** Every check, in the order the report prints them. */
-export const AUDIT_CHECKS: readonly Check<AuditContext>[] = [bundleSecrets, dependencies, pageCsp, backendCsp, newTabLinks];
+export const AUDIT_CHECKS: readonly Check<AuditContext>[] = [bundleSecrets, serverKeysCheck, dependencies, pageCsp, backendCsp, newTabLinks, ...CHAT_AUDIT_CHECKS];
 
 export interface AuditOptions {
   readonly outDir: string;
@@ -650,6 +743,7 @@ export async function audit(options: AuditOptions): Promise<DoctorReport> {
     }]);
   }
   let site: Promise<SiteReport> | undefined;
+  let keys: Promise<{ keys: ServerKey[]; short: string[] }> | undefined;
   // Ends a read still running once the report is in, so nothing outlives it.
   const done = new AbortController();
   const ctx: AuditContext = {
@@ -657,8 +751,10 @@ export async function audit(options: AuditOptions): Promise<DoctorReport> {
     cwd: options.cwd,
     probe: options.probe,
     online: options.online,
-    site: () => (site ??= publicValues(ctx).then(async (allow): Promise<SiteReport> => {
-      const job: SiteJob = { outDir: options.outDir, allow: [...allow] };
+    keyNames: async () => (await (keys ??= serverKeys(ctx))).keys.map((k) => k.name),
+    shortKeys: async () => (await (keys ??= serverKeys(ctx))).short,
+    site: () => (site ??= Promise.all([publicValues(ctx), keys ??= serverKeys(ctx)]).then(async ([allow, server]): Promise<SiteReport> => {
+      const job: SiteJob = { outDir: options.outDir, allow: [...allow], keys: server.keys };
       const r = await runWorker<SiteReport>(options.siteReader ?? SITE_READER, job, options.siteMs ?? CHILD_MS, done.signal);
       if (r.kind === 'done') return r.value;
       return { kind: 'unanswered', why: r.kind === 'timeout' ? `no answer after ${r.ms / 1000}s` : r.message.split('\n')[0] };

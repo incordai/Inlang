@@ -1,6 +1,6 @@
 /**
  * @az module doctor-checks
- * Purpose: every az doctor check — machine, project, backend — each a line and its fix; and doctor(), which runs them.
+ * Purpose: every az doctor check — machine, project, backend, and the chat's (doctor-chat.ts) — each a line and its fix; and doctor(), which runs them.
  * Spec: docs/word-quality-gate.md §5 · docs/auth-block-spec.md §4.1 · docs/stack-evaluation.md §9
  * Exports: CHECKS, doctor, glbGeometry, browserPlatform, BrowserMachine, DoctorOptions
  * Edit guide: detect and instruct only — no check installs, writes or prints an environment value; files are read through fs/promises, bounded.
@@ -28,6 +28,7 @@ import { isFromMark } from '../../core/src/emit-contract.ts';
 import { BACKEND_PINS, NODE_ENGINE, SERVER_DIR } from '../../backend/src/emit.ts';
 import { loadConfig, type Setup } from '../../backend/src/server/env.ts';
 import { DOTENV_FILES, parseDotenv } from './az.ts';
+import { CHAT_DOCTOR_CHECKS } from './doctor-chat.ts';
 import { lockPath } from './data-schema.ts';
 import type { CompileJob } from './doctor-compile.ts';
 import { ENCODER, type ProbeJob } from './images.ts';
@@ -739,7 +740,7 @@ const buildSecrets: Check = {
 export const CHECKS: readonly Check[] = [
   node, npm, platform, imageLibrary, backendImageLibrary, browsers,
   compiles, dataLock, tableRules, models, assets,
-  backendEnv, buildSecrets,
+  backendEnv, ...CHAT_DOCTOR_CHECKS, buildSecrets,
 ];
 
 export interface DoctorOptions {

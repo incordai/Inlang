@@ -452,12 +452,16 @@ test('DEADLINE: a read of the built site that never answers is ended at its time
   assert.ok(took < 8_000, `ended at the read's timeout, not the scan's end (${took}ms)`);
   assert.deepEqual(r.checks.map((c) => [c.id, c.status, c.line]), [
     ['bundle-secrets', 'fail', 'bundle secrets: no answer after 1s reading .az-build/dist — nothing it ships was checked'],
+    ['server-keys', 'skip', 'server keys: the built site was not read — see the bundle secrets line'],
     ['dependencies', 'skip', 'dependencies: not checked — the advisory service is a network call; run: az audit --online'],
     ['page-csp', 'skip', 'page CSP: the built site was not read — see the bundle secrets line'],
-    ['backend-csp', 'pass', r.checks[3].line],
+    ['backend-csp', 'pass', r.checks[4].line],
     ['new-tab-links', 'skip', 'new-tab links: the built site was not read — see the bundle secrets line'],
+    ['chat-shared-page', 'skip', 'chat shared page: the built site was not read — see the bundle secrets line'],
+    ['chat-context', 'skip', 'chat context: the build has no chat server'],
+    ['chat-runtime', 'skip', 'chat runtime: the site has no chat'],
   ]);
-  assert.match(r.checks[3].line, /^backend CSP: every API response sends /);
+  assert.match(r.checks[4].line, /^backend CSP: every API response sends /);
   assert.equal(r.exit, 1);
 });
 
@@ -508,7 +512,7 @@ test('E2E: az audit on a built fixture with a planted key exits 1, never prints 
   assert.ok(lines.includes('  - dependencies: not checked — the advisory service is a network call; run: az audit --online'), text.stdout);
   assert.ok(lines.includes('  ! page CSP: none of 1 page sets a Content-Security-Policy — an injected script would run'), text.stdout);
   assert.ok(lines.some((l) => l.startsWith('  ✓ backend CSP: every API response sends')), text.stdout);
-  assert.equal(lines.at(-2), 'az audit: 1 failure, 1 warning, 1 passed, 2 skipped');
+  assert.equal(lines.at(-2), 'az audit: 1 failure, 1 warning, 1 passed, 6 skipped');
   assert.ok(!text.stdout.includes(PLANTED));
 
   const json = az(b.dir, '--json', '--out', '.az-build');
