@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import { createModeration, MODERATION_REPLY_MAX, MODERATION_TIMEOUT_MS } from '../src/server/chat-moderation.ts';
 import { createApp } from '../src/server/app.ts';
 import { createFakeAdapter, parseFakeScript } from '../src/server/chat-adapters.ts';
-import { migrateChat } from '../src/server/chat-usage.ts';
+import { createUsage, migrateChat, utcDay } from '../src/server/chat-usage.ts';
 import { createChat, parseChatContext } from '../src/server/chat.ts';
 import { migrate, openSqlite } from '../src/server/db.ts';
 import { loadConfig } from '../src/server/env.ts';
@@ -182,11 +182,22 @@ test('route: a blocked question is 400 blocked; the model is never asked; the lo
     assert.equal(s.fake.calls(), 0, 'the model was not asked');
     assert.deepEqual(JSON.parse(j.seen[0].body), { text: `please block ${MARKER}` });
     assert.ok(s.log.includes('chat: blocked by moderation'), s.log.join(' | '));
-    // CONTROL: an allowed question streams from the model.
+    // The block is counted in today's row: one blocked question, no message, no tokens.
+    const today = utcDay(Date.now());
+    assert.deepEqual(await createUsage(s.db).row(today), { input: 0, output: 0, messages: 0, dropped: 0, blocked: 1 });
+    // CONTROL: an allowed question streams from the model, and is counted as a message, not a block.
     const ok = await client(s.url).post('/chat', { page: '/', messages: [say('Which plan?')] });
     assert.equal(ok.status, 200);
     assert.match(await ok.text(), /event: done/);
     assert.equal(s.fake.calls(), 1);
+    let row = await createUsage(s.db).row(today);
+    // The answer's count is written just after its stream ends: wait for it, bounded.
+    for (const until = Date.now() + 2_000; row?.messages !== 1 && Date.now() < until;) {
+      await new Promise((res) => setTimeout(res, 20));
+      row = await createUsage(s.db).row(today);
+    }
+    assert.equal(row?.messages, 1);
+    assert.equal(row?.blocked, 1);
     const all = s.log.join('\n');
     assert.ok(!all.includes(MARKER) && !all.includes(KEY), all);
   } finally { await s.close(); await j.close(); }

@@ -9,8 +9,11 @@
  * chat knows, read through the anonymous list on this engine — the search,
  * the newest rows, money in major units, no private value — and a table the
  * server would refuse never read. C4 (§11.4): the operator's usage report,
- * its window, its order and its shares by day. Run by backend-db.mjs inside
- * its containers.
+ * its window, its order and its shares by day. Limits two (§19.11): ISO
+ * weeks built from day buckets, equal on every engine across a year boundary
+ * and week 53; the blocked count; the rate-limit windows shared by two
+ * connections and by two server instances on one database. Run by
+ * backend-db.mjs inside its containers.
  */
 
 import { createServer } from 'node:http';
@@ -27,6 +30,7 @@ import { createShareStore, SHARE_LIMITS } from '../packages/backend/src/server/c
 import { createApp } from '../packages/backend/src/server/app.ts';
 import { createFakeAdapter } from '../packages/backend/src/server/chat-adapters.ts';
 import { createChat, parseChatContext } from '../packages/backend/src/server/chat.ts';
+import { createRateLimits, createWindows } from '../packages/backend/src/server/chat-limits.ts';
 import { createUsage, migrateChat, usageReport, USAGE_KEEP_DAYS, utcDay } from '../packages/backend/src/server/chat-usage.ts';
 import { loadConfig } from '../packages/backend/src/server/env.ts';
 import { createOidc } from '../packages/backend/src/server/oidc.ts';
@@ -55,11 +59,17 @@ export async function shareChecks(engine, db, check) {
   const ids = new Set(many.map((m) => m.id));
   const readable = (await Promise.all(many.map((m) => shares.read(m.id)))).every((r) => r !== null);
   check(`${engine} chat shares: ten concurrent creates make ten readable shares`, ids.size === 10 && readable);
+  // §19.11: one live share per tag — the proof's unique index refuses a replay on this engine; shares with no proof never collide.
+  const proof = 'f'.repeat(64);
+  const proved = await shares.createProved('[]', null, proof);
+  const replays = await Promise.all([shares.createProved('[]', null, proof), shares.createProved('[]', null, proof)]);
+  check(`${engine} chat shares: a tag's proof makes one share; replayed, even at once from two requests, it is refused`,
+    typeof proved === 'object' && replays.every((r) => r === 'replayed'), JSON.stringify(replays));
   check(`${engine} chat shares: a wrong token deletes nothing`, (await shares.remove(made.id, 'x'.repeat(43))) === false && (await shares.read(made.id)) !== null);
   check(`${engine} chat shares: the delete token deletes`, (await shares.remove(made.id, made.token)) === true && (await shares.read(made.id)) === null);
   clock.now = bigMade.expires;
   check(`${engine} chat shares: gone at the instant it expires, before any sweep`, (await shares.read(bigMade.id)) === null);
-  check(`${engine} chat shares: the sweep removes every expired share`, (await shares.sweep()) === 11
+  check(`${engine} chat shares: the sweep removes every expired share`, (await shares.sweep()) === 12
     && Number((await db.get('SELECT COUNT(*) AS n FROM az_chat_shares')).n) === 0);
 }
 
@@ -205,6 +215,7 @@ export async function usageReportChecks(engine, db, check) {
   const usage = createUsage(db);
   await usage.add('2031-01-20', 900, 90, 1);
   await usage.add('2031-01-20', 100, 10, 0);
+  await usage.block('2031-01-20');
   await usage.add('2030-12-22', 5, 5, 0);
   await usage.add('2030-12-21', 7, 7, 0);
   const words = 'shared-words-the-report-never-reads';
@@ -217,10 +228,10 @@ export async function usageReportChecks(engine, db, check) {
     today: '2031-01-20',
     budget: { daily: 1_500, spent: 1_100, left: 400 },
     days: [
-      { day: '2031-01-20', input: 1000, output: 100, messages: 2, dropped: 1, shares: 1 },
-      { day: '2031-01-19', input: 0, output: 0, messages: 0, dropped: 0, shares: 1 },
-      { day: '2031-01-18', input: 0, output: 0, messages: 0, dropped: 0, shares: 1 },
-      { day: '2030-12-22', input: 5, output: 5, messages: 1, dropped: 0, shares: 0 },
+      { day: '2031-01-20', input: 1000, output: 100, messages: 2, dropped: 1, blocked: 1, shares: 1 },
+      { day: '2031-01-19', input: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
+      { day: '2031-01-18', input: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
+      { day: '2030-12-22', input: 5, output: 5, messages: 1, dropped: 0, blocked: 0, shares: 0 },
     ],
   };
   const { shares, ...rest } = r;
@@ -230,8 +241,139 @@ export async function usageReportChecks(engine, db, check) {
   check(`${engine} chat usage report: the shares kept now, and never a share's text`, shares.kept === 3 && shares.enabled === true && !JSON.stringify(r).includes(words), JSON.stringify(shares));
 }
 
+const WEEK_TABLE = `  data chatweeks
+    placed   datetime required
+    shipped  date
+    amount   money    usd required
+    allow anyone read
+`;
+
+/**
+ * chat-block-spec §19.11 on this engine: `by … week` is the ISO week, built
+ * from the engine's day buckets by the server's own code — so every engine
+ * gives the same weeks: the last instant of a Sunday and the first of a
+ * Monday on either side of a week's edge, week 53 of 2026 holding days of
+ * two calendar years, 2020-12-31 in 2020-W53, money in major units.
+ */
+export async function weekChecks(engine, db, check) {
+  const words = new Map();
+  for (const n of readdirSync(WORDS)) {
+    const f = new URL(`${n}/word.json`, WORDS);
+    if (existsSync(f)) {
+      const m = JSON.parse(readFileSync(f, 'utf8'));
+      words.set(m.name, m);
+    }
+  }
+  const r = compile(SITE_SOURCE(WEEK_TABLE), { manifests: words });
+  if (!r.ok) throw new Error(`fixture: ${JSON.stringify(r.diagnostics)}`);
+  const ops = plan([], r.spec.site.data, { rename: [], drop: [], unique: [] }).ops;
+  // A version far from the other suites', which share this database.
+  await migrateData(db, dataSteps([{ version: 960, ops }]), { confirm: Infinity });
+  const tables = loadTables(JSON.parse(JSON.stringify({ tables: r.spec.site.data }))).map((table) => ({ table, digits: { amount: 2 } }));
+  const rows = [
+    ['2026-12-27T23:59:59.999Z', '2026-12-27', 100],
+    ['2026-12-28T00:00:00.000Z', '2026-12-28', 300],
+    ['2026-12-31T23:59:59.999Z', '2026-12-31', 500],
+    ['2027-01-01T00:00:00.000Z', '2027-01-01', 700],
+    ['2027-01-03T23:59:59.999Z', '2027-01-03', 900],
+    ['2027-01-04T00:00:00.000Z', '2027-01-04', 50],
+    ['2020-12-31T12:00:00.000Z', null, 1],
+  ];
+  for (const [placed, shipped, amount] of rows) {
+    const at = Date.parse(placed);
+    await db.run('INSERT INTO azd_chatweeks (id, owner, created, updated, placed, shipped, amount) VALUES (?, NULL, ?, ?, ?, ?, ?)',
+      [randomUUID(), at, at, at, shipped, amount]);
+  }
+  const q = createQueries({ db, database: engine, publicBase: 'http://127.0.0.1:9', log: () => {} });
+  const run = async (s, cap = 24) => {
+    const req = parseFigures(s.split(' '), tables, cap);
+    const out = req ? await q.run(req) : { ok: false };
+    return out.ok ? out.result : null;
+  };
+  const expect = [
+    ['chatweeks count by placed week', [['2020-W53', 1], ['2026-W52', 1], ['2026-W53', 4], ['2027-W01', 1]]],
+    ['chatweeks sum amount by placed week', [['2020-W53', 0.01], ['2026-W52', 1], ['2026-W53', 24], ['2027-W01', 0.5]]],
+    ['chatweeks avg amount by shipped week', [['2026-W52', 1], ['2026-W53', 6], ['2027-W01', 0.5]]],
+    ['chatweeks min amount by placed week', [['2020-W53', 0.01], ['2026-W52', 1], ['2026-W53', 3], ['2027-W01', 0.5]]],
+  ];
+  for (const [s, groups] of expect) {
+    const got = await run(s);
+    check(`${engine} chat figures by ISO week: ${s}`, JSON.stringify(got?.groups) === JSON.stringify(groups) && got?.dated === true, JSON.stringify(got?.groups));
+  }
+  const latest = await run('chatweeks max amount by placed week', 2);
+  check(`${engine} chat figures by ISO week: the latest 2 weeks kept, oldest first, with more set`,
+    JSON.stringify(latest?.groups) === JSON.stringify([['2026-W53', 9], ['2027-W01', 0.5]]) && latest?.more === true, JSON.stringify(latest));
+}
+
+/**
+ * chat-block-spec §19.11 on this engine: the rate-limit windows are the
+ * database's, so two connections — two server instances — share one
+ * allowance: thirty attempts at once over both let exactly the limit
+ * through (the conditional UPDATE is atomic here too), and no row holds an
+ * address in the clear.
+ */
+export async function windowChecks(engine, db, other, check) {
+  const secret = randomBytes(32);
+  const clock = () => Date.UTC(2031, 5, 1, 12);
+  const one = createRateLimits(createWindows(db, secret, { now: clock }), 'chat', { hour: 10 }, {});
+  const two = createRateLimits(createWindows(other, secret, { now: clock }), 'chat', { hour: 10 }, {});
+  const results = await Promise.all(Array.from({ length: 30 }, (_, i) => (i % 2 === 0 ? one : two).take('198.51.100.23', null)));
+  check(`${engine} chat limits: 30 attempts at once over two connections let exactly the 10 an hour allows through`,
+    results.filter(Boolean).length === 10, `${results.filter(Boolean).length}`);
+  const rows = await db.all('SELECT id, n FROM az_chat_limits');
+  check(`${engine} chat limits: one counter at 10, every row named by a keyed hash — no address in the table`,
+    rows.filter((r) => Number(r.n) === 10).length === 1 && rows.every((r) => /^[A-Za-z0-9_-]{43}$/.test(String(r.id).trim()))
+      && !JSON.stringify(rows).includes('198.51.100') && !JSON.stringify(rows).includes('127.0.0.1'), JSON.stringify(rows));
+}
+
+/**
+ * chat-block-spec §19.11 on this engine: two server instances (two
+ * createChat on two connections, behind one address) — a visitor's
+ * messages are counted once across both: the fourth of three an hour is
+ * refused whichever instance it reaches. Then a question the moderation
+ * hook blocks is counted in the day's `blocked`.
+ */
+export async function twoInstanceChecks(engine, db, other, check, url) {
+  const loaded = loadConfig({
+    AZ_SESSION_SECRET: randomBytes(32).toString('base64url'), AZ_BACKEND_PUBLIC_URL: 'http://127.0.0.1:9', AZ_ALLOWED_ORIGINS: SITE,
+    AZ_EMAIL_FROM: 'x <x@studio.test>', AZ_DATABASE_URL: url, AZ_EMAIL_API_URL: 'http://127.0.0.1:9/send', AZ_EMAIL_API_KEY: 'k',
+    AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: '/in-process.json', AZ_CHAT_PER_ADDRESS: '3/hour',
+  }, { database: engine, email: 'api', chat: true }, 'Studio');
+  if (!loaded.ok) throw new Error(loaded.problems.join('\n'));
+  const context = parseChatContext(JSON.stringify({ site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5 } }, routes: ['/'] }));
+  const serve = async (conn) => {
+    const chat = createChat({
+      config: loaded.config.chat, secret: loaded.config.secret, db: conn, prompt: 'Answer.', context,
+      adapter: createFakeAdapter({ answers: [{ chunks: ['Hello.'] }] }), log: () => {},
+    });
+    const app = createApp({ config: loaded.config, store: createStore(conn, loaded.config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: () => {}, chat });
+    const server = createServer((q, r) => { void app.handler(q, r); });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    return server;
+  };
+  const a = await serve(db);
+  const b = await serve(other);
+  try {
+    const ask = async (server) => {
+      const r = await fetch(`http://127.0.0.1:${server.address().port}/chat`, {
+        method: 'POST', signal: AbortSignal.timeout(FETCH_MS),
+        headers: { origin: SITE, 'x-az-request': '1', 'content-type': 'application/json' },
+        body: JSON.stringify({ page: '/', messages: [{ role: 'visitor', text: 'hi' }] }),
+      });
+      await r.text();
+      return r.status;
+    };
+    const statuses = [await ask(a), await ask(b), await ask(a), await ask(b), await ask(a)];
+    check(`${engine} chat limits: two server instances on one database — 3 an hour across both, the 4th and 5th refused on either`,
+      JSON.stringify(statuses) === JSON.stringify([200, 200, 200, 429, 429]), JSON.stringify(statuses));
+  } finally {
+    await closeWithin(a, DB_CLOSE_MS, `${engine} instance one close`);
+    await closeWithin(b, DB_CLOSE_MS, `${engine} instance two close`);
+  }
+}
+
 export async function chatSuite(engine, db, openAgain, check, url) {
-  check(`${engine} chat: the usage and share migrations apply`, (await migrateChat(db)).join() === '1,2');
+  check(`${engine} chat: the usage, share, blocked, limits and share-proof migrations apply`, (await migrateChat(db)).join() === '1,2,3,4,5');
   check(`${engine} chat: …and is a no-op the second time`, (await migrateChat(db)).length === 0);
 
   const usage = createUsage(db);
@@ -239,7 +381,12 @@ export async function chatSuite(engine, db, openAgain, check, url) {
   await usage.add(day, 100, 20, 0);
   await usage.add(day, 50, 5, 1);
   const row = await usage.row(day);
-  check(`${engine} chat: one row per day, added to by one statement`, JSON.stringify(row) === JSON.stringify({ input: 150, output: 25, messages: 2, dropped: 1 }), JSON.stringify(row));
+  check(`${engine} chat: one row per day, added to by one statement`, JSON.stringify(row) === JSON.stringify({ input: 150, output: 25, messages: 2, dropped: 1, blocked: 0 }), JSON.stringify(row));
+  await usage.block(day);
+  await usage.block(utcDay(Date.UTC(2026, 9, 13)));
+  check(`${engine} chat: a blocked question adds to the day's blocked count, spending nothing; a day that starts with one has its own row`,
+    JSON.stringify(await usage.row(day)) === JSON.stringify({ input: 150, output: 25, messages: 2, dropped: 1, blocked: 1 })
+      && JSON.stringify(await usage.row(utcDay(Date.UTC(2026, 9, 13)))) === JSON.stringify({ input: 0, output: 0, messages: 0, dropped: 0, blocked: 1 }));
 
   // Two answers finishing at once, from two connections: both counted.
   const other = await openAgain();
@@ -267,6 +414,7 @@ export async function chatSuite(engine, db, openAgain, check, url) {
 
   await shareChecks(engine, db, check);
   await figureChecks(engine, db, check);
+  await weekChecks(engine, db, check);
   await knowsChecks(engine, db, check);
   await usageReportChecks(engine, db, check);
 
@@ -310,5 +458,14 @@ export async function chatSuite(engine, db, openAgain, check, url) {
       droppedAfter - droppedBefore === 1 && !body.includes('evil.example') && !/event: block/.test(body), `${droppedAfter - droppedBefore}`);
   } finally {
     await closeWithin(server, DB_CLOSE_MS, `${engine} chat server close`);
+  }
+
+  // Last: they answer through the route today, so they come after every check of today's and tomorrow's rows.
+  const second = await openAgain();
+  try {
+    await windowChecks(engine, db, second, check);
+    await twoInstanceChecks(engine, db, second, check, url);
+  } finally {
+    await closeWithin(second, DB_CLOSE_MS, `${engine} limits connection close`);
   }
 }

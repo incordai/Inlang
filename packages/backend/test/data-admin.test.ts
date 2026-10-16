@@ -331,6 +331,7 @@ test('SECURITY chat usage: GET /admin/chat answers admins only — signed out 40
     const usage = createUsage(h.db);
     await usage.add(today, 1200, 80, 1);
     await usage.add(today, 300, 20, 0);
+    await usage.block(today);
     // A share holds a question and an answer's text: the view counts it and reads neither.
     const shares = createShareStore({ db: h.db, days: 30, max: 100, now: () => h.clock.now });
     await shares.create(JSON.stringify([{ type: 'text', s: words }]), words);
@@ -346,7 +347,7 @@ test('SECURITY chat usage: GET /admin/chat answers admins only — signed out 40
       usage: {
         today,
         budget: { daily: 300_000, spent: 1600, left: 298_400 },
-        days: [{ day: today, input: 1500, output: 100, messages: 2, dropped: 1, shares: 1 }],
+        days: [{ day: today, input: 1500, output: 100, messages: 2, dropped: 1, blocked: 1, shares: 1 }],
         shares: { enabled: true, kept: 1 },
       },
     });
@@ -354,6 +355,46 @@ test('SECURITY chat usage: GET /admin/chat answers admins only — signed out 40
     assert.equal((await boss.c.get('/admin/chat?day=x')).status, 400);
     assert.equal((await boss.c.request('POST', '/admin/chat', {})).status, 404);
     assert.equal((await boss.c.get('/admin/chat/x')).status, 404);
+  } finally { await h.close(); }
+});
+
+test('SECURITY chat shares: DELETE /admin/chat/shares/<id> is an admin\'s alone — audited by id, logged without the answer, gone for everyone', async () => {
+  const words = 'a-shared-answer-the-log-never-holds';
+  const log: string[] = [];
+  const h = await startBackend({}, { data: dataOf(SHOP), admins: ['boss@studio.test', 'fake@studio.test'], chatUsage: { dailyTokens: 300_000, sharesEnabled: true }, log: (l) => log.push(l) });
+  try {
+    const boss = await signUp(h, 'Boss', true);
+    const fake = await signUp(h, 'Fake', false);
+    const ana = await signUp(h, 'Ana', true);
+    const shares = createShareStore({ db: h.db, days: 30, max: 100, now: () => h.clock.now });
+    const made = await shares.create(JSON.stringify([{ type: 'text', s: words }]), words);
+    if (made === 'full') throw new Error('full');
+    const path = `/admin/chat/shares/${made.id}`;
+    assert.equal((await client(h.url).request('DELETE', path, {})).status, 401, 'signed out');
+    assert.equal((await fake.c.request('DELETE', path, {})).status, 403, 'listed but unverified is not an admin');
+    assert.equal((await ana.c.request('DELETE', path, {})).status, 403, 'verified but unlisted is not an admin');
+    assert.notEqual(await shares.read(made.id), null, 'still there after every refusal');
+    // Only DELETE, only a share id's shape, no parameters.
+    assert.equal((await boss.c.get(path)).status, 404);
+    assert.equal((await boss.c.request('DELETE', '/admin/chat/shares/not-an-id', {})).status, 404);
+    assert.equal((await boss.c.request('DELETE', `${path}?x=1`, {})).status, 400);
+    const gone = await boss.c.request('DELETE', path, {});
+    assert.equal(gone.status, 204, 'CONTROL: the admin deletes it');
+    assert.equal(await shares.read(made.id), null, 'gone for everyone');
+    assert.equal((await boss.c.request('DELETE', path, {})).status, 404, 'a second delete finds nothing');
+    // The audit names the share by id under its own name (never a table's), with who did it.
+    const audit = await body(await boss.c.get('/admin/audit')) as { items: { table: string; row: string; action: string; admin: string }[] };
+    assert.deepEqual(audit.items.map((i) => [i.table, i.row, i.action, i.admin]), [['chat_shares', made.id, 'delete', 'boss@studio.test']]);
+    assert.ok(log.includes(`data: an admin deleted shared chat answer ${made.id}`), log.join(' | '));
+    assert.ok(!log.join('\n').includes(words), 'no answer text in the log');
+  } finally { await h.close(); }
+});
+
+test('CONTROL chat shares: a server without chat has no share delete — 404 even to an admin', async () => {
+  const h = await startBackend({}, { data: dataOf(SHOP), admins: ['boss@studio.test'] });
+  try {
+    const boss = await signUp(h, 'Boss', true);
+    assert.equal((await boss.c.request('DELETE', '/admin/chat/shares/AAAAAAAAAAAAAAAAAAAAAA', {})).status, 404);
   } finally { await h.close(); }
 });
 

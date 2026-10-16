@@ -164,7 +164,7 @@ export const TOOL_NAME = /^[a-z][a-z0-9]{0,23}$/;
 /** A parameter's or a field's name, as the model writes it. */
 export const TOOL_WORD = /^[a-z][a-z0-9_]{0,31}$/;
 /** Words that start the aggregate after the parameters: never a parameter's name, or a request would read two ways. */
-const TOOL_RESERVED: ReadonlySet<string> = new Set(['count', 'sum', 'avg', 'min', 'max', 'columns', 'by', 'from', 'tool']);
+const TOOL_RESERVED: ReadonlySet<string> = new Set(['count', 'sum', 'avg', 'min', 'max', 'columns', 'title', 'by', 'from', 'tool']);
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type ToolParamType = 'int' | 'number' | 'bool' | 'date' | 'enum' | 'text';

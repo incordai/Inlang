@@ -8,6 +8,7 @@ import { createServer, type Server } from 'node:http';
 import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { createApp } from '../src/server/app.ts';
 import { migrateChat, usageReport } from '../src/server/chat-usage.ts';
+import { createShareStore } from '../src/server/chat-share.ts';
 import { migrate, openSqlite, type Db } from '../src/server/db.ts';
 import { createData } from '../src/server/data-api.ts';
 import type { Images } from '../src/server/data-images.ts';
@@ -140,9 +141,12 @@ export async function startBackend(
     oidc: createOidc((...a) => fetch(...a), () => clock.now), now: () => clock.now, log: over.log ?? (() => {}),
     ...(over.data ? {
       data: createData({
-        db, tables: over.data.tables, admins: over.admins ?? [], now: () => clock.now, publicUrl: url,
+        db, tables: over.data.tables, admins: over.admins ?? [], now: () => clock.now, publicUrl: url, ...(over.log ? { log: over.log } : {}),
         ...(over.images ? { images: over.images } : {}), ...(over.uploadLimit ? { uploadLimit: over.uploadLimit } : {}),
-        ...(chatUsage ? { chatUsage: () => usageReport(db, chatUsage, clock.now) } : {}),
+        ...(chatUsage ? {
+          chatUsage: () => usageReport(db, chatUsage, clock.now),
+          removeChatShare: (id: string) => createShareStore({ db, days: 30, max: 10_000, now: () => clock.now }).removeAny(id),
+        } : {}),
       }),
     } : {}),
   });

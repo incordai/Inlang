@@ -48,10 +48,12 @@ export function checkTag(key: Buffer, conversation: string, index: number, text:
 
 export interface ChatTurn { readonly role: 'user' | 'assistant'; readonly text: string }
 
-/** A checked request: where the visitor is, which conversation, every turn, and how many the visitor has sent. */
+/** A checked request: where the visitor is, which conversation, every turn sent, and how many the visitor has sent in all. */
 export interface ChatAsk {
   readonly page: string;
   readonly conversation: string | null;
+  /** The position of the first turn sent in the whole conversation (`from`): 0 unless the page left older turns out. */
+  readonly from: number;
   readonly turns: readonly ChatTurn[];
   readonly visitorTurns: number;
 }
@@ -64,6 +66,13 @@ const CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f]/;
  * The request body as a ChatAsk, or the refusal. `limit` is the page's
  * conversation length (messages may hold up to 2·limit entries); a page
  * that is not a chat page is a bad request.
+ *
+ * A long conversation does not fit the request cap, so the page may send
+ * only its latest whole exchanges (chat-block-spec §19.11): `from` is the
+ * position of the first message sent in the whole conversation — even, so
+ * it is a visitor's — and every answer is still proven by its tag at its
+ * own position, `from + i`. A page that sends from the start sends none.
+ * `from` past 0 needs the conversation it continues.
  */
 export function readChatRequest(
   body: Record<string, unknown>, limitOf: (page: string) => number | null, key: Buffer,
@@ -80,6 +89,11 @@ export function readChatRequest(
   if (conversation !== undefined && (typeof conversation !== 'string' || !CONVERSATION_ID.test(conversation))) {
     return { error: 'bad_request' };
   }
+  const from = body.from ?? 0;
+  if (typeof from !== 'number' || !Number.isSafeInteger(from) || from < 0 || from % 2 !== 0 || from + messages.length > 2 * limit + 1
+    || (from > 0 && typeof conversation !== 'string')) {
+    return { error: 'bad_request' };
+  }
   const turns: ChatTurn[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i] as { role?: unknown; text?: unknown; tag?: unknown } | null;
@@ -93,13 +107,13 @@ export function readChatRequest(
       turns.push({ role: 'user', text });
     } else {
       // An answer is the server's own words, exactly as it tagged them.
-      if (m.text.length > SITE_MAX || typeof conversation !== 'string' || !checkTag(key, conversation, i, m.text, m.tag)) {
+      if (m.text.length > SITE_MAX || typeof conversation !== 'string' || !checkTag(key, conversation, from + i, m.text, m.tag)) {
         return { error: 'tampered' };
       }
       turns.push({ role: 'assistant', text: m.text });
     }
   }
-  return { page, conversation: typeof conversation === 'string' ? conversation : null, turns, visitorTurns: (messages.length + 1) / 2 };
+  return { page, conversation: typeof conversation === 'string' ? conversation : null, from, turns, visitorTurns: (from + messages.length + 1) / 2 };
 }
 
 /**

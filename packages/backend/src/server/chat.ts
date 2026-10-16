@@ -60,7 +60,7 @@ import { ANSWER_WORDS, createAnswerParser, type AnswerBlock, type AnswerEvent, t
 import { RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
 import { toolsText, type Tools } from './chat-tools.ts';
 import { createShareRoutes, createShareStore, mergeText, shareKey, shareTag, SHARE_LIMITS } from './chat-share.ts';
-import { createQueue, createRateLimits } from './chat-limits.ts';
+import { createQueue, createRateLimits, createWindows, type Windows } from './chat-limits.ts';
 import { sseEvent } from './chat-sse.ts';
 import { historyKey, readChatRequest, tagTurn, trimHistory } from './chat-text.ts';
 import { createModeration, type Moderation } from './chat-moderation.ts';
@@ -193,10 +193,10 @@ export function parseChatContext(text: string): ChatContext | string {
   return { chats, quotes: quotes as AnswerQuote[], destinations: destinations as string[], images, tables, knows, content: { site: r.site, pages: r.pages } };
 }
 
-/** The components a tool's figures may fill (§21.2.8 O5): a chat whose `show` has one of them may use the tools. */
-const TOOL_WORDS: readonly AnswerWord[] = ['chart', 'table', 'stats'];
+/** The components a tool may fill (§21.2.8 O5; cards since §19.11): a chat whose `show` has one of them may use the tools. */
+const TOOL_WORDS: readonly AnswerWord[] = ['chart', 'table', 'stats', 'cards'];
 
-/** Whether a page's chat may use the operator's tools: its `show` has a chart, a table or stats. */
+/** Whether a page's chat may use the operator's tools: its `show` has a chart, a table, stats or cards. */
 const usesTools = (show: readonly AnswerWord[]) => show.some((w) => TOOL_WORDS.includes(w));
 
 /** What one chat page's answers may show: its own `show`, the site's quotes and destinations, and the tools when it may use them. */
@@ -239,7 +239,7 @@ export function systemText(prompt: string, context: ChatContext, page: string, r
     const rich = rules.show.filter((w) => (RICH_WORDS as readonly string[]).includes(w));
     if (rich.length > 0) {
       lines.push(context.tables.length > 0
-        ? `The tables "from" may count, sum, average, or list (by field, a date by day, month or year; "where" a choice or flag field equals one value):\n${context.tables.map(tableLine).join('\n')}`
+        ? `The tables "from" may count, sum, average, or list (by field, a date by day, week, month or year; "where" a choice or flag field equals one value):\n${context.tables.map(tableLine).join('\n')}`
         : 'There are no tables to take figures "from": any figure is your own, and is shown labelled as AI-generated.');
     }
     if (rules.tools) lines.push(toolsText(rules.tools));
@@ -273,6 +273,8 @@ export interface ChatOptions {
   readonly moderation?: Moderation;
   /** The operator's data tools (chat-tools.ts); absent when AZ_CHAT_TOOLS is unset. */
   readonly tools?: Tools;
+  /** The rate-limit windows every instance shares (chat-limits.ts); by default this database's. */
+  readonly windows?: Windows;
 }
 
 /** A whole-number token estimate for `chars` characters. */
@@ -290,12 +292,13 @@ export function createChat(o: ChatOptions): ChatRoutes {
   const timing = o.timing ?? CHAT_TIMING;
   const key = historyKey(o.secret);
   const usage = createUsage(o.db);
-  const limits = createRateLimits(o.config.perAddress, o.config.perAccount, now);
+  const windows = o.windows ?? createWindows(o.db, o.secret, { now });
+  const limits = createRateLimits(windows, 'chat', o.config.perAddress, o.config.perAccount);
   const queue = createQueue(o.config.concurrency);
   const shareTagKey = shareKey(o.secret);
   const shareStore = createShareStore({ db: o.db, days: o.config.shares.days, max: o.config.shares.max, now });
   const shares = createShareRoutes({
-    store: shareStore, key: shareTagKey, config: o.config.shares, now,
+    store: shareStore, key: shareTagKey, config: o.config.shares, windows, now,
     allowOf: (page) => (Object.hasOwn(o.context.chats, page) ? o.context.chats[page].allow : null),
   });
   const moderation = o.moderation ?? (o.config.moderation ? createModeration(o.config.moderation) : null);
@@ -332,7 +335,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
         let out: Sent;
         if (e.type === 'text') out = e;
         else if (isRich(e.block)) {
-          const r = await resolveRich(e.block, o.figures ?? null, day, toolRun);
+          const r = await resolveRich(e.block, o.figures ?? null, day, toolRun, o.context.images.map((i) => i.key));
           if (r === null) { resolvedDrops.push('figures'); continue; }
           out = { type: 'block', block: r };
         } else out = { type: 'block', block: e.block as unknown as Record<string, unknown> };
@@ -417,7 +420,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
       res.end(sseEvent('error', { code: 'conversation_full' }));
       return;
     }
-    if (!limits.take(req.ip, user)) return refuse(429, 'rate_limited');
+    if (!(await limits.take(req.ip, user))) return refuse(429, 'rate_limited');
     // Before anything is read or sent for it, the visitor's words are judged; only an allow goes on (§6.8).
     if (moderation) {
       const words = trimHistory(ask.turns).filter((t) => t.role === 'user').map((t) => t.text).join('\n\n');
@@ -425,6 +428,8 @@ export function createChat(o: ChatOptions): ChatRoutes {
       if (req.closed.aborted) return;
       if (judged.verdict === 'block') {
         log('chat: blocked by moderation');
+        // Counted in the day's row (the operator's usage view shows it); it spent no tokens.
+        await usage.block(utcDay(now()));
         return refuse(400, 'blocked');
       }
       if (judged.verdict === 'failed') {
@@ -449,7 +454,8 @@ export function createChat(o: ChatOptions): ChatRoutes {
     if (!release) return req.closed.aborted ? undefined : refuse(503, 'busy');
     try {
       if (req.closed.aborted) return;
-      await stream(req, res, ask.page, ask.conversation ?? randomToken(), ask.turns, ask.turns.length, chat.limit - ask.visitorTurns, system);
+      // The answer's position in the whole conversation, the tag's index: after every message, sent or left out (§19.11).
+      await stream(req, res, ask.page, ask.conversation ?? randomToken(), ask.turns, ask.from + ask.turns.length, chat.limit - ask.visitorTurns, system);
     } finally {
       release();
     }
@@ -457,8 +463,8 @@ export function createChat(o: ChatOptions): ChatRoutes {
 
   return {
     handle,
-    sweep: () => { limits.sweep(); shares.sweep(); o.tools?.sweep(); },
-    prune: async () => (await usage.sweep(now())) + (await shareStore.sweep()),
+    sweep: () => shares.sweep(),
+    prune: async () => (await usage.sweep(now())) + (await shareStore.sweep()) + (await windows.sweep()),
     shares,
   };
 }

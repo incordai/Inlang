@@ -39,11 +39,11 @@ const site = (text: string, index: number, conversation = CONV) => ({ role: 'sit
 test('a well-formed request is read: turns, conversation, visitor count', () => {
   const r = readChatRequest({ page: '/', conversation: CONV, messages: [visitor(' Hi? '), site('Hello.', 1), visitor('Plans?')] }, limitOf, key);
   assert.deepEqual(r, {
-    page: '/', conversation: CONV, visitorTurns: 2,
+    page: '/', conversation: CONV, from: 0, visitorTurns: 2,
     turns: [{ role: 'user', text: 'Hi?' }, { role: 'assistant', text: 'Hello.' }, { role: 'user', text: 'Plans?' }],
   });
   assert.deepEqual(readChatRequest({ page: '/', messages: [visitor('Hi')] }, limitOf, key),
-    { page: '/', conversation: null, visitorTurns: 1, turns: [{ role: 'user', text: 'Hi' }] });
+    { page: '/', conversation: null, from: 0, visitorTurns: 1, turns: [{ role: 'user', text: 'Hi' }] });
 });
 
 test('every malformed request is a bad_request', () => {
@@ -82,6 +82,27 @@ test('a forged, altered, moved or untagged answer is tampered', () => {
     { error: 'tampered' }, 'no conversation with history');
   // CONTROL: the genuine one passes.
   assert.ok(!('error' in ask([visitor('a'), site('Real.', 1), visitor('b')])));
+});
+
+test('a page that leaves older turns out sends from: the answers it sends are proven at their own positions; the count is the whole conversation\'s', () => {
+  const ask = (messages: unknown[], from: unknown, conversation: unknown = CONV) => readChatRequest({ page: '/', conversation, from, messages }, limitOf, key);
+  // The third exchange of a conversation, its first two left out: the answer at position 3 is proven there.
+  const r = ask([visitor('Again?'), site('Third.', 3), visitor('And?')], 2);
+  assert.deepEqual(r, {
+    page: '/', conversation: CONV, from: 2, visitorTurns: 3,
+    turns: [{ role: 'user', text: 'Again?' }, { role: 'assistant', text: 'Third.' }, { role: 'user', text: 'And?' }],
+  });
+  // Every earlier answer left out: the question alone, still in its conversation.
+  assert.deepEqual(ask([visitor('Last?')], 4), { page: '/', conversation: CONV, from: 4, visitorTurns: 3, turns: [{ role: 'user', text: 'Last?' }] });
+  // An answer moved by a wrong `from` is not the server's at that position.
+  assert.deepEqual(ask([visitor('Again?'), site('Third.', 3), visitor('And?')], 0), { error: 'tampered' });
+  assert.deepEqual(ask([visitor('Again?'), site('Third.', 1), visitor('And?')], 2), { error: 'tampered' }, 'a tag from position 1 replayed at 3');
+  // Malformed: odd (a site turn first), negative, not an integer, past the conversation's length, or no conversation to continue.
+  for (const from of [1, -2, 2.5, '2', 8]) assert.deepEqual(ask([visitor('x')], from), { error: 'bad_request' }, String(from));
+  assert.deepEqual(readChatRequest({ page: '/', from: 2, messages: [visitor('x')] }, limitOf, key), { error: 'bad_request' });
+  // The limit counts what was left out: a fourth question after three left out is the fourth (the route answers conversation_full).
+  const full = ask([visitor('Fourth?')], 6);
+  assert.ok(!('error' in full) && full.visitorTurns === 4, JSON.stringify(full));
 });
 
 test('trimHistory: the last 8 turns, then oldest dropped to 12 000 characters, starting with the visitor', () => {

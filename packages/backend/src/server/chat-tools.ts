@@ -39,9 +39,9 @@
  */
 
 import { cleanText } from './chat-answer.ts';
-import { createRateLimits } from './chat-limits.ts';
+import { createRateLimits, type Windows } from './chat-limits.ts';
 import type { Figures, RowsResult } from './chat-query.ts';
-import { clampText, type ToolAnswer, type ToolRequest, type ToolShape, type ToolsRun } from './chat-rich.ts';
+import { clampText, type ToolAnswer, type ToolCards, type ToolRequest, type ToolShape, type ToolsRun } from './chat-rich.ts';
 import { isDay, paramsProblem, type ChatRate, type ChatTool, type ChatToolShape, type ToolFieldType, type ToolParam } from './env.ts';
 import { BodyTooLarge, readCapped } from './outbound.ts';
 
@@ -196,7 +196,18 @@ const cellOf = (type: ToolFieldType, v: string | number | boolean): string | num
  * rows cannot be shown so: a figure past 10¹⁵, or two groups whose labels
  * are the same once clamped.
  */
-export function aggregateTool(rows: readonly ToolRow[], shape: ToolShape, fields: Readonly<Record<string, ToolFieldType>>, cap: number): Figures | RowsResult | null {
+export function aggregateTool(rows: readonly ToolRow[], shape: ToolShape, fields: Readonly<Record<string, ToolFieldType>>, cap: number): Figures | RowsResult | ToolCards | null {
+  if (shape.kind === 'cards') {
+    // The first rows with a title, in the endpoint's order, as cards: text values only (the row check made them text), trimmed.
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+    const titled = rows.filter((r) => text(r[shape.title]) !== null).slice(0, cap);
+    return {
+      kind: 'toolcards',
+      items: titled.map((r) => ({
+        title: text(r[shape.title])!, text: shape.text ? text(r[shape.text]) : null, image: shape.image ? text(r[shape.image]) : null,
+      })),
+    };
+  }
   if (shape.kind === 'rows') {
     return {
       kind: 'rows',
@@ -289,15 +300,17 @@ export function toolsText(shapes: readonly ChatToolShape[]): string {
   const num = fields.find(([, f]) => f === 'number')?.[0];
   const group = fields.find(([, f]) => f === 'text' || f === 'date')?.[0];
   const head = ['from tool', first.name, ...args].join(' ');
+  const texts = fields.filter(([, f]) => f === 'text').map(([n]) => n);
   const examples = [
     ...(group ? [`chart bar "A title" ${head} ${num ? `sum ${num}` : 'count'} by ${group}`] : []),
     `table "A title" ${head} columns ${fields.slice(0, 3).map(([n]) => n).join(' ')}`,
     `stats\n  stat "A label" ${head} ${num ? `max ${num}` : 'count'}`,
+    ...(texts.length > 0 ? [`cards ${head} title ${texts[0]}${texts.length > 1 ? ` text ${texts[1]}` : ''}`] : []),
   ];
   return [
-    'The operator\'s tools a chart, table or stat may take live figures "from tool" (the visitor sees them with their source; you never see what they answer, so never state their figures yourself):',
+    'The operator\'s tools a chart, table, stat or cards may take live figures "from tool" (the visitor sees them with their source; you never see what they answer, so never state their figures yourself):',
     ...lines,
-    'Write the tool\'s name, then each parameter and its value, then what to show: count, or sum, avg, min or max of a number field, optionally "by" a text or date field (a chart needs "by"; a stat takes "by" only a date field, for the latest) — or, in a table, "columns" and up to 6 fields. At most 3 tool requests in one answer. For example:',
+    'Write the tool\'s name, then each parameter and its value, then what to show: count, or sum, avg, min or max of a number field, optionally "by" a text or date field (a chart needs "by"; a stat takes "by" only a date field, for the latest) — or, in a table, "columns" and up to 6 fields — or, in cards, "title" and a text field, then optionally "text" and a text field and "image" and a text field that holds a site image\'s key. At most 3 tool requests in one answer. For example:',
     ...examples,
   ].join('\n');
 }
@@ -306,6 +319,8 @@ export interface ToolsOptions {
   readonly tools: readonly ChatTool[];
   /** AZ_CHAT_TOOL_CALLS_PER_ADDRESS. */
   readonly perAddress: ChatRate;
+  /** The rate-limit windows every instance shares (chat-limits.ts): a call counts against its address on all of them. */
+  readonly windows: Windows;
   readonly fetch?: Fetch;
   readonly now?: () => number;
   readonly log?: (line: string) => void;
@@ -316,8 +331,6 @@ export interface Tools {
   readonly shapes: readonly ChatToolShape[];
   /** The tool runner for one answer: calls counted against `address`; `signal` aborts them (the visitor left). */
   forAnswer(address: string, signal: AbortSignal): ToolsRun;
-  /** Forget old limiter keys. */
-  sweep(): void;
 }
 
 export function createTools(o: ToolsOptions): Tools {
@@ -325,7 +338,7 @@ export function createTools(o: ToolsOptions): Tools {
   const log = o.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const fetchImpl: Fetch = o.fetch ?? ((...a) => fetch(...a));
   const byName = new Map(o.tools.map((t) => [t.name, t]));
-  const limits = createRateLimits(o.perAddress, {}, now);
+  const limits = createRateLimits(o.windows, 'tool', o.perAddress, {});
   /** 60 s per (tool, parameters), least recently used out past 200 (§21.2.4): the checked rows, and when they were read. */
   const cache = new Map<string, { at: number; rows: readonly ToolRow[] }>();
   const shapes = o.tools.map(({ name, params, fields, label, about }): ChatToolShape => ({ name, params, fields, label, about }));
@@ -339,7 +352,7 @@ export function createTools(o: ToolsOptions): Tools {
       return hit;
     }
     // Only a call costs the operator: a cached reply is not counted against the address.
-    if (!limits.take(address, null)) {
+    if (!(await limits.take(address, null))) {
       log(`chat: tool ${tool.name} limited 0ms 0 rows`);
       return null;
     }
@@ -368,7 +381,6 @@ export function createTools(o: ToolsOptions): Tools {
         return result === null ? 'unavailable' : { result, source: tool.label, at: toolMinute(got.at) };
       };
     },
-    sweep: () => limits.sweep(),
   };
 }
 

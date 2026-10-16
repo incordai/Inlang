@@ -100,9 +100,9 @@ export interface ChatRequest {
 /** The chat route — present only when a page shows a chat (chat.ts, copied only then). */
 export interface ChatRoutes {
   handle(req: ChatRequest, res: ServerResponse): Promise<void>;
-  /** Forget old limiter keys; also on the sweep timer. */
+  /** Forget this process's own limiter keys (a share's reads and deletes); also on the sweep timer. */
   sweep(): void;
-  /** Remove usage rows past their retention, and expired shares; how many went. */
+  /** Remove usage rows past their retention, expired shares and spent rate-limit slots; how many went. */
   prune(): Promise<number>;
   /** Share links (chat-block-spec §20.7): POST /chat/share, GET and DELETE /chat/share/<id>. */
   readonly shares?: {
@@ -523,7 +523,8 @@ export function createApp(deps: AppDeps) {
     const data = deps.data;
     // The admin routes (data-spec §11) are fetch routes too, with the same edge.
     const dataPath = url.pathname === '/data' || url.pathname.startsWith('/data/')
-      || url.pathname === '/admin/data' || url.pathname.startsWith('/admin/data/') || url.pathname === '/admin/audit' || url.pathname === '/admin/chat';
+      || url.pathname === '/admin/data' || url.pathname.startsWith('/admin/data/') || url.pathname === '/admin/audit' || url.pathname === '/admin/chat'
+      || url.pathname.startsWith('/admin/chat/shares/');
     if (data && dataPath) {
       // A fetch route like /auth: an allowed origin always, and the CSRF
       // header on EVERY method that can change something (data-spec §5.4).

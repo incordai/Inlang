@@ -18,6 +18,10 @@ import { createAnswerParser, type AnswerEvent, type AnswerRules } from '../src/s
 import { resolveRich, type RichBlock, type ToolRequest } from '../src/server/chat-rich.ts';
 import { aggregateTool, callTool, createTools, probeTools, toolCacheKey, toolMinute, toolRows, toolsText, TOOL_RESULT } from '../src/server/chat-tools.ts';
 import { loadConfig, toolSecretKeys, type ChatTool } from '../src/server/env.ts';
+import { createWindows } from '../src/server/chat-limits.ts';
+import { migrateChat } from '../src/server/chat-usage.ts';
+import { openSqlite } from '../src/server/db.ts';
+import { randomBytes } from 'node:crypto';
 import { SECRET } from './helpers.ts';
 
 const BASE = {
@@ -141,7 +145,7 @@ test('declarations: each bad key refused at start, named, with no value quoted',
   assert.deepEqual(problems({ AZ_CHAT_TOOL_RESULTS_KEY: '' }), []);
 });
 
-const RULES: AnswerRules = { show: ['chart', 'table', 'stats'], quotes: [], destinations: ['/'], tools: toolsOf(STANDINGS) };
+const RULES: AnswerRules = { show: ['chart', 'table', 'stats', 'cards'], quotes: [], destinations: ['/'], images: ['i1', 'i2'], tools: toolsOf(STANDINGS) };
 
 function parse(answer: string, rules: AnswerRules = RULES): { blocks: Record<string, unknown>[]; dropped: string[]; record: string } {
   const p = createAnswerParser(rules);
@@ -201,6 +205,75 @@ test('requests: an invented tool, an aggregate the component cannot show, a fiel
   assert.deepEqual(r.dropped, []);
   assert.deepEqual(r.blocks[0], { chart: { kind: 'bar', title: 'Points', tool: { tool: 'standings', args: { final: false, season: 2026 }, shape: { kind: 'figures', fn: 'sum', field: 'points', by: 'driver' }, words: 'tool standings final no season 2026 sum points by driver' } } });
   assert.equal(r.record, 'chart bar "Points" from tool standings final no season 2026 sum points by driver\ntable "Last" from tool standings season 2026 columns driver points\nstats\n  stat "Latest" from tool standings season 2026 count by day\n');
+});
+
+test('cards from tool: a title, and optionally a text and an image, each a text field — parsed whole, or dropped as tool', () => {
+  const r = parse('cards from tool standings season 2026 title driver text team image team\n');
+  assert.deepEqual(r.dropped, []);
+  assert.deepEqual(r.blocks[0], {
+    cards: { tool: { tool: 'standings', args: { season: 2026 }, shape: { kind: 'cards', title: 'driver', text: 'team', image: 'team' }, words: 'tool standings season 2026 title driver text team image team' } },
+  });
+  assert.equal(r.record, 'cards from tool standings season 2026 title driver text team image team\n');
+  assert.deepEqual((parse('cards from tool standings season 2026 title driver\n').blocks[0].cards as { tool: ToolRequest }).tool.shape, { kind: 'cards', title: 'driver', text: null, image: null });
+  for (const line of [
+    'cards from tool standings season 2026 title points',          // a number is not a title
+    'cards from tool standings season 2026 title day',             // nor a date
+    'cards from tool standings season 2026 title driver text points',
+    'cards from tool standings season 2026 title driver image podium',
+    'cards from tool standings season 2026 title car',             // not a declared field
+    'cards from tool standings season 2026 count',                 // cards hold rows, not a figure
+    'cards from tool standings season 2026 columns driver',
+    'cards from tool standings season 2026 title driver extra',
+    'cards from tool standings title driver',                      // the required season is missing
+    'table "T" from tool standings season 2026 title driver',      // a title is cards' only
+    'chart bar "T" from tool standings season 2026 title driver',
+  ]) assert.deepEqual(parse(`${line}\n`).dropped, ['tool'], line);
+  // A card list from a tool takes no child lines; a chat that shows no cards drops it as not shown.
+  assert.deepEqual(parse('cards from tool standings season 2026 title driver\n  card "x"\n').dropped, ['shape']);
+  assert.deepEqual(parse('cards from tool standings season 2026 title driver\n', { ...RULES, show: ['chart'] }).dropped, ['not_shown']);
+});
+
+test('cards from tool: the first rows in the endpoint\'s order; an image only by a site image key, never an address; the source on each card', async () => {
+  const rows = toolRows({ ...FIELDS }, [
+    { ...ROWS[0], driver: 'Ana', team: 'i1' },
+    { ...ROWS[1], driver: 'Ben', team: 'https://collector.example/x.png' },
+    { ...ROWS[2], driver: '   ', team: 'i2' },
+    { ...ROWS[3], driver: 'Cy', team: 'i9' },
+    { ...ROWS[4], driver: 'Di', team: 'i2' },
+  ])!;
+  const shape = { kind: 'cards' as const, title: 'driver', text: 'team', image: 'team' };
+  assert.deepEqual(aggregateTool(rows, shape, FIELDS, 4), {
+    kind: 'toolcards',
+    items: [
+      { title: 'Ana', text: 'i1', image: 'i1' },
+      { title: 'Ben', text: 'https://collector.example/x.png', image: 'https://collector.example/x.png' },
+      // A row with no title is no card: the next one takes its place.
+      { title: 'Cy', text: 'i9', image: 'i9' },
+      { title: 'Di', text: 'i2', image: 'i2' },
+    ],
+  });
+  const at = '2026-10-16T14:05Z';
+  const tools = async () => ({ result: aggregateTool(rows, shape, FIELDS, 4)!, source: 'Race results service', at });
+  const block: RichBlock = { cards: { tool: { tool: 'standings', args: { season: 2026 }, shape, words: '' } } };
+  const meta = { src: 'tool', source: 'Race results service', asOf: at };
+  assert.deepEqual(await resolveRich(block, null, '2026-10-16', tools, ['i1', 'i2']), {
+    cards: [
+      { title: 'Ana', text: 'i1', image: { asset: 'i1' }, ...meta },
+      // An address in a row is text at most — never an image.
+      { title: 'Ben', text: 'https://collector.example/x.png', ...meta },
+      // A key the site does not have is no image; the card keeps its text.
+      { title: 'Cy', text: 'i9', ...meta },
+      { title: 'Di', text: 'i2', image: { asset: 'i2' }, ...meta },
+    ],
+  });
+  assert.deepEqual(await resolveRich(block, null, '2026-10-16', async () => 'unavailable' as const, ['i1']), { unavailable: { title: 'Figures' } });
+  assert.deepEqual(await resolveRich(block, null, '2026-10-16', async () => ({ result: { kind: 'toolcards' as const, items: [] }, source: 'S', at }), ['i1']), { unavailable: { title: 'Figures' } });
+  assert.equal(await resolveRich(block, null, '2026-10-16', null, ['i1']), null, 'no tools: the component is dropped');
+});
+
+test('a tool parameter may not be called title: a cards request would read two ways', () => {
+  const env = { ...STANDINGS, AZ_CHAT_TOOL_STANDINGS_PARAMS: JSON.stringify({ title: { type: 'text', maxLength: 10 } }), AZ_CHAT_TOOL_STANDINGS_SAMPLE: '' };
+  assert.ok(problems(env).some((p) => p.startsWith('AZ_CHAT_TOOL_STANDINGS_PARAMS has a parameter name') && p.includes('title')), problems(env).join(' | '));
 });
 
 test('calls per answer: the fourth `from tool` is dropped as too_many, inside the six requests', () => {
@@ -369,8 +442,12 @@ test('the runner: cached per tool and parameters for 60 s, counted per address, 
   const e = await endpoint(json(ROWS));
   let clock = Date.UTC(2026, 9, 16, 14, 5, 30);
   const log: string[] = [];
+  const db = await openSqlite(':memory:');
+  await migrateChat(db);
   try {
-    const tools = createTools({ tools: [toolAt(`${e.base}/s`)], perAddress: { hour: 2 }, now: () => clock, log: (l) => log.push(l) });
+    const secret = randomBytes(32);
+    const windows = createWindows(db, secret, { now: () => clock });
+    const tools = createTools({ tools: [toolAt(`${e.base}/s`)], perAddress: { hour: 2 }, windows, now: () => clock, log: (l) => log.push(l) });
     assert.deepEqual(tools.shapes.map((s) => Object.keys(s).sort()), [['about', 'fields', 'label', 'name', 'params']], 'no URL, no key');
     const run = tools.forAnswer('192.0.2.7', never);
     const req = (args: Record<string, string | number | boolean>): ToolRequest => ({ tool: 'standings', args, shape: { kind: 'figures', fn: 'sum', field: 'points', by: 'driver' }, words: '' });
@@ -403,7 +480,14 @@ test('the runner: cached per tool and parameters for 60 s, counted per address, 
     ]);
     assert.ok(!log.join('\n').includes('2026') && !log.join('\n').includes(TOOL_SECRET) && !log.join('\n').includes('Ana'), 'no parameter, value or key in the log');
     assert.equal(toolMinute(Date.UTC(2026, 0, 2, 3, 4, 59)), '2026-01-02T03:04Z');
-  } finally { await e.close(); }
+    // A second server instance on the same database (its own runner, its own cache): the address's calls this hour are spent there too.
+    const other = createTools({ tools: [toolAt(`${e.base}/s`)], perAddress: { hour: 2 }, windows: createWindows(db, secret, { now: () => clock }), now: () => clock, log: () => {} });
+    assert.equal(await other.forAnswer('192.0.2.7', never)(req({ season: 2024 }), 24), 'unavailable', 'limited on the other instance too');
+    assert.equal(e.seen.length, 3, 'and not called');
+    // CONTROL: an address with calls left is called from the other instance.
+    assert.notEqual(await other.forAnswer('192.0.2.9', never)(req({ season: 2024 }), 24), 'unavailable');
+    assert.equal(e.seen.length, 4);
+  } finally { await e.close(); await db.close(); }
 });
 
 test('resolve: tool figures become src tool with the operator\'s label; a failing tool is the note, never figures', async () => {
@@ -423,15 +507,20 @@ test('resolve: tool figures become src tool with the operator\'s label; a failin
 test('the model is told each tool by its declaration — never its URL, key or label', () => {
   const t = toolsOf(STANDINGS);
   const text = toolsText(t);
-  assert.match(text, /^The operator's tools a chart, table or stat may take live figures "from tool"/);
+  assert.match(text, /^The operator's tools a chart, table, stat or cards may take live figures "from tool"/);
+  assert.match(text, /cards from tool standings season 2000 title driver text team/);
   assert.match(text, /- standings — Season standings by driver\. Parameters: season \(a whole number, 2000 to 2030, required\), weight \(number, 0\.5 to 2\.5\), since \(a date, YYYY-MM-DD, 2026-01-01 to 2026-12-31\), class \(one of open, junior, Over 40\), team \(text in double quotes, at most 12 characters\), final \(yes or no\)\. Each row: driver \(text\), team \(text\), points \(number\), day \(date\), podium \(bool\)\./);
   assert.match(text, /chart bar "A title" from tool standings season 2000 sum points by driver/);
   for (const secret of [TOOL_SECRET, 'tools.example.test', 'Race results service']) assert.ok(!text.includes(secret), secret);
   // Every example line is one the parser takes.
   const examples = text.slice(text.indexOf('For example:\n') + 'For example:\n'.length);
-  const r = parse(`${examples}\n`);
-  assert.deepEqual(r.dropped, []);
-  assert.equal(r.blocks.length, 3);
+  // Each example on its own (one answer may hold three tool requests; there are four examples): every one parses whole.
+  const each = examples.split(/\n(?=\S)/);
+  assert.equal(each.length, 4);
+  for (const ex of each) {
+    const r = parse(`${ex}\n`);
+    assert.deepEqual([r.dropped, r.blocks.length], [[], 1], ex);
+  }
   assert.equal(toolsText([]), '');
 });
 

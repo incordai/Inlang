@@ -2,7 +2,7 @@
  * @az server chat-share
  * Purpose: one answer kept under a link, only when its visitor presses Share — the tag that proves it is a real answer, the store, expiry and delete.
  * Spec: docs/chat-block-spec.md §20.7
- * Exports: SHARE_LIMITS, ShareStore, StoredShare, ShareRoutes, ShareRoutesOptions, shareKey, shareTag, checkShareTag, mergeText, newShareId,
+ * Exports: SHARE_LIMITS, ShareStore, StoredShare, Made, ShareRoutes, ShareRoutesOptions, shareKey, shareTag, checkShareTag, mergeText, newShareId,
  *   isShareId, createShareStore, createShareRoutes, shareableEvents
  * Edit guide: store only events this server tagged (the tag covers every event, the turn and the time); keep no person —
  *   no address, account or agent column. An expired, unknown or wrongly-tokened share is answered exactly like a missing one.
@@ -29,9 +29,9 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import type { ServerResponse } from 'node:http';
 import type { ChatRequest } from './app.ts';
 import { ANSWER_LIMITS, ANSWER_WORDS } from './chat-answer.ts';
-import { createRateLimits, DAY_MS, HOUR_MS } from './chat-limits.ts';
+import { createRateLimits, DAY_MS, HOUR_MS, type Windows } from './chat-limits.ts';
 import { CONVERSATION_ID } from './chat-text.ts';
-import type { Db } from './db.ts';
+import { isUniqueViolation, type Db } from './db.ts';
 import type { ChatConfig } from './env.ts';
 import { BodyError, createLimiter, send } from './http.ts';
 
@@ -40,8 +40,13 @@ export const SHARE_LIMITS = {
   eventsBytes: 48 * 1024,
   /** A visitor's question, when included (chat-block-spec §4.2's message cap). */
   question: 1000,
-  /** A share tag older than this is refused: share an answer the day it was given. */
-  tagMaxAgeMs: 24 * 60 * 60 * 1000,
+  /**
+   * A share tag older than this is refused. It is the page's history
+   * retention (overlay chat-history.ts HISTORY_LIMITS.maxAgeMs, 7 days): the
+   * page keeps each answer's share tags with it, so a restored answer can be
+   * shared while it can be restored (chat-block-spec §19.11).
+   */
+  tagMaxAgeMs: 7 * 24 * 60 * 60 * 1000,
   idBytes: 16,
   tokenBytes: 32,
 } as const;
@@ -105,13 +110,24 @@ export interface StoredShare {
   readonly expires: number;
 }
 
+/** A share just made: its id, its delete token (shown once), when it expires. */
+export interface Made { readonly id: string; readonly token: string; readonly expires: number }
+
 export interface ShareStore {
   /** Store one answer; the id, the delete token (shown once) and when it expires — or `full` past the live-share ceiling. */
-  create(eventsJson: string, question: string | null): Promise<{ id: string; token: string; expires: number } | 'full'>;
+  create(eventsJson: string, question: string | null): Promise<Made | 'full'>;
+  /**
+   * Store one answer a tag proved, as `create` — or `replayed` when a share
+   * made with the same `proof` (the hash of that tag) is still kept: one live
+   * share per tag, so a tag cannot be spent twice.
+   */
+  createProved(eventsJson: string, question: string | null, proof: string): Promise<Made | 'full' | 'replayed'>;
   /** A live share, or null: unknown, malformed and expired alike. */
   read(id: string): Promise<StoredShare | null>;
   /** Delete with the sharer's token; false when there was nothing to delete (or the token is not its). */
   remove(id: string, token: string): Promise<boolean>;
+  /** Delete as the operator — an admin on /admin, or `az backend shares --delete` — with no token; false when no live share has that id. */
+  removeAny(id: string): Promise<boolean>;
   /** Delete every expired share; how many went. */
   sweep(): Promise<number>;
 }
@@ -128,20 +144,33 @@ export interface ShareStoreOptions {
 export function createShareStore(o: ShareStoreOptions): ShareStore {
   const now = o.now ?? Date.now;
   const { db } = o;
+  const insert = async (eventsJson: string, question: string | null, proof: string | null): Promise<Made | 'full' | 'replayed'> => {
+    const at = now();
+    const live = await db.get('SELECT COUNT(*) AS n FROM az_chat_shares WHERE expires > ?', [at]);
+    if (Number(live?.n ?? 0) >= o.max) return 'full';
+    const id = newShareId();
+    const token = randomBytes(SHARE_LIMITS.tokenBytes).toString('base64url');
+    const expires = at + o.days * DAY_MS;
+    try {
+      await db.run(
+        'INSERT INTO az_chat_shares (id, events, question, created, expires, delete_hash, proof) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [id, eventsJson, question, at, expires, sha256(token), proof],
+      );
+    } catch (e) {
+      // The proof's unique index: this tag already made a share that is still kept (an expired one is swept first).
+      if (proof !== null && isUniqueViolation(e)) return 'replayed';
+      throw e;
+    }
+    return { id, token, expires };
+  };
   return {
     async create(eventsJson, question) {
-      const at = now();
-      const live = await db.get('SELECT COUNT(*) AS n FROM az_chat_shares WHERE expires > ?', [at]);
-      if (Number(live?.n ?? 0) >= o.max) return 'full';
-      const id = newShareId();
-      const token = randomBytes(SHARE_LIMITS.tokenBytes).toString('base64url');
-      const expires = at + o.days * DAY_MS;
-      await db.run(
-        'INSERT INTO az_chat_shares (id, events, question, created, expires, delete_hash) VALUES (?, ?, ?, ?, ?, ?)',
-        [id, eventsJson, question, at, expires, sha256(token)],
-      );
-      return { id, token, expires };
+      const made = await insert(eventsJson, question, null);
+      // With no proof there is no unique value to collide on.
+      if (made === 'replayed') throw new Error('chat-share: a share with no proof was refused as a replay');
+      return made;
     },
+    createProved: (eventsJson, question, proof) => insert(eventsJson, question, proof),
     async read(id) {
       if (!isShareId(id)) return null;
       const row = await db.get('SELECT events, question, created, expires FROM az_chat_shares WHERE id = ? AND expires > ?', [id, now()]);
@@ -161,6 +190,10 @@ export function createShareStore(o: ShareStoreOptions): ShareStore {
       const got = Buffer.from(sha256(token), 'utf8');
       if (want.length !== got.length || !timingSafeEqual(want, got)) return false;
       return (await db.run('DELETE FROM az_chat_shares WHERE id = ?', [id])) === 1;
+    },
+    async removeAny(id) {
+      if (!isShareId(id)) return false;
+      return (await db.run('DELETE FROM az_chat_shares WHERE id = ? AND expires > ?', [id, now()])) === 1;
     },
     sweep: () => db.run('DELETE FROM az_chat_shares WHERE expires <= ?', [now()]),
   };
@@ -198,7 +231,7 @@ export interface ShareRoutes {
   read(id: string, req: ChatRequest, res: ServerResponse): Promise<void>;
   /** DELETE /chat/share/<id> with `{ token }`. */
   remove(id: string, req: ChatRequest, res: ServerResponse): Promise<void>;
-  /** Forget old limiter keys. */
+  /** Forget old read and delete limiter keys (this process's own). */
   sweep(): void;
 }
 
@@ -209,6 +242,8 @@ export interface ShareRoutesOptions {
   readonly config: ChatConfig['shares'];
   /** Who may chat on a chat page — the same may share from it; null for a page with no chat. */
   readonly allowOf: (page: string) => 'anyone' | 'signedin' | null;
+  /** The rate-limit windows every instance shares (chat-limits.ts). */
+  readonly windows: Windows;
   readonly now?: () => number;
 }
 
@@ -220,7 +255,9 @@ const DELETES_PER_ADDRESS = 30;
 
 export function createShareRoutes(o: ShareRoutesOptions): ShareRoutes {
   const now = o.now ?? Date.now;
-  const creates = createRateLimits(o.config.perAddress, o.config.perAccount, now);
+  const creates = createRateLimits(o.windows, 'share', o.config.perAddress, o.config.perAccount);
+  // A share's reads and deletes are anonymous: counted in this process's bounded limiter, as data reads are — an
+  // anonymous flood writes no row, and cannot fill the table the chat's own limits are counted in (chat-limits.ts).
   const reads = createLimiter(READS_PER_ADDRESS, READ_WINDOW_MS, now);
   const deletes = createLimiter(DELETES_PER_ADDRESS, HOUR_MS, now);
   const refuse = (res: ServerResponse, req: ChatRequest, status: number, error: string) => send(res, status, { error }, req.cors);
@@ -249,14 +286,18 @@ export function createShareRoutes(o: ShareRoutesOptions): ShareRoutes {
       const json = JSON.stringify(events) ?? '';
       if (Buffer.byteLength(json, 'utf8') > SHARE_LIMITS.eventsBytes) return refuse(res, req, 400, 'too_large');
       const q = typeof question === 'string' ? question : null;
-      // Only an answer this server gave, unedited, today: the tag covers every event, the turn, the time and the question.
+      // Only an answer this server gave, unedited, within the history's retention: the tag covers every event, the turn, the time and the question.
       const fresh = at <= now() && now() - at <= SHARE_LIMITS.tagMaxAgeMs;
       if (!fresh || !shareableEvents(events) || !checkShareTag(o.key, conversation, index, at, events, q, tag)) {
         return refuse(res, req, 400, 'tampered');
       }
-      if (!creates.take(req.ip, user)) return refuse(res, req, 429, 'rate_limited');
-      const made = await o.store.create(json, q);
+      if (!(await creates.take(req.ip, user))) return refuse(res, req, 429, 'rate_limited');
+      // An expired share frees its tag for the unique index; the sweep would get to it within PRUNE_MS anyway.
+      await o.store.sweep();
+      const made = await o.store.createProved(json, q, sha256(String(tag)));
       if (made === 'full') return refuse(res, req, 429, 'shares_full');
+      // The same tag again while its share lives: a replay, refused — the first link stands (its sharer has it).
+      if (made === 'replayed') return refuse(res, req, 409, 'already_shared');
       send(res, 201, { id: made.id, expires: made.expires, deleteToken: made.token }, req.cors);
     },
     async read(id, req, res) {
@@ -285,7 +326,6 @@ export function createShareRoutes(o: ShareRoutesOptions): ShareRoutes {
       send(res, 204, undefined, req.cors);
     },
     sweep() {
-      creates.sweep();
       reads.sweep();
       deletes.sweep();
     },

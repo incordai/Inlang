@@ -151,6 +151,38 @@ test('an answer streams as text events, then done with a tag that proves it; it 
   } finally { await s.close(); }
 });
 
+test('a long conversation sent from its latest exchange: the answer keeps its position, the next request proves it there; the 16 KB cap stays', async () => {
+  const s = await startChat();
+  try {
+    const c = client(s.url);
+    const key = historyKey(Buffer.from(SECRET, 'base64url'));
+    const first = (await events(await ask(c, [say('hello')]))).at(-1)!.data;
+    const conversation = first.conversation as string;
+    const a1 = { role: 'site', text: first.text, tag: first.tag };
+    const second = (await events(await ask(c, [say('hello'), a1, say('again')], { conversation }))).at(-1)!.data;
+    // The page left the first exchange out: from 2, and the answer is the conversation's fifth message (index 3), its tag there.
+    const a2 = { role: 'site', text: second.text, tag: second.tag };
+    const third = await ask(c, [say('again'), a2, say('once more')], { conversation, from: 2 });
+    const done = (await events(third)).at(-1)!;
+    assert.equal(done.event, 'done');
+    assert.ok(checkTag(key, conversation, 5, String(done.data.text), done.data.tag), 'tagged at its position in the whole conversation');
+    assert.equal(done.data.left, 0, 'the questions left out still count against the limit of 3');
+    // Sent from the start, the same answers verify too: the positions never changed.
+    const whole = await ask(c, [say('hello'), a1, say('again'), a2, say('more')], { conversation });
+    assert.equal(whole.status, 200);
+    assert.equal((await events(whole)).at(-1)!.event, 'done');
+    // A fourth question with everything before it left out is still the fourth: the conversation is full.
+    const fourth = await ask(c, [say('fourth')], { conversation, from: 6 });
+    assert.equal((await events(fourth)).at(-1)!.data.code, 'conversation_full');
+    // A tag moved to another position is refused.
+    const moved = await ask(c, [say('again'), a2, say('x')], { conversation, from: 0 });
+    assert.deepEqual([moved.status, await moved.json()], [400, { error: 'tampered' }]);
+    // The server's request cap is unchanged: a body past 16 KB is refused before anything is read.
+    const big = await ask(c, [say('x'), { role: 'site', text: 'y'.repeat(17 * 1024), tag: 'z' }, say('q')], { conversation });
+    assert.deepEqual([big.status, await big.json()], [400, { error: 'bad_request' }]);
+  } finally { await s.close(); }
+});
+
 test('refusals before the stream: disabled, bad_request, too_long; no model call', async () => {
   const off = await startChat({ AZ_CHAT_ENABLED: 'off' });
   try {
@@ -222,7 +254,7 @@ test('the budget: a request whose largest cost would cross it is refused before 
     const c = client(s.url);
     // 'price' reports 912 tokens: within the budget before, over it after.
     assert.equal((await events(await ask(c, [say('price?')]))).at(-1)!.event, 'done');
-    assert.deepEqual(await createUsage(s.db).row(utcDay(Date.now())), { input: 900, output: 12, messages: 1, dropped: 0 });
+    assert.deepEqual(await createUsage(s.db).row(utcDay(Date.now())), { input: 900, output: 12, messages: 1, dropped: 0, blocked: 0 });
     const calls = s.fake.calls();
     for (let i = 0; i < 2; i++) {
       const r = await ask(c, [say('hello')]);

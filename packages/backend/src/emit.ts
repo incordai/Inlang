@@ -284,18 +284,22 @@ readable), to the model named in \`.env\`, and streams the answer back. The
 - **Limits.** Per address and per account (\`AZ_CHAT_PER_ADDRESS\`,
   \`AZ_CHAT_PER_ACCOUNT\`), \`AZ_CHAT_CONCURRENCY\` answers at once with four
   times as many waiting up to 10 s, and \`AZ_CHAT_TIMEOUT_SECONDS\` per answer.
-  Rate limits are per process; the budget is shared through the database.
+  The chat's rate limits (messages, share creates, tool calls) and the budget are
+  counted in the database, so every instance on it shares them (\`az_chat_limits\`
+  holds keyed hashes and counts, never an address or an account); the answer
+  queue, a shared answer's read and delete limits and the 60 s caches are
+  each instance's own.
 - **A reverse proxy must not buffer \`/chat\`**, or the answer arrives all at
   once: turn response buffering off for that path (the server sends
   \`x-accel-buffering: no\`).
 - **Nothing is stored** but per-day counts in \`az_chat_usage\` (tokens and
-  messages, no text, no person), kept 400 days, and the answers visitors
-  chose to share (\`az_chat_shares\`, until they expire). Logs carry an
+  messages, no text, no person), kept 400 days, the rate-limit counts above,
+  and the answers visitors chose to share (\`az_chat_shares\`, until they expire). Logs carry an
   outcome, a duration and token counts — never a message, an address or an
   account.
 - **Usage.** \`az backend usage <this folder>\` prints today's spend against
-  the budget, the last 30 days' messages, tokens, dropped components and
-  shares, and the shares kept — counts only, read from the database without
+  the budget, the last 30 days' messages, tokens, dropped components,
+  questions the moderation hook blocked and shares, and the shares kept — counts only, read from the database without
   changing it. A site with data tables shows the same on \`/admin\` to the
   addresses in \`AZ_ADMIN_EMAILS\` (\`GET /admin/chat\`, admins only).
 
@@ -315,8 +319,9 @@ readable), to the model named in \`.env\`, and streams the answer back. The
    question answers \`disabled\`. Lower \`AZ_CHAT_PER_ADDRESS\`,
    \`AZ_CHAT_PER_ACCOUNT\` or the budget, consider a moderation hook, then
    switch it back on.
-4. **A shared answer must go**: \`DELETE FROM az_chat_shares WHERE id = '<id>'\`
-   (the id is the last part of its link); \`AZ_CHAT_SHARES=off\` stops new ones.
+4. **A shared answer must go**: \`az backend shares <this folder> --delete <its link or id>\`
+   (it prints one audit line, never the answer); on a site with data tables an
+   admin can do the same on \`/admin\`. \`AZ_CHAT_SHARES=off\` stops new ones.
 5. **Rotating the model key**: set the new \`AZ_CHAT_KEY\`, restart; nothing
    else holds it. A tool's key the same way (\`AZ_CHAT_TOOL_<NAME>_KEY\`).
 6. **A tool misbehaves** (slow, failing, answering the wrong shape — its log

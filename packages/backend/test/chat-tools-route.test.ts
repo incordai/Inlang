@@ -21,6 +21,7 @@ import { createFakeAdapter, parseFakeScript, type ChatAdapter, type ChatStreamRe
 import { createSseReader } from '../src/server/chat-sse.ts';
 import { migrateChat } from '../src/server/chat-usage.ts';
 import { createTools } from '../src/server/chat-tools.ts';
+import { createWindows } from '../src/server/chat-limits.ts';
 import { createChat, parseChatContext, systemText } from '../src/server/chat.ts';
 import { migrate, openSqlite } from '../src/server/db.ts';
 import { loadConfig } from '../src/server/env.ts';
@@ -103,7 +104,7 @@ async function start(env: Record<string, string> = {}) {
   const adapter: ChatAdapter = { stream: (req) => { sent.push(req); return fake.stream(req); } };
   const context = parseChatContext(CONTEXT);
   if (typeof context === 'string') throw new Error(context);
-  const tools = createTools({ tools: config.chat!.tools, perAddress: config.chat!.toolCallsPerAddress, log: (l) => log.push(l) });
+  const tools = createTools({ tools: config.chat!.tools, perAddress: config.chat!.toolCallsPerAddress, windows: createWindows(db, config.secret), log: (l) => log.push(l) });
   const chat = createChat({ config: config.chat!, secret: config.secret, db, prompt: PROMPT, context, adapter, log: (l) => log.push(l), tools });
   const app = createApp({ config, store: createStore(db, config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: (l) => log.push(l), chat });
   const server = createServer((q, r) => { void app.handler(q, r); });

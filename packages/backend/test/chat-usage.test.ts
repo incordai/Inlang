@@ -18,9 +18,27 @@ test('the chat migration creates az_chat_usage once; a second run is a no-op; th
   try {
     await migrate(db);
     assert.equal(await db.get("SELECT 1 AS x FROM sqlite_schema WHERE name = 'az_chat_usage'"), undefined, 'not part of the auth schema');
-    assert.deepEqual(await migrateChat(db), [1, 2]);
+    assert.deepEqual(await migrateChat(db), [1, 2, 3, 4, 5]);
     assert.deepEqual(await migrateChat(db), []);
     assert.ok(await db.get("SELECT 1 AS x FROM sqlite_schema WHERE name = 'az_chat_usage'"));
+  } finally { await db.close(); }
+});
+
+test('a server from before the blocked count upgrades in place: its days keep their counts and gain blocked 0', async () => {
+  const db = await openSqlite(':memory:');
+  try {
+    // The database as C4 left it: steps 1 and 2 applied, a day counted.
+    await db.run(CHAT_MIGRATIONS.table.sqlite);
+    for (const step of CHAT_MIGRATIONS.steps.slice(0, 2)) {
+      for (const sql of step.sql.sqlite) await db.run(sql);
+      await db.run('INSERT INTO az_chat_migrations (version, claimed_at, applied_at) VALUES (?, 1, 1)', [step.version]);
+    }
+    await db.run("INSERT INTO az_chat_usage (day, input_tokens, output_tokens, messages, dropped) VALUES ('2026-10-15', 10, 2, 1, 0)");
+    assert.deepEqual(await migrateChat(db), [3, 4, 5]);
+    const usage = createUsage(db);
+    assert.deepEqual(await usage.row('2026-10-15'), { input: 10, output: 2, messages: 1, dropped: 0, blocked: 0 });
+    await usage.block('2026-10-15');
+    assert.equal((await usage.row('2026-10-15'))?.blocked, 1);
   } finally { await db.close(); }
 });
 
@@ -42,7 +60,15 @@ test('one row per UTC day, added to by one statement per answer; counts only', a
     assert.equal(await usage.spent(day), 0);
     await usage.add(day, 100, 20, 0);
     await usage.add(day, 50, 5, 1);
-    assert.deepEqual(await usage.row(day), { input: 150, output: 25, messages: 2, dropped: 1 });
+    assert.deepEqual(await usage.row(day), { input: 150, output: 25, messages: 2, dropped: 1, blocked: 0 });
+    // A blocked question adds to the same row, spending nothing and counting no message.
+    await usage.block(day);
+    await usage.block(day);
+    assert.deepEqual(await usage.row(day), { input: 150, output: 25, messages: 2, dropped: 1, blocked: 2 });
+    assert.equal(await usage.spent(day), 175);
+    // A day whose first count is a block has its own row.
+    await usage.block('2026-10-14');
+    assert.deepEqual(await usage.row('2026-10-14'), { input: 0, output: 0, messages: 0, dropped: 0, blocked: 1 });
     assert.equal(await usage.spent(day), 175);
     // The rollover: a minute later is another day, with its own row.
     const next = utcDay(Date.UTC(2026, 9, 16, 0, 0));
@@ -50,7 +76,7 @@ test('one row per UTC day, added to by one statement per answer; counts only', a
     assert.equal(await usage.spent(next), 2);
     assert.equal(await usage.spent(day), 175);
     const columns = (await db.all('SELECT name FROM pragma_table_info(?)', ['az_chat_usage'])).map((r) => r.name);
-    assert.deepEqual(columns, ['day', 'input_tokens', 'output_tokens', 'messages', 'dropped']);
+    assert.deepEqual(columns, ['day', 'input_tokens', 'output_tokens', 'messages', 'dropped', 'blocked']);
   } finally { await db.close(); }
 });
 
@@ -80,6 +106,8 @@ test('usage report: today against the budget, the last 30 days newest first, sha
     await usage.add('2026-10-16', 1000, 100, 2);
     await usage.add('2026-10-16', 500, 50, 0);
     await usage.add('2026-10-10', 10, 1, 0);
+    await usage.block('2026-10-16');
+    await usage.block('2026-10-11');
     // The window's first day is 29 days back; the day before it is outside.
     await usage.add(utcDay(now - 29 * DAY), 7, 7, 0);
     await usage.add(utcDay(now - 30 * DAY), 9, 9, 0);
@@ -96,10 +124,11 @@ test('usage report: today against the budget, the last 30 days newest first, sha
       today: '2026-10-16',
       budget: { daily: 2_000, spent: 1_650, left: 350 },
       days: [
-        { day: '2026-10-16', input: 1500, output: 150, messages: 2, dropped: 2, shares: 1 },
-        { day: '2026-10-12', input: 0, output: 0, messages: 0, dropped: 0, shares: 1 },
-        { day: '2026-10-10', input: 10, output: 1, messages: 1, dropped: 0, shares: 0 },
-        { day: utcDay(now - 29 * DAY), input: 7, output: 7, messages: 1, dropped: 0, shares: 0 },
+        { day: '2026-10-16', input: 1500, output: 150, messages: 2, dropped: 2, blocked: 1, shares: 1 },
+        { day: '2026-10-12', input: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
+        { day: '2026-10-11', input: 0, output: 0, messages: 0, dropped: 0, blocked: 1, shares: 0 },
+        { day: '2026-10-10', input: 10, output: 1, messages: 1, dropped: 0, blocked: 0, shares: 0 },
+        { day: utcDay(now - 29 * DAY), input: 7, output: 7, messages: 1, dropped: 0, blocked: 0, shares: 0 },
       ],
       shares: { enabled: false, kept: 2 },
     });
@@ -117,15 +146,15 @@ test('usage text: one line for today and the budget, one for the shares, a table
   const text = usageText({
     today: '2026-10-16',
     budget: { daily: 300_000, spent: 12_345, left: 287_655 },
-    days: [{ day: '2026-10-16', input: 12_000, output: 345, messages: 9, dropped: 1, shares: 2 }],
+    days: [{ day: '2026-10-16', input: 12_000, output: 345, messages: 9, dropped: 1, blocked: 3, shares: 2 }],
     shares: { enabled: true, kept: 4 },
   });
   assert.equal(text, [
     'chat usage — today is 2026-10-16 (UTC)',
     '  budget 300,000 tokens a day · spent today 12,345 · left 287,655',
     '  shared answers: on · 4 kept now',
-    '  day         messages  input tokens  output tokens  dropped  shares',
-    '  2026-10-16         9        12,000            345        1       2',
+    '  day         messages  input tokens  output tokens  dropped  blocked  shares',
+    '  2026-10-16         9        12,000            345        1        3       2',
     '',
   ].join('\n'));
   assert.match(usageText({ today: '2026-10-16', budget: { daily: 1000, spent: 0, left: 1000 }, days: [], shares: { enabled: false, kept: 0 } }),

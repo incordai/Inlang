@@ -1,6 +1,6 @@
 /**
  * @az server chat-usage
- * Purpose: the chat's daily counters — the az_chat_usage table, one upsert per answer, the 400-day sweep — and every chat table's migrations (az_chat_shares too, chat-share.ts).
+ * Purpose: the chat's daily counters — the az_chat_usage table, one upsert per answer or blocked question, the 400-day sweep — and every chat table's migrations (az_chat_shares, chat-share.ts; az_chat_limits, chat-limits.ts).
  * Spec: docs/backend-spec.md §3, §5 (docs/chat-block-spec.md §6.5, §6.7)
  * Exports: CHAT_MIGRATIONS, migrateChat, createUsage, usageReport, utcDay, Usage, UsageDay, UsageReport, USAGE_KEEP_DAYS, REPORT_DAYS
  * Edit guide: counts only, never text or a person; one statement per answer (pooler-safe); append a step, never edit a shipped one; the report never reads a share's events or question.
@@ -69,6 +69,44 @@ export const CHAT_MIGRATIONS: {
         ],
       },
     },
+    {
+      // Questions the moderation hook blocked (§6.8), counted per day beside the answers: a block spends no tokens.
+      version: 3,
+      sql: {
+        sqlite: ['ALTER TABLE az_chat_usage ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0'],
+        postgres: ['ALTER TABLE az_chat_usage ADD COLUMN blocked BIGINT NOT NULL DEFAULT 0'],
+        mysql: ['ALTER TABLE az_chat_usage ADD COLUMN blocked BIGINT NOT NULL DEFAULT 0'],
+      },
+    },
+    {
+      // The chat's rate limits, shared by every instance on this database (chat-limits.ts): one counter per
+      // (limit, slot, subject) under a keyed hash — never an address or an account in the clear. Swept by `expires`.
+      version: 4,
+      sql: {
+        sqlite: [
+          'CREATE TABLE az_chat_limits (id TEXT PRIMARY KEY, n INTEGER NOT NULL, expires INTEGER NOT NULL)',
+          'CREATE INDEX az_chat_limits_expires ON az_chat_limits (expires)',
+        ],
+        postgres: [
+          'CREATE TABLE az_chat_limits (id CHAR(43) PRIMARY KEY, n INTEGER NOT NULL, expires BIGINT NOT NULL)',
+          'CREATE INDEX az_chat_limits_expires ON az_chat_limits (expires)',
+        ],
+        mysql: [
+          `CREATE TABLE az_chat_limits (id CHAR(43) PRIMARY KEY, n INT NOT NULL, expires BIGINT NOT NULL) ${MYSQL}`,
+          'CREATE INDEX az_chat_limits_expires ON az_chat_limits (expires)',
+        ],
+      },
+    },
+    {
+      // chat-block-spec §19.11: the hash of the share tag that proved a share — one live share per tag, so a
+      // tag replayed is refused. Shares made before this have none (NULL, which a unique index does not compare).
+      version: 5,
+      sql: {
+        sqlite: ['ALTER TABLE az_chat_shares ADD COLUMN proof TEXT', 'CREATE UNIQUE INDEX az_chat_shares_proof ON az_chat_shares (proof)'],
+        postgres: ['ALTER TABLE az_chat_shares ADD COLUMN proof CHAR(64)', 'CREATE UNIQUE INDEX az_chat_shares_proof ON az_chat_shares (proof)'],
+        mysql: ['ALTER TABLE az_chat_shares ADD COLUMN proof CHAR(64)', 'CREATE UNIQUE INDEX az_chat_shares_proof ON az_chat_shares (proof)'],
+      },
+    },
   ],
 };
 
@@ -117,15 +155,22 @@ export const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0
 
 /** One answer's counts, as one statement (§6.5): the day's row made or added to. */
 function upsert(dialect: Db['dialect']): string {
-  const cols = 'day, input_tokens, output_tokens, messages, dropped';
+  const cols = 'day, input_tokens, output_tokens, messages, dropped, blocked';
   if (dialect === 'mysql') {
-    return `INSERT INTO az_chat_usage (${cols}) VALUES (?, ?, ?, 1, ?) AS n ON DUPLICATE KEY UPDATE `
+    return `INSERT INTO az_chat_usage (${cols}) VALUES (?, ?, ?, 1, ?, 0) AS n ON DUPLICATE KEY UPDATE `
       + 'input_tokens = az_chat_usage.input_tokens + n.input_tokens, output_tokens = az_chat_usage.output_tokens + n.output_tokens, '
       + 'messages = az_chat_usage.messages + 1, dropped = az_chat_usage.dropped + n.dropped';
   }
-  return `INSERT INTO az_chat_usage (${cols}) VALUES (?, ?, ?, 1, ?) ON CONFLICT (day) DO UPDATE SET `
+  return `INSERT INTO az_chat_usage (${cols}) VALUES (?, ?, ?, 1, ?, 0) ON CONFLICT (day) DO UPDATE SET `
     + 'input_tokens = az_chat_usage.input_tokens + excluded.input_tokens, output_tokens = az_chat_usage.output_tokens + excluded.output_tokens, '
     + 'messages = az_chat_usage.messages + 1, dropped = az_chat_usage.dropped + excluded.dropped';
+}
+
+/** One blocked question, as one statement: the day's row made with nothing spent, or its `blocked` added to. */
+function blockUpsert(dialect: Db['dialect']): string {
+  const cols = 'day, input_tokens, output_tokens, messages, dropped, blocked';
+  if (dialect === 'mysql') return `INSERT INTO az_chat_usage (${cols}) VALUES (?, 0, 0, 0, 0, 1) ON DUPLICATE KEY UPDATE blocked = az_chat_usage.blocked + 1`;
+  return `INSERT INTO az_chat_usage (${cols}) VALUES (?, 0, 0, 0, 0, 1) ON CONFLICT (day) DO UPDATE SET blocked = az_chat_usage.blocked + 1`;
 }
 
 export interface Usage {
@@ -133,14 +178,17 @@ export interface Usage {
   spent(day: string): Promise<number>;
   /** Count one answer on `day`. */
   add(day: string, input: number, output: number, dropped: number): Promise<void>;
-  /** The day's row, for a report: null when nothing was spent. */
-  row(day: string): Promise<{ input: number; output: number; messages: number; dropped: number } | null>;
+  /** Count one question the moderation hook blocked on `day` (§6.8): no tokens, no message. */
+  block(day: string): Promise<void>;
+  /** The day's row, for a report: null when nothing was counted. */
+  row(day: string): Promise<{ input: number; output: number; messages: number; dropped: number; blocked: number } | null>;
   /** Remove days older than USAGE_KEEP_DAYS before `now`; how many went. */
   sweep(now: number): Promise<number>;
 }
 
 export function createUsage(db: Db): Usage {
   const sql = upsert(db.dialect);
+  const blocked = blockUpsert(db.dialect);
   return {
     async spent(day) {
       const r = await db.get('SELECT input_tokens, output_tokens FROM az_chat_usage WHERE day = ?', [day]);
@@ -149,9 +197,12 @@ export function createUsage(db: Db): Usage {
     async add(day, input, output, dropped) {
       await db.run(sql, [day, input, output, dropped]);
     },
+    async block(day) {
+      await db.run(blocked, [day]);
+    },
     async row(day) {
-      const r = await db.get('SELECT input_tokens, output_tokens, messages, dropped FROM az_chat_usage WHERE day = ?', [day]);
-      return r ? { input: Number(r.input_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped) } : null;
+      const r = await db.get('SELECT input_tokens, output_tokens, messages, dropped, blocked FROM az_chat_usage WHERE day = ?', [day]);
+      return r ? { input: Number(r.input_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped), blocked: Number(r.blocked) } : null;
     },
     sweep: (now) => db.run('DELETE FROM az_chat_usage WHERE day < ?', [utcDay(now - USAGE_KEEP_DAYS * DAY_MS)]),
   };
@@ -167,6 +218,8 @@ export interface UsageDay {
   readonly output: number;
   readonly messages: number;
   readonly dropped: number;
+  /** Questions the moderation hook blocked: the model was never asked, so they spent nothing. */
+  readonly blocked: number;
   /** Shared answers made that day that are still kept (one past its expiry is gone, so it is not counted). */
   readonly shares: number;
 }
@@ -192,7 +245,7 @@ export async function usageReport(db: Db, config: { readonly dailyTokens: number
   const today = utcDay(now);
   const from = utcDay(now - (REPORT_DAYS - 1) * DAY_MS);
   const rows = await db.all(
-    'SELECT day, input_tokens, output_tokens, messages, dropped FROM az_chat_usage WHERE day >= ? AND day <= ? ORDER BY day DESC',
+    'SELECT day, input_tokens, output_tokens, messages, dropped, blocked FROM az_chat_usage WHERE day >= ? AND day <= ? ORDER BY day DESC',
     [from, today],
   );
   // The shares still kept, by the day they were made: counted per day number, never read.
@@ -206,12 +259,13 @@ export async function usageReport(db: Db, config: { readonly dailyTokens: number
   for (const r of rows) {
     const day = String(r.day);
     byDay.set(day, {
-      day, input: Number(r.input_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped), shares: sharesOn.get(day) ?? 0,
+      day, input: Number(r.input_tokens), output: Number(r.output_tokens), messages: Number(r.messages), dropped: Number(r.dropped), blocked: Number(r.blocked),
+      shares: sharesOn.get(day) ?? 0,
     });
   }
   // A day with shares made and no answer counted still shows (an answer's count and its share are separate writes).
   for (const [day, n] of sharesOn) {
-    if (!byDay.has(day)) byDay.set(day, { day, input: 0, output: 0, messages: 0, dropped: 0, shares: n });
+    if (!byDay.has(day)) byDay.set(day, { day, input: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: n });
   }
   const days = [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
   const todayRow = byDay.get(today);

@@ -147,14 +147,47 @@ test('forgeries are refused, nothing stored: edited, reordered, extended, a mode
   } finally { await s.close(); }
 });
 
-test('a share tag is good for a day: past it the answer can no longer be shared', async () => {
+test('a share tag is good for the history\'s 7 days — a restored answer can be shared; past them it is expired, refused', async () => {
   const s = await start();
   try {
     const a = await answer(s.url);
-    s.clock.now += 24 * 60 * 60 * 1000 + 1;
-    const r = await share(s.url, bodyOf(a));
+    const later = await answer(s.url, 'And later?');
+    // Kept in the browser and restored six days later: still its server's answer, and shared.
+    s.clock.now += 7 * 24 * 60 * 60 * 1000;
+    assert.equal((await share(s.url, bodyOf(a))).status, 201, 'at 7 days exactly');
+    s.clock.now += 1;
+    const r = await share(s.url, bodyOf(later));
     assert.equal(r.status, 400);
-    assert.equal(((await r.json()) as { error: string }).error, 'tampered');
+    assert.equal(((await r.json()) as { error: string }).error, 'tampered', 'expired: one millisecond past');
+    // A tag from the future (a clock set back on the server) is no proof either.
+    const c = await answer(s.url, 'Now?');
+    const future = await share(s.url, bodyOf(c, { at: c.done.share!.at + 1 }));
+    assert.equal(future.status, 400);
+  } finally { await s.close(); }
+});
+
+test('a share tag is spent once: replayed while its share lives it is refused (409 already_shared); the delete frees it', async () => {
+  const s = await start();
+  try {
+    const a = await answer(s.url);
+    const first = await share(s.url, bodyOf(a));
+    assert.equal(first.status, 201);
+    const { id, deleteToken } = await first.json() as { id: string; deleteToken: string };
+    // The same request again — a replay, from anywhere: refused, nothing stored.
+    const again = await share(s.url, bodyOf(a));
+    assert.deepEqual([again.status, await again.json()], [409, { error: 'already_shared' }]);
+    assert.equal(Number((await s.db.get('SELECT COUNT(*) AS n FROM az_chat_shares'))?.n), 1);
+    // The question's tag is its own proof: once, too.
+    assert.equal((await share(s.url, bodyOf(a, { question: a.question, tag: a.done.share!.tagq }))).status, 201);
+    assert.equal((await share(s.url, bodyOf(a, { question: a.question, tag: a.done.share!.tagq }))).status, 409);
+    // Replayed onto another turn or conversation, the tag is not this answer's at all.
+    for (const over of [{ index: 3 }, { conversation: 'b'.repeat(22) }]) {
+      const r = await share(s.url, bodyOf(a, over));
+      assert.deepEqual([r.status, ((await r.json()) as { error: string }).error], [400, 'tampered'], JSON.stringify(over));
+    }
+    // Its sharer deletes the link: the answer may be shared again.
+    assert.equal((await client(s.url).request('DELETE', `/chat/share/${id}`, { token: deleteToken })).status, 204);
+    assert.equal((await share(s.url, bodyOf(a))).status, 201);
   } finally { await s.close(); }
 });
 
@@ -191,9 +224,12 @@ test('who may share is who may ask; the size cap; the kill switch; the per-addre
     assert.equal((await share(s.url, bodyOf(a, { page: '/members' }))).status, 401, 'a signed-in-only chat page');
     assert.equal((await share(s.url, bodyOf(a, { events: [{ type: 'text', s: 'x'.repeat(50_000) }] }))).status, 400);
     assert.equal(((await (await share(s.url, bodyOf(a, { events: [{ type: 'text', s: 'x'.repeat(50_000) }] }))).json()) as { error: string }).error, 'too_large');
+    // Three answers (one share each — a tag is spent once): the third share from this address is past 2 an hour.
+    const b = await answer(s.url, 'And next month?');
+    const c = await answer(s.url, 'And after that?');
     assert.equal((await share(s.url, bodyOf(a))).status, 201);
-    assert.equal((await share(s.url, bodyOf(a))).status, 201);
-    const third = await share(s.url, bodyOf(a));
+    assert.equal((await share(s.url, bodyOf(b))).status, 201);
+    const third = await share(s.url, bodyOf(c));
     assert.equal(third.status, 429);
     assert.equal(((await third.json()) as { error: string }).error, 'rate_limited');
   } finally { await s.close(); }

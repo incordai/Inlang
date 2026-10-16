@@ -2,7 +2,7 @@
  * @az server chat-report
  * Purpose: az backend usage — the chat's daily counts read from this server's database and printed for the operator; reads only.
  * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §11.4)
- * Exports: usageText
+ * Exports: usageText, openChat, failure, OpenedChat
  * Edit guide: read-only — no migration, no write; counts only, never a message, a share's text, an address or an account; a database failure is named by class and code, never its message.
  * Tests: packages/backend/test/chat-usage.test.ts, packages/cli/test/backend.test.ts
  */
@@ -23,6 +23,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { UsageReport } from './chat-usage.ts';
+import type { Db } from './db.ts';
+import type { Config } from './env.ts';
 
 const n = (v: number) => v.toLocaleString('en-US');
 
@@ -36,8 +38,8 @@ export function usageText(r: UsageReport): string {
   if (r.days.length === 0) {
     lines.push('  nothing counted in the last 30 days');
   } else {
-    const head = ['day', 'messages', 'input tokens', 'output tokens', 'dropped', 'shares'];
-    const rows = r.days.map((d) => [d.day, n(d.messages), n(d.input), n(d.output), n(d.dropped), n(d.shares)]);
+    const head = ['day', 'messages', 'input tokens', 'output tokens', 'dropped', 'blocked', 'shares'];
+    const rows = r.days.map((d) => [d.day, n(d.messages), n(d.input), n(d.output), n(d.dropped), n(d.blocked), n(d.shares)]);
     const width = head.map((h, i) => Math.max(h.length, ...rows.map((row) => row[i].length)));
     const line = (cells: readonly string[]) => `  ${cells.map((c, i) => (i === 0 ? c.padEnd(width[i]) : c.padStart(width[i]))).join('  ')}`;
     lines.push(line(head), ...rows.map(line));
@@ -46,34 +48,42 @@ export function usageText(r: UsageReport): string {
 }
 
 /** A database failure in one line: its class and code, never its message (a driver's may quote the URL). */
-const failure = (e: unknown) => {
+export const failure = (e: unknown): string => {
   const err = e as { name?: unknown; code?: unknown };
   return `${typeof err?.name === 'string' ? err.name : 'Error'}${typeof err?.code === 'string' ? ` ${err.code}` : ''}`;
 };
 
-/** Run from the server folder: its .env and its database, as main.ts reads them. */
-async function main(argv: readonly string[]): Promise<number> {
-  if (argv.some((a) => a !== '--json')) {
-    process.stderr.write('backend: try: node src/chat-report.ts [--json]\n');
-    return 2;
-  }
+/** What an operator's chat command needs once the server folder's .env and database are open. */
+export interface OpenedChat {
+  readonly db: Db;
+  readonly chat: NonNullable<Config['chat']>;
+}
+
+/**
+ * The server folder's .env and its database, as main.ts reads them, for an
+ * operator's chat command (`task` names it in every refusal, `nothing` says
+ * why a server that never started has nothing for it). Returns the exit code
+ * when it cannot: no chat, a bad .env, no SQLite file yet, a CA file that
+ * cannot be read, a database that does not open — each said in one line,
+ * never with a value or a driver's message.
+ */
+export async function openChat(task: string, nothing: string): Promise<OpenedChat | number> {
   const { loadConfig } = await import('./env.ts');
   const site = JSON.parse(readFileSync(new URL('../az.config.json', import.meta.url), 'utf8')) as { siteName: string; database: 'sqlite' | 'postgres' | 'mysql'; email: 'smtp' | 'api'; images?: boolean; chat?: boolean };
   if (site.chat !== true) {
-    process.stderr.write('backend: this site shows no chat — there is no chat usage\n');
+    process.stderr.write(`backend: this site shows no chat — ${nothing}\n`);
     return 1;
   }
   if (existsSync('.env')) process.loadEnvFile('.env');
   const loaded = loadConfig(process.env, { database: site.database, email: site.email, ...(site.images ? { images: true } : {}), chat: true }, site.siteName);
   if (!loaded.ok) {
-    process.stderr.write(`backend: cannot read usage — fix these in .env (see .env.example):\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}\n`);
+    process.stderr.write(`backend: cannot ${task} — fix these in .env (see .env.example):\n${loaded.problems.map((p) => `  - ${p}`).join('\n')}\n`);
     return 1;
   }
   const { config } = loaded;
-  const chat = config.chat!;
-  // A SQLite file that is not there yet is not made by a report.
+  // A SQLite file that is not there yet is not made by an operator's command.
   if (config.setup.database === 'sqlite' && !existsSync(config.sqlitePath)) {
-    process.stderr.write(`backend: no database at ${config.sqlitePath} yet — start the server once; there is no usage to read\n`);
+    process.stderr.write(`backend: no database at ${config.sqlitePath} yet — start the server once; ${nothing}\n`);
     return 1;
   }
   let ca: string | undefined;
@@ -81,23 +91,34 @@ async function main(argv: readonly string[]): Promise<number> {
     try {
       ca = readFileSync(config.databaseCaFile, 'utf8');
     } catch {
-      process.stderr.write(`backend: cannot read usage — AZ_DATABASE_CA_FILE: cannot read ${config.databaseCaFile}\n`);
+      process.stderr.write(`backend: cannot ${task} — AZ_DATABASE_CA_FILE: cannot read ${config.databaseCaFile}\n`);
       return 1;
     }
   }
   const { openMysql, openPostgres, openSqlite } = await import('./db.ts');
-  const { usageReport } = await import('./chat-usage.ts');
-  let db;
   try {
-    db = config.setup.database === 'sqlite'
+    const db = config.setup.database === 'sqlite'
       ? await openSqlite(config.sqlitePath)
       : config.setup.database === 'postgres'
         ? await openPostgres(config.databaseUrl, config.databaseTls, ca)
         : await openMysql(config.databaseUrl, config.databaseTls, ca);
+    return { db, chat: config.chat! };
   } catch (e) {
-    process.stderr.write(`backend: cannot read usage — the database did not open (${failure(e)})\n`);
+    process.stderr.write(`backend: cannot ${task} — the database did not open (${failure(e)})\n`);
     return 1;
   }
+}
+
+/** Run from the server folder: its .env and its database, as main.ts reads them. */
+async function main(argv: readonly string[]): Promise<number> {
+  if (argv.some((a) => a !== '--json')) {
+    process.stderr.write('backend: try: node src/chat-report.ts [--json]\n');
+    return 2;
+  }
+  const opened = await openChat('read usage', 'there is no usage to read');
+  if (typeof opened === 'number') return opened;
+  const { db, chat } = opened;
+  const { usageReport } = await import('./chat-usage.ts');
   try {
     const report = await usageReport(db, { dailyTokens: chat.dailyTokens, sharesEnabled: chat.shares.enabled }, Date.now());
     process.stdout.write(argv.includes('--json') ? `${JSON.stringify(report, null, 2)}\n` : usageText(report));

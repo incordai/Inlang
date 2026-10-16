@@ -1,8 +1,8 @@
 /**
  * @az server data-api
  * Purpose: the /data/<table> routes and the /admin routes: rules in every statement, allow-listed bodies, closed codes, audit, limits, image uploads.
- * Spec: docs/data-spec.md §4.7, §5, §8, §11 (and docs/chat-block-spec.md §11.4: GET /admin/chat)
- * Exports: createData, parseAdminEmails, grant, DATA_BODY_LIMIT, DATA_LIMITS, UPLOAD_LIMIT_DEFAULT, LIST_DEADLINE_MS, isForeignKeyViolation, DataApi
+ * Spec: docs/data-spec.md §4.7, §5, §8, §11 (and docs/chat-block-spec.md §11.4, §20.7: GET /admin/chat, DELETE /admin/chat/shares/<id>)
+ * Exports: createData, parseAdminEmails, grant, DATA_BODY_LIMIT, DATA_LIMITS, UPLOAD_LIMIT_DEFAULT, LIST_DEADLINE_MS, isForeignKeyViolation, DataApi, CHAT_SHARES_AUDIT
  * Edit guide: deny unless a rule grants; the owner check lives in the SQL; unreadable is answered exactly like absent (404).
  *   Admins (verified, listed) bypass rules, never validation; every admin write is audited without values.
  *   An image's file is written before its row names it and removed only after the row stops naming it.
@@ -153,7 +153,19 @@ export interface DataDeps {
    * Counts only — no message text exists to be in it.
    */
   readonly chatUsage?: () => Promise<unknown>;
+  /**
+   * Deletes one shared chat answer by its id, as its operator may (chat-share.ts
+   * ShareStore.removeAny), on a site with chat: `DELETE /admin/chat/shares/<id>`
+   * answers it to admins only, audited by id — never the answer's text.
+   * False when no live share has that id.
+   */
+  readonly removeChatShare?: (id: string) => Promise<boolean>;
 }
+
+/** The audit log's name for a shared chat answer: not a table name (those have no `_`), so it is never one. */
+export const CHAT_SHARES_AUDIT = 'chat_shares';
+/** A share id's shape (chat-share.ts): 16 random bytes, base64url. */
+const SHARE_ID = /^[A-Za-z0-9_-]{22}$/;
 
 /** An audit row as the admin area lists it — ids, names and times, never a value. */
 const AUDIT_ACTIONS = ['create', 'edit', 'delete'] as const;
@@ -682,6 +694,17 @@ export function createData(deps: DataDeps): DataApi {
     if (parts[2] === 'audit') {
       if (parts.length !== 3 || !isRead) return NOT_FOUND;
       return adminAudit(req.url.searchParams);
+    }
+    // One shared chat answer deleted by an admin (chat-block-spec §20.7): audited by its id, its text never read or logged.
+    if (parts[2] === 'chat' && parts[3] === 'shares') {
+      if (!deps.removeChatShare || parts.length !== 5 || req.method !== 'DELETE' || !SHARE_ID.test(parts[4])) return NOT_FOUND;
+      const stray = req.url.searchParams.keys().next().value;
+      if (stray !== undefined) return fail(400, 'bad_query', stray);
+      if (!limits.adminWrites.take(admin)) return fail(429, 'rate_limited');
+      if (!(await deps.removeChatShare(parts[4]))) return NOT_FOUND;
+      await audit(admin, CHAT_SHARES_AUDIT, parts[4], 'delete');
+      log(`data: an admin deleted shared chat answer ${parts[4]}`);
+      return { status: 204 };
     }
     // The chat's daily counts (chat-block-spec §11.4): a site with chat only, read only, no parameters.
     if (parts[2] === 'chat') {

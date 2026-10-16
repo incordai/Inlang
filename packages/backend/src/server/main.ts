@@ -150,9 +150,13 @@ if (existsSync(dataFile)) {
   const images = config.setup.images === true
     ? await (await import('./data-images.ts')).createImages({ dir: config.filesDir })
     : undefined;
-  // A site with chat: its admins see the chat's daily counts at GET /admin/chat (chat-block-spec §11.4).
+  // A site with chat: its admins see the chat's daily counts at GET /admin/chat (chat-block-spec §11.4),
+  // and may delete a shared answer by its id at DELETE /admin/chat/shares/<id> (§20.7).
   const chatConfig = config.chat;
   const usageReport = chatConfig ? (await import('./chat-usage.ts')).usageReport : undefined;
+  const shareStore = chatConfig
+    ? (await import('./chat-share.ts')).createShareStore({ db, days: chatConfig.shares.days, max: chatConfig.shares.max })
+    : undefined;
   const api = createData({
     db, tables, admins: admins.emails, publicUrl: config.publicUrl,
     ...(images ? { images, uploadLimit: config.uploadLimit } : {}),
@@ -160,6 +164,7 @@ if (existsSync(dataFile)) {
     ...(chatConfig && usageReport
       ? { chatUsage: () => usageReport(db, { dailyTokens: chatConfig.dailyTokens, sharesEnabled: chatConfig.shares.enabled }, Date.now()) }
       : {}),
+    ...(shareStore ? { removeChatShare: (id: string) => shareStore.removeAny(id) } : {}),
   });
   data = api;
   if (images) sweepImages = api.sweepImages;
@@ -217,14 +222,17 @@ if (config.chat) {
     }
     knows = createKnows({ db, database: db.dialect, tables: dataTables!, known: context.knows, log: (line) => process.stderr.write(`backend: ${line}\n`) });
   }
+  // The rate-limit windows, in this database: every instance on it counts each address and account the same (chat-limits.ts).
+  const { createWindows } = await import('./chat-limits.ts');
+  const windows = createWindows(db, config.secret);
   // The operator's data tools (§21.2), declared in .env and already validated by loadConfig.
   let tools;
   if (config.chat.tools.length > 0) {
     const { createTools } = await import('./chat-tools.ts');
-    tools = createTools({ tools: config.chat.tools, perAddress: config.chat.toolCallsPerAddress, log: (line) => process.stderr.write(`backend: ${line}\n`) });
+    tools = createTools({ tools: config.chat.tools, perAddress: config.chat.toolCallsPerAddress, windows, log: (line) => process.stderr.write(`backend: ${line}\n`) });
   }
   chat = createChat({
-    config: config.chat, secret: config.secret, db, prompt: read('prompt.txt'), context, adapter,
+    config: config.chat, secret: config.secret, db, prompt: read('prompt.txt'), context, adapter, windows,
     log: (line) => process.stderr.write(`backend: ${line}\n`), ...(figures ? { figures } : {}), ...(knows ? { knows } : {}),
     ...(tools ? { tools } : {}),
   });
@@ -254,7 +262,7 @@ const sweep = setInterval(() => app.sweep(), SWEEP_MS);
 sweep.unref();
 const prune = setInterval(() => {
   store.prune().catch((e: unknown) => process.stderr.write(`backend: prune failed: ${(e as Error).name}\n`));
-  chat?.prune().catch((e: unknown) => process.stderr.write(`backend: chat usage and share sweep failed: ${(e as Error).name}\n`));
+  chat?.prune().catch((e: unknown) => process.stderr.write(`backend: chat usage, share and rate-limit sweep failed: ${(e as Error).name}\n`));
 }, PRUNE_MS);
 prune.unref();
 const fileSweep = sweepImages && setInterval(() => {

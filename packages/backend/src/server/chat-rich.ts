@@ -125,10 +125,16 @@ export interface RichLine { readonly depth: number; readonly tokens: readonly Li
 
 type Unit = string | null;
 
-/** A tool's aggregate (§21.2.3): a count or a measure of a number field, by a text or date field; or columns of rows. */
+/**
+ * A tool's aggregate (§21.2.3): a count or a measure of a number field, by a
+ * text or date field; or columns of rows; or cards (§19.11) — a title, and
+ * optionally a text and an image, each a text field, the image's value the
+ * key of one of the site's own images (never an address).
+ */
 export type ToolShape =
   | { readonly kind: 'figures'; readonly fn: 'count' | 'sum' | 'avg' | 'min' | 'max'; readonly field: string | null; readonly by: string | null }
-  | { readonly kind: 'rows'; readonly columns: readonly string[] };
+  | { readonly kind: 'rows'; readonly columns: readonly string[] }
+  | { readonly kind: 'cards'; readonly title: string; readonly text: string | null; readonly image: string | null };
 
 /** A `from tool …` request, checked against the tool's declaration: what chat-tools.ts calls and aggregates. */
 export interface ToolRequest {
@@ -158,7 +164,7 @@ export interface RichCard {
   readonly image?: { readonly asset: string };
   readonly link?: { readonly label: string; readonly to: string };
 }
-export type RichCards = readonly RichCard[] | { readonly from: readonly string[] };
+export type RichCards = readonly RichCard[] | { readonly from: readonly string[] } | { readonly tool: ToolRequest };
 export type RichTile = { readonly stat: RichStat } | { readonly chart: RichChart } | { readonly table: RichTable } | { readonly card: RichCard };
 export interface RichDashboard { readonly title: string; readonly tiles: readonly RichTile[] }
 
@@ -309,14 +315,14 @@ function reader(rules: RichRules, clean: Clean) {
    * the component can show: a chart groups, a stat is one figure or the
    * latest of a date grouping, a table either groups or lists rows.
    */
-  const toolOf = (tokens: readonly LineToken[], i: number, want: 'chart' | 'stat' | 'table'): ToolRequest => {
+  const toolOf = (tokens: readonly LineToken[], i: number, want: 'chart' | 'stat' | 'table' | 'cards'): ToolRequest => {
     const w = tokens.slice(i + 2);
     const nameT = w.shift();
     const decl = bare(nameT) ? (rules.tools ?? []).find((x) => x.name === nameT!.value) : undefined;
     if (!decl) return fail('tool');
     const args: Record<string, string | number | boolean> = {};
     const words = ['tool', decl.name];
-    const starts = (t: LineToken | undefined) => bare(t) && (TOOL_FNS.has(t!.value) || t!.value === 'columns');
+    const starts = (t: LineToken | undefined) => bare(t) && (TOOL_FNS.has(t!.value) || t!.value === 'columns' || t!.value === 'title');
     while (w.length > 0 && !starts(w[0])) {
       const p = w.shift()!;
       const v = w.shift();
@@ -332,7 +338,18 @@ function reader(rules: RichRules, clean: Clean) {
     };
     const head = w.shift();
     let shape: ToolShape;
-    if (bare(head, 'columns')) {
+    if (want === 'cards' || bare(head, 'title')) {
+      // Cards: `title <field> [text <field>] [image <field>]`, each a text field — an image's value is matched against the site's own keys when the rows come.
+      if (want !== 'cards' || !bare(head, 'title')) return fail('tool');
+      const title = field(w.shift(), ['text']);
+      let text: string | null = null;
+      let image: string | null = null;
+      if (bare(w[0], 'text')) { w.shift(); text = field(w.shift(), ['text']); }
+      if (bare(w[0], 'image')) { w.shift(); image = field(w.shift(), ['text']); }
+      if (w.length > 0) fail('tool');
+      shape = { kind: 'cards', title, text, image };
+      words.push('title', title, ...(text ? ['text', text] : []), ...(image ? ['image', image] : []));
+    } else if (bare(head, 'columns')) {
       if (want !== 'table') fail('tool');
       const columns = w.splice(0).map((t) => field(t, ['text', 'number', 'date', 'bool']));
       if (columns.length < 1 || columns.length > RICH_LIMITS.columns || new Set(columns).size !== columns.length) fail('tool');
@@ -509,6 +526,10 @@ function reader(rules: RichRules, clean: Clean) {
       }
       case 'cards': {
         shown('cards');
+        if (isTool(head, 1)) {
+          if (tree.length > 0) fail('shape');
+          return { cards: { tool: toolOf(head, 1, 'cards') } };
+        }
         if (bare(head[1], 'from')) {
           if (tree.length > 0) fail('shape');
           return { cards: { from: from(head, 1) } };
@@ -594,6 +615,7 @@ export function richLines(block: RichBlock): string {
   else if ('stats' in block) { out.push('stats'); for (const s of block.stats) statLine(s, '  '); }
   else if ('cards' in block) {
     if ('from' in block.cards) out.push(`cards from ${block.cards.from.join(' ')}`);
+    else if ('tool' in block.cards) out.push(`cards from ${block.cards.tool.words}`);
     else { out.push('cards'); for (const c of block.cards) cardLines(c, '  '); }
   } else {
     out.push(`dashboard ${quoted(block.dashboard.title)}`);
@@ -610,8 +632,14 @@ export function richLines(block: RichBlock): string {
 /** A `from` request answered: the kind of answer it wants decides which parse chat-query runs. */
 export type FiguresRun = (kind: 'figures' | 'rows' | 'cards', words: readonly string[], cap: number) => Promise<Figures | RowsResult | CardsResult | 'unavailable' | null>;
 
+/** A tool's rows as cards: each its title, and its text and image key when the request named those fields. */
+export interface ToolCards {
+  readonly kind: 'toolcards';
+  readonly items: readonly { readonly title: string; readonly text: string | null; readonly image: string | null }[];
+}
+
 /** A tool's rows, aggregated for the component, with the operator's label and the minute they were read (`YYYY-MM-DDTHH:MMZ`). */
-export interface ToolAnswer { readonly result: Figures | RowsResult; readonly source: string; readonly at: string }
+export interface ToolAnswer { readonly result: Figures | RowsResult | ToolCards; readonly source: string; readonly at: string }
 
 /** A `from tool` request answered (chat-tools.ts): `cap` is the groups the component shows. */
 export type ToolsRun = (req: ToolRequest, cap: number) => Promise<ToolAnswer | 'unavailable'>;
@@ -638,11 +666,13 @@ const figureColumns = (by: string, measure: string, unit: string | null) => [
  * or a tool that failed or answered rows of the wrong shape, becomes the
  * unavailable note.
  */
-export async function resolveRich(block: RichBlock, run: FiguresRun | null, day: string, tools: ToolsRun | null = null): Promise<Resolved | null> {
+export async function resolveRich(
+  block: RichBlock, run: FiguresRun | null, day: string, tools: ToolsRun | null = null, images: readonly string[] = [],
+): Promise<Resolved | null> {
   const site = { src: 'site', asOf: day };
   type Out = Resolved | null | 'unavailable';
   type Source = { readonly from: readonly string[] } | { readonly tool: ToolRequest };
-  type Got = { readonly r: Figures | RowsResult | CardsResult | null; readonly meta: Resolved } | 'unavailable';
+  type Got = { readonly r: Figures | RowsResult | CardsResult | ToolCards | null; readonly meta: Resolved } | 'unavailable';
   /** The figures a source answers, with the provenance the page shows them under. */
   const ask = async (s: Source, kind: 'figures' | 'rows' | 'cards', cap: number): Promise<Got> => {
     if ('from' in s) {
@@ -711,10 +741,22 @@ export async function resolveRich(block: RichBlock, run: FiguresRun | null, day:
     };
   };
   const cards = async (c: RichCards): Promise<Resolved[] | null | 'unavailable'> => {
-    if (!('from' in c)) return c.map(cardOut);
+    if (!('from' in c) && !('tool' in c)) return c.map(cardOut);
     const got = await ask(c, 'cards', RICH_LIMITS.cards);
     if (got === 'unavailable') return 'unavailable';
     const r = got.r;
+    if ('tool' in c) {
+      // A tool's cards carry its label and minute on each card; an image only when the row names one of the site's own image keys (§20.6).
+      if (!r || r.kind !== 'toolcards') return null;
+      const items = r.items.filter((i) => i.title !== '').slice(0, RICH_LIMITS.cards);
+      if (items.length === 0) return 'unavailable';
+      return items.map((i) => ({
+        title: clampText(i.title, RICH_LIMITS.cardTitle),
+        ...(i.text ? { text: clampText(i.text, RICH_LIMITS.cardText) } : {}),
+        ...(i.image !== null && images.includes(i.image) ? { image: { asset: i.image } } : {}),
+        ...got.meta,
+      }));
+    }
     if (!r || r.kind !== 'cards') return null;
     if (r.items.length === 0) return 'unavailable';
     return r.items.map((i) => ({

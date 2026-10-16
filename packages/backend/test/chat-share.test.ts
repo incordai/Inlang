@@ -103,7 +103,8 @@ test('the row holds no person: only id, events, question, times and a token hash
     const made = await s.create(JSON.stringify(EVENTS), null);
     if (made === 'full') throw new Error('full');
     const cols = (await db.all("SELECT name FROM pragma_table_info('az_chat_shares')")).map((r) => String(r.name));
-    assert.deepEqual(cols, ['id', 'events', 'question', 'created', 'expires', 'delete_hash']);
+    // `proof` is the hash of the share tag that proved the share (one live share per tag) — a tag, not a person.
+    assert.deepEqual(cols, ['id', 'events', 'question', 'created', 'expires', 'delete_hash', 'proof']);
     const row = await db.get('SELECT delete_hash FROM az_chat_shares');
     assert.notEqual(row?.delete_hash, made.token, 'the token itself is never stored');
     assert.match(String(row?.delete_hash), /^[0-9a-f]{64}$/);
