@@ -7,8 +7,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { compile, type Manifest } from '../src/index.ts';
-import { isSecretLiteral, ownNames, redact, scanEnv, scanText } from '../src/secrets.ts';
+import { entropy, isSecretLiteral, ownNames, redact, scanEnv, scanText, siteScanner } from '../src/secrets.ts';
 import { legacyScanText } from './legacy-secrets.ts';
+import { referenceScanText } from './reference-secrets.ts';
 
 const b64url = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const jwt = (role: string) => `${b64url({ alg: 'HS256' })}.${b64url({ role, iss: 'probe' })}.c2lnbmF0dXJlLXByb2Jl`;
@@ -131,6 +132,132 @@ test('code and links in a bundled map library are not keys: NAME=value runs, a p
   assert.deepEqual(scanText(chunk, new Set(names)), []);
   assert.equal(scanText(chunk).length, 1, 'CONTROL: without the build\'s names the hashed path reads as a key');
   assert.equal(scanText('var e=`/assets/maplibre-gl-worker-WbYs3Gdl.mjs`;', new Set(names)).length, 1, 'another hash is not the build\'s file');
+  // As the map site's chunk names it today — relative to itself — the name is under the rule's floor, allowed or not.
+  assert.deepEqual(scanText('var DI=``+new URL(`maplibre-gl-worker-VaXr2Fck.mjs`,import.meta.url).href'), []);
+});
+
+/** The map library's published files, as the map site's bundle carries them (a root devDependency, pinned). */
+const MAP_LIBRARY = new URL('../../../node_modules/maplibre-gl/dist/', import.meta.url);
+const MAP_FILES = ['maplibre-gl.mjs', 'maplibre-gl-worker.mjs', 'maplibre-gl-shared.mjs'];
+
+test('the map library\'s own files hold no key: the runs that once read as keys pass, each by the rule meant for it', () => {
+  let once = 0;
+  for (const name of MAP_FILES) {
+    const text = readFileSync(new URL(name, MAP_LIBRARY), 'utf8');
+    once += legacyScanText(text).length;
+    assert.deepEqual(scanText(text), [], name);
+  }
+  // CONTROL: the rules as they were before NAME=value was two runs and a path of words passed found these.
+  assert.ok(once >= 6, `the library's files hold the shapes that once read as keys (${once})`);
+  // The link in its message, as the file writes it: a path of lowercase words and an issue number.
+  const text = readFileSync(new URL(MAP_FILES[0], MAP_LIBRARY), 'utf8');
+  const links = [...text.matchAll(/[a-z]+\/[a-z-]+\/[a-z-]+\/issues\/[0-9]+/g)].map((m) => m[0]);
+  assert.ok(links.length > 0 && links.every((l) => l.length >= 32 && entropy(l) >= 4), 'CONTROL: the link is long and dense enough to be judged');
+  for (const l of links) assert.deepEqual(scanText(`warnOnce(\`See https://host.${l}\`)`), [], l);
+});
+
+/* ---- findings of the review of the loosened rule: each a real-looking key that shipped ---- */
+
+/** Obviously fake keys of letters and digits, built for the length each case needs. */
+const K30 = 'Qx7Lm2Vb9Rt4Wp8Kd3Hs6Nz1Gc5FyA';
+const K31 = `${K30}j`;
+const K24 = 'Ab3dE5gH7jK9mN1pQ3sT5vW7';
+
+test('padding: base64 of 22 or 23 bytes — 30 characters and ==, 31 and = — is a key at the rule\'s floor', () => {
+  assert.equal(K30.length, 30);
+  for (const text of [`k="${K30}=="`, `k="${K31}="`, `fetch("/x?t=${K30}==&a=1")`]) {
+    const found = scanText(text);
+    assert.deepEqual(found.map((f) => f.rule), ['entropy'], text);
+  }
+  assert.equal(scanText(`k="${K30}=="`)[0].excerpt, redact(`${K30}==`), 'the pad counts toward the length');
+  // CONTROL: the same characters without a pad are under the floor; a name of 31 characters set to a value is not padded.
+  assert.deepEqual(scanText(`k="${K31}"`), []);
+  assert.deepEqual(scanText('this._globeViewProjMatrixF64Inverted=ot()'), []);
+  assert.deepEqual(scanText(`k="${K30}===x"`), [], 'three = are not a pad');
+});
+
+test('a short key a credential\'s name is set to: a query string, a config line, a cookie', () => {
+  for (const text of [
+    `fetch("https://tiles.example.com/v1/{z}/{x}/{y}.pbf?api_key=${K24}&lang=en")`,
+    `API_KEY=${K24}\n`,
+    `document.cookie="session_token=${K24}; path=/; secure"`,
+    `location.hash="#access_token=${K24}"`,
+    `x?sig=${K24}`,
+  ]) {
+    assert.deepEqual(scanText(text).map((f) => f.rule), ['entropy'], text);
+    assert.ok(isSecretLiteral(text), text);
+  }
+  // A long one is reported once, by the run rule.
+  assert.equal(scanText(`?token=${K30}==`).length, 1);
+});
+
+test('CONTROL: a name that is not a credential\'s, an empty value, a short or repeated one, code that sets a name', () => {
+  for (const text of [
+    '?page=2', '?sort=name', '?token=&page=2', '?api_key=demo', '?token=abc123abc123abc123',
+    '?auth=redirect', 'a.key=createTokenizer16Bit', '?api_key=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    '?redirect_token=/account/settings/2024',
+  ]) {
+    assert.deepEqual(scanText(text), [], text);
+  }
+});
+
+test('a path segment of random letters is judged — only all digits or lowercase words are plain', () => {
+  for (const text of [
+    'fetch("https://hooks.example.com/services/12345/AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEf")',
+    'fetch("https://example.com/org/12345/project/ZyXwVuTsRqPoNmLkJiHgFeDcBa")',
+  ]) {
+    assert.deepEqual(scanText(text).map((f) => f.rule), ['entropy'], text);
+  }
+  // CONTROL: lowercase words with hyphens and an issue number stay a path of words.
+  assert.deepEqual(scanText('See https://code.example.com/org/project-gl-js/issues/2907'), []);
+});
+
+test('ownNames: only the run a file the bundler emitted starts with — never a run inside another name', () => {
+  const key = 'Zq8Lm2Xv7Rt4Wp9Kd3Hs6Nb1Gc5Fy0JaQe';
+  // A file copied from public/ is not passed (it is not in the bundle), and even passed its inner run is not a name.
+  const names = new Set(ownNames([`public/logo.${key}.svg`, `assets/logo.${key}.svg`]));
+  assert.equal(scanText(`var k="${key}"`, names).length, 1, 'a key inside a shipped file\'s name is still a key elsewhere');
+  assert.deepEqual(ownNames([`public/logo.${key}.svg`]), []);
+  // The build's own worker file: its path and its path after / (its name alone is under the rule's floor).
+  assert.deepEqual(ownNames(['assets/maplibre-gl-worker-VaXr2Fck.mjs']).sort(), ['/assets/maplibre-gl-worker-VaXr2Fck', 'assets/maplibre-gl-worker-VaXr2Fck']);
+  // A long file name is a name by itself too, as a chunk beside it names it.
+  assert.deepEqual(ownNames(['assets/chat-map-gl-runtime-module-B6rAErZn.js']).sort(),
+    ['/assets/chat-map-gl-runtime-module-B6rAErZn', '/chat-map-gl-runtime-module-B6rAErZn', 'assets/chat-map-gl-runtime-module-B6rAErZn', 'chat-map-gl-runtime-module-B6rAErZn']);
+});
+
+test('siteScanner: the one scan of a built site — public values, the emitted files\' names, a text\'s own digests', () => {
+  const PUBLIC = 'Pk7vR2mQ9xL4tW8nB3cY6hJ1sD5fG0aZeUoIpKjHgFdSa';
+  const digest = 'Dg4hT7kL2pQ9wX3zV6bN1mC8rF5jS0aYeUiOpKlHgTr=';
+  // As csp.ts ownDigests gives them: the source expression without its quotes.
+  const scan = siteScanner([PUBLIC], ['assets/map-library-worker-VaXr2Fck.mjs'], (text) => (text.includes('<style>') ? [`sha256-${digest}`] : []));
+  assert.deepEqual(scan(`k="${PUBLIC}";u="/assets/map-library-worker-VaXr2Fck.mjs"`), []);
+  assert.deepEqual(scan(`<style>a{}</style><meta content="'sha256-${digest}'">`), []);
+  // CONTROL: a digest the text does not pin, another hash of the worker, a key — each judged.
+  assert.equal(scan(`<p>'sha256-${digest}'</p>`).length, 1);
+  assert.equal(scan('u="/assets/map-library-worker-WbYs3Gdl.mjs"').length, 1);
+  assert.equal(scan(`?api_key=${K24}`).length, 1);
+  // A public URL carrying its own public key ships as it is: allowed whole and by the parts the scan reads alone.
+  const tiles = `https://tiles.example.com/{z}/{x}/{y}.pbf?key=${K24}&v=${RANDOMISH}`;
+  const withTiles = siteScanner([tiles], [], () => []);
+  assert.deepEqual(withTiles(`const u=${JSON.stringify(tiles)};`), []);
+  assert.equal(withTiles(`?key=${K24.split('').reverse().join('')}`).length, 1, 'CONTROL: another key in the same place is judged');
+});
+
+test('the secret prefix: inside a longer name, after _, and as short as real keys of it are', () => {
+  for (const text of [
+    `k="xsk_live_${K24.slice(0, 16)}"`,
+    `const api_sk_live_${K24.slice(0, 12)} = 1`,
+    `k="api_sk_live_${K24.slice(0, 16)}"`,
+    'k="sk_live_Ab3dE5gH7j"',
+    'k="rk_test_Ab3dE5gH7j"',
+    `k="api_sk_${K24}"`,
+  ]) {
+    assert.ok(scanText(text).some((f) => f.rule === 'secret-prefix'), text);
+  }
+  // CONTROL: words that hold the letters, a mode with too few characters, a bare prefix inside a word.
+  for (const text of ['task_list', 'task_listOfThingsToDo123', 'disk_test_results', 'k="sk_live_Ab3dE5gH7"', `mask_${K24}`, 'risk_live_feed']) {
+    assert.ok(!scanText(text).some((f) => f.rule === 'secret-prefix'), text);
+  }
 });
 
 test('SECURITY: a key is still found inside each of those shapes — after =, with padding, in a path segment', () => {
@@ -224,7 +351,14 @@ test('QUADRATIC (old code): a run of `eyJ` — eight times the input costs far m
   assert.ok(tBig > (big.length * NS_PER_CHAR) / 1e6, `CONTROL: ${tBig.toFixed(1)}ms CPU for ${big.length} characters is past the bound`);
 });
 
-test('EQUIVALENCE: every finding exactly the old scan\'s — real tokens, near-misses, and 2 000 generated texts', () => {
+test('LINEAR: 5MB of names never set, and one 5MB run with a pad that is not one — under the bound', () => {
+  for (const big of [' apiKeyName'.repeat(Math.ceil((5 * 1024 * 1024) / 11)), `?token=${'A1'.repeat(2.5 * 1024 * 1024)}==x`]) {
+    const t = cpuMs(() => scanText(big), 1);
+    assert.ok(t <= (big.length * NS_PER_CHAR) / 1e6, `${t.toFixed(1)}ms CPU for ${big.length} characters`);
+  }
+});
+
+test('EQUIVALENCE: every finding exactly the plain rules\' — real tokens, near-misses, and 4 000 generated texts', () => {
   const service = jwt('service_role');
   const anon = jwt('anon');
   const fixed = [
@@ -232,17 +366,24 @@ test('EQUIVALENCE: every finding exactly the old scan\'s — real tokens, near-m
     `eyJabcdefgh.abcdefgh.abcdefg`, `eyJabcdefg.abcdefgh.abcdefgh`, `eyJabcdefgh.abcdefgh.abcdefgh`, `eyJeyJabcdefgh.abcdefgh.abcdefgh`,
     `abcdeyJ12345678.12345678.12345678.12345678`, `eyJ1234567eyJ12345678.12345678.12345678`, `${RANDOMISH} ${anon} ${RANDOMISH}`,
   ];
-  for (const text of fixed) assert.deepEqual(scanText(text), legacyScanText(text), text);
+  for (const text of fixed) assert.deepEqual(scanText(text), referenceScanText(text), text);
   // Seeded, so a failure reproduces: texts made of the pieces the rule reads.
   let seed = 7;
   const next = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return seed / 2 ** 32; };
-  const pieces = ['eyJ', 'eyJh', 'abcdefgh', 'Q9', '.', '.', '-', '_', ' ', '"', 'x', RANDOMISH, service, anon, '12345678'];
+  const pieces = [
+    'eyJ', 'eyJh', 'abcdefgh', 'Q9', '.', '.', '-', '_', ' ', '"', 'x', RANDOMISH, service, anon, '12345678',
+    // Pads, paths and query strings: what the run's pad, the path rule and a credential's named value read.
+    '=', '==', '/', '/', 'issues', '2907', 'AbCdEfGh', '?', '&', ';', '#', '\n', 'api_key=', 'token=', 'page=', 'sk_live_', 'Xk9vQ2mZr7Lp4sBw',
+  ];
   let found = 0;
-  for (let i = 0; i < 2_000; i++) {
+  const rulesSeen = new Set<string>();
+  for (let i = 0; i < 4_000; i++) {
     const text = Array.from({ length: 4 + Math.floor(next() * 24) }, () => pieces[Math.floor(next() * pieces.length)]).join('');
-    const want = legacyScanText(text);
+    const want = referenceScanText(text);
     assert.deepEqual(scanText(text), want, text);
     found += want.length;
+    for (const f of want) rulesSeen.add(f.rule);
   }
-  assert.ok(found > 500, `CONTROL: the generated texts hold findings (${found})`);
+  assert.ok(found > 1_000, `CONTROL: the generated texts hold findings (${found})`);
+  assert.deepEqual([...rulesSeen].sort(), ['entropy', 'jwt-privileged', 'secret-prefix'], 'CONTROL: the texts exercise every rule their pieces can make');
 });

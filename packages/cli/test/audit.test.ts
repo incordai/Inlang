@@ -152,6 +152,21 @@ test('bundle secrets: a page\'s policy may pin digests of what it carries inline
   assert.ok((bad.fix ?? []).some((f) => /^dist\/index\.html:\d+ \(entropy\)$/.test(f)), (bad.fix ?? []).join(' | '));
 });
 
+test('bundle secrets: a chunk naming a file the bundler emitted passes; the same name copied from public/ is judged', async () => {
+  // A map site's chunk names the library's worker file by its hashed path (the build guard allows exactly that).
+  const worker = 'assets/map-library-worker-VaXr2Fck.mjs';
+  const dist = { 'index.html': PAGE(), 'assets/index.js': `var e=\`/${worker}\`;export{e as default};\n`, [worker]: 'self.onmessage=()=>{};\n' };
+  const ok = await check('bundle-secrets', built(SITE, dist));
+  assert.equal(ok.status, 'pass', ok.line);
+  // CONTROL: the file is in public/, so its name is the author's, and the run is judged like any text.
+  const copied = built(SITE, dist);
+  mkdirSync(join(copied.out, 'public', 'assets'), { recursive: true });
+  writeFileSync(join(copied.out, 'public', worker), 'self.onmessage=()=>{};\n');
+  const bad = await check('bundle-secrets', copied);
+  assert.equal(bad.status, 'fail', bad.line);
+  assert.ok((bad.fix ?? []).some((f) => /^dist\/assets\/index\.js:\d+ \(entropy\)$/.test(f)), (bad.fix ?? []).join(' | '));
+});
+
 test('a page whose attributes hold any numeric reference is read as the browser reads it — never a RangeError', async () => {
   // Past U+10FFFF, a surrogate, zero and a C1 remap in a style attribute; the
   // policy itself written with references the old decoding left as text.

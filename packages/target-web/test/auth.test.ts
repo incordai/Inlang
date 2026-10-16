@@ -127,6 +127,20 @@ test('CONTROL: the hosted guard does not import the backend check', () => {
   assert.doesNotMatch(guard, /backendUrlProblem|AZ_PUBLIC_BACKEND_URL/);
 });
 
+test('the guard, the page scan after the pre-render and az audit scan with one function — their rules cannot drift', () => {
+  const p = project(site('hosted'));
+  const audit = readFileSync(new URL('../../cli/src/audit.ts', import.meta.url), 'utf8');
+  const scans = [
+    ['guard.ts', file(p, 'az-vite/guard.ts'), 'siteScanner(publicValues, Object.keys(bundle), ownDigests)'],
+    ['build.mjs', file(p, 'az-vite/build.mjs'), 'siteScanner(Object.values(env).filter(Boolean), emitted, ownDigests)'],
+    ['audit.ts', audit, 'siteScanner(allow, await emittedFiles(outDir, site.names), ownDigests)'],
+  ] as const;
+  for (const [name, text, call] of scans) {
+    assert.ok(text.includes(call), `${name} scans with siteScanner`);
+    assert.doesNotMatch(text, /\bscanText\(text|ownNames\(/, `${name} builds no scanner of its own`);
+  }
+});
+
 test('the emitted hint and the runtime enforce the same password minimum', () => {
   assert.equal(EMITTED_MIN, RUNTIME_MIN);
 });

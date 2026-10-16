@@ -833,7 +833,7 @@ import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ownDigests, pagePolicy, withPolicy } from "./csp.ts";
-import { bundleMessage, scanText } from "./secrets.ts";
+import { bundleMessage, siteScanner } from "./secrets.ts";
 import { removeOutput, shippedSecrets } from "./shipped.ts";
 
 /** What each page loads beyond its own files (csp.ts PageNeeds), by its file in dist/. */
@@ -845,7 +845,10 @@ const server = join(root, ".az-ssr");
 const logLevel = process.env.AZ_BUILD_LOG ?? "info";
 
 // 1. The client: what the browser loads (vite.config.ts, the build guard).
-await build({ root, logLevel });
+//    The names of the files it emitted are the build's own (step 4).
+const client = [await build({ root, logLevel })].flat();
+if (!client.every((o) => Array.isArray(o?.output))) throw new Error("build: the client build returned no bundle to read its file names from");
+const emitted = client.flatMap((o) => o.output.map((f) => f.fileName));
 
 // 2. The server entry, bundled for Node. Its own minimal config: it is never
 //    shipped, so it needs neither the page inputs nor the bundle guard — but
@@ -888,11 +891,11 @@ try {
 // 4. The build guard's scan over every page as written: the guard ran when
 //    the client bundle was written, before any page held its markup, and a
 //    server-only render path can put text in a page that no chunk carries.
-//    The same scanner and rules as the guard and az audit: the public values
-//    allowed, and in a page the digests its own policy pins for what it
-//    carries inline; a hit removes dist/ and fails the build.
-const publicValues = [...new Set(Object.values(env).filter(Boolean))];
-const scan = (text) => scanText(text, new Set([...publicValues, ...ownDigests(text)]));
+//    The guard's and az audit's scan (secrets.ts siteScanner): the public
+//    values allowed, the names of the files the client build emitted, and in
+//    a page the digests its own policy pins for what it carries inline; a
+//    hit removes dist/ and fails the build.
+const scan = siteScanner(Object.values(env).filter(Boolean), emitted, ownDigests);
 const { hits } = await shippedSecrets(written, join(root, "node_modules"), scan);
 if (hits.length > 0) {
   const problems = hits.map((h) => bundleMessage(h.path, h.finding, "page"));

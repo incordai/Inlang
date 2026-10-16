@@ -269,8 +269,9 @@ export function guardTs(required: readonly string[], adapter: string | null = nu
   return `${generated('build guard: refuses a build that would ship a secret')}import { loadEnv, type Plugin } from "vite";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { PUBLIC_ENV_PREFIX, bundleMessage, envMessage, ownNames, scanEnv, scanText, type ShippedPlace } from "./secrets.ts";
+import { PUBLIC_ENV_PREFIX, bundleMessage, envMessage, scanEnv, siteScanner, type ShippedPlace } from "./secrets.ts";
 import { FILE_MAX_BYTES, MAX_FILES, removeOutput, shippedSecrets, walkShipped } from "./shipped.ts";
+import { ownDigests } from "./csp.ts";
 ${backend ? `import { backendUrlProblem } from "../${AUTH_DIR}/azbackend.ts";\n` : ''}
 /** Variables this site cannot build without (its auth adapter's, §3.2/§3.4). */
 const REQUIRED: readonly string[] = ${JSON.stringify(required)};
@@ -306,9 +307,10 @@ export function secretGuard(): Plugin {
       const tree = await walkShipped(dir);
       if (tree === null) throw new Error("auth: the build guard found no output folder at " + dir + " — nothing the site ships could be checked");
       // A file an installed package published is judged by key shape only.
-      // The build's own file names (a chunk naming the worker file it loads, hash and all) are names, not keys.
-      const allowed = new Set([...publicValues, ...ownNames(tree.files.map((f) => f.path))]);
-      const { hits } = await shippedSecrets(tree.files, join(root, "node_modules"), (text) => scanText(text, allowed));
+      // The names of the files Vite emitted (a chunk naming the worker file it loads, hash and all) are names, not
+      // keys; a file copied from public/ is not in the bundle, so its name is judged like any text.
+      const scan = siteScanner(publicValues, Object.keys(bundle), ownDigests);
+      const { hits } = await shippedSecrets(tree.files, join(root, "node_modules"), scan);
       // The message names where the key is: a file Vite wrote from the
       // bundle, one it copied from public/, or anything else in the folder.
       const place = (path: string): ShippedPlace => path in bundle ? "bundle"

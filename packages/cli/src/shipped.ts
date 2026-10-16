@@ -48,10 +48,15 @@ export interface Shipped {
   readonly text: string;
 }
 
-/** A walked folder; `unread` names what was too large or past the cap, never read. */
+/**
+ * A walked folder: the text files read; `unread` names what was too large or
+ * past the cap, never read; `names` is every regular file within the cap,
+ * text or binary, read or not — what the folder holds, by path.
+ */
 export interface ShippedTree {
   readonly files: readonly Shipped[];
   readonly unread: readonly string[];
+  readonly names: readonly string[];
 }
 
 /** One finding in one file. */
@@ -79,6 +84,7 @@ export async function walkShipped(dir: string, base: string = dir): Promise<Ship
   if (!(await isRealDir(dir))) return null;
   const files: Shipped[] = [];
   const unread: string[] = [];
+  const names: string[] = [];
   const pending = [dir];
   let seen = 0;
   while (pending.length > 0) {
@@ -97,6 +103,7 @@ export async function walkShipped(dir: string, base: string = dir): Promise<Ship
         unread.push(rel);
         continue;
       }
+      names.push(rel);
       if (BINARY.has(extname(e.name).toLowerCase())) continue;
       const s = await stat(path);
       if (s.size > FILE_MAX_BYTES) {
@@ -107,7 +114,8 @@ export async function walkShipped(dir: string, base: string = dir): Promise<Ship
     }
   }
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return { files, unread };
+  names.sort();
+  return { files, unread, names };
 }
 
 /**

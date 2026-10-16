@@ -668,10 +668,18 @@ scans the environment and the project's `.env` files before it writes
 anything, and the generated project's own build scans the environment it
 actually loads (`az-vite/guard.ts`). Rule 2 runs in that build, over every
 chunk and asset it emits. The patterns are shapes, never a provider's name:
-private-key blocks, `sk_`/`rk_` prefixes, `service_role`, tokens whose role
-claim is `service_role`/`service`/`admin`, and high-entropy strings (32+
-characters, ≥4.0 bits per character, letters and digits) other than inlined
-`data:` assets and the site's own public values. A finding names the variable
+private-key blocks, `sk_`/`rk_` prefixes (`sk_live_`/`rk_test_` and 10+
+characters anywhere, a bare `sk_` and 16+ at the start of a name or after
+`_`), `service_role`, tokens whose role claim is `service_role`/`service`/`admin`,
+high-entropy strings (32+ characters, base64 padding counted, ≥4.0 bits per
+character, letters and digits), and a shorter value (16+ characters, ≥3.0
+bits, letters and digits) set to a name that says credential — `key`, `token`,
+`secret`, `sig`, `password`, `auth` — in a query string, a config line or a
+cookie. Inlined `data:` assets, a path every segment of which is all digits or
+lowercase words, the site's own public values, the names of the files the
+bundler emitted and the digests a page's own policy pins are allowed; the build
+guard, the page scan after the pre-render and `az audit` share that one scan
+(`siteScanner`). A finding names the variable
 or the file offset and the value's length — never any character of the value.
 
 The two unsuppressible errors are the only ones in the product. Everything else

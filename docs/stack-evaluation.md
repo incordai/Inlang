@@ -1097,10 +1097,10 @@ WebKit (2026-10-16):**
 - The build's secret guard read the renderer's minified bundle as holding
   keys: `NAME=value` sequences in its shaders and code, a path of words in a
   message link, and the worker file's own hashed name. The guard now reads a
-  key's run with `=` only as trailing padding, skips a `/`-path none of whose
-  segments mixes letters and digits, and allows the build's own file names
-  (core `secrets.ts`); a key in any of those places is still found
-  (`secrets.test.ts`).
+  key's run with `=` only as trailing padding, skips a `/`-path every segment
+  of which is all digits or lowercase words, and allows the names of the
+  files the bundler emitted (core `secrets.ts`); a key in any of those places
+  is still found (`secrets.test.ts`).
 
 **Rejected alternatives** (R11): a raster tile service (every pan a request
 to a third party, and a key in the page); the renderer's own CDN build (a

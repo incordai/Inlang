@@ -821,6 +821,15 @@ try {
     check('C8: the map runtime ships verbatim with a chat that shows maps, and with no other site',
       MAP_RUNTIME_FILES.every((f) => readFileSync(join(mapProj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8'))
         && MAP_RUNTIME_FILES.every((f) => !existsSync(join(chatProj, 'src/az', f)) && !existsSync(join(plainProj, 'src/az', f))));
+    // The guard passed the map bundle (the build above); az audit reads the same folder with the same scan (siteScanner)
+    // and must pass it too — the library's code, its links and its worker's name are not keys.
+    const mapAudit = spawnSync(process.execPath, [CLI, 'audit', '--out', mapProj, '--json'], {
+      cwd: work, encoding: 'utf8', env: { ...process.env, AZ_WORDS: WORDS, ...PUBLIC_AUTH, ...serverKeys }, timeout: COMMAND_MS, killSignal: 'SIGKILL',
+    });
+    if (mapAudit.error || mapAudit.signal) throw new Error(`az audit was stopped: ${mapAudit.error?.message ?? mapAudit.signal}`);
+    const mapSecrets = JSON.parse(mapAudit.stdout).checks.find((c) => c.id === 'bundle-secrets') ?? {};
+    check('C8: az audit finds no key in the map site\'s build — the guard\'s own scan, no false positive',
+      mapSecrets.status === 'pass', `${mapSecrets.line} ${(mapSecrets.fix ?? []).join(' | ')}`);
 
     // C3 (§3.1, §3.2): a float under site ships on every page — its launcher
     // hidden until the runtime runs, its dialog closed, asking from that page —

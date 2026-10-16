@@ -30,7 +30,7 @@
 import { stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ownNames, PUBLIC_ENV_PREFIX, quotable, scanText } from '../../core/src/secrets.ts';
+import { PUBLIC_ENV_PREFIX, quotable, scanText, siteScanner } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { KEYS, toolSecretKeys } from '../../backend/src/server/env.ts';
 import { SECURITY_HEADERS } from '../../backend/src/server/http.ts';
@@ -54,6 +54,8 @@ const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json'] as const;
 
 /** The folder the generated project's build writes the site into (az-vite/build.mjs). */
 const DIST = 'dist';
+/** The project's folder of files the bundler copies into dist/ as they are (az.ts writes the site's assets there). */
+const PUBLIC = 'public';
 /** Written by every az build (output.ts); its absence means the folder is not one. */
 const BUILD_MANIFEST = '.az-manifest.json';
 
@@ -83,7 +85,11 @@ const HEADER_FILES = ['http.ts', 'app.ts', 'main.ts'] as const;
 /** The built site, walked once; `unread` names what was too large or past the cap. */
 type Site =
   | { readonly kind: 'missing'; readonly dir: string }
-  | { readonly kind: 'site'; readonly dir: string; readonly files: readonly Shipped[]; readonly unread: readonly string[] };
+  | {
+    readonly kind: 'site'; readonly dir: string; readonly files: readonly Shipped[]; readonly unread: readonly string[];
+    /** Every file under dist/ within the walk's cap, binary ones too, relative to the output folder. */
+    readonly names: readonly string[];
+  };
 
 /**
  * What the worker found in the built site, as plain data the checks format:
@@ -156,7 +162,7 @@ const named = (path: string) => (scanText(path).some((f) => f.rule !== 'entropy'
 async function walkSite(outDir: string): Promise<Site> {
   const dir = join(outDir, DIST);
   const tree = await walkShipped(dir, outDir);
-  return tree === null ? { kind: 'missing', dir } : { kind: 'site', dir, files: tree.files, unread: tree.unread.map(named) };
+  return tree === null ? { kind: 'missing', dir } : { kind: 'site', dir, files: tree.files, unread: tree.unread.map(named), names: tree.names };
 }
 
 /** The worker reading the built site gave no answer: said by bundle secrets, pointed to by the rest. */
@@ -642,13 +648,10 @@ const newTabLinks: Check<AuditContext> = {
 export async function analyseSite(outDir: string, allow: readonly string[], keys: readonly ServerKey[] = []): Promise<SiteReport> {
   const site = await walkSite(outDir);
   if (site.kind === 'missing') return site;
-  // The public values the build inlined, and the site's own file names as its bundle names them (the build guard's allow).
-  const allowed = new Set([...allow, ...ownNames(site.files.map((f) => f.path))]);
-  // A file a package published is judged by key shape only (shipped.ts).
-  const scan = (text: string) => {
-    const own = ownDigests(text);
-    return scanText(text, own.length > 0 ? new Set([...allowed, ...own]) : allowed);
-  };
+  // The build guard's scan (secrets.ts siteScanner): the public values the build inlined, the names of the files the
+  // bundler emitted, and in each file the digests its own policy pins. A file a package published is judged by key
+  // shape only (shipped.ts).
+  const scan = siteScanner(allow, await emittedFiles(outDir, site.names), ownDigests);
   const { hits, published } = await shippedSecrets(site.files, join(outDir, 'node_modules'), scan);
   const pages = pagesOf(site);
   const bare: string[] = [];
@@ -711,6 +714,19 @@ export async function analyseSite(outDir: string, allow: readonly string[], keys
     serverKeys,
     shared,
   };
+}
+
+/**
+ * The files of the built site the bundler emitted, as the bundle names them
+ * (relative to dist/): every file there but those copied from the project's
+ * public/ folder — the build guard's split (auth.ts), made from what the
+ * folder holds, since the bundle's own list is gone once the build ends.
+ */
+async function emittedFiles(outDir: string, names: readonly string[]): Promise<string[]> {
+  const prefix = `${DIST}/`;
+  const inDist = names.filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length));
+  const copied = await Promise.all(inDist.map((p) => stat(join(outDir, PUBLIC, p)).then((s) => s.isFile(), () => false)));
+  return inDist.filter((_, i) => !copied[i]);
 }
 
 /** The worker that runs analyseSite. */

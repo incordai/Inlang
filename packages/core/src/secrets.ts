@@ -2,7 +2,7 @@
  * @az module secrets
  * Purpose: secret detection for env, bundles and literals — never prints a value.
  * Spec: docs/auth-block-spec.md §4 · docs/word-quality-gate.md §4
- * Exports: scanText, scanEnv, redact, envMessage, bundleMessage, ownNames, ShippedPlace
+ * Exports: scanText, scanEnv, redact, envMessage, bundleMessage, ownNames, siteScanner, ShippedPlace
  * Edit guide: patterns stay vendor-neutral; findings report name/offset and length only.
  * Tests: packages/core/test/secrets.test.ts, packages/cli/test/secrets.test.ts
  */
@@ -41,13 +41,28 @@ const PRIVATE_NAME = /SERVICE|SECRET|PRIVATE|PASSWORD|PASSWD|DATABASE_URL|SMTP|E
 /** JWT roles that bypass row-level security — a service key, not a public one. */
 const PRIVILEGED_ROLES: ReadonlySet<string> = new Set(['service_role', 'service', 'admin']);
 
-/** Shortest run the high-entropy rule considers; shorter strings are ids, not keys. */
+/** Shortest run the high-entropy rule considers, its padding counted; shorter strings are ids, not keys. */
 const ENTROPY_MIN_LENGTH = 32;
 /** Bits per character above which a mixed letter-and-digit run reads as a key. */
 const ENTROPY_MIN_BITS = 4.0;
+/**
+ * Shortest value judged when its name says it is a credential (`api_key=…`,
+ * a query string, a config line, a cookie): the name is the evidence a bare
+ * run lacks, so a shorter value is read.
+ */
+const NAMED_MIN_LENGTH = 16;
+/**
+ * Bits per character a named value needs. A random 16-character key of
+ * letters and digits measures 3.2 or more in 999 of 1 000 draws; a repeated
+ * or counted value (`abc123abc123abc123`, 2.6) does not reach it.
+ */
+const NAMED_MIN_BITS = 3.0;
 
 export interface SecretFinding {
-  /** Which rule matched: `pem`, `secret-prefix`, `service-role`, `jwt-privileged`, `entropy`, `private-name`. */
+  /**
+   * Which rule matched: `pem`, `secret-prefix`, `service-role`, `jwt-privileged`, `entropy` (a long random run,
+   * or a shorter one a credential's name is set to), `private-name`.
+   */
   readonly rule: string;
   /** Where: an environment variable's name, or `@offset` in a text. */
   readonly where: string;
@@ -144,14 +159,39 @@ function jwts(text: string): { readonly at: number; readonly value: string }[] {
 }
 
 const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
-const SECRET_PREFIX = /\b(?:sk|rk)_(?:live|test)?_?[A-Za-z0-9]{16,}/g;
-const SERVICE_ROLE = /\bservice_role\b/g;
 /**
- * A key-shaped run: the base64 and base64url alphabets, `=` only as a
- * trailing pad — a key never holds one inside it, so `NAME=value` in code is
- * two runs, each judged by itself.
+ * A secret key's prefix: `sk_` or `rk_`, then its mode and the key. With a
+ * mode (`sk_live_…`, `rk_test_…`) the shape is distinctive wherever it
+ * starts — inside a longer name (`xsk_live_…`) too — and real keys of it
+ * carry at least 10 characters after the mode. Without one, `sk_` must start
+ * a name or follow `_` (`api_sk_…`), never sit inside a word (`task_list`),
+ * and the key must be 16 characters or more.
  */
-const HIGH_ENTROPY = /[A-Za-z0-9+/_-]{32,}={0,2}/g;
+const SECRET_PREFIX = /(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{10,}|(?<![A-Za-z0-9])(?:sk|rk)_[A-Za-z0-9]{16,}/g;
+const SERVICE_ROLE = /\bservice_role\b/g;
+/** The base64 and base64url alphabets: what a key's run is made of. */
+const RUN = 'A-Za-z0-9+/_-';
+/**
+ * A key-shaped run: the alphabets, then `=` only as a trailing pad — one or
+ * two, and only where no run character follows it. A key never holds `=`
+ * inside it, so `NAME=value` in code is two runs, each judged by itself; a
+ * pad is part of its key's length, so 30 characters and `==` (22 bytes in
+ * base64) reach the rule's floor. Read in one pass: a pad that is not one is
+ * left off without going back into the run.
+ */
+const HIGH_ENTROPY = new RegExp(`[${RUN}]{30,}(?:={1,2}(?![=${RUN}]))?`, 'g');
+/** The same run, read only where it starts at the beginning of a text. */
+const LEADING_RUN = new RegExp(HIGH_ENTROPY.source, 'y');
+/**
+ * A value set to a name that says credential, where a query string, a
+ * config line or a cookie writes one: the name starts the text or follows
+ * `?`, `&`, `#`, `;`, whitespace or a quote. The name is a whole word (its
+ * test is the caller's: CREDENTIAL_NAME), so the read never backtracks into
+ * it; the value is a run of the key alphabets with its pad, possibly empty.
+ */
+const NAMED_VALUE = new RegExp(`(?:^|[?&#;\\s"'\`])(\\w+)=([${RUN}]*(?:={1,2}(?![=${RUN}]))?)`, 'g');
+/** A name that says its value is a credential. */
+const CREDENTIAL_NAME = /key|token|secret|sig|signature|password|passwd|auth/i;
 
 /** A whole JS identifier — a name in code, which can never carry a value. */
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -188,39 +228,109 @@ export function scanText(text: string, allow: ReadonlySet<string> = new Set()): 
   // Both lists run left to right and spans never overlap, so one cursor
   // walks the spans once instead of searching them for every run.
   let span = 0;
+  const judged = new Set<number>();
   for (const m of text.matchAll(HIGH_ENTROPY)) {
     const value = m[0];
     const at = m.index ?? 0;
-    if (allow.has(value)) continue;
-    // A JWT is judged by its role above; its parts are not separate keys.
     while (span < jwtSpans.length && jwtSpans[span][1] <= at) span++;
     if (span < jwtSpans.length && jwtSpans[span][0] <= at) continue;
-    // Inlined assets are base64 by design (a small image in a data: URL).
-    if (/(?:data:[^,]{0,64},|base64,)$/.test(text.slice(Math.max(0, at - 72), at))) continue;
-    if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) continue;
     // A property access (`gl.framebufferTexture2DMultisampleEXT`) is a name in
     // code, not a value. Identifier characters only, so a token inside a URL
     // path — which has a `/` — is still judged.
     if (text[at - 1] === '.' && IDENTIFIER.test(value)) continue;
     if (EXTENSION_NAME.test(value)) continue;
-    // A path of plain words (`com/org/project/issues/2907`, a link in a library's message): no segment of it
-    // mixes letters and digits, as a key's would. A key in a path is a segment that does, and is still judged.
-    if (value.includes('/') && value.split('/').every((s) => !/[0-9]/.test(s) || !/[A-Za-z]/.test(s))) continue;
-    if (value.length >= ENTROPY_MIN_LENGTH && entropy(value) >= ENTROPY_MIN_BITS) add('entropy', at, value);
+    if (keyLike(text, at, value, allow, ENTROPY_MIN_LENGTH, ENTROPY_MIN_BITS)) {
+      judged.add(at);
+      add('entropy', at, value);
+    }
+  }
+  // A shorter value a credential's name is set to (`?api_key=…`): the name is
+  // the evidence. A value the run rule above already reported is not repeated.
+  span = 0;
+  for (const m of text.matchAll(NAMED_VALUE)) {
+    const value = m[2];
+    const at = (m.index ?? 0) + m[0].length - value.length;
+    if (!CREDENTIAL_NAME.test(m[1]) || judged.has(at)) continue;
+    while (span < jwtSpans.length && jwtSpans[span][1] <= at) span++;
+    if (span < jwtSpans.length && jwtSpans[span][0] <= at) continue;
+    if (keyLike(text, at, value, allow, NAMED_MIN_LENGTH, NAMED_MIN_BITS)) add('entropy', at, value);
   }
   return found;
 }
 
 /**
- * The build's own file names as the bundle writes them (`/assets/x-Ab12cD34.mjs`
- * names the file Vite emitted, its content hash and all), each run of them a
- * scan would read — the values `allow` takes so that a file's name in the
- * bundle is never judged as a key. Only exact names: anything else is judged.
+ * A path segment that cannot be a key: all digits (an issue number), or
+ * lowercase letters and hyphens (`issues`, `project-gl-js`) — empty between
+ * two slashes too. Anything else, mixed-case letters included, is judged.
  */
-export function ownNames(paths: readonly string[]): string[] {
+const PLAIN_SEGMENT = /^(?:[0-9]*|[a-z][a-z-]*)$/;
+
+/**
+ * Whether a value found at `at` in `text` reads as a key: at least
+ * `minLength` characters, its pad counted, and `minBits` per character,
+ * mixing letters and digits — unless it is a public value (`allow`), inlined
+ * data, or a path of plain words.
+ */
+function keyLike(text: string, at: number, value: string, allow: ReadonlySet<string>, minLength: number, minBits: number): boolean {
+  if (value.length < minLength || allow.has(value)) return false;
+  // Inlined assets are base64 by design (a small image in a data: URL).
+  if (/(?:data:[^,]{0,64},|base64,)$/.test(text.slice(Math.max(0, at - 72), at))) return false;
+  if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) return false;
+  // A path of plain words (`com/org/project/issues/2907`, a link in a library's message). A key in a path is a
+  // segment that is not plain, and the whole path is then judged.
+  if (value.includes('/') && value.split('/').every((s) => PLAIN_SEGMENT.test(s))) return false;
+  return entropy(value) >= minBits;
+}
+
+/**
+ * The names the build's own files go by in its text — the values `allow`
+ * takes so that a chunk naming a file the bundler emitted (`/assets/x-Ab12cD34.mjs`,
+ * its content hash and all) is not judged as a key. `emitted` is what the
+ * bundler wrote, paths relative to the output folder: never a file copied
+ * from `public/`, whose name the author chose. Only the run each name starts
+ * with, as a reference to the file reads it — the path, the path after `/`,
+ * the file name, the file name after `/`; a run anywhere else in a name is
+ * judged wherever it appears.
+ */
+export function ownNames(emitted: readonly string[]): string[] {
   const out = new Set<string>();
-  for (const p of paths) for (const form of [p, `/${p}`]) for (const m of form.matchAll(HIGH_ENTROPY)) out.add(m[0]);
+  for (const p of emitted) {
+    const base = p.slice(p.lastIndexOf('/') + 1);
+    for (const form of [p, `/${p}`, base, `/${base}`]) {
+      LEADING_RUN.lastIndex = 0;
+      const run = LEADING_RUN.exec(form);
+      if (run !== null) out.add(run[0]);
+    }
+  }
   return [...out];
+}
+
+/**
+ * The one scan every reader of a built site runs — the build guard, the
+ * page scan after the pre-render, and `az audit` — so their rules cannot
+ * drift: the public values the build inlined and the names of the files the
+ * bundler emitted are allowed everywhere, and in each text the digests its
+ * own policy pins for what it carries (`pinned`, csp.ts ownDigests: derived
+ * from that text, so a digest is allowed only where it hashes something the
+ * text holds). A public value is allowed whole and by each part the scan
+ * would judge alone — its key-shaped runs and its named values — so a public
+ * URL that carries its own public key (`…?key=…`) ships as it is meant to.
+ * Everything else is judged by scanText.
+ */
+export function siteScanner(
+  publicValues: Iterable<string>, emitted: readonly string[], pinned: (text: string) => readonly string[],
+): (text: string) => SecretFinding[] {
+  const parts: string[] = [];
+  for (const v of publicValues) {
+    parts.push(v);
+    for (const m of v.matchAll(HIGH_ENTROPY)) parts.push(m[0]);
+    for (const m of v.matchAll(NAMED_VALUE)) parts.push(m[2]);
+  }
+  const allowed = new Set([...parts, ...ownNames(emitted)]);
+  return (text) => {
+    const own = pinned(text);
+    return scanText(text, own.length > 0 ? new Set([...allowed, ...own]) : allowed);
+  };
 }
 
 /**

@@ -1824,10 +1824,12 @@ Where the build differs from §21.4:
 - **The build's secret guard** read the library's minified bundle as keys
   (`NAME=value` runs in shader code, a path of words in a message link, the
   worker file's hashed name). `core/secrets.ts` now reads `=` only as a
-  key's trailing padding, skips a `/` path no segment of which mixes letters
-  and digits, and allows the build's own file names (`ownNames`, in the build
-  guard and `az audit`); a key in each of those places is still found
-  (`secrets.test.ts`).
+  key's trailing padding, skips a `/` path every segment of which is all
+  digits or lowercase words, and allows the names of the files the bundler
+  emitted — the run each name starts with, never a `public/` copy's
+  (`ownNames`, through the one `siteScanner` the build guard, the page scan
+  and `az audit` share); a key in each of those places is still found, and
+  the library's own files are scanned clean (`secrets.test.ts`).
 - **A map is ended when its answer leaves the page** (a new chat, a failed
   answer), freeing its GL context; one watcher per page.
 - **Static hosts must serve `.mjs` as JavaScript** — the worker is a module;
