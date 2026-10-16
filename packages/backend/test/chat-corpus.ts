@@ -51,8 +51,8 @@ function answerOf(c: CorpusFile): string {
 
 /** The rules every case is judged under. */
 export function corpusRules(): AnswerRules {
-  const { show, quotes, destinations } = JSON.parse(readFileSync(new URL('rules.json', DIR), 'utf8')) as AnswerRules;
-  return { show, quotes, destinations };
+  const { show, quotes, destinations, presets } = JSON.parse(readFileSync(new URL('rules.json', DIR), 'utf8')) as AnswerRules;
+  return { show, quotes, destinations, ...(presets ? { presets } : {}) };
 }
 
 /** Every case, in file-name order. */

@@ -2,8 +2,8 @@ az 1
 
 # The chat prompt budget's fixture (docs/token-benchmark.md §8): one chat
 # that may show every component an answer can hold, on a small shop site
-# with a pricing block to quote, questions to quote and a public table to
-# take figures from.
+# with a pricing block to quote, questions to quote, a public table to
+# take figures from and an answer preset.
 
 site bench
   auth
@@ -29,6 +29,10 @@ page /
     greeting "Ask me about the lamps."
     show     pricing faq cta feature chart table stats cards dashboard explore map
     allow    anyone
+    answer monthly
+      dashboard "This month"
+        stat "Orders" from orders count by placed month
+        chart bar "Orders by status" from orders count by status
 
 page /pricing
   pricing cards

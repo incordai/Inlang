@@ -414,3 +414,43 @@ tokens `o200k_base` / `cl100k_base`:
 |---|---:|---:|---:|
 | `all` | 1 672 / 1 676 | 851 / 853 | 2 075 / 2 064 |
 | `faq` | 598 / 598 | 630 / 632 | 865 / 849 |
+
+After the prompt-cost work (chat-block-spec §19.14), same fixtures —
+`chat-all.az` now also holds one answer preset, so its prompt carries the
+preset listing:
+
+| Fixture | prompt | context.json | system text |
+|---|---:|---:|---:|
+| `all` | 1 721 / 1 727 | 990 / 992 | 2 148 / 2 141 |
+| `faq` | 615 / 615 | 674 / 676 | 918 / 904 |
+
+What moved, change by change (`o200k_base`, the system text unless said):
+one prompt per chat (`all` −44, `faq` −23; context.json +10 for the file
+names); the system text reordered for the prompt cache (no count moves —
+the prefix before the rows is now byte-identical across questions, which a
+provider's prompt cache bills at a fraction); stand-ins in the history
+(+25 on each prompt with components: the line that says the notes are not
+forms); quotable lists (`all` +61, `faq` +52: the listing of the site's
+own blocks, and context.json lists each quotable list); one-line forms (the
+prompts ±1); the preset (+30 for one listed preset). The system text a
+question pays before the cache is therefore larger than at the start
+(`all` +73 with the preset, `faq` +53); what each later question and each
+answer cost is smaller — the history and answer tables in §7.
+
+Answers in the taught forms, and what each later question pays again for
+them as history (`o200k_base`, the parser's own history):
+
+| Answer | `.az` before | `.az` now | as history |
+|---|---:|---:|---:|
+| prose only | 18 | 18 | 18 |
+| prose + the site's pricing, quoted | 22 | 22 | 23 |
+| faq, 3 items | 87 | 81 | 24 |
+| cta | 8 | 8 | 9 |
+| feature, 3 items | 58 | 52 | 15 |
+| prose + faq (2) + cta | 86 | 82 | 45 |
+| dashboard: a stat, 2 server charts, a model chart | 78 | 72 | 9 |
+| the author's preset of a 2-tile dashboard (`use monthly`) | — (27 as written) | 2 | 3 |
+| model chart, 2 series of 3 | 67 | 55 | 16 |
+| tables: a server table, a model table | 46 | 46 | 26 |
+| cards: model cards, server cards | 44 | 44 | 17 |
+| the ten of the first table | 514 | 480 | 202 |

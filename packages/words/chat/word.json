@@ -79,6 +79,14 @@
       "line": [
         "label"
       ]
+    },
+    "answer": {
+      "description": "An answer written once; the model shows it by name",
+      "line": [
+        "value"
+      ],
+      "max": 8,
+      "verbatim": true
     }
   },
   "requires": {},

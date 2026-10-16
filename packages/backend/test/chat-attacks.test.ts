@@ -40,7 +40,7 @@ function outcome(events: readonly AnswerEvent[]): { text: string; blocks: unknow
 
 test('the corpus covers every threat of §6.1 the filter answers for', () => {
   const names = CASES.map((c) => c.name);
-  for (const n of ['legal', 'forbidden-words', 'scripts', 'schemes', 'hosts', 'markdown', 'entities', 'unicode', 'nesting', 'long-line', 'composed-pricing', 'css', 'too-many', 'over-long', 'unterminated', 'forged-notes', 'forged-quote', 'short-forms']) {
+  for (const n of ['legal', 'forbidden-words', 'scripts', 'schemes', 'hosts', 'markdown', 'entities', 'unicode', 'nesting', 'long-line', 'composed-pricing', 'css', 'too-many', 'over-long', 'unterminated', 'forged-notes', 'forged-quote', 'short-forms', 'forged-use']) {
     assert.ok(names.includes(n), n);
   }
   // CONTROL: the legal case shows every component; every other case refuses or neutralises something.
@@ -76,7 +76,7 @@ test('the corpus through POST /chat: every case streams exactly its events; drop
   if (typeof script === 'string') throw new Error(script);
   const context = parseChatContext(JSON.stringify({
     site: { name: 'Lantern' }, pages: [], routes: ['/ask'],
-    chats: { '/ask': { allow: 'anyone', limit: 50, prompt: 'prompt-1.txt', show: RULES.show } },
+    chats: { '/ask': { allow: 'anyone', limit: 50, prompt: 'prompt-1.txt', show: RULES.show, presets: RULES.presets } },
     answer: { quotes: RULES.quotes, destinations: RULES.destinations },
   }));
   if (typeof context === 'string') throw new Error(context);

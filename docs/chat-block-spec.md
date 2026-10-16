@@ -2226,6 +2226,40 @@ dashboard 78 → 72, the two-series chart 67 → 55). The prompts barely move
 (the all-components prompt +1, the faq prompt −1): the saving is in what the
 model writes.
 
+**Answer presets: `answer <name>` in the `.az` file, `use <name>` by the
+model (§3, §5.3 changed).** Under a chat, `answer monthly` with one
+component indented under it in the answer forms is a preset (up to eight a
+chat). The link stage keeps its lines as written — a `verbatim` fill, never
+resolved as words, its strings re-quoted — in the fill's `body`; core's
+file-wide rules judge it: AZ1273 a missing or non-lowercase name, AZ1274 a
+name twice, AZ1275 not exactly one component, AZ1276 a component the
+chat's `show` does not list (or `ask`, `text`, `use`), and AZ1277 a body
+the chat server's own parser drops, run at compile time through
+`CompileOptions.checkAnswer`, which `az check` and `az build` give
+(backend `checkPreset`; core imports nothing of the server). AZ1277 also
+refuses a `from` that names no table a signed-out visitor can read, and a
+`from tool`: the operator's tools are the server's `.env`, never the
+build's. The fields after a `from`'s table are matched at run time, as the
+model's own `from` is: a wrong field is the `figures` note, not a
+compile error — the one way a preset that passed `az check` can still come
+back empty.
+
+The build writes each chat's presets to `context.json` (`chats[route].presets`,
+`{ name, text }`, checked by the server: names unique, bodies within the
+record cap, at most eight) and lists them in that chat's prompt only, by
+name and first line — never the body: `use monthly — dashboard "This
+month"`. The model writes `use monthly`: the parser reads the body under the
+page's own rules (its `show`, quotes, destinations, tools, geocoder), it
+must read as exactly one component and nothing dropped, it counts as one of
+the answer's four and its points, queries, tool calls and places count in
+the answer's caps; its `from` requests are answered by the server as any
+other's. A name the chat lacks is `no_quote`; on a chat with no presets
+`use …` is an ordinary sentence. The record and the history hold the one
+line. The preset never reaches the page as text: the page receives the
+component's event. Measured: the dashboard of two server tiles is 27
+tokens as written, 2 as `use monthly`; listing one preset costs 30 prompt
+tokens.
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links

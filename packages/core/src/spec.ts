@@ -32,7 +32,7 @@ import { LIST_SEPARATOR, type LinkedWord } from './link.ts';
 import type { Manifest } from './link.ts';
 import { buildFrom, GALLERY_FROM_REFUSED, type FromContext } from './from.ts';
 import { runPageChecks, runSiteChecks, type CheckSubject, type PageEntry } from './checks.ts';
-import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, knowsTables, sharedRouteDiagnostics, withAnswer, withShowGroups } from './chat.ts';
+import { CHAT_WORD, chatAnswers, chatDiagnostics, chatOf, knowsTables, PRESET_WORD, sharedRouteDiagnostics, withAnswer, withShowGroups, type AnswerCheck } from './chat.ts';
 
 /**
  * Where each block was written. A SpecBlock carries no position — it is the
@@ -272,6 +272,8 @@ export function buildSpec(
   version: string | null,
   linked: LinkedWord[],
   manifests: Map<string, Manifest>,
+  /** The chat server's answer parser, to judge each answer preset with (core chat.ts AnswerCheck); absent, only their structure is. */
+  checkAnswer?: AnswerCheck,
 ): SpecResult {
   const diagnostics: Diagnostic[] = [];
   // A chat's `show` groups (`show all`, `show figures`) stand for their components: expanded before anything reads them (chat.ts).
@@ -538,11 +540,16 @@ export function buildSpec(
   diagnostics.push(...chatDiagnostics(
     [
       // `chat none` is no chat: it asks nothing of the backend.
-      ...[...kids, ...pageWords.flatMap((p) => p.children)].filter((w) => w.word === CHAT_WORD && w.variant !== 'none').map((w) => ({ props: w.props, pos: w.pos })),
+      ...[...kids, ...pageWords.flatMap((p) => p.children)].filter((w) => w.word === CHAT_WORD && w.variant !== 'none').map((w) => ({
+        props: w.props, pos: w.pos,
+        // Its answer presets (chat-block-spec §19.14), each body as link.ts kept it.
+        presets: w.children.filter((c) => c.word === PRESET_WORD).map((c) => ({ name: c.args[0], body: c.props.body?.value ?? '', pos: c.pos })),
+      })),
     ],
     declared?.props.model,
     answers.quotes.length,
     tables,
+    checkAnswer ? { check: checkAnswer, answers } : undefined,
   ));
 
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');

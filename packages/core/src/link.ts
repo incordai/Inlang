@@ -2,7 +2,7 @@
  * @az module link
  * Purpose: statements → resolved words against manifests: props, slots, requires, values, routes.
  * Spec: docs/GRAMMAR.md §4–§5 · docs/ARCHITECTURE.md §4.1
- * Exports: link, LinkOptions, Manifest, PropSpec, FillLine, LineValue, ChildLine, STRUCTURE, STRUCTURE_PROPS
+ * Exports: link, LinkOptions, Manifest, PropSpec, FillLine, LineValue, ChildLine, STRUCTURE, STRUCTURE_PROPS, verbatimText
  * Edit guide: never name a specific word here — per-word rules are manifest data (checks.ts); lookups use Object.hasOwn.
  * Tests: packages/core/test/link.test.ts, packages/core/test/prop-rules.test.ts, packages/core/test/head-settings.test.ts, packages/core/test/strict-values.test.ts, packages/core/test/strict-fills.test.ts, packages/words/test/fill-lines.test.ts
  */
@@ -323,6 +323,31 @@ function slotLine(def: unknown): FillLine | undefined {
 function describeLine(line: FillLine): string {
   const parts = line.map((v) => typeof v === 'string' ? `a ${v}` : `'${v.flag}'`);
   return parts.length <= 1 ? parts[0] ?? 'no value' : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
+}
+
+/**
+ * A slot whose indented lines are kept as written, not linked (`verbatim`
+ * in word.json): chat's `answer <name>`, whose body is one component in the
+ * answer forms (chat-block-spec §19.14) — read by the chat server's own
+ * parser, never by the words.
+ */
+function slotVerbatim(def: unknown): boolean {
+  return (def as { verbatim?: unknown } | null)?.verbatim === true;
+}
+
+/** A string as the answer forms write one: GRAMMAR §1.5's three escapes. */
+const quoteString = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+
+/**
+ * The statements under a verbatim fill as lines of text, two spaces a level
+ * below the fill: each its word and its values — a string quoted, anything
+ * else as written. The text is the body the chat server reads.
+ */
+export function verbatimText(children: readonly Statement[], depth = 0): string {
+  return children.map((c) => {
+    const line = `${'  '.repeat(depth)}${[c.word, ...c.args.map((a) => (a.kind === 'string' ? quoteString(a.value) : a.value))].join(' ')}\n`;
+    return line + verbatimText(c.children, depth + 1);
+  }).join('');
 }
 
 /** A slot's declared bounds. */
@@ -1049,6 +1074,15 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
       const props: Record<string, Arg> = {};
       const children: LinkedWord[] = [];
       const seen = new Set<string>();
+      // A verbatim fill's lines are its body, as written (chat's `answer`, chat-block-spec §19.14): never linked as words.
+      if (slotVerbatim(parent.slots[s.word])) {
+        checkLine(s, slotLine(parent.slots[s.word]));
+        const as = [s, ...s.children.flatMap(function all(c: Statement): Statement[] { return [c, ...c.children.flatMap(all)]; })].find((c) => c.as !== null);
+        if (as) err('AZ1406', `${as.word}: takes no 'as' here — remove 'as ${shown(as.as!)}'`, as.pos);
+        const body = verbatimText(s.children);
+        return { word: s.word, variant: null, modifiers: [], args: s.args, props: body === '' ? {} : { body: { kind: 'string', value: body, pos: s.children[0].pos } },
+                 as: null, children: [], pos: s.pos };
+      }
       for (const c of s.children) {
         if (def.props && Object.prototype.hasOwnProperty.call(def.props, c.word)) {
           const value = propLine(s.word, c, def.props[c.word], seen);

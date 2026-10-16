@@ -376,6 +376,8 @@ page /ask
     show     pricing faq cta feature
     allow    anyone
     limit    50
+    answer contact
+      cta "Talk to us" /contact
 
 page /pricing
   hero center
@@ -796,8 +798,9 @@ writeFileSync(fakeFile, JSON.stringify(FAKE));
   const context = JSON.parse(await readFile(join(serverDir, 'chat/context.json'), 'utf8'));
   const { destinations, quotes } = context.answer ?? {};
   const same = JSON.stringify({ destinations, quotes }) === JSON.stringify({ destinations: RULES.destinations, quotes: RULES.quotes.map(({ label, n, route, word }) => ({ label, n, route, word })) })
-    && JSON.stringify(context.chats['/ask']?.show) === JSON.stringify(RULES.show);
-  check('the built server\'s chat context is the corpus\'s rules (show, quotes, destinations)', same, JSON.stringify({ answer: context.answer, show: context.chats['/ask']?.show }));
+    && JSON.stringify(context.chats['/ask']?.show) === JSON.stringify(RULES.show)
+    && JSON.stringify(context.chats['/ask']?.presets) === JSON.stringify(RULES.presets);
+  check('the built server\'s chat context is the corpus\'s rules (show, quotes, destinations, presets)', same, JSON.stringify({ answer: context.answer, show: context.chats['/ask']?.show, presets: context.chats['/ask']?.presets }));
 }
 const child = spawn(process.execPath, ['src/main.ts'], {
   cwd: serverDir,

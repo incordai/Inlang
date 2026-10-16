@@ -1,5 +1,5 @@
 {
-  "_about": "The rules every case is judged under: what the test site's /ask chat shows, the blocks it may quote, the destinations its .az file declares. scripts/chat-e2e.mjs builds that site and checks its server/chat/context.json says exactly this.",
+  "_about": "The rules every case is judged under: what the test site's /ask chat shows, the blocks it may quote, the destinations its .az file declares, its answer presets. scripts/chat-e2e.mjs builds that site and checks its server/chat/context.json says exactly this.",
   "show": [
     "pricing",
     "faq",
@@ -27,5 +27,11 @@
     "/terms",
     "https://docs.lantern.example/start",
     "mailto:help@lantern.example"
+  ],
+  "presets": [
+    {
+      "name": "contact",
+      "text": "cta \"Talk to us\" /contact\n"
+    }
   ]
 }

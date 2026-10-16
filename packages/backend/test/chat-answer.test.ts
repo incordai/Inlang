@@ -601,3 +601,49 @@ test('§19.14 one-line forms: item "title" "text" reads as the long form, under 
   assert.deepEqual(ANSWER_FORMS.feature.lines, ['feature', '  item "A title, at most 80 characters" "One or two sentences, at most 300 characters"']);
   assert.ok(ANSWER_FORMS.chart.lines.some((l) => /^ {4}points "Nov" 140 "Dec" 180$/.test(l)) && !ANSWER_FORMS.chart.lines.some((l) => /^\s*point /.test(l)));
 });
+
+/* ---- the author's presets (§19.14) ----------------------------------------- */
+
+const PRESETS: AnswerRules = {
+  ...RULES,
+  show: ['cta', 'chart', 'stats', 'dashboard', 'faq'],
+  presets: [
+    { name: 'monthly', text: 'dashboard "This month"\n  stat "Orders" from orders count\n  chart bar "By status" from orders count by status\n' },
+    { name: 'talk', text: 'cta "Talk to us" /contact\n' },
+    { name: 'estimate', text: 'chart line "Expected"\n  points "Nov" 140 "Dec" 180\n' },
+    { name: 'chatty', text: 'Some prose.\ncta "Talk to us" /contact\n' },
+    { name: 'heavy', text: `stats\n${Array.from({ length: 4 }, (_, i) => `  stat "S${i}" from orders count`).join('\n')}\n` },
+  ],
+};
+
+test('§19.14 use: the model\'s one line shows the author\'s whole component, read under the page\'s rules; the record and history are that line', () => {
+  const p = createAnswerParser(PRESETS);
+  const events = [...p.push('This month:\nuse monthly\nuse talk\nuse estimate\n'), ...p.end()];
+  const blocks = events.filter((e) => e.type === 'block').map((e) => (e as { block: unknown }).block);
+  assert.deepEqual(blocks, [
+    { dashboard: { title: 'This month', tiles: [{ stat: { label: 'Orders', from: ['orders', 'count'] } }, { chart: { kind: 'bar', title: 'By status', from: ['orders', 'count', 'by', 'status'] } }] } },
+    { cta: { label: 'Talk to us', to: '/contact' } },
+    { chart: { kind: 'line', title: 'Expected', unit: null, src: 'model', series: [{ name: 'Expected', points: [['Nov', 140], ['Dec', 180]] }] } },
+  ]);
+  assert.deepEqual([...p.dropped], []);
+  assert.equal(p.record, 'This month:\nuse monthly\nuse talk\nuse estimate\n');
+  assert.equal(p.history(), p.record);
+});
+
+test('§19.14 use: a name the chat has not, a preset that is not one clean component, the caps — each dropped by its code; without presets the line is prose', () => {
+  assert.deepEqual(whole('use nothing', PRESETS).dropped, ['no_quote']);
+  assert.deepEqual(whole('use chatty', PRESETS).dropped, ['shape'], 'a preset with prose is not one component');
+  assert.equal(whole('use talk now', PRESETS).text, 'use talk now', 'three words are a sentence');
+  // A use is one component toward the four.
+  const five = whole('use talk\nuse talk\nuse talk\nuse talk\nuse talk', PRESETS);
+  assert.deepEqual([five.blocks.length, five.dropped], [4, ['components']]);
+  // Its `from` requests count in the answer's six: two heavy presets are eight.
+  assert.deepEqual(whole('use heavy\nuse heavy', PRESETS).dropped, ['too_many']);
+  // The page's rules apply: a preset of a word this page does not show is dropped.
+  assert.deepEqual(whole('use talk', { ...PRESETS, show: ['faq'] }).dropped, ['not_shown']);
+  // No presets: `use` is an ordinary word.
+  assert.deepEqual([whole('use talk', RULES).text, whole('use talk', RULES).dropped], ['use talk', []]);
+  // A preset never uses another.
+  const nested = { ...PRESETS, presets: [{ name: 'outer', text: 'use talk\n' }, ...PRESETS.presets!] };
+  assert.deepEqual(whole('use outer', nested).dropped, ['shape']);
+});

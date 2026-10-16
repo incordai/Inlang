@@ -37,7 +37,11 @@ const CONTEXT = JSON.stringify({
   _generated: 'test',
   site: { name: 'League' },
   pages: [{ route: '/', blocks: [{ block: 'hero', title: 'League' }] }],
-  chats: { '/': { allow: 'anyone', limit: 10, prompt: 'prompt-1.txt', show: ['chart', 'table', 'stats'] }, '/about': { allow: 'anyone', limit: 10, prompt: 'prompt-1.txt' } },
+  chats: {
+    '/': {
+      allow: 'anyone', limit: 10, prompt: 'prompt-1.txt', show: ['chart', 'table', 'stats'],
+      presets: [{ name: 'estimate', text: 'chart line "Expected"\n  points "Nov" 140 "Dec" 180\n' }],
+    }, '/about': { allow: 'anyone', limit: 10, prompt: 'prompt-1.txt' } },
   answer: { quotes: [], destinations: ['/'] },
   routes: ['/', '/about'],
 });
@@ -55,6 +59,7 @@ const SCRIPT: FakeScript = (() => {
     { when: 'four', chunks: ['table "A" from tool standings season 2021 count by team\ntable "B" from tool standings season 2022 count by team\ntable "C" from tool standings season 2023 count by team\ntable "D" from tool standings season 2024 count by team\n'] },
     { when: 'invent', chunks: ['chart bar "Weather" from tool weather city "Oslo" count by day\nNo such tool.\n'] },
     { when: 'slow', chunks: ['chart bar "Slow" from tool slowpoke count by driver\nStill here.\n'] },
+    { when: 'preset', chunks: ['My estimate:\nuse estimate\nuse missing\n'] },
     { when: 'site figures', chunks: ['Counted.\nchart bar "Orders" from orders count by status\nDone.\n'] },
     { when: 'season', chunks: ['chart bar "Next" from tool standings season 2025 sum points by driver\n'] },
     { chunks: ['Hello.'] },
@@ -192,6 +197,19 @@ test('§19.14: a component the route drops after the parser passed it is a note 
       messages: [say('site figures'), { role: 'site', text: (done.text as string).replace('(dropped: chart, figures)', '[shown: chart bar "Orders" (site data)]'), tag: done.tag }, say('hello')],
     });
     assert.deepEqual([forged.status, await forged.json()], [400, { error: 'tampered' }]);
+  } finally { await s.close(); }
+});
+
+test('§19.14: use <name> through POST /chat — the author\'s component reaches the page, its line the history; a name the chat lacks is a note', async () => {
+  const s = await start();
+  try {
+    const ev = await events(await client(s.url).post('/chat', { page: '/', messages: [say('a preset please')] }));
+    assert.deepEqual(blocks(ev), [{ chart: { kind: 'line', title: 'Expected', unit: null, src: 'model', series: [{ name: 'Expected', points: [['Nov', 140], ['Dec', 180]] }] } }]);
+    assert.equal(ev.at(-1)!.data.text, 'My estimate:\nuse estimate\n(dropped: use, no_quote)\n');
+    assert.ok(s.log.some((l) => /dropped 1 \(no_quote\)$/.test(l)), s.log.join('\n'));
+    // The page with no presets reads the same line as prose.
+    const about = await events(await client(s.url).post('/chat', { page: '/about', messages: [say('a preset please')] }));
+    assert.deepEqual(blocks(about), []);
   } finally { await s.close(); }
 });
 

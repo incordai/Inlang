@@ -92,6 +92,7 @@ None in this release.
 ## Children
 
 - `ask "question"`: a suggested question (0–4, each 1–80 characters), shown as a button that asks it
+- `answer <name>`: an answer you write once (0–8), one component in the answer forms indented under it; the model shows it whole by writing `use <name>`, and its `from` figures are the server's (below)
 
 ## What the operator sets
 
@@ -149,6 +150,31 @@ any rule — a word the panel does not show, a destination the file does not
 declare, a value past its length, deeper nesting — is dropped and leaves no
 trace. No image, no markup, no style and no link the file did not declare
 can appear in an answer.
+
+## Answers you write once (`answer`)
+
+```
+chat panel
+  show dashboard chart stats
+  answer monthly
+    dashboard "This month"
+      stat "Orders" from orders count
+      chart bar "By status" from orders count by status
+```
+
+The chat's prompt lists each preset by name and its first line
+(`use monthly — dashboard "This month"`), never its body; the model answers
+with the one line `use monthly` — about 3 tokens for the whole dashboard —
+and the server reads the body from `context.json` under the page's own
+rules, so its figures are still the site's (chat-block-spec §19.14). A
+`use` counts as one of an answer's four components. `az check` runs the
+chat server's own parser on each body: a name (AZ1273), each name once
+(AZ1274), exactly one component (AZ1275), one the chat's `show` lists
+(AZ1276), and nothing the parser would drop — a `from` must name a table a
+signed-out visitor can read, and a preset cannot ask the operator's tools
+(AZ1277). The body is never drawn on the page. Its lines count toward the
+file's nesting depth, so under a `chat panel` a dashboard's tiles are one
+line each.
 
 ## Answers from the site's tables (`knows`)
 

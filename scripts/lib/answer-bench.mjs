@@ -39,6 +39,8 @@ export const ANSWER_RULES = {
   quotes: [{ word: 'pricing', route: '/pricing', n: 0 }],
   destinations: ['/', '/contact', '/pricing', '/signup', '/shop'],
   images: ['i1'],
+  /** The author's preset the `use` case shows (chat-block-spec §19.14). */
+  presets: [{ name: 'monthly', text: 'dashboard "This month"\n  stat "Orders" from orders count by placed month\n  chart bar "Orders by status" from orders count by status\n' }],
 };
 
 /** What the server's figures would be for the rich samples' `from` lines — what markdown has to write out. */
@@ -134,6 +136,15 @@ function richCases() {
       ],
     },
   };
+  const preset = {
+    dashboard: {
+      title: 'This month',
+      tiles: [
+        { stat: { label: 'Orders', from: ['orders', 'count', 'by', 'placed', 'month'] } },
+        { chart: { kind: 'bar', title: 'Orders by status', from: ['orders', 'count', 'by', 'status'] } },
+      ],
+    },
+  };
   const signups = {
     chart: {
       kind: 'bar', title: 'Signups by plan', unit: null, src: 'model',
@@ -169,6 +180,13 @@ function richCases() {
         '**Orders per month**', '', mdTable(['Month', 'Orders'], ORDERS_BY_MONTH), '',
         '**Expected next quarter** (my estimate)', '', mdTable(['Month', 'Orders'], expected.points),
       ].join('\n'),
+    },
+    {
+      // The same server figures as the author's preset: the model writes one line, the server reads the body (§19.14).
+      name: 'dashboard (the author\'s preset)', blocks: [preset],
+      az: 'use monthly',
+      json: json([preset]),
+      markdown: ['**This month**', '', 'Orders: 4 (up 3 on September)', '', '**Orders by status**', '', mdTable(['Status', 'Orders'], ORDERS_BY_STATUS)].join('\n'),
     },
     {
       name: 'model chart (2 series of 3)', blocks: [signups],

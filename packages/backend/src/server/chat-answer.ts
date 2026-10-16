@@ -2,7 +2,7 @@
  * @az server chat-answer
  * Purpose: the answer parser: a model's text, read line by line, becomes the closed set of page events — prose, or a component validated whole.
  * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3, §21.1.2, §21.2.3, §21.4.2)
- * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, ASK_FORM, FENCE, QUOTE_WORDS, lineTokens, quoteKey
+ * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, AnswerPreset, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, ASK_FORM, FENCE, QUOTE_WORDS, lineTokens, quoteKey
  * Edit guide: linear in the characters read, no regular expression that can backtrack; a line that does not parse is prose; a component that breaks a rule is dropped whole and never shown as syntax.
  * Tests: packages/backend/test/chat-answer.test.ts, packages/backend/test/chat-attacks.test.ts
  */
@@ -19,6 +19,7 @@
  *     feature                        a short list, composed
  *       item "Fast" "Pages are pre-rendered."
  *     ask "How do I cancel?"         a follow-up question, a button (C5)
+ *     use monthly                    the author's own answer preset (§19.14)
  *
  * An item's text may also be its own line under it (`    text "…"`), the
  * long form; the model is taught the one-line form only (§19.14), and both
@@ -126,7 +127,12 @@ export interface AnswerRules {
   readonly tools?: readonly ChatToolShape[];
   /** AZ_GEOCODER_URL is set: a map's `place` may be looked up (§21.4.2). */
   readonly geocoder?: boolean;
+  /** The chat's answer presets (§19.14): `use <name>` shows one, read here from the author's own text. None when absent. */
+  readonly presets?: readonly AnswerPreset[];
 }
+
+/** An author's answer preset (`answer <name>` in the .az file, §19.14): its name and its one component, as written. */
+export interface AnswerPreset { readonly name: string; readonly text: string }
 
 /** One component, validated: exactly what the page's templates are filled with. */
 export type AnswerBlock =
@@ -200,7 +206,7 @@ export const stripText = (s: string): string => s.replace(STRIPPED, '');
 export const cleanText = (s: string): string => stripText(s).normalize('NFC');
 
 /** The first words a line may start a component with; any other first word makes the line prose at once. */
-const KEYWORDS: readonly string[] = ['text', 'show', 'faq', 'cta', 'feature', 'pricing', 'ask', ...RICH_WORDS];
+const KEYWORDS: readonly string[] = ['text', 'show', 'faq', 'cta', 'feature', 'pricing', 'ask', 'use', ...RICH_WORDS];
 const LONGEST_KEYWORD = Math.max(...KEYWORDS.map((k) => k.length));
 const isKeywordPrefix = (s: string) => KEYWORDS.some((k) => k.startsWith(s));
 
@@ -267,7 +273,7 @@ const quoted = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g,
 /** Whether `ch` (one code point) is a combining mark — it may still join the character before it. */
 const MARK = /\p{M}/u;
 
-type BlockKind = 'faq' | 'feature' | 'cta' | 'show' | 'pricing' | 'ask' | 'rich' | 'dropped';
+type BlockKind = 'faq' | 'feature' | 'cta' | 'show' | 'pricing' | 'ask' | 'use' | 'rich' | 'dropped';
 
 /** The chart kinds a `chart` head line names (chat-block-spec §20.2). */
 const CHART_KINDS: readonly string[] = ['bar', 'line', 'area', 'pie', 'donut'];
@@ -295,6 +301,8 @@ export interface AnswerParser {
   readonly prose: number;
   /** Components dropped so far, by reason. */
   readonly dropped: readonly DropReason[];
+  /** What the answer's rich components ask of the server so far, against the answer's own caps (RICH_LIMITS). */
+  readonly spent: { readonly points: number; readonly queries: number; readonly calls: number; readonly places: number };
   /** The answer whole: prose, and each shown component's canonical lines — what every cap is judged on. */
   readonly record: string;
   /**
@@ -522,6 +530,26 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       emit(word === 'faq' ? { faq: items.map((i) => ({ q: i.title, a: i.text })) } : { feature: items }, `show ${word} ${at}${item !== undefined ? ` ${item}` : ''}\n`, b.word, true);
       return;
     }
+    if (b.kind === 'use') {
+      // The author's own component (§19.14), read as an answer would be, under this page's rules — never another preset.
+      const name = b.head[1].value;
+      const preset = (rules.presets ?? []).find((p) => p.name === name);
+      if (!preset) { drop('no_quote', b.word); return; }
+      const sub = createAnswerParser({ ...rules, presets: [] });
+      const blocks = [...sub.push(preset.text), ...sub.end()].filter((e) => e.type === 'block');
+      if (blocks.length !== 1 || sub.dropped.length > 0 || sub.prose > 0 || sub.ended) { drop(sub.dropped[0] ?? 'shape', b.word); return; }
+      // It counts in the answer's caps as the component it is.
+      const s = sub.spent;
+      if (points + s.points > RICH_LIMITS.answerPoints || queries + s.queries > RICH_LIMITS.answerQueries
+        || calls + s.calls > RICH_LIMITS.answerCalls || places + s.places > RICH_LIMITS.answerPlaces) { drop('too_many', b.word); return; }
+      points += s.points;
+      queries += s.queries;
+      calls += s.calls;
+      places += s.places;
+      // The record and the history hold the one line the model wrote.
+      emit(blocks[0].block, `use ${name}\n`, b.word, true);
+      return;
+    }
     if (b.kind === 'ask') {
       // A follow-up is one line of question: no line break, within the `ask` key's cap; past three, the rest go.
       const q = value(b.head[1].value, ANSWER_LIMITS.ask, true);
@@ -632,6 +660,11 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
         return;
       case 'ask':
         if (rest.length === 1 && str(0)) open = { kind: 'ask', word: 'ask', head: t, items: [], lines: [], broken: null };
+        else asProse();
+        return;
+      case 'use':
+        // Only a chat with presets reads `use <name>`; on any other, the line is the sentence it is.
+        if ((rules.presets ?? []).length > 0 && rest.length === 1 && bare(0)) open = { kind: 'use', word: 'use', head: t, items: [], lines: [], broken: null };
         else asProse();
         return;
       case 'faq':
@@ -773,6 +806,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     get ended() { return ended; },
     get prose() { return prose; },
     get dropped() { return dropped; },
+    get spent() { return { points, queries, calls, places }; },
     get record() { return record; },
     history(lost = new Map()) {
       // What the notes may take: the cap less the prose and the stand-ins that stand (each with its line break).

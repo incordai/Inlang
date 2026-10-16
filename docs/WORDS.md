@@ -164,6 +164,7 @@ A panel or a launcher where visitors ask the site's AI
 | `show` | list |  |  | Components an answer may hold besides text |
 | `knows` | list |  |  | Public tables whose rows ground the answers, up to 3 |
 | `ask` | child |  |  | A suggested question, shown as a button |
+| `answer` | child (max 8) |  |  | An answer written once; the model shows it by name |
 
 ### Where to edit
 

@@ -33,6 +33,7 @@ import { secretLiterals } from './literals.ts';
 import { checkLock } from './data-lock.ts';
 import { ICON_FORMATS, TOUCH_ICON_SIZE, iconFormat, pngSize } from './icon.ts';
 import { quotable } from './secrets.ts';
+import type { AnswerCheck } from './chat.ts';
 
 export type { Diagnostic, Pos, Token } from './lex.ts';
 export type { Arg, Statement, AzFile } from './parse.ts';
@@ -41,6 +42,7 @@ export { COMPONENT_EXT, INJECTION_POINTS, META_DESCRIPTION_MAX } from './link.ts
 export { ICON_FORMATS, ICON_HEAD_BYTES, TOUCH_ICON_SIZE, iconFormat, pngSize, type IconFormat } from './icon.ts';
 export type { Spec, SpecBlock, SpecPage, SpecSite } from './spec.ts';
 export type { SpecFrom } from './spec-block.ts';
+export type { AnswerCheck, AnswerCheckRules } from './chat.ts';
 export { FROM_EMPTY, FROM_SETTINGS, type FromField, type FromManifest } from './from.ts';
 export { serialiseSpec, blocksFor } from './spec.ts';
 export { BACKEND_DATABASES, BACKEND_EMAIL, BACKEND_SETTINGS } from './backend.ts';
@@ -106,6 +108,13 @@ export interface CompileOptions {
    * every strict caller leaves it unset.
    */
   readonly openRoutes?: boolean;
+  /**
+   * The chat server's answer parser (chat-block-spec §19.14), given by the
+   * CLI: each chat's `answer <name>` preset is judged by it at compile time
+   * (AZ1277), so a preset `az check` passes is never dropped at run time.
+   * Absent (the Playground), a preset's structure is still checked.
+   */
+  readonly checkAnswer?: AnswerCheck;
 }
 
 /**
@@ -121,7 +130,7 @@ export function compile(source: string, options: CompileOptions): CompileResult 
   const parsed = parse(lexed.tokens, lexed.diagnostics);
   const refusedLines = new Set(lexed.diagnostics.filter((d) => d.severity === 'error').map((d) => d.pos.line));
   const linked = link(parsed.file, options.manifests, { openRoutes: options.openRoutes === true, refusedLines });
-  const built = buildSpec(parsed.file.version, linked.root, options.manifests);
+  const built = buildSpec(parsed.file.version, linked.root, options.manifests, options.checkAnswer);
 
   // A fatal version error (GRAMMAR §7.3) leaves an empty body; the missing
   // site and pages that follow from it are not the author's mistakes.

@@ -43,7 +43,7 @@ import { AUTH_DIR, BACKEND_URL_FILES, GUARD_DIR } from '../../target-web/src/aut
 import { THREE_DIR } from '../../target-web/src/three.ts';
 import { backendFiles, BASEMAP_SOURCE, SERVER_DIR } from '../../backend/src/emit.ts';
 import { BUNDLED_WORLD } from '../../backend/src/server/env.ts';
-import { CONTEXT_MAX, chatBackend, type BackendChat } from '../../backend/src/chat-context.ts';
+import { CONTEXT_MAX, chatBackend, checkPreset, type BackendChat } from '../../backend/src/chat-context.ts';
 import type { Served } from './serve.ts';
 import { BUNDLED_WORDS, eject, loadWords, wordExamples } from './words.ts';
 import { migrate, GRAMMAR_VERSION } from './migrate.ts';
@@ -297,7 +297,8 @@ export const wordsFor = (options: Omit<BuildOptions, 'outDir'>, code = true) => 
 export function build(options: BuildOptions): BuildOutcome {
   const src = options.sourceText ?? readFileSync(options.source, 'utf8');
   const words = wordsFor(options);
-  const compileOptions = { manifests: words.manifests, lock: lockOption(options.source), readBytes: compileReader(options.source) };
+  // A chat's answer presets are judged by the chat server's own parser (chat-block-spec §19.14, AZ1277).
+  const compileOptions = { manifests: words.manifests, lock: lockOption(options.source), readBytes: compileReader(options.source), checkAnswer: checkPreset };
   const { strict, preview } = options.preview
     ? compilePreview(src, compileOptions)
     : { strict: compile(src, compileOptions), preview: null };
@@ -495,7 +496,7 @@ export function parseDotenv(text: string, out: Record<string, string>): void {
  */
 export function specOf(options: Omit<BuildOptions, 'outDir'>): { json: string | null; report: string } {
   const src = readFileSync(options.source, 'utf8');
-  const r = compile(src, { manifests: wordsFor(options).manifests, lock: lockOption(options.source), readBytes: compileReader(options.source) });
+  const r = compile(src, { manifests: wordsFor(options).manifests, lock: lockOption(options.source), readBytes: compileReader(options.source), checkAnswer: checkPreset });
   const report = r.diagnostics.length ? formatDiagnostics(r.diagnostics, options.source) : '';
   return { json: r.ok && r.spec ? serialiseSpec(r.spec) : null, report };
 }

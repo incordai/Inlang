@@ -2,11 +2,11 @@
  * @az module chat
  * Purpose: the file-wide rules of a `chat` block: a backend that talks to a model, what an answer may show and quote and link to, who may ask.
  * Spec: docs/chat-block-spec.md §3.4, §5.3, §6.2, §8.2, §14 (C1, C2, C2b, C3), §20, §21.3, §21.4
- * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, TOOLS_WORD, CHAT_REFUSED, SHARED_ROUTE, KNOWS_MAX, SHOW_GROUPS, chatOf, chatAnswers, withAnswer, knowsTables,
- *   chatDiagnostics, sharedRouteDiagnostics, expandShow, withShowGroups, ChatAnswers
+ * Exports: CHAT_WORD, CHAT_ANSWER_WORDS, CHAT_RICH_WORDS, TOOLS_WORD, CHAT_REFUSED, SHARED_ROUTE, KNOWS_MAX, SHOW_GROUPS, PRESET_WORD, PRESET_NAME, chatOf, chatAnswers, withAnswer,
+ *   knowsTables, chatDiagnostics, presetDiagnostics, sharedRouteDiagnostics, expandShow, withShowGroups, ChatAnswers, ChatDecl, PresetDecl, AnswerCheck, AnswerCheckRules
  * Edit guide: rules that need the whole file live here; a rule about one chat block alone is a word.json check (AZ2220–AZ2239).
  * Tests: packages/core/test/chat-decl.test.ts, packages/core/test/chat-answer-decl.test.ts, packages/core/test/chat-float-decl.test.ts,
- *   packages/core/test/chat-show-groups.test.ts
+ *   packages/core/test/chat-show-groups.test.ts, packages/core/test/chat-preset-decl.test.ts
  */
 
 /**
@@ -135,10 +135,101 @@ export const CHAT_REFUSED: Readonly<Record<string, string>> = {
  */
 const LINKABLE = /^(?:https:\/\/|mailto:|tel:)[^\s\\]+$/;
 
-/** A chat block as the rules see it: its written props and where it was written. */
+/** A chat block as the rules see it: its written props, its answer presets, and where it was written. */
 export interface ChatDecl {
   readonly props: Readonly<Record<string, Arg>>;
   readonly pos: Pos;
+  readonly presets?: readonly PresetDecl[];
+}
+
+/** The fill an author writes an answer preset with (chat-block-spec §19.14): `answer <name>`, one component indented under it. */
+export const PRESET_WORD = 'answer';
+/** A preset's name: what the model writes after `use`. */
+export const PRESET_NAME = /^[a-z][a-z0-9]{0,31}$/;
+
+/** One `answer <name>` under a chat: its name as written, its body as text (link.ts verbatimText), where it was written. */
+export interface PresetDecl {
+  readonly name: Arg | undefined;
+  readonly body: string;
+  readonly pos: Pos;
+}
+
+/** What a preset's body is judged against: the chat's `show`, the site's pricing quotes, its destinations, image keys and the tables a `from` may name. */
+export interface AnswerCheckRules {
+  readonly show: readonly string[];
+  readonly quotes: readonly { readonly word: string; readonly route: string; readonly n: number }[];
+  readonly destinations: readonly string[];
+  readonly images: readonly string[];
+  readonly tables: readonly string[];
+}
+
+/**
+ * The chat server's own answer parser, run on a preset's body at build
+ * (the CLI gives it; core imports nothing of the server): the reason code
+ * the parser would drop it for, or null when it reads as exactly one
+ * component and nothing else.
+ */
+export type AnswerCheck = (rules: AnswerCheckRules, text: string) => string | null;
+
+/** The words a preset's component may start with: an answer word, or `show` quoting one. */
+const presetHead = (body: string): { word: string; quoted: boolean } => {
+  const [first = '', second = ''] = (body.split('\n')[0] ?? '').split(' ');
+  return first === 'show' ? { word: second, quoted: true } : { word: first, quoted: false };
+};
+
+/**
+ * A chat's answer presets (chat-block-spec §19.14): AZ1273 a preset with no
+ * name, or one that is not lowercase letters and digits; AZ1274 a name
+ * written twice; AZ1275 a body that is not exactly one component (none
+ * indented, or two at its margin); AZ1276 a component the chat does not
+ * show (or that is not one — `ask`, `text`, `use`); AZ1277 a body the
+ * chat server's answer parser drops, judged by `check` with the chat's own
+ * rules, so a preset that passes `az check` is never dropped at run time.
+ */
+export function presetDiagnostics(presets: readonly PresetDecl[], show: readonly string[], rules?: { check: AnswerCheck; answers: ChatAnswers }): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const err = (code: string, message: string, pos: Pos) => out.push({ code, message, pos, severity: 'error' });
+  const seen = new Set<string>();
+  for (const p of presets) {
+    const name = p.name?.value ?? '';
+    if (p.name === undefined || p.name.kind !== 'word' || !PRESET_NAME.test(name)) {
+      err('AZ1273', `${PRESET_WORD}: needs a name of lowercase letters and digits, at most 32 — write: ${PRESET_WORD} monthly`, p.name?.pos ?? p.pos);
+      continue;
+    }
+    if (seen.has(name)) {
+      err('AZ1274', `${PRESET_WORD}: '${name}' is written twice in this chat — keep one, or rename it`, p.name.pos);
+      continue;
+    }
+    seen.add(name);
+    const tops = p.body.split('\n').filter((l) => l !== '' && !l.startsWith(' ')).length;
+    if (tops !== 1) {
+      err('AZ1275', tops === 0
+        ? `${PRESET_WORD} ${name}: holds no component — indent one under it, as an answer writes it`
+        : `${PRESET_WORD} ${name}: holds ${tops} components — a preset is one; write each as its own ${PRESET_WORD}`, p.pos);
+      continue;
+    }
+    const head = presetHead(p.body);
+    if (!CHAT_ANSWER_WORDS.includes(head.word) || !show.includes(head.word)) {
+      err('AZ1276', CHAT_ANSWER_WORDS.includes(head.word)
+        ? `${PRESET_WORD} ${name}: its ${head.word} is not in this chat's show — add ${head.word} to show, or change the ${PRESET_WORD}`
+        : `${PRESET_WORD} ${name}: '${head.word}' is not a component an answer holds — write one of this chat's show: ${show.join(', ') || 'none'}`, p.pos);
+      continue;
+    }
+    if (rules) {
+      const why = rules.check({
+        show,
+        quotes: rules.answers.quotes.map((q) => ({ word: QUOTED_WORD, route: q.route, n: q.n })),
+        destinations: rules.answers.destinations,
+        images: rules.answers.images.map((i) => i.key),
+        tables: rules.answers.tables.map((t) => t.name),
+      }, p.body);
+      const fix = why === 'figures' ? 'its from names no table a signed-out visitor can read'
+        : why === 'tool' ? 'from tool asks the operator\'s tools, which a preset cannot'
+        : 'write it in the forms the chat\'s prompt teaches (az prompt)';
+      if (why !== null) err('AZ1277', `${PRESET_WORD} ${name}: the chat would drop its ${head.word} (${why}) — ${fix}`, p.pos);
+    }
+  }
+  return out;
 }
 
 /**
@@ -312,6 +403,7 @@ export function withAnswer(block: SpecBlock, answers: ChatAnswers): SpecBlock {
  */
 export function chatDiagnostics(
   chats: readonly ChatDecl[], model: Arg | undefined, quotable = 0, tables: readonly SpecTable[] = [],
+  presets?: { check: AnswerCheck; answers: ChatAnswers },
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const err = (code: string, message: string, pos: Pos) => out.push({ code, message, pos, severity: 'error' });
@@ -344,6 +436,7 @@ export function chatDiagnostics(
     }
     const knows = c.props.knows;
     if (knows) out.push(...knowsDiagnostics(knows, tables));
+    if (c.presets && c.presets.length > 0) out.push(...presetDiagnostics(c.presets, showOf(Object.fromEntries(Object.entries(c.props).map(([k, a]) => [k, a.value]))), presets));
   }
   // `from tool …` is always a request to the operator's data tools (§21.2.3): a table named `tool` that an answer
   // could take figures from would be read the other way, so it is refused where a chat shows a component with `from`.

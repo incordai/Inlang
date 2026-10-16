@@ -60,7 +60,7 @@ import type { ServerResponse } from 'node:http';
 import type { ChatRequest, ChatRoutes } from './app.ts';
 import type { ChatAdapter } from './chat-adapters.ts';
 import type { KnowsRun } from './chat-knows.ts';
-import { ANSWER_WORDS, createAnswerParser, QUOTE_WORDS, type AnswerBlock, type AnswerEvent, type AnswerQuote, type AnswerRules, type AnswerWord, type DropReason } from './chat-answer.ts';
+import { ANSWER_LIMITS, ANSWER_WORDS, createAnswerParser, QUOTE_WORDS, type AnswerBlock, type AnswerEvent, type AnswerPreset, type AnswerQuote, type AnswerRules, type AnswerWord, type DropReason } from './chat-answer.ts';
 import { clampText, RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
 import { toolsText, type Tools } from './chat-tools.ts';
 import type { Geocoder } from './chat-geocode.ts';
@@ -91,7 +91,11 @@ export const CHAT_TIMING: ChatTiming = { firstMs: CHAT_FIRST_TOKEN_MS, betweenMs
 /** server/chat/context.json, as the route reads it. */
 export interface ChatContext {
   /** Each page with a chat: who may send, how many messages a conversation holds, what an answer may show, and its chat's prompt file. */
-  readonly chats: Readonly<Record<string, { readonly allow: 'signedin' | 'anyone'; readonly limit: number; readonly show: readonly AnswerWord[]; readonly knows: readonly string[]; readonly prompt: string }>>;
+  readonly chats: Readonly<Record<string, {
+    readonly allow: 'signedin' | 'anyone'; readonly limit: number; readonly show: readonly AnswerWord[]; readonly knows: readonly string[]; readonly prompt: string;
+    /** The chat's answer presets (§19.14), each name and body as the author wrote them; none when absent. */
+    readonly presets: readonly AnswerPreset[];
+  }>>;
   /** The blocks answers may quote, and every destination a cta may point at (chat-block-spec §5.3, §6.2). */
   readonly quotes: readonly AnswerQuote[];
   readonly destinations: readonly string[];
@@ -114,6 +118,23 @@ export interface ContextTable {
 const NAME = /^[a-z][a-z0-9]*$/;
 /** A chat's prompt file in server/chat/, as the build names it (chat-context.ts promptFileName). */
 const PROMPT_FILE = /^prompt-[1-9][0-9]{0,3}\.txt$/;
+/** A preset's name (core chat.ts PRESET_NAME), and the most one chat holds (the `answer` slot's max). */
+const PRESET_NAME = /^[a-z][a-z0-9]{0,31}$/;
+const PRESETS_MAX = 8;
+
+/** context.json's `chats[…].presets`, or null when malformed: names unique, each body one answer's record at most. */
+function contextPresets(v: unknown): AnswerPreset[] | null {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length > PRESETS_MAX) return null;
+  const out: AnswerPreset[] = [];
+  for (const p of v) {
+    const x = p as { name?: unknown; text?: unknown } | null;
+    if (!x || typeof x.name !== 'string' || !PRESET_NAME.test(x.name) || out.some((o) => o.name === x.name)) return null;
+    if (typeof x.text !== 'string' || x.text === '' || x.text.length > ANSWER_LIMITS.record) return null;
+    out.push({ name: x.name, text: x.text });
+  }
+  return out;
+}
 
 /** context.json's `answer.tables`, or null when malformed. */
 function contextTables(v: unknown): ContextTable[] | null {
@@ -198,9 +219,9 @@ export function parseChatContext(text: string): ChatContext | string {
   if (!r || typeof r.chats !== 'object' || r.chats === null) return 'has no chats';
   const knows = contextTables(r.knows);
   if (knows === null) return 'knows is not a list of { name, fields }';
-  const chats: Record<string, { allow: 'signedin' | 'anyone'; limit: number; show: AnswerWord[]; knows: string[]; prompt: string }> = {};
+  const chats: Record<string, { allow: 'signedin' | 'anyone'; limit: number; show: AnswerWord[]; knows: string[]; prompt: string; presets: AnswerPreset[] }> = {};
   for (const [route, c] of Object.entries(r.chats as Record<string, unknown>)) {
-    const x = c as { allow?: unknown; limit?: unknown; show?: unknown; knows?: unknown; prompt?: unknown } | null;
+    const x = c as { allow?: unknown; limit?: unknown; show?: unknown; knows?: unknown; prompt?: unknown; presets?: unknown } | null;
     if (!x || (x.allow !== 'signedin' && x.allow !== 'anyone') || !Number.isInteger(x.limit) || (x.limit as number) < 1 || (x.limit as number) > 50) {
       return `chats['${route}'] is not { allow, limit }`;
     }
@@ -213,7 +234,9 @@ export function parseChatContext(text: string): ChatContext | string {
       return `chats['${route}'].knows is not a list of the tables in knows`;
     }
     if (typeof x.prompt !== 'string' || !PROMPT_FILE.test(x.prompt)) return `chats['${route}'].prompt is not a prompt file (prompt-<n>.txt)`;
-    chats[route] = { allow: x.allow, limit: x.limit as number, show: show as AnswerWord[], knows: known as string[], prompt: x.prompt };
+    const presets = contextPresets(x.presets);
+    if (presets === null) return `chats['${route}'].presets is not a list of { name, text }`;
+    chats[route] = { allow: x.allow, limit: x.limit as number, show: show as AnswerWord[], knows: known as string[], prompt: x.prompt, presets };
   }
   // Present when a chat may show components; without it answers are prose only.
   const answer = (r.answer ?? { quotes: [], destinations: [] }) as { quotes?: unknown; destinations?: unknown; tables?: unknown; images?: unknown };
@@ -251,8 +274,10 @@ const usesTools = (show: readonly AnswerWord[]) => show.some((w) => TOOL_WORDS.i
  */
 export function rulesFor(context: ChatContext, page: string, tools: readonly ChatToolShape[] = [], geocoder = false): AnswerRules {
   const show = Object.hasOwn(context.chats, page) ? context.chats[page].show : [];
+  const presets = Object.hasOwn(context.chats, page) ? context.chats[page].presets : [];
   return {
     show, quotes: context.quotes, destinations: context.destinations, images: context.images.map((i) => i.key),
+    ...(presets.length > 0 ? { presets } : {}),
     ...(usesTools(show) && tools.length > 0 ? { tools } : {}),
     ...(geocoder && show.includes('map') ? { geocoder: true } : {}),
   };

@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compile, type Spec, type SpecBlock } from '../../core/src/index.ts';
-import { chatBackend, CONTEXT_MAX, type BackendChat } from '../src/chat-context.ts';
+import { chatBackend, checkPreset, CONTEXT_MAX, type BackendChat } from '../src/chat-context.ts';
 import { backendFiles, envExample } from '../src/emit.ts';
 import { KEYS, loadConfig } from '../src/server/env.ts';
 import { parseChatContext, ROWS_HEADING, rulesFor, systemText } from '../src/server/chat.ts';
@@ -350,6 +350,53 @@ page /login
   assert.match(String(parseChatContext(JSON.stringify(forged))), /^answer\.quotes is not a list/);
   // CONTROL: a chat that shows no list quotes none; pricing alone is as before.
   assert.ok(!JSON.stringify(JSON.parse(chatBackend(compile(SHOW_SITE.replace('    show  pricing faq cta', '    show  pricing cta'), { manifests }).spec!)!.context).answer.quotes).includes('"faq"'));
+});
+
+test('§19.14 presets: each chat\'s presets reach context.json and its own prompt, by name and first line; the server reads them back, and refuses a malformed one', () => {
+  const source = SHOW_SITE.replace('    show  pricing faq cta\n    allow anyone\n', `    show  pricing faq cta stats
+    allow anyone
+    answer talk
+      cta "Talk to us" /
+    answer numbers
+      stats
+        stat "Pairs" 2
+`);
+  const r = compile(source, { manifests, checkAnswer: checkPreset });
+  assert.ok(r.ok && r.spec, JSON.stringify(r.diagnostics));
+  const a = chatBackend(r.spec)!;
+  const raw = JSON.parse(a.context);
+  assert.deepEqual(raw.chats['/'].presets, [{ name: 'talk', text: 'cta "Talk to us" /\n' }, { name: 'numbers', text: 'stats\n  stat "Pairs" 2\n' }]);
+  assert.equal(raw.chats['/quiet'].presets, undefined, 'a chat without presets has none');
+  const prompt = promptOf(a, '/');
+  assert.match(prompt, /\nPresets:\n- The site's own components: when one answers, write its line alone instead of composing one:\nuse talk — cta "Talk to us" \/\nuse numbers — stats\n$/);
+  assert.ok(!prompt.includes('stat "Pairs" 2'), 'a preset\'s body is never in the prompt');
+  assert.doesNotMatch(promptOf(a, '/quiet'), /Presets:/);
+  const ctx = parseChatContext(a.context);
+  assert.ok(typeof ctx === 'object', String(ctx));
+  assert.deepEqual(rulesFor(ctx, '/').presets, raw.chats['/'].presets);
+  assert.equal(rulesFor(ctx, '/quiet').presets, undefined);
+  for (const [bad, why] of [
+    [[{ name: 'Talk', text: 'cta "x" /\n' }], 'a name not lowercase'],
+    [[{ name: 'talk', text: '' }], 'an empty body'],
+    [[{ name: 'talk', text: 'cta "x" /\n' }, { name: 'talk', text: 'cta "y" /\n' }], 'a name twice'],
+    [Array.from({ length: 9 }, (_, i) => ({ name: `p${i}`, text: 'cta "x" /\n' })), 'nine'],
+    [[{ name: 'talk', text: 'x'.repeat(12_001) }], 'past the record cap'],
+  ] as const) {
+    const forged = JSON.parse(a.context);
+    forged.chats['/'].presets = bad;
+    assert.equal(parseChatContext(JSON.stringify(forged)), "chats['/'].presets is not a list of { name, text }", why);
+  }
+});
+
+test('§19.14 checkPreset: the chat server\'s parser on a preset — one component, no prose, a from that names a public table, no tool', () => {
+  const rules = { show: ['cta', 'chart', 'stats', 'dashboard'], quotes: [], destinations: ['/'], images: [], tables: ['orders'] };
+  assert.equal(checkPreset(rules, 'dashboard "M"\n  stat "Orders" from orders count\n  chart bar "By" from orders count by status\n'), null);
+  assert.equal(checkPreset(rules, 'chart bar "By" from secrets count by status\n'), 'figures');
+  assert.equal(checkPreset(rules, 'chart bar "By" from tool standings season 2026 sum points by driver\n'), 'tool');
+  assert.equal(checkPreset(rules, 'cta "Go" /elsewhere\n'), 'destination');
+  assert.equal(checkPreset(rules, 'Hello.\ncta "Go" /\n'), 'shape');
+  assert.equal(checkPreset(rules, 'chart line "X"\n  points "a" 1\n'), 'empty');
+  assert.equal(checkPreset(rules, 'cta "Go" /\n'), null, 'CONTROL');
 });
 
 test('C7 (§21.3): a chat that shows explore is taught its form — data, controls, views, no formula — and its page is told the tables', () => {

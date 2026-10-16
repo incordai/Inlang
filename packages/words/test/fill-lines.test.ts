@@ -40,16 +40,18 @@ const manifests = new Map<string, Manifest>(dirs.map((d) => {
 
 interface SlotDef {
   readonly line?: unknown;
+  /** Its indented lines are kept as written for the chat server (chat's `answer`, chat-block-spec §19.14): never drawn. */
+  readonly verbatim?: boolean;
   readonly props?: Record<string, { type: string }>;
   readonly slots?: Record<string, SlotDef>;
 }
 
 /** Every fill a manifest declares: its path, its line as written, and the props a flag may name. */
-function fills(m: Manifest): { path: string; line: unknown; props: Record<string, { type: string }> }[] {
-  const out: { path: string; line: unknown; props: Record<string, { type: string }> }[] = [];
+function fills(m: Manifest): { path: string; line: unknown; props: Record<string, { type: string }>; verbatim?: true }[] {
+  const out: { path: string; line: unknown; props: Record<string, { type: string }>; verbatim?: true }[] = [];
   const walk = (slots: Record<string, SlotDef> | undefined, prefix: string) => {
     for (const [name, def] of Object.entries(slots ?? {})) {
-      out.push({ path: `${prefix}${name}`, line: def.line, props: def.props ?? {} });
+      out.push({ path: `${prefix}${name}`, line: def.line, props: def.props ?? {}, ...(def.verbatim === true ? { verbatim: true as const } : {}) });
       walk(def.slots, `${prefix}${name}.`);
     }
   };
@@ -77,7 +79,8 @@ test('every fill declares its line: roles in order, a flag naming a flag prop of
     for (const f of fills(m)) {
       if (!Array.isArray(f.line) || f.line.length === 0) problems.push(`${m.name}.${f.path}: no line`);
       else if (!f.line.every((v) => validValue(v, f.props))) problems.push(`${m.name}.${f.path}: ${JSON.stringify(f.line)}`);
-      else if (f.line[0] !== 'label' && f.line[0] !== 'file') problems.push(`${m.name}.${f.path}: starts with ${JSON.stringify(f.line[0])}`);
+      // A verbatim fill is named, not labelled: its line is its name alone (`answer monthly`).
+      else if (f.verbatim ? JSON.stringify(f.line) !== '["value"]' : f.line[0] !== 'label' && f.line[0] !== 'file') problems.push(`${m.name}.${f.path}: starts with ${JSON.stringify(f.line[0])}`);
     }
   }
   assert.deepEqual(problems, []);
@@ -234,6 +237,13 @@ test('no emitter reads a value past its fill\'s declared line', () => {
       const add = (args: SpecBlock['args']): string => JSON.stringify(emitter.emit(
         replace(block, parent, { ...parent, children: [...parent.children, { ...fill, args }] }), context()));
       seen.add(`${m.name}.${f.path}`);
+      // A verbatim fill is the chat server's, never the page's: neither its name nor its body is drawn.
+      if (f.verbatim) {
+        const body = { ...fill, props: { body: 'cta "Zq preset body" /\n' } };
+        const drawn: string = JSON.stringify(emitter.emit(replace(block, parent, { ...parent, children: [...parent.children, body] }), context()));
+        assert.ok(!drawn.includes(fill.args[0].value) && !drawn.includes('Zq preset body'), `${m.name}.${f.path}: a verbatim fill reaches the page`);
+        continue;
+      }
       // Rendered at all, or "reads nothing past its line" would hold of a fill nothing draws.
       assert.ok(add(fill.args).includes(fill.args[0].value), `${m.name}.${f.path}: the added fill is drawn`);
       if (add(fill.args) !== add([...fill.args, EXTRA])) read.push(`${m.name}.${f.path}`);
