@@ -51,7 +51,7 @@ jobs:
   build:
     name: end-to-end build and render
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,12 +61,33 @@ jobs:
           node-version: 22
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      # verify:build opens built pages in all three engines (policy and hash checks).
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm verify:build
 
-  visual:
-    name: 12-point word gate and thumbnails
+  gate:
+    name: 12-point word gate
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # About half an hour on a laptop; a hosted runner has fewer, slower cores.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm gate --self-test
+      # All 12 gate items for every word; runs the browser checks itself.
+      - run: pnpm gate
+
+  visual:
+    name: visual, auth, dev, 3D, thumbnails and palette
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,9 +101,6 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm lint
       - run: pnpm test:visual --self-test
-      - run: pnpm gate --self-test
-      # All 12 gate items for every word; runs the browser checks itself.
-      - run: pnpm gate
       # M4: auth forms, <Protected> and the reset flow against a local mock
       # provider (the real-provider exit criterion needs an account; open).
       - run: pnpm test:auth
@@ -131,11 +149,13 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
       # Three engines over local https (a certificate made at test time), the
       # generated server on the scripted `fake` model (chat-block-spec §12).
+      # Under xvfb-run: headless Firefox on Linux has no WebGL, so with a display
+      # it runs headed and its maps are drawn, not only listed.
       - name: pnpm test:chat
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
-          pnpm test:chat 2>&1 | tee "$RUNNER_TEMP/logs/test-chat.log"
+          xvfb-run -a pnpm test:chat 2>&1 | tee "$RUNNER_TEMP/logs/test-chat.log"
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

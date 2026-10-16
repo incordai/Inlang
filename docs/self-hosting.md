@@ -80,6 +80,13 @@ Migrations run on every start and are safe to repeat.
 
 - **Node 22** on the server; in `out/server/`, `npm install` (only the driver
   your setup needs) then `npm start`.
+- **On Linux with glibc** (Debian, Ubuntu, Red Hat) and image fields or chat
+  images: glibc's default allocator holds on to memory freed by the image
+  library, so a busy server's memory creeps up. The image library's own
+  install guide recommends an alternative allocator such as jemalloc
+  (preload it, e.g. `LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2`).
+  If you cannot, start the server with `MALLOC_ARENA_MAX=2`, which limits the
+  same effect. Alpine (musl) and macOS are not affected.
 - **Behind TLS**, on the **same site** as the pages (`api.example.org` beside
   `www.example.org`): the session cookie is then `SameSite=Lax`. A different
   site needs `AZ_COOKIE_SAMESITE=none`, which some browsers restrict.

@@ -206,8 +206,12 @@ async function waitForQuiet(quiet, progress) {
 /** A headless Chromium with a DevTools port and its own profile; resolves `{ child, port, profile }`. */
 async function launch(children) {
   const profile = mkdtempSync(join(tmpdir(), 'az-lh-profile-'));
+  // --no-sandbox matches the test framework's own default launch (its
+  // chromiumSandbox option is off): Ubuntu 24.04 blocks the unprivileged user
+  // namespaces Chromium's sandbox needs, so without it the browser dies at start
+  // on CI. It only ever opens this run's own locally built pages.
   const child = spawn(chromium.executablePath(), [
-    '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
+    '--headless=new', '--no-sandbox', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
     '--no-first-run', '--no-default-browser-check', 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
   children.add(child);

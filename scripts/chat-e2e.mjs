@@ -2115,15 +2115,18 @@ async function c7Flow(b, name, origins) {
     const toggled = await exploreUntil(page, 1, (s) => s?.views[1].stat[0] === '$99.00', `${name} toggle`);
     check(`${name}: ArrowRight moves the toggle to its next option, and the stat follows`,
       JSON.stringify(toggled?.radios) === JSON.stringify([['Team', false], ['Business', true]]), JSON.stringify(toggled?.radios));
+    // A native date input: how its keys step (by day or month, wrapping within min..max or not) is
+    // each engine's own and differs by platform and locale, so this checks the explore's part — the
+    // control is a date input the keyboard reaches, and a date chosen in it filters at once.
     const date = exploreAt(page, 1).locator('input[type="date"]');
-    await date.focus();
-    await page.keyboard.press('ArrowDown');
+    // Forwards, or back if the engine's Tab does not wrap past the page's end.
+    const dateReached = (await tabTo(page, date)) || (await tabTo(page, date, 60, 'Shift+Tab'));
+    await date.fill('2024-02-28');
     const day = await date.inputValue();
     const expected = [['Solo', '2024-02-28'], ['Team', '2024-02-29'], ['Business', '2024-03-01']].filter(([, d]) => d <= day).map(([p]) => p);
-    const dated = await exploreUntil(page, 1, (s) => (expected.length > 0 ? JSON.stringify(s?.views[0].rows) === JSON.stringify(expected) : s?.views[0].note === 'No rows match.'), `${name} date`);
-    // From the leap day, a day earlier keeps only Solo; a month earlier (the engine's first part) keeps none.
-    check(`${name}: ArrowDown in the date input moves its day back, and the table keeps only the rows launched by then`,
-      (day === '2024-02-28' || day === '2024-01-29') && expected.length < 2, `${day} ${JSON.stringify(dated?.views[0])}`);
+    const dated = await exploreUntil(page, 1, (s) => JSON.stringify(s?.views[0].rows) === JSON.stringify(expected), `${name} date`);
+    check(`${name}: the date control is a native date input the keyboard reaches; a day earlier than the leap day keeps only the rows launched by then`,
+      dateReached && day === '2024-02-28' && JSON.stringify(dated?.views[0].rows) === JSON.stringify(['Solo']), `${dateReached} ${day} ${JSON.stringify(dated?.views[0])}`);
     const budget = exploreAt(page, 1).locator('input[type="number"]');
     await budget.focus();
     await budget.fill('');
@@ -2389,7 +2392,10 @@ async function c8Flow(b, name, origins) {
     const zoomOut = () => page.evaluate(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-out"]')?.getAttribute('aria-disabled'));
     check(`${name}: the map opens fitted to its places at its deepest zoom: Zoom in is at its limit, Zoom out is not`,
       (await zoomIn()) === 'true' && (await zoomOut()) === 'false', JSON.stringify([await zoomIn(), await zoomOut()]));
-    // The map sits above the question input, which holds focus after asking: Shift+Tab goes back to it (Firefox's Tab does not wrap past the page's end).
+    // The map sits above the question input: from the input, Shift+Tab goes back to it (Firefox's Tab does not
+    // wrap past the page's end). Focus is put back in the input first — the popup's button was just clicked, and
+    // in one engine Shift+Tab from that button moves nowhere.
+    await panel(page).locator('[data-az-chat-input]').focus();
     const reached = await tabTo(page, stage, 60, 'Shift+Tab');
     await page.keyboard.press('-');
     const out = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'false', null, { timeout: STATE_MS }).then(() => true, () => false);
@@ -2738,6 +2744,13 @@ const FLOWS = [
 ];
 /** Chromium draws WebGL in software, the same on every machine (test-3d.mjs): a map needs WebGL2. */
 const GL_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+/**
+ * Firefox has no WebGL at all when headless on Linux, so there its maps would only
+ * ever be lists. Given a display (CI runs this suite under xvfb-run), it runs headed
+ * and draws in software like the other two engines.
+ */
+const FIREFOX_HEADED = process.platform === 'linux' && Boolean(process.env.DISPLAY);
+const launchOptions = (name) => (name === 'chromium' ? { args: GL_ARGS } : name === 'firefox' && FIREFOX_HEADED ? { headless: false } : {});
 /** Where an engine's flows stopped: the flow, and the last check that passed before it. */
 const stopped = {};
 /** The engines whose moderation flow ran to its end: the server's block counts are judged on them. */
@@ -2748,7 +2761,7 @@ const waitedFor = (message) => message.split('\n').find((l) => l.includes('waiti
 const errors = [];
 try {
   for (const [name, engine] of [['chromium', chromium], ['firefox', firefox], ['webkit', webkit]]) {
-    const b = await engine.launch(name === 'chromium' ? { args: GL_ARGS } : {});
+    const b = await engine.launch(launchOptions(name));
     let step = `${name} policy control`;
     try {
       const caught = await violationControl(b, `${host.url}/az-policy-control/`, CONTROL_MS);

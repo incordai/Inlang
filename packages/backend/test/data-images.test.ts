@@ -316,8 +316,12 @@ test('the queue: one image at a time, a bounded wait, and 429 beyond it', async 
 
 test('memory stays bounded with many large uploads at once — measured in a fresh process, with a CONTROL', () => {
   const run = (mode: 'queue' | 'unbounded') => {
+    // MALLOC_ARENA_MAX (a glibc tunable; no effect elsewhere) stops glibc's
+    // per-thread arenas from holding freed image memory, which on Linux inflates
+    // both runs' RSS and hides what the queue does. Production servers are told
+    // the same in self-hosting §6.
     const r = spawnSync(process.execPath, ['--experimental-strip-types', fileURLToPath(new URL('./image-memory.child.ts', import.meta.url)),
-      mode, String(IMAGE_LIMITS.queueMax + 1), '6000', '4000'], { encoding: 'utf8' });
+      mode, String(IMAGE_LIMITS.queueMax + 1), '6000', '4000'], { encoding: 'utf8', env: { ...process.env, MALLOC_ARENA_MAX: '2' } });
     assert.equal(r.status, 0, r.stderr);
     return JSON.parse(r.stdout) as { baseMb: number; peakMb: number; ms: number };
   };
