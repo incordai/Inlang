@@ -490,7 +490,7 @@ export function specOf(options: Omit<BuildOptions, 'outDir'>): { json: string | 
 
 /* ------------------------------------------------------------------ */
 
-const USAGE = `az — words to a website
+const USAGE = `az — Incord Intelligent Language (inlang): words to a website
 
   az build <file.az> [--out dir]   compile to a runnable project
   az dev   <file.az> [--port N] [--open] [--no-serve]

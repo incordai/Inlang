@@ -36,7 +36,7 @@ const GRAMMAR_URI = 'az://grammar';
  * authoring order — colour, then the frame, then sections (PRD §6.1a) — and
  * the trust rules. Every client pays for it on every session, so it is short.
  */
-export const INSTRUCTIONS = 'Tools for the az website compiler. Write a site in this order. '
+export const INSTRUCTIONS = 'Tools for Incord Intelligent Language (inlang), the website compiler run as az. Write a site in this order. '
   + '1) Colour first: theme, accent (one hue, or an allowed pair for a gradient) and pattern, chosen '
   + 'from the user\'s brand or mood. Call az_palette or az_explain "theme" / "theme accent" for the '
   + 'choices, show the user 2-3 options with their exact .az lines, and confirm one. Colours come only '

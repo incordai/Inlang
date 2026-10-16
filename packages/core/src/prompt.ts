@@ -562,7 +562,7 @@ function render(input: PromptInput, words: readonly Manifest[], drop: ReadonlySe
   const lines = [
     '# Writing .az files',
     '',
-    'A `.az` file describes a whole website in words; the az compiler builds it. This is the complete',
+    'A `.az` file describes a whole website in words; the Incord Intelligent Language (inlang) compiler, run as `az`, builds it. This is the complete',
     "vocabulary, generated from the compiler's own tables: write only what is listed here.",
     '',
     ...orderSection(),

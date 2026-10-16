@@ -1,4 +1,7 @@
-# Contributing to az
+# Contributing to Incord Intelligent Language (inlang)
+
+The language's command is `az`, and that name stays in code, file names and
+error codes (`AZ1234`).
 
 Read [docs/AGENTS.md](docs/AGENTS.md) first: the reading order, the seven
 non-negotiable rules and the stop conditions. The binding code rules are

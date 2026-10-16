@@ -1,6 +1,7 @@
-# Using az — the full guide
+# Using inlang — the full guide
 
-The root [README](../README.md) says what az is and gets a site running.
+The root [README](../README.md) says what Incord Intelligent Language
+(inlang) is and gets a site running. Its command is `az`.
 This page holds the detail behind it: installing, the authoring order,
 colour, the optional backend, the security model and working with an AI
 assistant. Every word, variant and key is in [WORDS.md](WORDS.md); the full

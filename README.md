@@ -1,16 +1,20 @@
-# az
+# Incord Intelligent Language (inlang)
 
-**Describe a website in short words; az compiles them into a pre-rendered,
-locked-down site — and the words are designed so an AI assistant can write
-them for you.**
+**Describe a website in short words; inlang compiles them into a
+pre-rendered, locked-down site — and the words are designed so an AI
+assistant can write them for you.**
 
-az is for developers, small studios and agencies shipping client sites, and
-founders building their own product site — very often with an AI assistant
-doing the typing. When an assistant writes a site's code directly, every run
-comes out different and nothing checks the result. az gives the assistant a
-small vocabulary instead (`hero center`, `faq list`, `pricing cards`), checks
-every line of it, and compiles it into tested production code. The compiler
-itself has no AI in it and never calls the network.
+*By [Incord AI](https://github.com/incordai). The command is `az` and site
+files end in `.az`.*
+
+inlang is for developers, small studios and agencies shipping client sites,
+and founders building their own product site — very often with an AI
+assistant doing the typing. When an assistant writes a site's code directly,
+every run comes out different and nothing checks the result. inlang gives the
+assistant a small vocabulary instead (`hero center`, `faq list`,
+`pricing cards`), checks every line of it, and compiles it into tested
+production code. The compiler itself has no AI in it and never calls the
+network.
 
 ## What you get
 

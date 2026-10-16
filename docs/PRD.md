@@ -1,4 +1,7 @@
-# AZ Web — Product Requirements Document
+# Incord Intelligent Language (inlang) — Product Requirements Document
+
+*A product of Incord AI. Throughout this document "az" is the language's
+command and file format (`az build`, `site.az`); the product is inlang.*
 
 **Version** 0.2 (draft) · **Status** pre-build · **Owner** you
 

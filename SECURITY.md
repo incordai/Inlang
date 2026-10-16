@@ -1,7 +1,7 @@
 # Security policy
 
-az compiles a `.az` file into a website and, optionally, a backend (accounts,
-data tables, chat). Security problems in the compiler, in the sites and servers
+Incord Intelligent Language (inlang), by Incord AI, compiles a `.az` file into
+a website and, optionally, a backend (accounts, data tables, chat). Security problems in the compiler, in the sites and servers
 it generates, or in the CLI tools are taken seriously.
 
 ## Reporting a vulnerability
