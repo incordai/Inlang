@@ -506,6 +506,13 @@ deployment needs it, and none has. Open: a curl-probe of a real candidate
 model before one is pinned; the `messages` shape when a deployment needs it;
 §14's Later row (transcripts, output moderation, the visitor's own data),
 each its own spec section first.
+C5–C8 (specified 2026-10-16 on the owner's approval, chat-block-spec §21,
+§17 Q16–Q19): C5 follow-up questions as buttons, a markdown subset in prose
+read in the page into fixed elements, and the conversation kept in the
+visitor's browser with Clear history; C6 operator data tools declared in
+`.env`, results to the page only; C7 interactive controls over a closed set
+of computations; C8 maps (library set and backend-served tiles decided 2026-10-16,
+Q19a–Q19h). Open: C5 (next), C6, C7, C8.
 
 **M5 — not started.**
 

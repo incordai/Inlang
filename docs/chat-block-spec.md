@@ -5,7 +5,9 @@ recommendation** (§17) · **C0, C1, C2 and C3 built 2026-10-15, C4 built 2026-1
 chat is complete** (§19: what was built, and where it differs; C3 is §19.7, C4
 §19.8) · **C2b specified and built
 2026-10-15** (§20: charts, tables, stats, image cards, dashboards and share
-links in answers, on the owner's Q13–Q15; §19.6: as built) · Extends backend-spec.md,
+links in answers, on the owner's Q13–Q15; §19.6: as built) · **C5–C8 specified 2026-10-16** (§21:
+follow-ups, formatting and history, operator tools, interactive controls, maps, on
+the owner's Q16–Q19) · Extends backend-spec.md,
 data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12)
 
 The owner's goal: **a visitor on an az site asks a question and gets an
@@ -1062,9 +1064,13 @@ person, focused (PRD §8's convention).
 | **C2b — rich answers** (§20) | `show chart table stats cards dashboard`; the SVG chart renderer (no library) and the derived `series-1…6` tokens; server aggregations over public tables through the anonymous read path; the "AI-generated figures" label; image cards by key; share links (`az_chat_shares`, `/chat/share`, `/chat/shared`) | §20.9: renderer, validation, aggregation and share tests; `test:backend-db` on both engines; `test:chat` in three engines with axe, zero CSP violations, the label on model figures only, a share link signed out, gone after delete and expiry | 1.5 wk |
 | **C3 — float and grounding** | `chat float` inherited, `chat none`, overlay presets; `knows` tables (AZ1252, AZ1253, AZ1257, AZ1258); the a11y polish of §9; visual snapshots | `test:chat` keyboard/focus/reduced-motion/announcement checks; exact-bytes grounding test | 1 wk |
 | **C4 — operations** | `messages` adapter (if Q2 says so); moderation hook; `az doctor`/`az audit` checks; usage tile / `az backend usage`; README runbook and cost formula | doctor/audit tests; adapter tests | 1 wk |
+| **C5 — follow-ups, formatting, history** (§21.1) | `ask "…"` follow-up lines (≤ 3, buttons that send the question); the prose markdown subset parsed in the page into seven fixed elements, fenced code with Copy; fences make the server read every line inside as prose; the conversation in `localStorage` (256 KB, 8 chats, 7 days), Clear history, the shared-computer note, cleared at sign-out, dropped on `tampered` | §21.1.7: markdown, follow-up and history unit tests (corrupt storage, a throwing accessor, no storage); `test:chat` in three engines — a tap sends, formatting renders, Copy, a reload restores and continues, Clear empties, axe, zero CSP violations, no words in the log | 1 wk |
+| **C6 — operator data tools** (§21.2) | `.env`-declared tools (name, https/loopback URL, typed parameters, result fields, label, timeout); `from tool …` in chart/table/stats; ≤ 3 calls per answer, 256 KB, 200 rows, cache, per-address limit; results to the page only, `src: tool` with the operator's label; doctor and probe checks | §21.2.7 | 1.5 wk |
+| **C7 — interactive controls** (§21.3) | `show explore`: one data set, slider/date/toggle/form controls, table/stat/chart views over a closed set of computations evaluated in the page; a form applies locally or sends a shown question | §21.3.7 | 1.5 wk |
+| **C8 — maps** (§21.4) | `show map`: pins from public rows or the model ("Approximate, AI-placed"), optional server-side geocoding, straight-line routes; the vetted library set [R11] by dynamic import on map pages only, its worker started from `blob:`; tiles, glyphs and sprites from the backend (world z0–6 plus a regional extract); `worker-src 'self' blob:` the only policy change; az's own zoom/reset; the list fallback | §21.4.6 | 2 wk |
 | Later | transcripts (Q6); output moderation; the visitor's own data (§8.4); more `show` words; per-locale prompts | each its own spec section first | — |
 
-Total ≈ 5 weeks of focused work for C1–C4.
+Total ≈ 5 weeks of focused work for C1–C4; ≈ 5.5 more for C5–C8.
 
 ---
 
@@ -1122,6 +1128,24 @@ specifies them as phase C2b:
 | Q14 | Can an answer be shared? | **Only when the visitor clicks Share is that one answer stored**, under an unguessable link; it expires after 30 days by default (operator-configurable in `.env`), the sharer can delete it, nothing else is stored (Q6 holds), and the shared page renders it with the same safe renderer, read-only (§20.7) |
 | Q15 | Are these new words? | **No — chat-only.** They exist only inside chat answers; no new page word; the 12-word cap holds (§20.1) |
 
+**Decided 2026-10-16, owner-approved** — after reviewing four generative-UI
+demos ([R7]–[R10]); §21 specifies them as phases C5–C8:
+
+| # | Question | Decision |
+|---|---|---|
+| Q16 | Follow-ups, formatting, history? | **Yes (C5, §21.1).** An answer may end with up to 3 follow-up questions as buttons that send the question as the visitor's next message; prose may use a markdown subset (bold, italic, inline code, lists, fenced code with Copy) — no raw HTML, no images, no links beyond the allow-list; the conversation is kept in the visitor's browser (`localStorage`), capped, with a visible Clear history and a shared-computer note; history tags stay valid, or the saved conversation is dropped. Q6 holds: nothing more on the server |
+| Q17 | Live data from the operator's endpoints? | **Yes (C6, §21.2).** Tools declared in the server's `.env` only (name, URL, parameter shape, timeout); https or loopback; bounded time, size and calls per answer; results validated, treated as data, rendered through chart/table/stats with a source label; no tool the model can invent; keys in `.env` only |
+| Q18 | Interactive controls? | **Yes (C7, §21.3).** Slider, date picker, segmented toggle and a simple form bound to local variables, recomputing an answer's figures by a closed set of computations in az's own code; no eval; a form updates locally or sends a follow-up, and does nothing else on the network |
+| Q19 | Maps? | **Yes (C8, §21.4)**, pins and routes from the model (labelled) or from table rows |
+| Q19a | Which library? | **The set in [R11]**, pinned exactly (BSD-3, `npm audit` 0); the vetting goes into `docs/stack-evaluation.md` when C8 is built |
+| Q19b | Its worker and the CSP? | **Started from a `blob:` URL that imports the same-origin worker file, with `worker-src 'self' blob:`** (the 3D pages' audited exception). Measured in three engines: a same-origin worker script is not governed by the page's `<meta>` CSP (cross-origin tile fetches got through despite `connect-src 'self'`). Violations inside the worker never reach the page's listener, so `test:chat` also reads the request and console logs on map pages |
+| Q19c | Controls? | **az's own zoom and reset buttons**, never the library's navigation control (its CSS uses `data:` images); no `img-src data:` |
+| Q19d | Popups? | **`setDOMContent` with `textContent` only**; never the HTML setter or `innerHTML` |
+| Q19e | Tiles? | **From the backend**, with HTTP Range and CORS (allow `range`, `if-match`; expose `etag`); world z0–6 (≈ 46 MB) by default plus an operator-configured regional extract; configured in `.env`, switchable, no vendor in code; glyphs and sprites self-hosted; a third-party origin enters `connect-src` only if the operator sets one, and `az doctor` names it; the ODbL attribution stays visible |
+| Q19f | Bundle? | **≈ 440 KB gzipped accepted**, by dynamic import only on chat pages whose `show` has `map` |
+| Q19g | Pins and routes? | **Public rows' latitude/longitude, or model numbers in range with ≤ 6 decimals labelled "Approximate, AI-placed"**; optional server-side geocoding behind `AZ_GEOCODER_URL`, cached and rate-limited, never from the browser; straight polylines in v1 |
+| Q19h | Theme and fallback? | **Paint from the `--az-color-*` tokens, repainted on a scheme change; an ordered list of pins and stops, also the WebGL2-missing fallback, announced once** |
+
 ---
 
 ## 18. Research sources
@@ -1139,6 +1163,11 @@ described and must be re-read before C1 relies on it.
 | R4 | `log` is a live-region role (fetched excerpt truncated; its implicit `aria-live` value `polite` to re-verify); `aria-busy` marks content being updated | WAI-ARIA 1.2, https://www.w3.org/TR/wai-aria-1.2/#log |
 | R5 | Chat-completions streaming: `stream: true`, `data:` JSON chunks with `choices[].delta.content`, terminated by `data: [DONE]`; optional usage in the final chunk — **not fetched (403)** | OpenAI API reference, https://platform.openai.com/docs/api-reference/chat/create |
 | R6 | A second streaming shape with a top-level `system` field, typed content blocks and named stream events — **not fetched**; to be read before C4 | Anthropic Messages API streaming, https://docs.anthropic.com/en/api/messages-streaming |
+| R7 | Prior art (C5–C8, docs only): a trip planner whose answers are generated UI — moodboards, chat, a day-by-day itinerary on a map (a vector map library over a free tile service), weather and hotel prices from several public APIs | openui-trip-planner, https://github.com/thesysdev/openui-trip-planner (fetched 2026-10-16) |
+| R8 | Prior art: a sports dashboard whose chat answers are streamed charts and tables; the model calls named server tools for live data through a rate-limited, cached client; its README notes rate limiting should be added before wider use | openui-f1-dashboard, https://github.com/thesysdev/openui-f1-dashboard (fetched 2026-10-16) |
+| R9 | Prior art: answers stream as interactive UI — maps, charts, sliders, forms, date pickers bound to variables; threads and messages kept in the browser's localStorage so they survive a reload | open-intelligent-ui, https://github.com/thesysdev/open-intelligent-ui (fetched 2026-10-16) |
+| R10 | Prior art: every screen generated on request and streamed; taps on rows and chips generate the next screen; a web-search tool mid-stream; oldest exchanges dropped past the token limit | appless, https://github.com/thesysdev/appless (fetched 2026-10-16) |
+| R11 | The map library set vetted for C8 (owner-decided 2026-10-16, Q19a): `maplibre-gl` 6.14.0 (WebGL vector-map renderer), `pmtiles` 4.5.0 (single-file tile-archive reader over HTTP Range), `@protomaps/basemaps` 5.7.2 (basemap styles); BSD-3; `npm audit` 0 at vetting | the coordinator's vetting report, 2026-10-16; written into docs/stack-evaluation.md when C8 is built |
 
 ---
 
@@ -2091,3 +2120,653 @@ dashboard in each theme, both schemes (gate item 3's method).
 - No stored transcripts; a share holds one answer and no person.
 - No per-locale summary copy (English fixed copy, as the rest of the chat
   shell in v1).
+
+---
+
+## 21. C5–C8 — answers that offer, format, remember, fetch, react and map
+
+**Status** specified 2026-10-16 on the owner's approval of that day (§17,
+Q16–Q19) · C5 next to build; C6, C7, C8 specified, not built · C8's map
+library and tile source vetted and decided 2026-10-16 (§17 Q19a–Q19h) ·
+builds on C2's parser, events and templates (§5.3, §5.4) and C2b's rich
+components (§20), which it extends and never forks.
+
+The owner reviewed four generative-UI demos (prior art, [R7]–[R10]):
+answers with follow-up buttons and formatted prose, conversations kept in
+the browser, a model that calls the operator's tools for live data, controls
+inside an answer that recompute its figures, and maps. This section gives
+`chat` each of those under the rules the rest of this spec keeps: the model
+writes a closed line grammar; the server parses and validates it into typed
+events; the page fills build-made templates with `textContent` and checked
+attributes; no model text is ever markup, a style, a URL, an expression or
+code.
+
+What is new in kind, and where it is answered:
+
+| New | The risk it brings | Where |
+|---|---|---|
+| model text the **page** reads as structure (markdown) | a second parser in the browser — the place XSS lives | §21.1.3: a closed tree of seven fixed elements, text leaves only; every other form literal |
+| a button whose label the model wrote **and that sends** | a planted question; social engineering | §21.1.5: it sends only to the same chat, only on a tap, exactly the words shown |
+| **storage** in the visitor's browser | a shared computer; stale or forged history | §21.1.4: capped, expiring, one visible Clear control, cleared at sign-out; tags still proven by the server |
+| the server **calls out** on the model's request | SSRF, cost, indirect injection, data leaving | §21.2: operator-declared tools only, fixed URLs, typed parameters, results to the page only |
+| **computation** in the answer | an expression language is an eval | §21.3: a closed set of computations, data in, numbers out, no expression syntax |
+| a map renderer with a **worker** and tiles | the CSP widens; a worker can escape a `<meta>` policy; coordinates leak where the visitor looks | §21.4: `worker-src 'self' blob:` on map pages only, the worker started from `blob:`, tiles from the site's own backend |
+
+### 21.1 C5 — follow-up questions, formatted prose, history in the browser
+
+#### 21.1.1 The owner's decisions this implements
+
+| # | Decision |
+|---|---|
+| Q16a | An answer may end with **follow-up questions** as buttons; tapping one sends that question as the visitor's next message |
+| Q16b | Prose may use a **markdown subset** — bold, italic, inline code, bullet and numbered lists, fenced code blocks with a Copy button. No raw HTML, no images, no links (the destination allow-list, §6.2, stays the only way to a link: a `cta`) |
+| Q16c | **The conversation is kept in the visitor's browser** (`localStorage`), capped, with a visible **Clear history** control and a privacy note that speaks to shared computers. The history tags stay valid (§4.2) or the saved conversation is dropped and the visitor told |
+
+Q6 holds: **nothing more is stored on the server.** What C5 keeps, it keeps
+in the visitor's own browser, where the visitor can see and clear it.
+
+#### 21.1.2 The answer format
+
+C2's subset (§5.3), extended by one line form and by prose formatting.
+Nothing in `.az` changes: C5 adds no key, no `show` value, no diagnostic.
+Every chat gets it — a prose-only C1 chat too, since neither follow-ups nor
+formatting is a component.
+
+```ebnf
+answer-line += follow-up ;
+follow-up    = "ask" , STRING , NEWLINE ;        (* at the margin, no child lines *)
+```
+
+| Line | Means | Rules |
+|---|---|---|
+| `ask "How do I cancel?"` | a follow-up question, offered as a button | 1–80 characters after cleaning (the `ask` key's cap, §3.2); no line break inside (`\n` drops it); **at most 3 per answer**, the 4th and later dropped (`too_many`); they do **not** count toward the 4-component cap; a child line under it drops it (`shape`) |
+| prose | as before, now read by the page as the subset below | the server streams it exactly as before (§19.5 "one character behind"); the page decides its shape |
+| a fence line ```` ``` ```` at the margin | opens or closes a code block | **server**: while a fence is open, every line is prose — a `show`, `cta`, `faq` or `ask` line inside a code block is the code's text, never a component; an unclosed fence runs to the end of the answer |
+
+The event is the existing `block` with one new key: `{ "ask": "…" }`. The
+answer's record (§19.5, the tagged history) gains each shown follow-up as
+its canonical line, `ask "…"`, so the model sees what it offered. The
+prompt (generated, `chat-context.ts`) teaches the form and the formatting
+rules from the parser's own constants, as it does the components.
+
+**The prose subset** (the page's `chat-markdown.ts`, pure, linear):
+
+| Block form | Written | Becomes |
+|---|---|---|
+| paragraph | lines up to a blank (or whitespace-only) line | `<p>` — line breaks inside kept, as today |
+| bullet list | consecutive lines starting `- ` or `* ` | `<ul><li>` — one level; spaces before the marker are ignored (no nesting, so no depth to abuse) |
+| numbered list | consecutive lines starting `N. ` (N 1–3 digits) | `<ol><li>`, numbered from the first item's N |
+| code block | a line at the margin starting ```` ``` ````, an optional language word (`[A-Za-z0-9_+#.-]{1,20}`, else none), the lines after it verbatim, up to a line that is ```` ``` ```` alone | `<pre><code>` with a Copy button and the language as a text label; while streaming an open block grows in place |
+
+| Inline form (in paragraphs and list items) | Becomes |
+|---|---|
+| `` `code` `` (a run of n backticks closed by a run of n) | `<code>`; its content literal, nothing inside it parsed |
+| `**strong**`, `__strong__` | `<strong>` |
+| `*em*`, `_em_` | `<em>` |
+| `\*`, `\_`, `` \` ``, `\\` | the character itself |
+
+Emphasis follows the flanking rule simply: an opener is followed by a
+non-space, a closer preceded by one; `_` also needs a non-letter-or-digit
+outside it (so `snake_case_name` stays text); a run of three or more is
+text. A closer matches only the innermost open delimiter, so the parser is
+one pass with a stack; **nesting stops at two** (strong in em, em in
+strong) and a third opener is text. An unmatched delimiter is text.
+
+**Everything else is literal text**, exactly as written: headings (`#`),
+quotes (`>`), tables (`|`), rules (`---`), links `[x](y)`, images
+`![x](y)`, autolinks `<https://…>`, bare URLs, HTML tags and comments,
+entities (`&lt;` stays four characters), a fence not at the margin.
+
+**Why the page parses prose now** (§5.1 decided that the browser parses
+nothing a model wrote). Formatting streams: `**bo` arrives before `ld**`.
+On the server that means holding every line to its end before sending it —
+up to 4 000 characters of a paragraph with nothing shown. In the page it
+means re-reading the open piece of prose on each `text` event, which is
+already what `paragraphsOf` did (C1). What makes it safe is not where it
+runs but what it can produce: **a tree of seven fixed elements (`p`, `ul`,
+`ol`, `li`, `strong`, `em`, `code`) plus the build's code-block template,
+every leaf a text node set with `textContent`.** The parser has no
+attribute output at all (a list's start number is a property set from an
+integer it parsed), no URL output, no tag it can name. The §5.1 decision
+stands for everything else: components are parsed on the server only.
+
+#### 21.1.3 Components and rendering
+
+| Piece | Fields | Limits |
+|---|---|---|
+| follow-up | `ask`: string | 1–80 chars, ≤ 3 per answer |
+| prose tree | blocks: `p` (inlines) · `ul`/`ol` (items of inlines, `start` 1–999) · `code` (`lang` or none, `text`, `open`) — inlines: text, `code`, `strong`/`em` (inlines, depth ≤ 2) | input ≤ the answer's prose (server cap 4 000; the page's own `ANSWER_MAX` 20 000); the tree is never larger than its input |
+
+Rendering:
+
+- **Templates, not elements.** The chat word ships one more hidden part
+  container, `div.az-chat-prose[hidden][data-az-chat-prose]`, with a slot
+  per element the tree can hold: `strong`, `em`, `code` (inline: the
+  theme's `type.mono` at `type.size.sm` on `color.surface-alt`), `ul`,
+  `ol`, `li`, the code block (a bar with the language label and **Copy
+  code**, then `pre[tabindex=0]` — a scroll region the keyboard reaches —
+  holding `code`) and the follow-up list (`ul` "Follow-up questions" whose
+  `li` holds a secondary button). The runtime clones these; it never calls
+  `createElement`. Every class is the chat word's, in the generated sheet.
+- **Text only.** Each leaf is `textContent`. The code block's language
+  label is text. The Copy button copies the code element's `textContent`
+  through `navigator.clipboard.writeText` — text, never HTML — and the
+  status region says "Code copied." or, where the clipboard is refused,
+  "Copy did not work — select the code to copy it.".
+- **Streaming.** The open piece of prose (since the last component) is
+  re-read on every `text` event; blocks that did not change are kept, an
+  open code block's text is updated in place, the rest replaced. Linear in
+  the piece; the piece is bounded by the prose cap.
+- **Follow-ups** are collected while the answer streams and drawn once it
+  is `done`, as the answer's last part, after its components. A tap calls
+  the same `ask()` a suggested question does: `visitorText`, the same
+  limits, the same server path. While an answer streams a tap does nothing.
+  The shared-answer page (§20.7) draws no follow-ups: it has no
+  conversation to continue.
+- **Theme tokens only; no inline style; CSP unchanged** (no new source:
+  the clipboard is not a network call).
+
+#### 21.1.4 History in the browser
+
+**What is kept.** After each answer that finishes with a tag — never a
+stopped, failed or refused one — the page saves the conversation: its id,
+and each turn — the visitor's words; the answer's tagged record and tag
+(what the server needs back, §4.2) and its events as received (what the
+page needs to draw it again). Nothing else: no share tag (they last 24 h,
+§20.7, and a restored answer offers no Share), no session, no account, no
+time but the save's.
+
+| Rule | Value |
+|---|---|
+| where | `localStorage`, one key per site origin: `az-chat:v1` |
+| one conversation per chat | a float's under `float` — so it **continues across pages** as the visitor moves — and a panel's under `panel:<route>` |
+| cap | **256 KB** of JSON for the key; **8 conversations**, the least recently saved dropped first; a conversation that alone passes the cap is kept as its longest prefix of whole exchanges that fits (a prefix of a tagged history is still valid: the tag covers the turn's index from the start) |
+| expiry | **7 days** after the conversation was last saved; dropped when read |
+| restore | at attach, before the greeting's first question; every turn re-checked by the page's own rules (alternation, `visitorText`, the record cap, the tag's shape, each event through the stream's own shape check) — **one bad turn and the whole saved conversation is dropped**, never half-restored |
+| Clear history | a visible button under the input; it removes the key (every chat on this site), starts the panel over and says "History cleared." |
+| New chat | starts over and removes this chat's saved conversation |
+| sign-out | on a `signedin` chat, when the auth adapter reports the visitor signed out, the key is removed; a signed-in chat restores only once the session says signed in |
+| storage refused | private windows, blocked site data, a full quota, a throwing accessor: every read and write is in `try`/`catch`; the panel works exactly as C4's, and the note and Clear control stay hidden |
+
+**The privacy note** (shown with Clear history, only when storage works):
+"This chat is kept in this browser for 7 days. On a shared computer, clear
+it when you are done." It is fixed copy, one line, `color.muted`.
+
+**The tags.** A history tag is HMAC(conversation, turn index, record)
+under `AZ_SESSION_SECRET` (§4.2) — no time in it — so a saved conversation
+stays valid as long as the secret does. After the operator rotates the
+secret, the next question is `400 tampered`: the page drops the saved
+conversation, starts over and says "This saved chat can't be continued — it
+was cleared. Ask your question again." A tag cannot be re-issued without
+the server re-proving the turn, and re-proving a turn the visitor holds is
+exactly what the tag forbids, so dropping is the only safe "re-issue".
+
+#### 21.1.5 Security
+
+| Threat | Defence | Test |
+|---|---|---|
+| XSS through formatting | the tree holds seven element kinds plus a template; leaves are `textContent`; no attribute or URL is ever derived from prose | unit: every malicious form (HTML, entities, links, images, autolinks, `javascript:`, unclosed and nested delimiters, 10 000 asterisks, a 1 MB fence) becomes literal text in the tree; e2e: none becomes an element, an attribute or a request |
+| exfiltration by image or link in prose | images and links are not in the subset; nothing is linkified | corpus `markdown.json` unchanged — still literal — plus the C5 cases |
+| a component smuggled through a code block | the server's fence rule: inside a fence nothing is a component | parser unit test: `show pricing /pricing` inside a fence is prose |
+| parser cost | one pass, a stack of depth ≤ 2, no regular expression that backtracks; re-reading the open piece is linear in a capped piece | unit: an adversarial 20 000-character piece parses within a fixed bound |
+| a planted follow-up ("Ignore your rules…") | it is a **visitor** turn when tapped — untrusted as every visitor turn, judged by the moderation hook, rate-limited, filtered on the way out; it goes only to this chat; it is sent only on a tap and is exactly the text on the button | e2e: the follow-up's text is what the next request carries, and nothing is sent without a tap |
+| social engineering by button ("Enter your card number") | a follow-up is a question, not a form: there is no input on it and its only effect is a chat question | — (stated) |
+| forged saved history | the server still proves every `site` turn by its tag; a visitor who edits storage gets `tampered`, as one who edits memory does today | e2e: an edited saved answer is refused and the saved chat cleared |
+| a shared computer | 7-day expiry; the note; one Clear control; cleared on sign-out | e2e: history survives a reload; Clear removes it; a fresh context has none |
+| cost | none new: a tap is a question, under every C1 limit | — |
+| logs | unchanged: no message text, no follow-up text | e2e: planted words in a follow-up and a code block never appear in the server's log |
+
+#### 21.1.6 Accessibility
+
+| Need | How |
+|---|---|
+| follow-ups | a list named "Follow-up questions", each a real `<button>` in the Tab order after the answer's components; announced once with the answer: "3 follow-up questions." |
+| code | `pre` is a focusable scroll region named "Code" (or "Code, js"); Copy is a real button named "Copy code"; the result is announced in the status region |
+| formatting | `strong`/`em` are the semantic elements; lists are real lists |
+| history | a restored conversation is announced once: "Your earlier chat is restored."; Clear history is a real button with a visible name |
+| contrast | inline code on `surface-alt` with `color.text` — a pair already proven per theme (theme-spec §6) |
+| reduced motion | nothing new moves |
+
+#### 21.1.7 Test plan
+
+Each test must fail on the C4 code (run against `78c6b45` first).
+
+- **Unit, `chat-markdown.test.ts`** (overlay): every form of the subset;
+  every literal form above; emphasis flanking (`snake_case`, `2*3*4`);
+  depth 2; unmatched and crossed delimiters; backtick runs; escapes; a fence
+  open at the end; list numbering; the plain-text paragraphs exactly as
+  C1's `paragraphsOf` gave them (no regression); linear-time bounds.
+- **Unit, `chat-history.test.ts`** (overlay): save → load round trip; the
+  256 KB cap (eviction order, the prefix fallback); the 8-conversation cap;
+  7-day expiry with a fake clock; clear; corrupt storage — not JSON, the
+  wrong shape, a forged turn, a bad tag shape, an event of an unknown shape
+  — gives an empty history and removes the key; an accessor that throws on
+  read, write and remove (the page still works); a `null` storage.
+- **Unit, server** (`chat-answer.test.ts`): `ask` lines — legal, at 80 and
+  81, with `\n`, with a child line, the 4th dropped and not ending the
+  answer, not counted as components, in the record; fences — a component
+  inside is prose, an unclosed fence, a fence after an open component
+  closes it.
+- **Unit, sink scan** (overlay `chat.test.ts`): the new runtime files scanned
+  like the others; storage is reached in exactly one function of
+  `chat-history.ts`, inside `try`.
+- **Browser, `test:chat`** (three engines): a follow-up tap sends its
+  question and is answered; markdown renders (strong, em, code, both lists,
+  a code block with its label); Copy puts the code on the clipboard
+  (Chromium, where the test can grant the permission; elsewhere the
+  announced fallback); history survives a reload and draws the same
+  answer; a follow-up question continues the restored conversation (tags
+  valid); Clear history empties it and a reload stays empty; a tampered
+  saved answer is refused and cleared; axe in each state; zero CSP
+  violations; no message text in the server log.
+
+#### 21.1.8 Open questions
+
+| # | Question | Recommendation |
+|---|---|---|
+| O1 | Should the author be able to switch history off per chat (`history off`)? | **Not in C5.** One key would be cheap, but the note and Clear already give the visitor the choice; add it if an author asks |
+| O2 | 7 days, 256 KB, 8 conversations? | **Yes** — a week covers "come back tomorrow"; 256 KB is under every engine's per-origin quota with room for the site's own use; revisit with real usage |
+| O3 | Keep a restored answer's Share? | **No** — the share tag's 24 h would have to be stored, and a share is for the answer just given |
+| O4 | Headings and tables in prose? | **No** — tables are the `table` component (§20), whose cells are validated; headings would compete with the panel's own outline |
+
+### 21.2 C6 — operator data tools
+
+#### 21.2.1 The owner's decision
+
+Q17: the model may ask for **live data from the operator's own HTTP
+endpoints**, declared in the server's `.env` — allow-listed, https only (or
+loopback), bounded in time, size and calls per answer; results validated,
+treated as data and never instructions; rendered through the existing
+chart, table and stats components with a source label; no tool the model
+can invent; keys in `.env` only.
+
+#### 21.2.2 Declaring a tool (`.env`, the operator's)
+
+| Key | Meaning | Rules |
+|---|---|---|
+| `AZ_CHAT_TOOLS` | the tool names, comma-separated | `[a-z][a-z0-9]{0,23}`, at most 8; absent = no tools |
+| `AZ_CHAT_TOOL_<NAME>_URL` | the endpoint | `https:`, or `http:` on loopback; no credentials, no fragment; the server refuses to start otherwise |
+| `AZ_CHAT_TOOL_<NAME>_KEY` | bearer key | optional, **secret** (`env.ts` KEYS `secret: true`; never in `.env.example`; covered by `az audit`'s server-keys check and the `CHAT` private-name rule) |
+| `AZ_CHAT_TOOL_<NAME>_PARAMS` | the parameter shape, a JSON object: `{ "<param>": { "type": "int"\|"number"\|"bool"\|"date"\|"enum"\|"text", "min"?, "max"?, "values"?, "maxLength"? (≤ 80), "required"? } }` | ≤ 6 parameters; `enum` ≤ 24 values; no pattern, no nested type, no array |
+| `AZ_CHAT_TOOL_<NAME>_FIELDS` | the result row shape: `{ "<field>": "text"\|"number"\|"date"\|"bool" }` | 1–8 fields; a result is a JSON array of rows of exactly these fields |
+| `AZ_CHAT_TOOL_<NAME>_LABEL` | the source label the page shows, e.g. "Race results service" | 1–40 chars, operator copy, never model text |
+| `AZ_CHAT_TOOL_<NAME>_ABOUT` | one sentence the model is told | ≤ 200 chars |
+| `AZ_CHAT_TOOL_<NAME>_TIMEOUT_MS` | per call | 100–5 000, default 2 000 |
+| `AZ_CHAT_TOOL_<NAME>_SAMPLE` | parameters `az backend probe` and `az doctor` try | a JSON object valid under `_PARAMS` |
+
+The **build** knows nothing of tools (the compiler never reads `.env`):
+the tool list reaches the model in the per-request system text
+(`systemText`, §8.3), generated from the validated declarations, so
+`prompt.txt` stays a function of the spec.
+
+#### 21.2.3 The answer format
+
+A tool is one more source for the rich components' `from` (§20.3):
+
+```ebnf
+query      += "from" , "tool" , tool-name , { param } , ( aggregate , [ "by" , field ] | "columns" , field , { field } ) ;
+param       = param-name , ( STRING | number | "yes" | "no" | date ) ;
+```
+
+```
+chart bar "Points by driver" from tool standings season 2026 sum points by driver
+table "Last race" from tool results round 12 columns position driver team
+stats
+  stat "Leader's points" from tool standings season 2026 max points
+```
+
+- The model names a **declared** tool and **declared** parameters, each
+  value checked against its type and bounds; an unknown tool, an unknown or
+  missing required parameter, a value out of range — the component is
+  dropped (`tool`), as a misspelt field is (§20.5). **No tool can be
+  invented**: there is nothing to call but the URLs in `.env`.
+- **The URL never comes from the model.** Parameters go in the JSON body
+  of a `POST` to the declared URL; the path, the host and the query string
+  are the operator's. No redirect is followed (`redirect: 'error'`).
+- **Aggregation is the server's own**, over the validated rows: the same
+  closed set as §20.5 (`count`, `sum`/`avg`/`min`/`max` of a number field,
+  `by` a text or date field — tool rows are the operator's data, so a text
+  group-by is allowed here, clamped to 24 characters per label).
+
+#### 21.2.4 Calling and validating
+
+| Bound | Value |
+|---|---|
+| calls per answer | **3** (inside §20.2's 6 queries) |
+| time per call | the tool's timeout (≤ 5 s), one bound for request and body; past it the fixed "These figures could not be loaded." note |
+| response | `200`, `content-type: application/json`, ≤ **256 KB** (read through `outbound.ts`'s capped reader), a JSON array of ≤ **200** rows, each exactly the declared fields, each value its declared type (strings cleaned as §5.3 and ≤ 200 chars, numbers finite and ≤ 10¹⁵, dates `YYYY-MM-DD`) — **one row wrong, the whole result is refused** |
+| per address | `AZ_CHAT_TOOL_CALLS_PER_ADDRESS` (default `120/hour`) |
+| cache | 60 s per (tool, parameters), 200 entries |
+| concurrency | inside the chat queue (§6.5): at most 4 answers at once, their calls one after another |
+
+**Results are data, never instructions — structurally.** In C6 a tool's
+result goes **only to the page**, as figures: it is never added to what the
+model reads, in this answer or the next (the answer's record holds the
+request line, `from tool …`, not the rows). An endpoint that returns "ignore
+your rules" can at most put those words in a table cell, clamped, as text —
+it cannot steer the model, because the model never sees it. (Feeding
+results back to the model is O6.)
+
+**Source label.** A tool's figures carry `src: "tool"`, set by the server
+only, and render "From <LABEL> · <time>" in the caption where the AI label
+would be — operator copy, never the model's. One component never mixes a
+tool with literal points.
+
+#### 21.2.5 Security
+
+| Threat | Defence |
+|---|---|
+| SSRF | the model chooses a name from the operator's list, never a host, path or query; URLs validated at start-up; no redirects |
+| invented tools | only `AZ_CHAT_TOOLS`; an unknown name drops the component |
+| parameter injection | typed values only, in a JSON body; `text` ≤ 80 chars, cleaned; no value reaches a URL |
+| indirect injection | results never reach the model in C6 (above); every value validated against `_FIELDS` and rendered as `textContent` |
+| exfiltration | the parameters are the only thing the model sends out, to the operator's own endpoint; the operator's endpoint must treat them as untrusted input (said in the README); parameters are not logged |
+| cost / abuse | 3 calls per answer, per-address limits, the cache, the timeouts, the queue; a tool failing fast never fails the answer — the component becomes the note |
+| keys | `.env` only, `secret: true`; `az audit` searches every shipped file for each value |
+| logs | `chat: tool <name> <status> <ms> <rows>` — never parameters or values |
+
+#### 21.2.6 Accessibility
+
+Unchanged from §20.8: tool figures are charts, tables and stats with their
+summary and table equivalent; the source label is text, read with the
+caption; "could not be loaded" is the existing note.
+
+#### 21.2.7 Test plan
+
+Unit (backend): declarations — each bad `.env` refused at start with its
+key named; parameters — every type at bound and bound ± 1; the call — a
+local server over https (self-signed) and loopback http: timeout, 301 not
+followed, a 257 KB body, 201 rows, a missing field, an extra field, a NaN,
+a string with markup (text in the cell); the cache; the per-answer cap;
+results absent from the next request's system text (exact bytes, as §8.3's
+test). `az doctor`: each tool's declaration and its `_SAMPLE` validity, by
+name, never values; `az backend probe`: each tool called once with
+`_SAMPLE`. `test:chat`: a tool chart and table with the source label, the
+"could not be loaded" note for a slow tool, axe, zero CSP violations, no
+parameter in the log.
+
+#### 21.2.8 Open questions
+
+| # | Question | Recommendation |
+|---|---|---|
+| O5 | Which chats may use tools? | **Every chat whose `show` has `chart`, `table` or `stats`**, in C6; add a `uses <tool>` key only if an author needs a narrower page |
+| O6 | Should the model read results to comment on them ("the leader is…")? | **Not in C6.** Later, as `knows` rows are sent (§8.2): a delimited data section, cleaned, capped, labelled untrusted — with its own corpus first |
+| O7 | GET endpoints? | **POST only in C6**: GET would put parameters in a URL, which proxies and logs keep |
+| O8 | Provider-native function calling? | **No** — it differs per wire shape (§4.3) and would make the adapter a protocol; the `from tool` line works with any model that writes the subset |
+
+### 21.3 C7 — interactive controls in answers
+
+#### 21.3.1 The owner's decision
+
+Q18: controls in answers — a slider, a date picker, a segmented toggle, a
+simple form — bound to **local variables**, updating that answer's charts,
+tables and stats in the page, with **a small closed set of safe
+computations** evaluated by az's own code. **No eval.** A form either
+updates locally or sends a follow-up as the visitor's message; there is no
+other network effect.
+
+#### 21.3.2 The answer format
+
+One new rich component, `explore` (a new value of `show`, chat-only like
+§20's — Q15 holds), holding one data set, its controls and its views. Depth
+stays ≤ 2.
+
+```
+explore "Plan cost"
+  columns "Plan" "Seats" "Price"
+  row "Solo" 1 9
+  row "Team" 10 29
+  row "Business" 50 99
+  slider seats "Team size" 1 50 step 1 value 5
+  toggle period "Billing" "Monthly" "Annual"
+  view table where Seats >= $seats
+  view stat "Cheapest that fits" min Price where Seats >= $seats unit usd
+  view chart bar "Price by plan" sum Price by Plan where Seats >= $seats
+```
+
+```ebnf
+explore   = "explore" , STRING , NEWLINE , INDENT , source , { control } , { view } , DEDENT ;
+source    = rows-literal | rows-query ;                       (* §20.3, or C6's from tool … columns … *)
+control   = "slider" , var , STRING , number , number , [ "step" , number ] , [ "value" , number ]
+          | "date"   , var , STRING , date , date , [ "value" , date ]
+          | "toggle" , var , STRING , STRING , STRING , [ STRING , [ STRING ] ]   (* 2–4 options *)
+          | "field"  , var , STRING , ( "number" , number , number | "choice" , STRING , { STRING } )
+          | "form"   , STRING , ( "apply" | "send" , STRING ) ;      (* the fields written before it are its own *)
+view      = "view" , ( "table" | "stat" , STRING , aggregate | "chart" , chart-kind , STRING , aggregate , "by" , column ) ,
+            [ "where" , column , op , operand ] , [ "unit" , ( "percent" | currency-code ) ] ;
+op        = "=" | "!=" | "<" | "<=" | ">" | ">=" ;
+operand   = "$" , var | STRING | number | date ;
+var       = lower-letter , { lower-letter | digit } ;          (* ≤ 16 chars *)
+```
+
+Every line of an explore is at depth 1, so depth stays ≤ 2 without nesting
+a form: `field` lines are inputs that change nothing until the `form` line
+after them is pressed — `apply` sets their variables, `send` asks a
+question made from them.
+
+#### 21.3.3 Components and limits
+
+| Piece | Limits |
+|---|---|
+| data | 1–6 columns, 1–200 rows (literal: the model's — labelled AI-generated; from a table or tool: the server's, with its source) |
+| controls | ≤ 4 per explore; variable names unique; a slider's min < max, step > 0, ≤ 1 000 steps; dates within 1900–2100; toggle 2–4 options of ≤ 24 chars |
+| views | ≤ 4 per explore, each a table, a stat or a chart as §20.2 caps them |
+| computations | exactly: one `where` (column op operand), one aggregate (`count`, `sum`, `avg`, `min`, `max`), one `by`, one `unit`/format — evaluated by `chat-explore.ts`, a pure function `(rows, view, vars) → figures`, over ≤ 200 rows |
+| form `send` | the template is the model's text with `{var}` holes filled by the form's own formatted values; the result goes through `visitorText` and is **shown in the button's label before it is sent** ("Ask: Find plans for 5 seats") |
+
+**No expression language.** An operand is one variable, one literal or
+nothing; there are no operators to combine, no function names, no
+precedence, no strings that become code. The page evaluates by a `switch`
+over the closed operator and aggregate names, on numbers and dates already
+parsed. A variable that does not exist drops the view on the server.
+
+#### 21.3.4 Rendering
+
+Controls are the build's templates: `input[type=range]` with its `<label>`
+and an `<output>`; `input[type=date]` with `min`/`max`; a toggle as a
+`radiogroup` of real radios (the pricing switch's pattern); a form with
+labelled fields and one button. Values are written through properties
+(`.value`, `.min`), never attributes from text. On `input` the page
+recomputes the explore's views (debounced to one frame), redraws them with
+chat-draw.ts (§20.4) and announces the first view's new summary at most
+once per 1.5 s (§9's rule). No style, no inline handler, CSP unchanged; no
+network call except a form's `send`, which is `ask()`.
+
+#### 21.3.5 Security
+
+| Threat | Defence |
+|---|---|
+| code execution | no eval, no `Function`, no expression syntax; closed `switch`es over parsed values |
+| CPU abuse | ≤ 200 rows × ≤ 4 views per input, one per frame; a stuck slider costs microseconds |
+| hidden network effects | only `send` sends, through `ask()`, on a click, with its words shown first |
+| misleading figures | literal rows carry the AI label on every view computed from them; a server or tool source carries its own label |
+| storage | controls' positions are not saved; a restored explore starts at its written values (O9) |
+
+#### 21.3.6 Accessibility
+
+Every control labelled; slider value in an `<output>` tied by `for`; the
+toggle a radio group (arrow keys); views announced as their summaries after
+a change, rate-limited; the explore a labelled `<section>`; nothing changes
+on focus alone.
+
+#### 21.3.7 Test plan
+
+Unit: the grammar's every form and cap ± 1; each operator and aggregate on
+fixed rows, byte-compared; empty results ("No rows match."); a missing
+variable; dates across a leap day; the template fill and its `visitorText`
+check; the sink scan on `chat-explore.ts`. `test:chat`: a slider moved by
+keyboard changes a table, a stat and a chart; a toggle by arrow keys; a
+date; a form `apply` and a form `send` (the next request carries the shown
+words); axe; zero CSP violations; no request but the backend's.
+
+#### 21.3.8 Open questions
+
+| # | Question | Recommendation |
+|---|---|---|
+| O9 | Save control positions with history? | **No** — the answer as written is what was tagged; positions are the visitor's play |
+| O10 | More computations (percent of total, running sum)? | **Later, each a new closed name** with its own tests — never a formula |
+| O11 | Controls over the server's live figures (re-query on change)? | **No** — a control changes only what the page already holds; a re-query is a new question |
+
+### 21.4 C8 — maps in answers
+
+#### 21.4.1 The owner's decisions
+
+Q19: a map component in answers, pins and routes from public data rows or
+from coordinates the model writes (labelled). The library and tile source
+were vetted separately and decided by the owner on 2026-10-16 (§17 Q19,
+Q19a–Q19h); this section implements those decisions:
+
+| # | Decision |
+|---|---|
+| Q19a | **The library set [R11]**, pinned exactly (BSD-3, `npm audit` clean at vetting): a WebGL vector-map renderer, a single-file tile-archive reader, and a basemap style set. The vetting is written into `docs/stack-evaluation.md` as its own section when C8 is built (global rule 11) |
+| Q19b | **The renderer's worker starts from a `blob:` URL** that only imports the same-origin worker file — `URL.createObjectURL(new Blob(['import "<origin>/<worker file>.mjs";']))` handed to the library's worker-URL setter — with `worker-src 'self' blob:`, the policy's existing audited exception for 3D pages. Measured in three engines: **a same-origin worker script is not governed by the page's `<meta>` CSP** (its cross-origin tile fetches got through despite `connect-src 'self'`); a worker created from a `blob:` URL inherits the page's policy |
+| Q19c | **az's own zoom and reset buttons**, never the library's navigation control (its CSS uses `data:` images); `img-src` gains no `data:` |
+| Q19d | **Popups by `setDOMContent`** with an element whose text is set by `textContent`; never the library's HTML setter, never `innerHTML` |
+| Q19e | **Tiles from the site's backend**, which every chat site has: one tile archive served with HTTP `Range`, CORS allowing the `range` and `if-match` request headers and exposing `etag`. Default coverage the **world at zoom 0–6 (≈ 46 MB)**, plus an operator-configured **regional extract** for detail. Configured in `.env`, switchable, no vendor in code; **glyphs and sprites self-hosted** too. No third-party tile host by default: a third-party origin enters `connect-src` only when the operator sets one, and `az doctor` names it. The map data's **ODbL attribution stays visible** |
+| Q19f | **The bundle** (≈ 440 KB gzipped) is accepted, loaded **only on chat pages whose `show` has `map`**, by a dynamic `import()` when the first map event arrives |
+| Q19g | **Pins** from public rows (latitude/longitude fields) or model-written numbers in range with at most **6 decimals**, shown with the label **"Approximate, AI-placed"**; **optional server-side geocoding** behind `AZ_GEOCODER_URL`, cached and rate-limited, never called from the browser; **routes are straight polylines** in v1 |
+| Q19h | **Theme**: paint properties set from the page's `--az-color-*` tokens, read at draw time and again on a scheme change. **Fallback**: an ordered list of the pins and route stops, always present, and the whole map when WebGL2 is missing — announced once |
+
+#### 21.4.2 The answer format
+
+`map`, a new value of `show` (chat-only, Q15):
+
+```
+map "Where to find us"
+  pin "Workshop" 52.520008 13.404954
+  pin "Shop" 52.5163 13.3777
+  route "Walk"
+    point 52.520008 13.404954
+    point 52.5163 13.3777
+map "Our stores" from stores label name lat latitude lon longitude
+map "The venue"
+  place "Main hall" "Alexanderplatz, Berlin"
+```
+
+```ebnf
+map       = "map" , STRING , ( map-query | NEWLINE , INDENT , { pin | place | route } , DEDENT ) ;
+pin       = "pin" , STRING , lat , lon ;
+place     = "place" , STRING , STRING ;              (* label, address: only with AZ_GEOCODER_URL *)
+route     = "route" , STRING , NEWLINE , INDENT , point , point , { point } , DEDENT ;
+point     = "point" , lat , lon ;
+map-query = "from" , table-name , "label" , field , "lat" , field , "lon" , field , [ "where" , field , value ] ;
+lat       = number ;   (* −90…90, ≤ 6 decimals *)
+lon       = number ;   (* −180…180, ≤ 6 decimals *)
+```
+
+| Piece | Limits |
+|---|---|
+| pins (and places) | 1–24 per map, label 1–40 chars |
+| routes | 0–2 per map, each 2–50 points, drawn as straight segments |
+| coordinates | §20.3's number subset, in range, **≤ 6 decimals** (more drops the pin: `number`) |
+| from a table | a public table's non-private `number` fields, read as §20.5's anonymous list; ≤ 24 rows; `src: site` with its source line |
+| from the model | `src: model` and the label "Approximate, AI-placed", which the model cannot remove (§20.2's mechanism) |
+| `place` | only when `AZ_GEOCODER_URL` is set; the server geocodes the address (≤ 120 chars) through the operator's endpoint — https or loopback, ≤ 2 s, ≤ 16 KB, the first result's numbers only, cached 24 h, ≤ 3 per answer, `AZ_GEOCODER_PER_ADDRESS` (default `60/hour`); the pin carries `src: geocoded` and the label "Approximate location"; without the key, a `place` line drops (`not_shown`) |
+
+#### 21.4.3 Rendering
+
+- **Loading.** The map module and its worker file ship only with a site
+  whose chat shows `map`; the page imports the module dynamically when the
+  first `map` event arrives (Q19f). The worker is started from the `blob:`
+  wrapper of Q19b — the runtime's only `createObjectURL`, held by a sink
+  test like `setDestination`.
+- **Tiles, glyphs, sprites** come from the backend's own tile route
+  (`GET /tiles/<archive>`, Range, the CORS of Q19e) and its glyph and sprite
+  paths — the backend's origin is already in a chat page's `connect-src`
+  (§6.3), so **with the default configuration the page's policy gains only
+  `worker-src 'self' blob:`**.
+- **View.** Fitted to the pins' bounds; the model writes no zoom or centre;
+  zoom capped at the regional extract's maximum (or 6 without one).
+- **Controls** are the chat word's own buttons — Zoom in, Zoom out, Reset
+  view — calling the library's camera methods (Q19c).
+- **Pins and routes** are vector layers; **colours** are the series tokens
+  (§20.4) and role tokens read from `--az-color-*` with `getComputedStyle`
+  at draw time and on `prefers-color-scheme` change, set as the library's
+  paint properties — never a hex in code (Q19h).
+- **Popups** hold an element built from the word's template, text by
+  `textContent`, attached with `setDOMContent` (Q19d).
+- **Attribution** of the map data (ODbL) is a visible line under the map,
+  fixed copy from the build (Q19e).
+- **Text equivalent, always**: an ordered list of pins (label, then
+  coordinates in words) and of each route's stops, in a `<details>`; it is
+  the whole component when WebGL2 is missing or the module fails to load
+  (Q19h).
+
+**The CSP change** (the only phase that widens a policy, and only on pages
+whose chat shows `map`):
+
+| Directive | Change |
+|---|---|
+| `worker-src` | `'self' blob:` (the 3D pages' audited exception, `csp.ts` `decoder`) |
+| `connect-src` | no change by default (tiles, glyphs and sprites are the backend's, already listed); **`+` the operator's tile origin only when `.env` names a third-party one**, which `az doctor` names |
+| `img-src` | **no change** — no `data:` (Q19c), sprites by `connect-src` |
+| `style-src` | no change — the library's stylesheet ships as a build file (`'self'`) |
+| `script-src` | no change — the module is bundled, no `'unsafe-eval'` |
+
+`verify:build` asserts the map page's policy is the plain page's plus
+exactly `worker-src 'self' blob:`; every other page's policy unchanged.
+**`test:chat` on map pages reads the request log and the console as well as
+the `securitypolicyviolation` events** — a violation inside the worker never
+reaches the page's listener (Q19b) — and fails on any request to an origin
+but the site and the backend.
+
+#### 21.4.4 Security and privacy
+
+| Threat | Defence |
+|---|---|
+| exfiltration through tile requests | a model-written coordinate becomes tile requests; with tiles on the backend those go **only to the operator's own server** (no third party learns them), the view is fitted (no zoom from the model) and ≤ 24 pins, so the bits a map can carry reach no one new. A third-party tile origin reopens the channel and is the operator's explicit choice (`az doctor` warns) |
+| worker escaping the policy | the `blob:` start of Q19b; the e2e request log on map pages |
+| markup in popups | `setDOMContent` + `textContent` only (Q19d); a sink test forbids the HTML setter in the map module |
+| geocoding | server-side only (Q19g), the operator's endpoint, address text only, cached and rate-limited; the model never reaches a service; the browser never calls it |
+| misinformation | "Approximate, AI-placed" on model pins, "Approximate location" on geocoded ones, a source line on table pins |
+| supply chain | three exact pins [R11], `pnpm scan:deps`, the stack-evaluation section |
+| cost | ≈ 440 KB gz once, only on map pages; tile bytes from the backend (the README sizes the world archive at ≈ 46 MB plus the extract) |
+
+#### 21.4.5 Accessibility
+
+The list equivalent is always present and is the fallback; the map is
+`role="img"` with a summary ("Map: Where to find us, 2 places, 1 route.");
+az's zoom and reset buttons are real buttons; reduced motion: camera moves
+are instant; the map is announced once, the fallback once.
+
+#### 21.4.6 Test plan
+
+Unit: grammar and caps ± 1; 6 decimals and 7; out of range; NaN and
+exponents; `from` on a private field dropped; `place` without the geocoder
+dropped; the geocoder client against a local server (timeout, size,
+shape, cache, rate limit); labels per source. Build: the module and worker
+only on map sites; the policy delta on map pages only. Backend: the tile
+route's Range, CORS and `etag`. `test:chat` (three engines): a model map
+with its label, a table map with its source, the list equivalent, zoom and
+reset by keyboard, a scheme change repaints, the WebGL2-missing fallback,
+the request log and console clean on map pages (Q19b), zero CSP violations,
+axe.
+
+#### 21.4.7 Open questions
+
+| # | Question | Recommendation |
+|---|---|---|
+| O12 | A third-party tile host? | **Decided (Q19e): not by default**; only when the operator sets one, named by `az doctor` |
+| O13 | Geocoding? | **Decided (Q19g): optional, server-side**, behind `AZ_GEOCODER_URL` |
+| O14 | Real routes (paths along roads)? | **Not in v1** (Q19g: straight polylines); a routing endpoint would be a C6 tool |
+
+### 21.5 Codes, keys and files
+
+| Phase | Diagnostics | `.env` | Files |
+|---|---|---|---|
+| C5 | none | none | server `chat-answer.ts` (`ask`, fences), `chat-share.ts` (the `ask` key), `chat-context.ts` (the prompt); page `chat-markdown.ts`, `chat-prose.ts`, `chat-history.ts`; word `chat` (prose and history templates) |
+| C6 | none in `.az`; start-up refusals naming each bad key | `AZ_CHAT_TOOLS`, `AZ_CHAT_TOOL_<NAME>_*`, `AZ_CHAT_TOOL_CALLS_PER_ADDRESS` | server `chat-tools.ts`; `chat-rich.ts` (`from tool`); doctor and probe |
+| C7 | `show explore` (a value) | none | page `chat-explore.ts`; word templates for the controls |
+| C8 | `show map` (a value) | the tile archive(s), glyph and sprite paths, an optional third-party tile origin, `AZ_GEOCODER_URL`, `AZ_GEOCODER_PER_ADDRESS` | page map module and its `blob:`-started worker; the backend's tile route; `csp.ts` (`worker-src` on map pages); word template; the stack-evaluation section |
+
+### 21.6 What C5–C8 do not do
+
+- No new word, variant or modifier; the 12-word cap holds (Q15).
+- No model-written URL anywhere, still (the cta allow-list is the only
+  link); no HTML or raw markdown beyond §21.1.2's subset.
+- No server-side transcript (Q6): history lives only in the visitor's
+  browser.
+- No tool the operator did not declare; no tool result read by the model
+  (C6).
+- No expression language, no eval (C7).
+- No geocoding or routing service (C8).
