@@ -23,7 +23,7 @@ import type { Spec } from '../../core/src/spec.ts';
 export const ROWS_FILE = `${DATA_DIR}/rows.tsx`;
 
 /** The behaviour runtime's files that only a site with a `from` block ships. */
-export const ROWS_RUNTIME_FILES: readonly string[] = ['rows.ts', 'rows-logic.ts'];
+export const ROWS_RUNTIME_FILES: readonly string[] = ['rows.ts', 'rows-logic.ts', 'cover-sizes.ts'];
 
 /** The tables `from` blocks read, sorted and once each. */
 export function fromTables(spec: Spec): string[] {

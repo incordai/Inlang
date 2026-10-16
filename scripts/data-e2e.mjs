@@ -48,6 +48,7 @@ import { metadataFindings, phoneJpeg, plainJpeg, plainWebp, SVG } from '../packa
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 import { selfSignedCert } from './lib/self-signed.mjs';
+import { coverSizes } from '../packages/overlay/src/runtime/cover-sizes.ts';
 
 /*
  * Deadlines (lib/bounded.mjs): page.evaluate and close() have no timeout of
@@ -182,6 +183,17 @@ page /photos
     title "Photos"
   gallery grid
     title "Photos"
+    from notes
+      src     photo
+      alt     title
+      empty   "No photos yet"
+
+page /squares
+  hero center
+    title "Squares"
+  gallery grid
+    title "Squares"
+    ratio square
     from notes
       src     photo
       alt     title
@@ -567,9 +579,10 @@ async function rowImages(page, word) {
   await page.waitForFunction((w) => [...document.querySelectorAll(`section.az-${w} [data-az-from-rows] img`)].every((i) => i.complete && i.naturalWidth > 0), word);
   return page.evaluate((w) => ({
     template: document.querySelector(`section.az-${w} [data-az-from-template] img`)?.getAttribute('sizes') ?? null,
+    cover: document.querySelector(`section.az-${w} [data-az-from-template] img`)?.getAttribute('data-az-cover') ?? null,
     imgs: [...document.querySelectorAll(`section.az-${w} [data-az-from-rows] img`)].map((i) => ({
       alt: i.alt, item: i.closest('.az-feature-item')?.querySelector('.az-feature-item-title')?.textContent ?? '',
-      srcset: i.getAttribute('srcset'), sizes: i.getAttribute('sizes'), src: i.getAttribute('src'),
+      srcset: i.getAttribute('srcset'), sizes: i.getAttribute('sizes'), src: i.getAttribute('src'), hint: i.getAttribute('data-az-cover'),
       current: i.currentSrc, natural: i.naturalWidth, w: i.getAttribute('width'), h: i.getAttribute('height'),
     })),
   }), word);
@@ -577,17 +590,24 @@ async function rowImages(page, word) {
 
 /**
  * Width copies (data-spec §8) in the browser, on imageFlow's row (`id`,
- * titled `title`): a fresh 1600 px upload gives the row image of a `from`
- * gallery and a `from` rows block a srcset of its copies beside the word's
- * own `sizes`, and on a 375 px phone the browser loads a copy, not the stored
- * file. CONTROL: a row whose image is stored the way the server stored one
+ * titled `title`): a fresh 1500 × 1000 (3:2) upload gives the row image of a
+ * `from` gallery and a `from` rows block a srcset of its copies beside the
+ * word's own `sizes`, and on a 375 px phone the browser loads a copy, not the
+ * stored file. In a square gallery tile the same 3:2 image is a cover crop
+ * drawn 1.5 times the tile's width, so its `sizes` is the word's widened by
+ * the build's own coverSizes, from the row's stored size; in the 3:2 tile it
+ * fits, and the `sizes` is the word's. CONTROL: a row whose image is stored the way the server stored one
  * before copies (`<uuid>.webp`, inserted as such) shows with no srcset and no
  * sizes; `az backend images --confirm` then gives it copies under the same
  * URL. Only two writes per browser (the upload, the legacy row's delete):
  * every browser shares one address and its write limit (data-spec §5.5).
  */
+/** The fresh upload's size: 3:2, so a 3:2 tile fits it and a square one crops it. */
+const UPLOAD_W = 1500;
+const UPLOAD_H = 1000;
+
 async function responsiveFlow(b, name, owner, id, title) {
-  const up = await uploadVia(owner, id, await plainJpeg(1600, 1000));
+  const up = await uploadVia(owner, id, await plainJpeg(UPLOAD_W, UPLOAD_H));
   const url = up.item?.photo?.url;
   check(`${name} copies: an upload lists its 480, 768 and 1200 copies`,
     up.ok === true && JSON.stringify(up.item.photo.variants) === JSON.stringify([480, 768, 1200].map((w) => ({ url: `${url}&w=${w}`, width: w }))),
@@ -605,7 +625,7 @@ async function responsiveFlow(b, name, owner, id, title) {
     sql.close();
   }
   const legacyUrl = `${serverUrl}/data/notes/${legacyId}/photo?v=${legacyKey.slice(0, 36)}`;
-  const srcsetOf = (u) => `${u}&w=480 480w, ${u}&w=768 768w, ${u}&w=1200 1200w, ${u} 1600w`;
+  const srcsetOf = (u, width = UPLOAD_W) => `${u}&w=480 480w, ${u}&w=768 768w, ${u}&w=1200 1200w, ${u} ${width}w`;
   // A fresh phone each time: no image cached from an earlier load can stand in for the copy.
   const onPhone = async (path, word) => {
     const ctx = await watchedContext(b, csp, { ...CONTEXT, viewport: { width: 375, height: 812 }, deviceScaleFactor: 1 });
@@ -623,12 +643,19 @@ async function responsiveFlow(b, name, owner, id, title) {
   const g = await onPhone('/photos', 'gallery');
   const gw = g.imgs.find((i) => i.alt === title);
   const gl = g.imgs.find((i) => i.alt === `${name} legacy`);
-  check(`${name} copies: a from gallery's row image has a srcset of its copies and the word's sizes`,
-    gw?.srcset === srcsetOf(url) && typeof g.template === 'string' && g.template !== '' && gw.sizes === g.template && gw.w === '1600' && gw.h === '1000',
-    JSON.stringify({ template: g.template, gw }));
-  check(`${name} copies: at 375 px the browser loads the 480 copy, not the 1600 px file`, gw?.current === `${url}&w=480`, JSON.stringify(gw?.current));
+  check(`${name} copies: a from gallery's row image has a srcset of its copies and the word's sizes (a 3:2 file in a 3:2 tile is not widened)`,
+    gw?.srcset === srcsetOf(url) && typeof g.template === 'string' && g.template !== '' && gw.sizes === g.template && gw.w === String(UPLOAD_W) && gw.h === String(UPLOAD_H)
+      && g.cover === '3 / 2' && gw.hint === null,
+    JSON.stringify({ template: g.template, cover: g.cover, gw }));
+  check(`${name} copies: at 375 px the browser loads the 480 copy, not the ${UPLOAD_W} px file`, gw?.current === `${url}&w=480`, JSON.stringify(gw?.current));
+  const q = await onPhone('/squares', 'gallery');
+  const qw = q.imgs.find((i) => i.alt === title);
+  const widened = typeof q.template === 'string' ? coverSizes(q.template, '1 / 1', UPLOAD_W / UPLOAD_H, UPLOAD_W) : null;
+  check(`${name} copies: a 3:2 row image in a square tile gets the cover-widened sizes (1.5 × the tile), and no hint is left on it`,
+    qw?.srcset === srcsetOf(url) && q.cover === '1 / 1' && widened !== null && widened !== q.template && qw.sizes === widened && qw.hint === null,
+    JSON.stringify({ template: q.template, widened, qw }));
   check(`${name} copies: CONTROL — an image stored before copies has no srcset and no sizes, and shows its one file`,
-    gl !== undefined && gl.srcset === null && gl.sizes === null && gl.current === legacyUrl && gl.natural === 1600, JSON.stringify(gl));
+    gl !== undefined && gl.srcset === null && gl.sizes === null && gl.current === legacyUrl && gl.natural === 1600 && gl.hint === null, JSON.stringify(gl));
   check(`${name} copies: axe finds nothing on the phone gallery`, g.axe.length === 0, g.axe.join(', '));
 
   const s = await onPhone('/stories', 'feature');
@@ -647,7 +674,7 @@ async function responsiveFlow(b, name, owner, id, title) {
       && readdirSync(filesDir).filter((n) => n.startsWith(legacyKey.slice(0, 36))).length === 4, (made.stdout + made.stderr).trim());
   const after = (await onPhone('/photos', 'gallery')).imgs.find((i) => i.alt === `${name} legacy`);
   check(`${name} backfill: the same URL now has a srcset, and the phone loads its 480 copy`,
-    after?.src === legacyUrl && after.srcset === srcsetOf(legacyUrl) && after.current === `${legacyUrl}&w=480`, JSON.stringify(after));
+    after?.src === legacyUrl && after.srcset === srcsetOf(legacyUrl, 1600) && after.current === `${legacyUrl}&w=480`, JSON.stringify(after));
 
   await owner.goto(`${host.url}/notes`);
   const before = stored();

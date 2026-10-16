@@ -33,7 +33,24 @@
  * Imports only its siblings.
  */
 
-import { attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowSrcset, rowText, type RowsConfig } from './rows-logic.ts';
+import { COVER_ATTR, coverSizes } from './cover-sizes.ts';
+import { attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowSrcset, rowText, type RowImage, type RowsConfig } from './rows-logic.ts';
+
+/**
+ * A row image's `sizes` widened for its cover box (gallery-spec §7 rule 3):
+ * coverSizes, the build's function, with the row's stored aspect and the
+ * image itself as the largest file of its srcset. A hint it cannot read is
+ * the word's bug, which the build's own call refuses for a build image; on a
+ * visitor's page the box's `sizes` stays, a valid and only narrower choice,
+ * and the rows are filled.
+ */
+function rowCoverSizes(sizes: string, cover: string, image: RowImage): string {
+  try {
+    return coverSizes(sizes, cover, image.width / image.height, image.width);
+  } catch {
+    return sizes;
+  }
+}
 
 /** What a table's list answers: the generated client's DataResult, narrowed to what this needs. */
 export type RowsResult =
@@ -164,10 +181,22 @@ function fillRow(doc: Document, item: Element, row: unknown, config: RowsConfig,
       img.setAttribute('width', String(size.width));
       img.setAttribute('height', String(size.height));
     }
-    if (prop === null || !img.hasAttribute('sizes')) continue;
+    // The word's cover hint (a `ratio` tile's box) is for this step only.
+    const cover = img.getAttribute(COVER_ATTR);
+    img.removeAttribute(COVER_ATTR);
+    const sizes = img.getAttribute('sizes');
+    if (prop === null || sizes === null) continue;
     const srcset = size ? rowSrcset(size, base) : null;
-    if (srcset === null) img.removeAttribute('sizes');
-    else img.setAttribute('srcset', srcset);
+    if (srcset === null || !size) {
+      img.removeAttribute('sizes');
+      continue;
+    }
+    img.setAttribute('srcset', srcset);
+    // A cover crop is drawn wider than its box when the file is wider than
+    // the box: `sizes` is widened as the build widens a build image's, by
+    // the same function, from the row's stored size. The srcset tops out at
+    // the image itself, so that is the largest file.
+    if (cover !== null && size.height > 0) img.setAttribute('sizes', rowCoverSizes(sizes, cover, size));
   }
   for (const el of [copy, ...copy.querySelectorAll('*')]) {
     for (const attr of [...el.attributes]) {

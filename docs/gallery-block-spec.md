@@ -313,7 +313,11 @@ byte-identical rebuild stops being cheap.
 >   a build image; the target leaves it in place, and the rows runtime
 >   writes the srcset from the row's `variants` — or removes the `sizes` when
 >   the image has none (stored before copies existed). A row's `ratio` tile
->   gets no cover widening: its file's aspect is unknown at build.
+>   is widened like a build file's, at runtime: the word's cover hint rides
+>   on the row's `<img>`, and the rows runtime widens its `sizes` from the
+>   row's stored width and height with the build's own `coverSizes`
+>   (shared, not copied), then removes the hint (built 2026-10-16; it was a
+>   limit while the file's aspect was unknown at build).
 
 **4 — `content-visibility: auto` with `contain-intrinsic-size` per row.**
 Offscreen rows skip layout and paint entirely, and the intrinsic size comes free

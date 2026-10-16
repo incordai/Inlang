@@ -112,11 +112,12 @@ test('a width the resizer did not ship (larger than the original) is left out; t
   assert.equal(cover.attrs?.sizes, '(width < 768px) 75vw, min(51vw, 2400px)', 'a cover crop is capped at the largest candidate: the original');
 });
 
-test('a `from` row\'s image keeps its sizes for the rows runtime, with or without a resizer, and gets no srcset at build', () => {
+test('a `from` row\'s image keeps its sizes and cover hint for the rows runtime, with or without a resizer, and gets no srcset at build', () => {
   const asked: [string, readonly number[]][] = [];
   const row = img(fromMark('src'), { sizes: SIZES, [COVER_ATTR]: '4 / 3' });
   for (const resize of [fakeResize(asked), undefined]) {
-    assert.deepEqual(srcsetImages(row, srcs, sizeOf, resize).attrs, { src: fromMark('src'), alt: '', sizes: SIZES }, 'sizes kept; the cover hint removed');
+    assert.deepEqual(srcsetImages(row, srcs, sizeOf, resize).attrs, { src: fromMark('src'), alt: '', sizes: SIZES, [COVER_ATTR]: '4 / 3' },
+      'sizes and the cover hint kept: only the runtime knows the file\'s shape');
   }
   assert.deepEqual(asked, [], 'nothing is resized for a row: its file is the server\'s');
 });

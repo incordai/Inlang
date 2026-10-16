@@ -411,8 +411,8 @@ function galleryImage(
       // for a row, the one the rows runtime writes from the server's width
       // copies (data-spec §8). A `ratio` crop is `cover` in a box of exactly
       // that ratio, which the target widens `sizes` by when the file is wider
-      // than the box; a row's file is unknown at build, so its `sizes` stays the box's.
-      ...(sizes !== undefined ? { sizes, ...(aspect && !fromRow ? { 'data-az-cover': aspect } : {}) } : {}),
+      // than the box — for a row, the rows runtime, from the row's stored size.
+      ...(sizes !== undefined ? { sizes, ...(aspect ? { 'data-az-cover': aspect } : {}) } : {}),
     },
     style: {
       display: 'block',

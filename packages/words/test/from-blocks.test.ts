@@ -157,7 +157,7 @@ test('feature: media fills from an image field (rows), as a marker the runtime r
     bento(['    item "A"', '      media ./a.webp', '    item "B"', '      media ./b.webp', '    item "C"', '      media ./c.webp']), 'bento too');
 });
 
-test('gallery: a row\'s image carries the layout\'s sizes, the same as a build image; no cover hint (its file is unknown at build)', () => {
+test('gallery: a row\'s image carries the layout\'s sizes and cover hint, the same as a build image (the rows runtime widens it from the row)', () => {
   for (const [head, extra] of [['  gallery grid', ['    columns 4']], ['  gallery grid', ['    ratio 4:3']], ['  gallery masonry', []]] as const) {
     const rows = emit(block([head, ...extra, '    from notes', '      src photo', '      alt title'], 'gallery'));
     const row = walk(part(rows, 'data-az-from-template')!).find((n) => n.tag === 'img')!;
@@ -165,6 +165,8 @@ test('gallery: a row\'s image carries the layout\'s sizes, the same as a build i
     const own = walk(plain).find((n) => n.tag === 'img')!;
     assert.equal(typeof own.attrs!.sizes, 'string', `CONTROL ${head} ${extra.join(' ')}`);
     assert.equal(row.attrs!.sizes, own.attrs!.sizes, `${head} ${extra.join(' ')}`);
-    assert.equal(has(row, 'data-az-cover'), false, 'no cover hint on a row');
+    // A `ratio` tile is a cover crop: its hint rides to the runtime, which knows the row's file.
+    assert.equal(row.attrs!['data-az-cover'], own.attrs!['data-az-cover'], `the cover hint: ${head} ${extra.join(' ')}`);
+    if (extra.join() === '    ratio 4:3') assert.equal(row.attrs!['data-az-cover'], '4 / 3', 'a 4:3 tile says so');
   }
 });
