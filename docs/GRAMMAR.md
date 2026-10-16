@@ -961,10 +961,20 @@ under the page it leaves the block out of; under `site` there is no inherited
 block for it to leave out, and it is
 `nav: 'none' leaves the site's nav out of one page — under 'site' there is no nav to leave out; remove it, or write it under that page`
 (AZ1202). *(Before, `nav none` or `scene none` under `site` compiled and did
-nothing.)*
+nothing.)* The four `none`s are `nav none`, `footer none`, `scene none` and
+`chat none` (footer-block-spec §3: `footer none` opts an embed out of the
+site footer). *(Before, `footer none` was AZ1204: footer's manifest had no
+`none`.)*
 *Decision: without it there is no way to write a page with no nav — a login or
 campaign page — and PRD §6.1's `page /login` example needs one. This is an
 addition to the taxonomy, not a re-litigation of it.*
+
+A page's `none` leaves out the site's block of that word. When the site
+declares none — no `nav`, no `footer`, no `scene backdrop`, no `chat float`
+under `site` — there is nothing to leave out, and the line is
+`footer: 'none' leaves nothing out on this page; remove it — the site has no footer to leave out`
+(AZ1510, a warning: the page builds as it would without the line). *(Before,
+it compiled silently, so a stale or misplaced opt-out read as a working one.)*
 
 ### 5.3 Where an inherited block renders
 

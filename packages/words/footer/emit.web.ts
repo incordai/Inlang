@@ -9,7 +9,7 @@
  *   (mega, below sm) div.az-footer-accordion > details.az-footer-group > summary.az-footer-group-summary ·
  *   div.az-footer-bottom > p.az-footer-copyright (span[data-year] when year is dynamic) + ul.az-footer-legal
  * Variants: minimal — logo, tagline and legal row, flattened · columns — groups as flex columns, one below sm ·
- *   mega — grid of groups; below sm the groups become details accordions.
+ *   mega — grid of groups; below sm the groups become details accordions · none (renders nothing).
  * Modifiers: glass — blurred veil surface (translucent).
  * Props: logo → img.az-footer-logo-img · tagline → p.az-footer-tagline · copyright → the copyright line ·
  *   since / year → the year in that line (dynamic: runtime updates it).
@@ -77,6 +77,14 @@ const linkList = (items: SpecBlock[], ctx: EmitContext, cls: string): EmittedNod
 export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const variant = block.variant ?? 'minimal';
+
+  // GRAMMAR §5.2: `none` renders nothing. Suppression is resolved earlier by
+  // core's blocksFor, so a target normally never reaches this — it is here so
+  // that calling the emitter directly cannot produce a footer the author
+  // explicitly asked not to have.
+  if (variant === 'none') {
+    return { tag: 'footer', attrs: { class: 'az-footer az-footer--none', hidden: 'hidden' }, children: [] };
+  }
 
   const groups = block.children.filter((c) => c.word === 'group');
   const loose = block.children.filter((c) => c.word === 'link');

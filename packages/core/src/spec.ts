@@ -481,6 +481,22 @@ export function buildSpec(
     };
   });
 
+  // ---- `none` with nothing to leave out (GRAMMAR §5.2) -------------------
+  // `none` leaves the site's inherited block out of one page. When the site
+  // declares no such block, the line compiled silently and did nothing, so a
+  // typo'd or stale opt-out looked like a working one.
+  for (const p of pageWords) {
+    for (const w of p.children) {
+      if (w.variant !== 'none' || inherited.some((b) => b.word === w.word)) continue;
+      diagnostics.push({
+        code: 'AZ1510',
+        message: `${w.word}: 'none' leaves nothing out on this page; remove it — the site has no ${w.word} to leave out`,
+        pos: w.pos,
+        severity: 'warning',
+      });
+    }
+  }
+
   // ---- chat (chat-block-spec §3.4, §5.3, §6.2): its backend, what it may show and quote and link to, who asks
   // A chat's answers can quote any page's pricing and link to any declared
   // destination, so they are known only once every page is built.

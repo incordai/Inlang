@@ -17,7 +17,9 @@
  * (`centred`). From theme-spec §13, an accent-pair site's gradient primary
  * keeps its label at 4.5:1 over every pixel in every engine and both
  * schemes (`gradient`, with axe in Firefox and WebKit too), and keeps a
- * visible edge under forced colours (`forced-colors`, Chromium).
+ * visible edge under forced colours (`forced-colors`, Chromium). From
+ * GRAMMAR §5.2, a preview page that writes `nav none` or `footer none` has
+ * no such block and every other page keeps the site's (`none`, all engines).
  * Chromium runs everything; Firefox and WebKit run a smaller pass (overflow
  * and page errors at one width each), so browser claims rest on real runs.
  *
@@ -44,7 +46,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer, textOverPoster, centredUnder, PHONE_WIDTH, gradientLabel, forcedEdge } from './visual/checks.mjs';
+import { WIDTHS, FRAME_WIDTH, overflow, axe, keyboard, reducedMotion, bodyBackground, columnsOf, restacks, sharedColumn, skipLink, noJs, hydration, imageShift, frame, fonts, themeReading, settingsDiffer, textOverPoster, centredUnder, PHONE_WIDTH, gradientLabel, forcedEdge, leftOut } from './visual/checks.mjs';
 import { FONT_STACKS, THEMES as THEME_TOKENS } from '../packages/theme/src/index.ts';
 import { startServer } from './visual/serve.mjs';
 import {
@@ -129,6 +131,7 @@ const CHECKS = ['compile', 'deadline', 'overflow', 'axe', 'keyboard', 'reduced-m
   'drawer', 'dropdown', 'solid', 'hide-shrink', 'scroll-padding', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'copy', 'play', 'overlay-motion', 'nav-motion',
   'reveal', 'reveal-reduced', 'sheet-drag',
   'gradient', 'forced-colors',
+  'none',
   'firefox', 'webkit', 'csp', 'scan'];
 
 /**
@@ -323,6 +326,28 @@ const themeReadings = [];
 const RENDERS_NOTHING = 'none';
 
 /**
+ * The element an inherited word renders on every page (GRAMMAR §5.2), for
+ * the `none` check: a preview with a page that writes `<word> none` is
+ * loaded on every page, which must have the site's block or not have it.
+ */
+const INHERITED_ELEMENT = { nav: 'nav.az-nav', footer: 'footer.az-footer' };
+
+/**
+ * Every page of a preview as { path, none }: its URL path, and whether the
+ * page writes `<word> none`. Empty when no page does, so the check has
+ * nothing to compare and is not run.
+ */
+function pagesLeavingOut(source, word) {
+  const pages = [];
+  for (const line of source.split('\n')) {
+    const page = /^page\s+(\S+)/.exec(line);
+    if (page) pages.push({ path: page[1] === '/' ? '/' : `${page[1]}/`, none: false });
+    else if (pages.length > 0 && new RegExp(`^ {2}${word}\\s+${RENDERS_NOTHING}\\s*(#|$)`).test(line)) pages.at(-1).none = true;
+  }
+  return pages.some((p) => p.none) ? pages : [];
+}
+
+/**
  * The theme the extra variant sites use. Every variant is checked — light
  * and dark, every width, every engine — and the previews are checked in every
  * theme; checking every variant in every theme as well would multiply by six
@@ -383,6 +408,9 @@ async function buildAll(words, work, everyVariant) {
     // Each page is its own HTML file, and a preview's extra pages exist only
     // so its links resolve. The word under test is on the FIRST page declared.
     s.path = firstRoute(preview);
+    // Presence does not change with the theme or the variant: one site checks it.
+    s.leftOut = INHERITED_ELEMENT[s.word] && !s.variant && !s.roles && !s.settings && s.theme === VARIANT_THEME
+      ? pagesLeavingOut(preview, s.word) : [];
     if (existsSync(join(src, 'preview-assets'))) cpSync(join(src, 'preview-assets'), join(s.dir, 'preview-assets'), { recursive: true });
   }
   // A preview that no longer compiles is a finding for that word, not a
@@ -734,6 +762,21 @@ async function checkSite(s, browsers, server) {
       if (r) record(s.word, 'forced-colors', where, r);
       await fsf.close();
     }
+  }
+
+  // GRAMMAR §5.2: the page that writes `<word> none` has no such block, and
+  // every other page keeps the site's — in every engine, on the pages as built.
+  for (const engine of s.leftOut.length > 0 ? ['chromium', 'firefox', 'webkit'] : []) {
+    const nsf = await surface(browsers[engine], server, s.path, { viewport: { width: 1440, height: 900 } }, csp[engine]);
+    for (const p of s.leftOut) {
+      const where = `${s.label}/${engine}/light/1440${p.path}`;
+      const r = await guarded(nsf, engine, 'none', where, async (page) => {
+        await open(page, p.path, server);
+        return leftOut(page, INHERITED_ELEMENT[s.word], !p.none);
+      });
+      if (r) record(s.word, 'none', where, r);
+    }
+    await nsf.close();
   }
 
   // §2 B: the checks above load the word's page; every other page the site
@@ -1161,6 +1204,26 @@ async function selfTest() {
       await closeWithin(ctx, CLOSE_MS, 'context.close');
       if (b !== browser) await closeWithin(b, CLOSE_MS, `${engine}.close`);
     }
+  }
+  // GRAMMAR §5.2: a footer on the page that said `footer none`, and none on
+  // a page that keeps the site's; a hidden one is not kept either.
+  for (const [name, footer, none, shouldPass] of [
+    ['none-kept', '<footer class="az-footer"><p>© Site</p></footer>', true, false],
+    ['none-left-out', '', true, true],
+    ['kept-missing', '', false, false],
+    ['kept-hidden', '<footer class="az-footer" hidden><p>© Site</p></footer>', false, false],
+    ['kept-shown', '<footer class="az-footer"><p>© Site</p></footer>', false, true],
+  ]) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'index.html'),
+      `<!doctype html><html lang="en"><head><title>none</title></head><body><main><h1>None</h1></main>${footer}</body></html>`);
+    server.serve(join(dir, name));
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto(server.url);
+    expect(`GRAMMAR §5.2 ${none ? "'footer none' leaves it out" : 'another page keeps the site footer'} (${name} page)`,
+      await within(CHECK_MS, 'none self-test', () => leftOut(page, 'footer.az-footer', !none)), shouldPass);
+    await closeWithin(ctx, CLOSE_MS, 'context.close');
   }
   console.log('\nbehaviour runtime — each check fails without it and passes with it');
   await behaviourSelfTest(browser, server, dir, expect);

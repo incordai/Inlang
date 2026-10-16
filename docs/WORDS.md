@@ -81,7 +81,7 @@ Gates for any word change: `pnpm verify` (unit, typecheck, this index), `pnpm li
 | [`cta`](#cta) | Closing call-to-action section before the footer | `band` `card` `split` |
 | [`faq`](#faq) | Questions with expandable answers, plus FAQ schema | `list` `columns` |
 | [`feature`](#feature) | Set of features or benefits | `grid` `rows` `bento` |
-| [`footer`](#footer) | Site footer: links, legal row and copyright | `minimal` `columns` `mega` |
+| [`footer`](#footer) | Site footer: links, legal row and copyright | `minimal` `columns` `mega` `none` |
 | [`gallery`](#gallery) | Set of images in a chosen layout | `grid` `masonry` `carousel` `orbit` |
 | [`hero`](#hero) | Page opener: the page's only h1, text and actions | `center` `split` `full` `stack` `minimal` |
 | [`nav`](#nav) | Site navigation bar with links, groups and a CTA | `bar` `center` `split` `minimal` `side` `mega` `none` |
@@ -345,6 +345,7 @@ Site footer: links, legal row and copyright
 | `minimal` (default) | Logo, tagline and legal row only | `preview.az` |
 | `columns` | Two to five link groups in columns | `preview.columns.az` |
 | `mega` | Many groups; accordions on phones | `preview.mega.az` |
+| `none` | No footer on this page (page level) | renders nothing; no thumbnail |
 
 ### Modifiers
 

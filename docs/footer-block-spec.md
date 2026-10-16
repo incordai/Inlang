@@ -90,7 +90,12 @@ Three rules make inheritance safe:
 1. **Override replaces, never merges.** Merge semantics ("this page adds one
    link") produce a footer no single file describes — the bug we just removed.
 2. **`footer none` is explicit.** Embeds legitimately have none, and silent
-   absence must not look like a forgotten declaration.
+   absence must not look like a forgotten declaration. It is the reserved
+   variant `none` that `nav` has (GRAMMAR §5.2): written under a page, it
+   leaves the site's footer out of that page only, takes no modifiers
+   (AZ1204) and no indented lines (AZ1219); under `site` it is AZ1202, and on
+   a page of a site that declares no footer it is the warning AZ1510
+   (`remove it — the site has no footer to leave out`).
 3. **Internal `link` destinations resolve against the page graph at compile
    time.** A `/pricing` no `page` declares is a build error, not a runtime 404 —
    the stale-link bug caught at the only moment it is cheap.
@@ -238,7 +243,7 @@ ragged block with more whitespace than content.
   "name": "footer",
   "version": "1.0.0",
   "kind": "block",
-  "variants": ["minimal", "columns", "mega"],
+  "variants": ["minimal", "columns", "mega", "none"],
   "modifiers": ["glass"],
   "props": {
     "logo":      { "type": "path", "ext": [".svg", ".png"], "maxBytes": 262144 },

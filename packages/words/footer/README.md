@@ -1,6 +1,6 @@
 # `footer`
 
-The site footer: logo, tagline, link groups, social and legal links, and the copyright line. Usually declared once at site level and inherited by every page.
+The site footer: logo, tagline, link groups, social and legal links, and the copyright line. Usually declared once at site level and inherited by every page; `footer none` removes it from a page.
 
 Full specification: [`docs/footer-block-spec.md`](../../../docs/footer-block-spec.md). This page summarises it; the spec is authoritative.
 
@@ -28,6 +28,9 @@ page /about
 page /contact
 
 page /privacy
+
+page /embed
+  footer none
 ```
 
 ## Variants
@@ -39,6 +42,7 @@ Pick one. The first is the default.
 | `minimal` | one-page sites, portfolios, campaigns, checkout |
 | `columns` | 2–5 link groups; the honest default for a marketing site |
 | `mega` | multi-product sites with locale, status and legal surfaces |
+| `none` | leaves the site footer out of one page (an embed) |
 
 ## Modifiers
 

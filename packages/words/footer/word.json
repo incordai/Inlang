@@ -7,7 +7,8 @@
     "variants": {
       "minimal": "Logo, tagline and legal row only",
       "columns": "Two to five link groups in columns",
-      "mega": "Many groups; accordions on phones"
+      "mega": "Many groups; accordions on phones",
+      "none": "No footer on this page (page level)"
     },
     "modifiers": {
       "glass": "Blurred veil surface; solid where unsupported"
@@ -16,7 +17,8 @@
   "variants": [
     "minimal",
     "columns",
-    "mega"
+    "mega",
+    "none"
   ],
   "modifiers": [
     "glass"

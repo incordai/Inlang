@@ -219,7 +219,7 @@ modifier and key with its info line, and the file to edit for each concern);
 | `cta` | Closing call-to-action section before the footer | `band` `card` `split` | [README](packages/words/cta/README.md) |
 | `faq` | Questions with expandable answers, plus FAQ schema | `list` `columns` | [README](packages/words/faq/README.md) |
 | `feature` | Set of features or benefits | `grid` `rows` `bento` | [README](packages/words/feature/README.md) |
-| `footer` | Site footer: links, legal row and copyright | `minimal` `columns` `mega` | [README](packages/words/footer/README.md) |
+| `footer` | Site footer: links, legal row and copyright | `minimal` `columns` `mega` `none` | [README](packages/words/footer/README.md) |
 | `gallery` | Set of images in a chosen layout | `grid` `masonry` `carousel` `orbit` | [README](packages/words/gallery/README.md) |
 | `hero` | Page opener: the page's only h1, text and actions | `center` `split` `full` `stack` `minimal` | [README](packages/words/hero/README.md) |
 | `nav` | Site navigation bar with links, groups and a CTA | `bar` `center` `split` `minimal` `side` `mega` `none` | [README](packages/words/nav/README.md) |

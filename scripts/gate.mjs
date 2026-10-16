@@ -11,7 +11,9 @@
  *                                     plus the responsive-table rows and
  *                                     centred columns (hero-spec §2), and no
  *                                     Content-Security-Policy violation on
- *                                     any page in any engine (§2 B)
+ *                                     any page in any engine (§2 B); a page
+ *                                     that writes `nav none` or `footer none`
+ *                                     has none, the others keep the site's
  *    4  axe, zero violations          test:visual — and text over media at
  *                                     4.5:1 (over-media, hero-spec §10), and
  *                                     an accent pair's gradient label and its
@@ -48,7 +50,7 @@ const EXACT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const RAN = /^(chromium|firefox|webkit)-\d+(\.\d+)?$/;
 /** Items 3–7: which test:visual checks each gate item is made of. */
 const VISUAL = {
-  3: ['compile', 'deadline', 'overflow', 'no-js', 'hydration', 'image-shift', 'restack', 'column', 'centred', 'frame', 'font', 'theme-settings', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'firefox', 'webkit', 'csp', 'scan'],
+  3: ['compile', 'deadline', 'overflow', 'no-js', 'hydration', 'image-shift', 'restack', 'column', 'centred', 'frame', 'font', 'theme-settings', 'disclosure', 'solid', 'hide-shrink', 'scroll-padding', 'year', 'none', 'firefox', 'webkit', 'csp', 'scan'],
   4: ['axe', 'over-media', 'copy', 'gradient', 'forced-colors'],
   5: ['keyboard', 'skip-link', 'drawer', 'sheet-drag', 'dropdown', 'faq', 'faq-deep-link', 'carousel', 'lightbox', 'play', 'billing'],
   6: ['reduced-motion', 'overlay-motion', 'nav-motion', 'reveal', 'reveal-reduced'],

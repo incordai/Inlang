@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compile, type Manifest } from '../src/index.ts';
+import { blocksFor, compile, type Manifest } from '../src/index.ts';
 
 const WORDS = fileURLToPath(new URL('../../words/', import.meta.url));
 const manifests = new Map<string, Manifest>();
@@ -158,11 +158,47 @@ test("'none' takes no modifiers and no body: AZ1204 at the modifier, AZ1219 at t
 });
 
 test("CONTROL: 'none' under a page compiles and leaves the site's block out; a page's scene none needs no poster", () => {
-  const src = 'az 1\nsite studio\n  nav bar\n    link "Home" /\npage /\npage /login\n  nav none\n  scene none\n';
+  const src = 'az 1\nsite studio\n  nav bar\n    link "Home" /\n  scene backdrop 3d\n    poster ./a.webp\n    alt "Fog"\npage /\npage /login\n  nav none\n  scene none\n';
   clean(src);
   const spec = run(src).spec!;
-  assert.deepEqual(spec.site.inherited.map((b) => b.word), ['nav']);
+  assert.deepEqual(spec.site.inherited.map((b) => b.word), ['nav', 'scene']);
   assert.deepEqual(spec.pages[1].blocks.map((b) => `${b.word} ${b.variant}`), ['nav none', 'scene none']);
+  assert.deepEqual(run(src).diagnostics.map((d) => d.code), [], 'every none here has a site block to leave out');
+});
+
+/* ---- 5b. `footer none`, and a `none` with nothing to leave out ----------- */
+
+const FOOTER_SITE = 'az 1\nsite studio\n  footer minimal\n    link "Home" /\n    copyright "Studio"\npage /\npage /embed\n  footer none\n';
+
+test("'footer none' under a page compiles and leaves the site's footer out of that page only", () => {
+  // It was AZ1204 "'none' is not a variant or modifier": footer's manifest had no none.
+  clean(FOOTER_SITE);
+  const spec = run(FOOTER_SITE).spec!;
+  assert.deepEqual(blocksFor(spec, spec.pages[1]).map((b) => b.word), [], '/embed renders no footer');
+  assert.deepEqual(blocksFor(spec, spec.pages[0]).map((b) => `${b.word} ${b.variant}`), ['footer minimal'], '/ keeps the site footer');
+  // The same rules as nav's none: no modifiers, no body.
+  assert.deepEqual(only(page('  footer none glass\n')), { at: 'AZ1204 4:15', message: "footer: 'none' takes no modifiers — remove 'glass'" });
+  assert.deepEqual(only(page('  footer none\n    link "Home" /\n')), { at: 'AZ1219 5:5', message: "footer: 'none' takes no indented lines — remove them" });
+  assert.equal(only(site('  footer none\n')).at, 'AZ1202 3:3');
+});
+
+test("a page's 'none' when the site declares no such block is AZ1510, a warning at the line", () => {
+  // Each compiled with no diagnostic at all and left nothing out.
+  for (const word of ['nav', 'footer', 'scene', 'chat']) {
+    const r = run(page(`  ${word} none\n`));
+    assert.deepEqual(r.diagnostics.map((d) => `${d.code} ${d.severity} ${d.pos.line}:${d.pos.col}`), ['AZ1510 warning 4:3'], word);
+    assert.equal(r.diagnostics[0].message,
+      `${word}: 'none' leaves nothing out on this page; remove it — the site has no ${word} to leave out`);
+  }
+  // A site block of another word does not match.
+  const other = run('az 1\nsite studio\n  nav bar\n    link "Home" /\npage /\n  footer none\n');
+  assert.deepEqual(other.diagnostics.map((d) => d.code), ['AZ1510']);
+  assert.ok(other.spec, 'a warning still builds');
+});
+
+test("CONTROL: a 'none' with a site block to leave out warns nothing", () => {
+  assert.deepEqual(run(FOOTER_SITE).diagnostics, []);
+  assert.deepEqual(run('az 1\nsite studio\n  nav bar\n    link "Home" /\npage /\n  nav none\n').diagnostics, []);
 });
 
 /* ---- 6. a fill's label is copy ------------------------------------------- */

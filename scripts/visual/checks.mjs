@@ -47,6 +47,23 @@ export async function overflow(page) {
   return { pass, detail: pass ? '' : `scrollWidth ${r.sw} > ${r.vw}; widest: ${r.worst ? `${r.worst.el} to ${r.worst.right}px` : 'unknown'}` };
 }
 
+/**
+ * GRAMMAR §5.2: an inherited block on one page. A page that writes
+ * `<word> none` has none of the elements `selector` names; any other page
+ * has exactly one, and it is shown.
+ */
+export async function leftOut(page, selector, present) {
+  const shown = await page.evaluate((sel) => [...document.querySelectorAll(sel)].map((el) => {
+    const r = el.getBoundingClientRect();
+    return getComputedStyle(el).display !== 'none' && r.width > 0 && r.height > 0;
+  }), selector);
+  if (!present) {
+    return { pass: shown.length === 0, detail: shown.length ? `the page says none, and it has ${shown.length} ${selector}` : '' };
+  }
+  const pass = shown.length === 1 && shown[0];
+  return { pass, detail: pass ? '' : `the site's ${selector} is not on this page: ${shown.length} found, ${shown.filter(Boolean).length} shown` };
+}
+
 /** Item 4: axe, zero violations. */
 export async function axe(page) {
   const result = await new AxeBuilder({ page }).analyze();

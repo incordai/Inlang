@@ -17,3 +17,6 @@ page /about
 page /contact
 
 page /privacy
+
+page /embed
+  footer none
