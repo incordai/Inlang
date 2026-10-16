@@ -201,21 +201,43 @@ than guess.
 
 ## 7. CI
 
-`.github/workflows/ci.yml`, on every push and PR, as parallel jobs on Node 22,
-Ubuntu — each step a command from §1, so CI and a local run cannot differ:
+`.github/workflows/ci.yml` runs on every push to `main`, every PR, nightly
+(03:00 UTC) and on demand. Four parallel jobs, each on Ubuntu and Node 22
+unless noted, each step a command from §1, so CI and a local run cannot
+differ:
 
-- **verify** — `pnpm verify` (typecheck + unit: dependency rules,
-  determinism, offline build)
-- **build** — `pnpm verify:build`
-- **word gate** — `pnpm lint`, `pnpm test:visual --self-test`,
-  `pnpm gate --self-test`, `pnpm gate` (all 12 items for every word; it runs
-  the browser checks itself), `pnpm thumbnails --verify`
+- **verify** (typecheck + unit) — `pnpm verify`: the typecheck and every
+  unit suite (dependency rules, determinism, offline build). On a
+  push or PR it runs on Ubuntu, Node 22; nightly it runs across Ubuntu,
+  macOS and Windows on Node 22 and 24.
+- **build** (end-to-end build and render) — `pnpm verify:build`.
+- **visual** (12-point word gate and thumbnails) — after installing the
+  pinned Playwright's Chromium, Firefox and WebKit: `pnpm lint`,
+  `pnpm test:visual --self-test`, `pnpm gate --self-test`, `pnpm gate` (all
+  12 items for every word; it runs the browser checks itself),
+  `pnpm test:auth` (auth forms, `<Protected>` and the reset flow against a
+  local mock provider), `pnpm test:dev` (`az dev` with no setup, the dev
+  mailbox, reload on save, a clean Ctrl-C), `pnpm test:3d` (the 3D runtime,
+  on software WebGL), `pnpm thumbnails --verify` and `pnpm test:palette`
+  (the palette gallery in three engines, theme-spec §14).
+- **backend-db** (built-in backend on PostgreSQL and MySQL) —
+  `pnpm test:backend-db`, which starts and removes its pinned database
+  images itself (backend-spec §10).
 
-Nightly: the verify job across macOS, Windows and Ubuntu on Node 22 and 24.
+Not in CI, run locally (§1.1): `pnpm test:chat`, `pnpm test:data`,
+`pnpm test:cloud-auth`, `pnpm test:lighthouse`, `pnpm coverage` and
+`pnpm bench:tokens`.
 
-`.github/workflows/security.yml`, on every push, PR and weekly: CodeQL
-(security-extended), dependency review on PRs, and `pnpm scan:secrets`,
-`pnpm scan:deps`, `pnpm scan:actions` — see docs/security-scanning.md.
+`.github/workflows/security.yml` runs on every push to `main`, every PR,
+weekly (Monday 04:30 UTC) and on demand — see docs/security-scanning.md:
+
+- **codeql** — CodeQL (security-extended) over `javascript-typescript` and
+  over `actions`, one job each;
+- **dependency-review** (dependency review) — PRs only, failing on
+  moderate or worse;
+- **secrets** (secret scan, full history) — `pnpm scan:secrets`;
+- **dependencies** (dependency vulnerabilities) — `pnpm scan:deps`;
+- **workflows** (workflow lint) — `pnpm scan:actions`.
 
 **Windows is in the nightly matrix for a reason** — it is the primary
 development platform for this project, and path length, line endings and
