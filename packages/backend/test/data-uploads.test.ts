@@ -529,6 +529,33 @@ test('the backfill: counts without confirm; with it, gives old images copies und
   }
 });
 
+test('two backfills at once on the same files: one gives the copies, the other makes nothing and says so; every row moves once, its files intact', async () => {
+  const { h, dir, ana, chair, create } = await shop();
+  try {
+    const rows = [chair, await create(ana.c, 'products', { name: 'Stool' }), await create(ana.c, 'products', { name: 'Bench' })];
+    const keys = await Promise.all(rows.map((id) => legacyImage(h, dir, id, 1600, 1000)));
+    // Two processes' backfills: each its own image pool and data API over the one database and files directory.
+    const runs = await Promise.all([0, 1].map(async () => {
+      const images = await createImages({ dir });
+      return createData({ db: h.db, tables: dataOf(SHOP).tables, images }).backfillImages({ confirm: true, deadline: Infinity, settleMs: 0 });
+    }));
+    const done = runs.filter((r) => r.busy === undefined);
+    const busy = runs.filter((r) => r.busy === true);
+    assert.equal(done.length, 1, JSON.stringify(runs));
+    assert.deepEqual(done[0], { widened: 3, left: 0, skipped: 0 });
+    assert.equal(busy.length, 1, JSON.stringify(runs));
+    assert.equal(busy[0].widened, 0, 'the second made nothing');
+    for (const [i, id] of rows.entries()) {
+      const now = await keyOf(h, 'products', 'photo', id);
+      assert.equal(now, `${keys[i].slice(0, 36)}.full.webp`);
+      assert.equal(setOf(dir, now).length, 4, `${id}: the key and its three copies, none removed by a losing run`);
+    }
+    assert.deepEqual(readdirSync(join(dir, '.leases')), [], 'both leases released');
+  } finally {
+    await h.close();
+  }
+});
+
 test('the backfill never overwrites a newer image: a replace while it works wins, and its own new files go', async () => {
   const { h, dir, images, ana, chair } = await shop();
   try {

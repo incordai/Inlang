@@ -31,7 +31,11 @@
  * worker thread, and every loader blocked but JPEG, PNG, WebP and HEIF (which
  * decodes AVIF). A small queue runs one image at a time, so memory stays near
  * one image's worth (about 150 MB for 40 megapixels, measured) however many
- * uploads arrive together.
+ * uploads arrive together. The queue is one process's; each job also holds
+ * the files directory's `encode` lease (data-lease.ts), so a backfill run
+ * beside a live server (`az backend images --confirm`) waits its turn
+ * instead of doubling the encodes, and a second backfill on the same files
+ * does not start while one runs (the `backfill` lease).
  *
  * Copied into a generated server only when the site declares data; imports
  * only its siblings, node built-ins and, lazily, the image library.
@@ -40,7 +44,9 @@
 import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { loadDriver } from './drivers.ts';
+import { LeaseBusy, takeLease, type LeaseTiming } from './data-lease.ts';
 
 /** data-spec §8 — what an upload may be, and what is stored. */
 export const IMAGE_LIMITS = {
@@ -57,6 +63,29 @@ export const IMAGE_LIMITS = {
   /** A temporary or unreferenced file younger than this is never swept: its row may still be being written. */
   sweepGraceMs: 60 * 60 * 1000,
 } as const;
+
+/**
+ * The leases on a files directory (data-lease.ts). An encode waits for its
+ * turn up to 30 s — several images' work — then is refused as the queue
+ * refuses (429); a backfill does not wait for another backfill. A holder
+ * refreshes its lease every 3 s, and one not refreshed for 15 s is a dead
+ * process's.
+ */
+export const IMAGE_LEASES: { readonly encode: LeaseTiming; readonly backfill: LeaseTiming } = {
+  encode: { waitMs: 30_000, staleMs: 15_000, heartbeatMs: 3_000, pollMs: 25 },
+  backfill: { waitMs: 0, staleMs: 15_000, heartbeatMs: 3_000, pollMs: 25 },
+};
+
+/**
+ * After each image it gives copies, the backfill leaves the encoder free
+ * this long — more than twice the longest wait between an upload's looks
+ * (pollMs and its jitter) — so a live server's uploads are never starved
+ * by a long backfill.
+ */
+export const BACKFILL_YIELD_MS = 100;
+
+/** The leases' folder inside the files directory, beside the temporary one. */
+const LEASE_DIR = '.leases';
 
 /**
  * The decoder allow-list: every loader is blocked, then only these are
@@ -159,6 +188,11 @@ export interface Images {
    * names it. Null when `key` is not such a key or its file is gone.
    */
   addWidths(key: string): Promise<StoredImage | null>;
+  /**
+   * Run `work` as the one backfill on these files (the `backfill` lease),
+   * or return null at once when another process's backfill holds it.
+   */
+  backfill<T>(work: () => Promise<T>): Promise<T | null>;
   /** Remove files no row names, older than the grace period; returns how many. */
   sweep(inUse: ReadonlySet<string>, now?: number): Promise<number>;
   /** Uploads processing or waiting — for tests and the log. */
@@ -224,7 +258,12 @@ interface ImageLibrary {
   unblock(options: { operation: string[] }): void;
 }
 
-export async function createImages(opts: { readonly dir: string }): Promise<Images> {
+/** `leases` replaces IMAGE_LEASES and `yieldMs` BACKFILL_YIELD_MS — for tests that prove the turns without waiting them out. */
+export async function createImages(opts: {
+  readonly dir: string;
+  readonly leases?: { readonly encode: LeaseTiming; readonly backfill: LeaseTiming };
+  readonly yieldMs?: number;
+}): Promise<Images> {
   // Loaded only here, so a server without image fields never needs it.
   const { default: sharp } = await loadDriver('sharp') as { default: ImageLibrary };
   sharp.cache(false);
@@ -235,7 +274,26 @@ export async function createImages(opts: { readonly dir: string }): Promise<Imag
   const dir = opts.dir;
   const tmp = join(dir, TMP_DIR);
   await mkdir(tmp, { recursive: true, mode: 0o700 });
+  const leaseDir = join(dir, LEASE_DIR);
+  await mkdir(leaseDir, { recursive: true, mode: 0o700 });
+  const leases = opts.leases ?? IMAGE_LEASES;
+  const yieldMs = opts.yieldMs ?? BACKFILL_YIELD_MS;
   const queue = createQueue(IMAGE_LIMITS.queueMax);
+  /** One job of the queue, under the files directory's encode lease: one encode at a time across processes. */
+  const encoding = async <T>(job: () => Promise<T>): Promise<T> => {
+    let lease;
+    try {
+      lease = await takeLease(leaseDir, 'encode', leases.encode);
+    } catch (e) {
+      if (e instanceof LeaseBusy) throw new ImageError('rate_limited');
+      throw e;
+    }
+    try {
+      return await job();
+    } finally {
+      await lease.release();
+    }
+  };
   const input = { limitInputPixels: IMAGE_LIMITS.maxPixels, failOn: 'error' as const, sequentialRead: true };
 
   async function encode(temp: string): Promise<StoredImage> {
@@ -331,7 +389,7 @@ export async function createImages(opts: { readonly dir: string }): Promise<Imag
     tempPath: () => join(tmp, `${randomUUID()}.upload`),
     async store(temp) {
       try {
-        return await queue.run(() => encode(temp));
+        return await queue.run(() => encoding(() => encode(temp)));
       } finally {
         await rm(temp, { force: true });
       }
@@ -345,7 +403,28 @@ export async function createImages(opts: { readonly dir: string }): Promise<Imag
       // set of files no row names, which the sweep takes.
       if (typeof key === 'string' && isKey(key)) for (const name of filesOf(key).reverse()) await rm(join(dir, name), { force: true });
     },
-    addWidths: (key) => queue.run(() => widen(key)),
+    async addWidths(key) {
+      try {
+        return await queue.run(() => encoding(() => widen(key)));
+      } finally {
+        // The encoder is left free a moment, so a live server's waiting upload takes its turn.
+        await sleep(yieldMs);
+      }
+    },
+    async backfill(work) {
+      let lease;
+      try {
+        lease = await takeLease(leaseDir, 'backfill', leases.backfill);
+      } catch (e) {
+        if (e instanceof LeaseBusy) return null;
+        throw e;
+      }
+      try {
+        return await work();
+      } finally {
+        await lease.release();
+      }
+    },
     async sweep(inUse, now = Date.now()) {
       let removed = 0;
       // A file is in use when it is one of an in-use key's files.

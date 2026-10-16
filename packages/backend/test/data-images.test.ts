@@ -51,6 +51,9 @@ async function refusal(images: Images, bytes: Buffer): Promise<string> {
 
 const { images, dir } = await fresh();
 
+/** The module's own folders in a files directory: its temporaries and its leases (data-lease.ts). */
+const FOLDERS = new Set(['.tmp', '.leases']);
+
 test('sniff: the four types by their first bytes; HEIC named; everything else nothing', async () => {
   assert.equal(sniffImage(await plainJpeg(4, 4)), 'jpeg');
   assert.equal(sniffImage(await taggedPng()), 'png');
@@ -237,7 +240,7 @@ test('width copies are written with their key or not at all: a failed placement 
   } finally {
     chmodSync(d, 0o700);
   }
-  assert.deepEqual(readdirSync(d).filter((n) => n !== '.tmp'), []);
+  assert.deepEqual(readdirSync(d).filter((n) => !FOLDERS.has(n)), []);
   assert.deepEqual(readdirSync(join(d, '.tmp')), []);
   // The key's own rename fails after the copies are in: they are taken out again.
   const legacy = `${randomUUID()}.webp`;
@@ -246,7 +249,7 @@ test('width copies are written with their key or not at all: a failed placement 
   mkdirSync(blocker);
   writeFileSync(join(blocker, 'x'), 'occupied');
   await assert.rejects(q.addWidths(legacy));
-  assert.deepEqual(readdirSync(d).filter((n) => n !== '.tmp').sort(), [legacy, `${legacy.slice(0, 36)}.full.webp`].sort(), 'no copy outlived the failure');
+  assert.deepEqual(readdirSync(d).filter((n) => !FOLDERS.has(n)).sort(), [legacy, `${legacy.slice(0, 36)}.full.webp`].sort(), 'no copy outlived the failure');
   assert.deepEqual(readdirSync(join(d, '.tmp')), []);
   rmSync(blocker, { recursive: true });
   // CONTROL: the same backfill with the way clear places all four.

@@ -44,6 +44,11 @@ export interface BackfillReport {
   readonly left: number;
   /** Rows whose file is missing or does not decode: left as they are, named in the log by count only. */
   readonly skipped: number;
+  /**
+   * Set when another process's backfill holds these files (data-images.ts
+   * `backfill`): this run made nothing, and `left` is what is still to do.
+   */
+  readonly busy?: true;
 }
 
 /** Rows read per backfill page: memory stays one page's worth however large the table. */
@@ -796,10 +801,24 @@ export function createData(deps: DataDeps): DataApi {
    * keeps its `v` — the same UUID — so a cached copy stays right. Old files
    * are removed after the last row moved (BACKFILL_SETTLE_MS later). Rows are
    * read a page at a time by id; nothing is started past `deadline`.
+   *
+   * With `confirm` it runs as the one backfill on these files (the images'
+   * `backfill` lease): a second, started while one works, gave the same
+   * images the same copies over each other's. It now makes nothing, counts
+   * what is left and says it was busy.
    */
   async function backfillImages(opts: { readonly confirm: boolean; readonly deadline: number; readonly settleMs?: number }): Promise<BackfillReport> {
     if (!images) return { widened: 0, left: 0, skipped: 0 };
+    if (!opts.confirm) return backfillRun(images, opts);
+    const ran = await images.backfill(() => backfillRun(images, opts));
+    return ran ?? { ...(await backfillRun(images, { ...opts, confirm: false })), busy: true };
+  }
+
+  /** One backfill pass: with `confirm`, under the lease backfillImages took. */
+  async function backfillRun(images: Images, opts: { readonly confirm: boolean; readonly deadline: number; readonly settleMs?: number }): Promise<BackfillReport> {
     let [widened, left, skipped] = [0, 0, 0];
+    // The encoder stayed taken past its wait (a live server's uploads): the rest is left for the next run.
+    let busy = false;
     const moved: string[] = [];
     for (const t of tables.values()) {
       const table = q(d, physical(t.name));
@@ -817,7 +836,7 @@ export function createData(deps: DataDeps): DataApi {
           for (const row of page) {
             const [id, key] = [String(row.id), String(row.k)];
             after = id;
-            if (now() > opts.deadline) {
+            if (busy || now() > opts.deadline) {
               left++;
               continue;
             }
@@ -826,6 +845,11 @@ export function createData(deps: DataDeps): DataApi {
               stored = await images.addWidths(key);
             } catch (e) {
               if (!(e instanceof ImageError)) throw e;
+              if (e.code === 'rate_limited') {
+                busy = true;
+                left++;
+                continue;
+              }
               stored = null;
             }
             if (stored === null) {

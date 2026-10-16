@@ -165,6 +165,11 @@ if (existsSync(dataFile)) {
   if (images) sweepImages = api.sweepImages;
   if (args.images !== null) {
     const r = await api.backfillImages({ confirm: args.images === 'make', deadline: Date.now() + IMAGES_RUN_MS });
+    if (r.busy) {
+      process.stderr.write(`backend: another image backfill is running on these files — this one made nothing; ${r.left} stored image(s) have no width copies yet. Run it again once that one ends\n`);
+      await db.close();
+      process.exit(1);
+    }
     process.stdout.write(args.images === 'count'
       ? `backend: ${r.left} stored image(s) have no width copies${r.left > 0 ? ' — make them with: node src/main.ts --images --confirm' : ''}\n`
       : `backend: gave ${r.widened} stored image(s) their width copies; ${r.skipped} skipped (missing or unreadable)${r.left > 0 ? `; ${r.left} left — run again to continue` : ''}\n`);
