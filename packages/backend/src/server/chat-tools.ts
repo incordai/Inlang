@@ -286,7 +286,7 @@ function exampleValue(p: ToolParam): string {
 /**
  * The tools as the model is told them in the per-request system text
  * (§21.2.2, §8.3): generated from the validated declarations, so the build's
- * prompt.txt stays a function of the .az file. Never a URL, never a key.
+ * chat prompt files stay a function of the .az file. Never a URL, never a key.
  */
 export function toolsText(shapes: readonly ChatToolShape[]): string {
   if (shapes.length === 0) return '';

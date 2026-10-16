@@ -45,10 +45,11 @@ export const CHAT_PROMPT_FIXTURES = [
 /** The texts measured per fixture, in table order. */
 export const CHAT_PROMPT_TEXTS = ['prompt', 'context', 'system'];
 
-/** The prompt file a chat page's model is told, among the build's files. */
-export function promptFileOf(files) {
-  const f = files.find((x) => x.path === 'server/chat/prompt.txt');
-  if (!f) throw new Error('the build has no server/chat/prompt.txt');
+/** The prompt file the chat on `page` reads, as context.json names it, among the build's files. */
+export function promptFileOf(files, context, page) {
+  const name = context.chats[page]?.prompt;
+  const f = files.find((x) => x.path === `server/chat/${name}`);
+  if (!f) throw new Error(`the build has no prompt file for the chat on ${page}`);
   return f.content;
 }
 
@@ -65,9 +66,9 @@ export function chatPromptTexts(fixture) {
     if (!outcome.ok) throw new Error(`${fixture.file} does not build\n${outcome.report}`);
     const contextFile = outcome.files.find((x) => x.path === 'server/chat/context.json');
     if (!contextFile) throw new Error(`${fixture.file}: the build has no server/chat/context.json`);
-    const prompt = promptFileOf(outcome.files);
     const context = parseChatContext(contextFile.content);
     if (typeof context === 'string') throw new Error(`${fixture.file}: context.json ${context}`);
+    const prompt = promptFileOf(outcome.files, context, fixture.page);
     return { prompt, context: contextFile.content, system: systemText(prompt, context, fixture.page) };
   } finally {
     rmSync(dir, { recursive: true, force: true });

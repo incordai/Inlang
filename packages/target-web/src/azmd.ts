@@ -237,7 +237,7 @@ export function azMd(m: MapInput): string {
     out.push(`- \`${m.dirs.runtime}/chat-markdown.ts\` and \`chat-prose.ts\` — an answer's formatting (bold, italic, code, lists, code blocks) read`);
     out.push('  into fixed elements and its follow-up questions as buttons; `chat-history.ts` — the conversation kept in the visitor\'s');
     out.push('  own browser for 7 days, with Clear history (nothing more is stored on the server)');
-    out.push('- `server/chat/prompt.txt` — what the model is told (generated, readable); `server/chat/context.json` — the public page');
+    out.push('- `server/chat/prompt-<n>.txt` — what each chat\'s model is told (generated, readable); `server/chat/context.json` — the public page');
     out.push('  content it answers from, the quotable blocks and the destination allow-list');
     out.push('- `server/src/chat.ts` — `POST /chat`: limits, budget, queue, timeouts; `server/src/chat-answer.ts` — the answer parser:');
     out.push('  the model\'s text becomes typed events; `server/src/chat-adapters.ts` — the wire shapes (no provider SDK)');

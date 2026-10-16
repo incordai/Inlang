@@ -1,8 +1,8 @@
 /**
  * @az module chat-context
- * Purpose: what a chat's model is told, built from the Spec: server/chat/prompt.txt and server/chat/context.json.
+ * Purpose: what a chat's model is told, built from the Spec: one server/chat/prompt-<n>.txt per chat, and server/chat/context.json.
  * Spec: docs/backend-spec.md §8 (docs/chat-block-spec.md §8.1)
- * Exports: chatBackend, BackendChat, ChatBackendOptions, CONTEXT_MAX, CHAT_PROMPT
+ * Exports: chatBackend, BackendChat, ChatPromptFile, ChatBackendOptions, CONTEXT_MAX, CHAT_PROMPT, promptFileName
  * Edit guide: deterministic (a function of the Spec only, keys sorted); public content only — never a protected page, never .env.
  * Tests: packages/backend/test/chat-context.test.ts
  */
@@ -37,10 +37,20 @@ import { ANSWER_FORMS, ANSWER_LIMITS, ANSWER_WORDS, ASK_FORM, type AnswerWord } 
 /** The site context's largest size, in characters of its pages (§8.1). */
 export const CONTEXT_MAX = 24_000;
 
+/** One chat's prompt file: its name in server/chat/ and what it says. */
+export interface ChatPromptFile { readonly file: string; readonly text: string }
+
+/** The name of the n-th prompt file (from 1), as context.json's chats name it. */
+export const promptFileName = (n: number): string => `prompt-${n}.txt`;
+
 /** What `az build` writes for a site whose pages show a chat. */
 export interface BackendChat {
-  /** server/chat/prompt.txt */
-  readonly prompt: string;
+  /**
+   * server/chat/prompt-<n>.txt: each chat's own instructions, teaching only
+   * the components its `show` lists (chat-block-spec §19.15). Chats told the
+   * same share one file; numbered in page order of first use.
+   */
+  readonly prompts: readonly ChatPromptFile[];
   /** server/chat/context.json */
   readonly context: string;
   /** Routes left out because the context would have passed CONTEXT_MAX. */
@@ -50,12 +60,13 @@ export interface BackendChat {
 }
 
 /**
- * The fixed instructions. Nothing in them is secret; they are told not to
- * recite them anyway. `words` are the components some chat on the site may
- * show: their forms are taught from the answer parser's own table and caps
- * (server chat-answer.ts), so what the model is told is what the parser
- * accepts; which of them a page allows is said per request (chat.ts
- * systemText).
+ * One chat's fixed instructions. Nothing in them is secret; they are told
+ * not to recite them anyway. `words` are the components this chat may show
+ * and no other: their forms are taught from the answer parser's own table
+ * and caps (server chat-answer.ts), so what the model is told is what the
+ * parser accepts, and a chat pays only for its own components
+ * (chat-block-spec §19.15). `knows`: this chat is sent rows of the tables it
+ * knows (§8.2).
  */
 export const CHAT_PROMPT = (site: string, words: readonly AnswerWord[] = [], knows = false): string => `You are the assistant on the website "${site}". You answer visitors' questions about this site only.
 
@@ -93,7 +104,7 @@ Components:
 ${forms.join('\n\n')}
 
 - Write each string in double quotes; inside one, write ${'\\"'} for a quote, ${'\\\\'} for a backslash and ${'\\n'} for a line break.
-- Use only the components the page allows (said at the end). A component that breaks any rule is not shown at all, so keep to the forms exactly.
+- Use only these components. A component that breaks any rule is not shown at all, so keep to the forms exactly.
 - Prose stays prose: no URL, no price of your own, no markup but the formatting above. Keep components out of the middle of a sentence, and out of a code block.
 `;
 }
@@ -176,6 +187,8 @@ function blockContent(b: SpecBlock, o: ChatBackendOptions): Json | null {
  */
 export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat | undefined {
   const chats: { [route: string]: Json } = {};
+  /** Each chat's prompt file, by what it says: chats told the same share one (§19.15). */
+  const prompts = new Map<string, string>();
   /** The components any chat may show, and what the site offers their answers (core chat.ts chatAnswers). */
   const shown = new Set<AnswerWord>();
   let quotes: Json[] = [];
@@ -202,10 +215,13 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
     for (const t of known) {
       knows.set(t.name, { name: t.name, fields: t.fields.map((f) => given({ ...f, choices: f.choices ? [...f.choices] : undefined })) });
     }
+    const text = CHAT_PROMPT(spec.site.name, ANSWER_WORDS.filter((w) => show.includes(w)), known.length > 0);
+    if (!prompts.has(text)) prompts.set(text, promptFileName(prompts.size + 1));
     chats[page.route] = {
       allow: chat.props.allow ?? 'signedin', limit: Number(chat.props.limit ?? '20'),
       ...(show.length > 0 ? { show } : {}),
       ...(known.length > 0 ? { knows: known.map((t) => t.name) } : {}),
+      prompt: prompts.get(text)!,
     };
   }
   if (Object.keys(chats).length === 0) return undefined;
@@ -239,7 +255,7 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
     ...(knows.size > 0 ? { knows: [...knows.keys()].sort().map((n) => knows.get(n)!) } : {}),
   });
   return {
-    prompt: CHAT_PROMPT(spec.site.name, ANSWER_WORDS.filter((w) => shown.has(w)), knows.size > 0),
+    prompts: [...prompts].map(([text, file]) => ({ file, text })),
     context: `${JSON.stringify(context, null, 2)}\n`,
     omitted,
     ...(shown.has('map') ? { map: true as const } : {}),

@@ -284,8 +284,11 @@ export function chatDemoFile(dir: string): string {
   return file;
 }
 
-/** The build's chat files (`server/chat/`), when a page shows a chat; `map` when a chat shows maps (its tiles are served too). */
-export interface DevChat { readonly prompt: string; readonly context: string; readonly map?: boolean }
+/**
+ * The build's chat files (`server/chat/`), when a page shows a chat: each chat's prompt file by name, and the context;
+ * `map` when a chat shows maps (its tiles are served too).
+ */
+export interface DevChat { readonly prompts: Readonly<Record<string, string>>; readonly context: string; readonly map?: boolean }
 
 export interface DevBackend {
   readonly url: string;
@@ -370,7 +373,7 @@ export async function startDevBackend(
       throw new Error(`the dev backend cannot start — fix this in ${DEV_DIR}/backend.env or ${DEV_DIR}/chat-demo.json:\n  - ${(e as Error).message}`);
     }
     chatRoutes = createChat({
-      config: config.chat, secret: config.secret, db, prompt: chat.prompt, context, adapter,
+      config: config.chat, secret: config.secret, db, prompts: chat.prompts, context, adapter,
       log: (line) => print(`backend: ${line}`), ...(figures ? { figures } : {}), ...(knows ? { knows } : {}),
     });
     print(`az dev: chat answers from ${config.chat.api === 'fake' ? `the demo script in ${DEV_DIR}/chat-demo.json` : 'the model set in .az-dev/backend.env'}`);

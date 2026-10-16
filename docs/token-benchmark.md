@@ -371,7 +371,7 @@ Characters per token, over the ten: `.az` 3.79, JSON 3.68, markdown
 only when a provider reports no usage, over-charges rather than under.
 
 **What the model is sent besides the conversation**, for the chat e2e site
-(8 pages, a chat that shows every component): the generated `prompt.txt`
+(8 pages, a chat that shows every component): the generated prompt file
 731 tokens (3 132 characters) and `context.json` 750 tokens (2 964
 characters).
 

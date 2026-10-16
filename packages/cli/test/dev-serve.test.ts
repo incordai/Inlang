@@ -125,8 +125,8 @@ test('az dev chats through the scripted demo, written once to .az-dev/, unless b
   const mailbox = await startMailbox(ports.mailbox, quiet);
   const printed: string[] = [];
   const chat = {
-    prompt: 'Answer about the studio.\n',
-    context: JSON.stringify({ site: { name: 'studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20 } }, routes: ['/'] }),
+    prompts: { 'prompt-1.txt': 'Answer about the studio.\n' },
+    context: JSON.stringify({ site: { name: 'studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20, prompt: 'prompt-1.txt' } }, routes: ['/'] }),
   };
   const backend = await startDevBackend(project, 'studio', ports, mailbox, (l) => printed.push(l), undefined, chat);
   try {
@@ -161,8 +161,8 @@ test('a public chat\'s dev backend keeps no accounts: no mailbox, no mail keys, 
   const project = tmp();
   const ports = { site: await freePort(0), backend: await freePort(0), mailbox: 0 };
   const chat = {
-    prompt: 'Answer about the demo.\n',
-    context: JSON.stringify({ site: { name: 'demo' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20 } }, routes: ['/'] }),
+    prompts: { 'prompt-1.txt': 'Answer about the demo.\n' },
+    context: JSON.stringify({ site: { name: 'demo' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20, prompt: 'prompt-1.txt' } }, routes: ['/'] }),
   };
   assert.equal('AZ_EMAIL_API_URL' in devBackendEnv(ports, 's'.repeat(43), ':memory:', null), false);
   const backend = await startDevBackend(project, 'demo', ports, null, quiet, undefined, chat);
@@ -185,8 +185,8 @@ test('a chat that shows maps: az dev serves the bundled world basemap with its c
   const ports = { site: await freePort(0), backend: await freePort(0), mailbox: 0 };
   const printed: string[] = [];
   const chat = {
-    prompt: 'Answer.\n',
-    context: JSON.stringify({ site: { name: 'demo' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20, show: ['map'] } }, routes: ['/'] }),
+    prompts: { 'prompt-1.txt': 'Answer.\n' },
+    context: JSON.stringify({ site: { name: 'demo' }, pages: [], chats: { '/': { allow: 'anyone', limit: 20, show: ['map'], prompt: 'prompt-1.txt' } }, routes: ['/'] }),
     map: true,
   };
   const backend = await startDevBackend(project, 'demo', ports, null, (l) => printed.push(l), undefined, chat);

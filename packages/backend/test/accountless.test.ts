@@ -33,7 +33,7 @@ const CONTEXT = JSON.stringify({
   site: { name: 'Demo' },
   pages: [],
   // A signed-in chat cannot compile on such a site (core accounts.ts); it is here to prove no session is ever read.
-  chats: { '/': { allow: 'anyone', limit: 10, show: ['cta'] }, '/members': { allow: 'signedin', limit: 10 } },
+  chats: { '/': { allow: 'anyone', limit: 10, show: ['cta'], prompt: 'prompt-1.txt' }, '/members': { allow: 'signedin', limit: 10, prompt: 'prompt-1.txt' } },
   routes: ['/', '/members', '/contact'],
   answer: { quotes: [], destinations: ['/contact'] },
 });
@@ -97,7 +97,7 @@ async function start(env: Record<string, string> = {}) {
   await migrateChat(db);
   const context = parseChatContext(CONTEXT);
   if (typeof context === 'string') throw new Error(context);
-  const chat = createChat({ config: loaded.config.chat!, secret: loaded.config.secret, db, prompt: 'Answer.', context, adapter: createFakeAdapter(SCRIPT), log: () => {} });
+  const chat = createChat({ config: loaded.config.chat!, secret: loaded.config.secret, db, prompts: { 'prompt-1.txt': 'Answer.' }, context, adapter: createFakeAdapter(SCRIPT), log: () => {} });
   const store = createStore(db, loaded.config.secret);
   // A mailer and a provider client handed to a server without accounts are not used: its sign-in stays absent.
   const app = createApp({ config: loaded.config, store, mailer: { send: async () => { throw new Error('a server without accounts sent mail'); } }, oidc: createOidc(fetch), log: () => {}, chat });

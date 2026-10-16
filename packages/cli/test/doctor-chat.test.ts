@@ -193,7 +193,7 @@ test('chat tools: each declaration and its sample by key name; refused keys fail
 
 test('chat budget: a budget that cannot pay for one answer fails; the default and the kill switch warn; CONTROL passes with the answers it pays for', async () => {
   const p = built();
-  const prompt = readFileSync(join(p.server, 'chat/prompt.txt'), 'utf8').length;
+  const prompt = readFileSync(join(p.server, 'chat/prompt-1.txt'), 'utf8').length;
   const context = readFileSync(join(p.server, 'chat/context.json'), 'utf8').length;
   // The server's own estimate: 3 characters a token, 12 000 of history, 12 000 per known table, the output cap.
   const cost = answerCost({ prompt, context, knows: 1, maxOutput: 600, charsPerToken: 3, historyChars: 12_000, tableChars: 12_000 });

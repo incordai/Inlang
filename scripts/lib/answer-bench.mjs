@@ -19,7 +19,7 @@
  * out (the table a server chart would draw), so it is counted that way.
  *
  * Also measured: what the model is sent besides the conversation — the
- * generated prompt.txt and context.json of the chat e2e site — and the
+ * generated prompt of the chat e2e site's /ask chat and its context.json — and the
  * characters per token of prose, against the server's estimate of 3.
  */
 
@@ -222,7 +222,7 @@ export function measureAnswers(counters) {
 
 /**
  * What a chat model is sent besides the conversation, for the chat e2e
- * site (scripts/chat-e2e.mjs SITE): prompt.txt and context.json as `az
+ * site (scripts/chat-e2e.mjs SITE): its /ask chat's prompt file and context.json as `az
  * build` writes them, counted.
  */
 export function measureChatInput(counters) {
@@ -238,7 +238,10 @@ export function measureChatInput(counters) {
       return f.content;
     };
     const result = {};
-    for (const [name, value] of Object.entries({ prompt: file('server/chat/prompt.txt'), context: file('server/chat/context.json') })) {
+    // The prompt of the chat that shows every component (/ask), as context.json names it.
+    const context = file('server/chat/context.json');
+    const prompt = file(`server/chat/${JSON.parse(context).chats['/ask'].prompt}`);
+    for (const [name, value] of Object.entries({ prompt, context })) {
       const tokens = {};
       for (const [enc, fn] of Object.entries(counters)) tokens[enc] = fn(value);
       result[name] = { chars: value.length, tokens };

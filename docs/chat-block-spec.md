@@ -864,7 +864,8 @@ Capped at 24 000 characters, filled in page order; past the cap a page is
 left out whole and AZ1257 names it. It is public content by construction —
 everything in it is already on a public page.
 
-`server/chat/prompt.txt` holds the fixed instructions: who it is (the site's
+`server/chat/prompt-<n>.txt` (one per chat since §19.15; `server/chat/prompt.txt`
+before) holds the fixed instructions: who it is (the site's
 assistant, answering only about this site), the answer grammar of §5.3
 generated from the allowed manifests, the list of quotable blocks, the
 allow-list, and the rules (answer from the context; say you don't know;
@@ -892,8 +893,8 @@ For each table in `knows`, per message:
 
 ### 8.3 What is sent, exactly
 
-`system` = `prompt.txt` + `context.json` (as text) + the rows of §8.2 + the
-current page's route; `turns` = the trimmed conversation. Nothing else. A
+`system` = the chat's `prompt-<n>.txt` + `context.json` (as text) + the
+rows of §8.2 + the current page's route; `turns` = the trimmed conversation. Nothing else. A
 test builds a request with a signed-in visitor, private fields and an
 owner-only table present, and asserts on the exact bytes handed to the fake
 adapter: no private value, no owner-only row, no email, no address, no
@@ -2089,6 +2090,29 @@ map draws it in three engines, read by HTTP Range (206) with its credit
 under it, and its pixels are two colours — land and water — each over a
 tenth of the stage (with the old code a map site had no archive and drew
 only its list).
+
+### 19.16 The prompt and answer cost, as built (2026-10-16)
+
+What every question costs before the model writes a word, and what each
+earlier answer costs again, cut without moving a rule. Measured with
+`pnpm bench:tokens` against the budget of docs/token-benchmark.md §8 —
+two fixture sites, a chat that shows every component (`all`) and one that
+shows `faq` only — whose starting numbers were, `o200k_base`: `all` prompt
+1 672, `context.json` 851, the system text 2 075; `faq` 598, 630 and 865.
+
+**One prompt per chat (§8.1 changed).** `az build` writes
+`server/chat/prompt-<n>.txt`, one per chat, each teaching only the
+components that chat's `show` lists, and saying "site rows" only when that
+chat `knows` tables; chats told the same share one file, numbered in page
+order of first use. `context.json`'s `chats` name each page's file
+(`"prompt": "prompt-1.txt"`, checked by the server against
+`prompt-<n>.txt`); the server reads every named file at start and stops
+when one is missing, as `az backend probe`, `az dev` and the `chat budget`
+line of `az doctor` do (the doctor judges an answer by the cheapest and the
+dearest chat's file). The prompt no longer says "use only the components
+the page allows (said at the end)", and the per-request text no longer
+lists them: what a chat's prompt teaches is all it may show.
+`server/chat/prompt.txt` is gone.
 
 ---
 

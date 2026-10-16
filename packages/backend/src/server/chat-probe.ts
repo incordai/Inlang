@@ -13,7 +13,7 @@
  * Before a site goes live the operator pins a model (owner's rule: probe
  * each candidate with the production prompt first). This reads the
  * server's own `.env` exactly as main.ts does, builds the system text the
- * chat route would send — prompt.txt, context.json, the page — and asks
+ * chat route would send — each chat's prompt file, context.json, the page — and asks
  * one fixed question for prose and one for each component some chat on the
  * site shows. Each answer goes through the real answer parser, and is
  * reported: whether it streamed, the time to its first text and in total,
@@ -86,7 +86,8 @@ const kindOf = (block: object) => Object.keys(block)[0];
  * the first-token and between-chunk bounds (the route's own by default).
  */
 export async function probeChat(o: {
-  readonly adapter: ChatAdapter; readonly prompt: string; readonly context: ChatContext;
+  /** Each chat's prompt file by name, as context.json's chats name them. */
+  readonly adapter: ChatAdapter; readonly prompts: Readonly<Record<string, string>>; readonly context: ChatContext;
   readonly maxOutputTokens: number; readonly timeoutMs: number;
   readonly now?: () => number; readonly timing?: ChatTiming; readonly budgetMs?: number;
   /** The operator's data tools, each called once with its sample; fetch is replaceable in tests. */
@@ -96,6 +97,9 @@ export async function probeChat(o: {
   const timing = o.timing ?? CHAT_TIMING;
   const pages = Object.keys(o.context.chats).sort();
   if (pages.length === 0) return { ok: false, answers: [], tools: [] };
+  for (const p of pages) {
+    if (!Object.hasOwn(o.prompts, o.context.chats[p].prompt)) throw new Error(`the chat on ${p} reads chat/${o.context.chats[p].prompt}, which is not given`);
+  }
   // Prose on the first chat page; each component on the first page that shows it.
   const asked: { question: 'prose' | AnswerWord; page: string }[] = [{ question: 'prose', page: pages[0] }];
   for (const word of ANSWER_WORDS) {
@@ -143,7 +147,7 @@ async function askOne(
   };
   try {
     for await (const chunk of o.adapter.stream({
-      system: systemText(o.prompt, o.context, page, '', shapes), turns: [{ role: 'user', text: PROBE_QUESTIONS[question] }],
+      system: systemText(o.prompts[o.context.chats[page].prompt], o.context, page, '', shapes), turns: [{ role: 'user', text: PROBE_QUESTIONS[question] }],
       maxOutputTokens: o.maxOutputTokens, signal: ac.signal,
     })) {
       clearTimeout(idle);
@@ -229,7 +233,14 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   // Where it asks, never with what key.
   process.stderr.write(`probe: ${chat.api} model ${JSON.stringify(chat.model)}${chat.api === 'completions' ? ` at ${new URL(chat.url).origin}` : ''}\n`);
-  const result = await probeChat({ adapter, prompt: read('prompt.txt'), context, maxOutputTokens: chat.maxOutputTokens, timeoutMs: chat.timeoutMs, tools: chat.tools });
+  let prompts: Record<string, string>;
+  try {
+    prompts = Object.fromEntries([...new Set(Object.values(context.chats).map((c) => c.prompt))].map((f) => [f, read(f)]));
+  } catch {
+    process.stderr.write('backend: cannot probe — a chat/prompt-<n>.txt that context.json names cannot be read; rebuild the site to regenerate server/\n');
+    return 1;
+  }
+  const result = await probeChat({ adapter, prompts, context, maxOutputTokens: chat.maxOutputTokens, timeoutMs: chat.timeoutMs, tools: chat.tools });
   process.stdout.write(argv.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : probeReport(result));
   return result.ok ? 0 : 1;
 }

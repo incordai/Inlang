@@ -182,7 +182,7 @@ test('AZ.md describes a site\'s chats: each page\'s panel, what its answers show
   assert.ok(md.includes('## Chat'), md);
   assert.ok(section.includes('| `/` | anyone | 20 | pricing, faq, cta | `/pricing#0` |'), section);
   assert.ok(section.includes('| `/help` | signed-in visitors | 20 | text only | — |'), section);
-  for (const f of ['src/az/chat.ts', 'server/chat/prompt.txt', 'server/chat/context.json', 'server/src/chat-answer.ts', 'az backend probe server']) {
+  for (const f of ['src/az/chat.ts', 'server/chat/prompt-<n>.txt', 'server/chat/context.json', 'server/src/chat-answer.ts', 'az backend probe server']) {
     assert.ok(section.includes(f), f);
   }
   // Nothing secret, and no provider: the keys are named, never valued.

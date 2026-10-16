@@ -344,10 +344,10 @@ export async function twoInstanceChecks(engine, db, other, check, url) {
     AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: '/in-process.json', AZ_CHAT_PER_ADDRESS: '3/hour',
   }, { database: engine, email: 'api', chat: true }, 'Studio');
   if (!loaded.ok) throw new Error(loaded.problems.join('\n'));
-  const context = parseChatContext(JSON.stringify({ site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5 } }, routes: ['/'] }));
+  const context = parseChatContext(JSON.stringify({ site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5, prompt: 'prompt-1.txt' } }, routes: ['/'] }));
   const serve = async (conn) => {
     const chat = createChat({
-      config: loaded.config.chat, secret: loaded.config.secret, db: conn, prompt: 'Answer.', context,
+      config: loaded.config.chat, secret: loaded.config.secret, db: conn, prompts: { 'prompt-1.txt': 'Answer.' }, context,
       adapter: createFakeAdapter({ answers: [{ chunks: ['Hello.'] }] }), log: () => {},
     });
     const app = createApp({ config: loaded.config, store: createStore(conn, loaded.config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: () => {}, chat });
@@ -433,11 +433,11 @@ export async function chatSuite(engine, db, openAgain, check, url) {
   if (!loaded.ok) throw new Error(loaded.problems.join('\n'));
   // C2: the answer also holds a call to action off the allow-list, which the parser drops and the row counts.
   const context = parseChatContext(JSON.stringify({
-    site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5, show: ['cta'] } }, routes: ['/'],
+    site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5, show: ['cta'], prompt: 'prompt-1.txt' } }, routes: ['/'],
     answer: { quotes: [], destinations: ['/'] },
   }));
   const chat = createChat({
-    config: loaded.config.chat, secret: loaded.config.secret, db, prompt: 'Answer.', context,
+    config: loaded.config.chat, secret: loaded.config.secret, db, prompts: { 'prompt-1.txt': 'Answer.' }, context,
     adapter: createFakeAdapter({ answers: [{ chunks: ['Hello.\ncta "Claim" https://evil.example/\n'], usage: { input: 40, output: 2 } }] }), log: () => {},
   });
   const app = createApp({ config: loaded.config, store: createStore(db, loaded.config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: () => {}, chat });

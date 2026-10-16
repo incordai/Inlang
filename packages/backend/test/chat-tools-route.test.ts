@@ -37,7 +37,7 @@ const CONTEXT = JSON.stringify({
   _generated: 'test',
   site: { name: 'League' },
   pages: [{ route: '/', blocks: [{ block: 'hero', title: 'League' }] }],
-  chats: { '/': { allow: 'anyone', limit: 10, show: ['chart', 'table', 'stats'] }, '/about': { allow: 'anyone', limit: 10 } },
+  chats: { '/': { allow: 'anyone', limit: 10, prompt: 'prompt-1.txt', show: ['chart', 'table', 'stats'] }, '/about': { allow: 'anyone', limit: 10, prompt: 'prompt-1.txt' } },
   answer: { quotes: [], destinations: ['/'] },
   routes: ['/', '/about'],
 });
@@ -105,7 +105,7 @@ async function start(env: Record<string, string> = {}) {
   const context = parseChatContext(CONTEXT);
   if (typeof context === 'string') throw new Error(context);
   const tools = createTools({ tools: config.chat!.tools, perAddress: config.chat!.toolCallsPerAddress, windows: createWindows(db, config.secret), log: (l) => log.push(l) });
-  const chat = createChat({ config: config.chat!, secret: config.secret, db, prompt: PROMPT, context, adapter, log: (l) => log.push(l), tools });
+  const chat = createChat({ config: config.chat!, secret: config.secret, db, prompts: { 'prompt-1.txt': PROMPT }, context, adapter, log: (l) => log.push(l), tools });
   const app = createApp({ config, store: createStore(db, config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: (l) => log.push(l), chat });
   const server = createServer((q, r) => { void app.handler(q, r); });
   const url = await listen(server);

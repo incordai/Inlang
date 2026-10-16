@@ -161,9 +161,9 @@ async function startChat(moderationUrl: string) {
   const script = parseFakeScript(JSON.stringify({ answers: [{ chunks: ['Hello ', 'there.'] }] }));
   if (typeof script === 'string') throw new Error(script);
   const fake = createFakeAdapter(script);
-  const context = parseChatContext(JSON.stringify({ site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5 } } }));
+  const context = parseChatContext(JSON.stringify({ site: { name: 'Studio' }, pages: [], chats: { '/': { allow: 'anyone', limit: 5, prompt: 'prompt-1.txt' } } }));
   if (typeof context === 'string') throw new Error(context);
-  const chat = createChat({ config: config.chat!, secret: config.secret, db, prompt: 'You answer about Studio.\n', context, adapter: fake, log: (l) => log.push(l) });
+  const chat = createChat({ config: config.chat!, secret: config.secret, db, prompts: { 'prompt-1.txt': 'You answer about Studio.\n' }, context, adapter: fake, log: (l) => log.push(l) });
   const app = createApp({ config, store: createStore(db, config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: (l) => log.push(l), chat });
   const server = createServer((q, r) => { void app.handler(q, r); });
   const url = await listen(server);

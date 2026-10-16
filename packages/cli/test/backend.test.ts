@@ -65,7 +65,7 @@ test('a site that declares a backend gets server/ with every source file copied 
     if (f.startsWith('data-') || f === 'chat-query.ts' || f === 'chat-knows.ts') { assert.ok(!existsSync(join(c.out, 'server/src', f)), `chat, no tables: ${f}`); continue; }
     assert.equal(readFileSync(join(c.out, 'server/src', f), 'utf8'), readFileSync(join(src, f), 'utf8'), `with chat: ${f}`);
   }
-  for (const f of ['chat/prompt.txt', 'chat/context.json']) assert.ok(existsSync(join(c.out, 'server', f)), `with chat: ${f}`);
+  for (const f of ['chat/prompt-1.txt', 'chat/context.json']) assert.ok(existsSync(join(c.out, 'server', f)), `with chat: ${f}`);
   assert.ok(!existsSync(join(p.out, 'server/chat')), 'CONTROL: without chat, no server/chat/');
   assert.ok(!existsSync(join(d.out, 'server/src/chat-query.ts')), 'CONTROL: tables without chat, no chat figures');
   assert.ok(!existsSync(join(d.out, 'server/src/chat-knows.ts')), 'CONTROL: tables without chat, no rows read for a chat');

@@ -1117,8 +1117,9 @@ async function runDev(file: string, outDir: string, wordsDir: string, rest: stri
       if (started) return;
       dataAtStart = dataJson;
       const config = outcome.files.find((f) => f.path === 'server/az.config.json');
-      // A chat's prompt and context, as the build wrote them (docs/chat-block-spec.md §8.1).
-      const prompt = outcome.files.find((f) => f.path === 'server/chat/prompt.txt')?.content;
+      // Each chat's prompt and the context, as the build wrote them (docs/chat-block-spec.md §8.1, §19.15).
+      const prompts = Object.fromEntries(outcome.files.filter((f) => /^server\/chat\/prompt-[0-9]+\.txt$/.test(f.path))
+        .map((f) => [f.path.slice('server/chat/'.length), f.content]));
       const context = outcome.files.find((f) => f.path === 'server/chat/context.json')?.content;
       const server = config ? JSON.parse(config.content) as { siteName: string; email?: string; map?: boolean } : null;
       const backend = server
@@ -1127,7 +1128,7 @@ async function runDev(file: string, outDir: string, wordsDir: string, rest: stri
             // No email: the site needs no accounts, and its dev server keeps none either (chat-block-spec §19.15).
             accounts: server.email !== undefined,
             ...(dataJson !== undefined ? { data: dataJson } : {}),
-            ...(prompt !== undefined && context !== undefined ? { chat: { prompt, context, ...(server.map === true ? { map: true } : {}) } } : {}),
+            ...(context !== undefined ? { chat: { prompts, context, ...(server.map === true ? { map: true } : {}) } } : {}),
           }
         : null;
       started = serve({ source: file, outDir, sitePort, open: rest.includes('--open'), backend, print })

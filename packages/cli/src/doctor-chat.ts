@@ -169,8 +169,22 @@ const chatBudget: Check = {
       return { status: 'skip', line: `chat budget: judged once the server's keys are valid — see the ${which} line` };
     }
     const chat = loaded.config.chat;
-    const [prompt, context] = await Promise.all([readRegular(join(got.server, 'chat', 'prompt.txt')), readRegular(join(got.server, 'chat', 'context.json'))]);
-    if (prompt === null || context === null) return { status: 'fail', line: 'chat budget: server/chat/ has no prompt.txt or context.json — the server won\'t start', fix: ['rebuild with az build'] };
+    const context = await readRegular(join(got.server, 'chat', 'context.json'));
+    // Each chat's own prompt file (chat-block-spec §19.15): the cheapest and the dearest bound one answer.
+    const promptFiles = (() => {
+      try {
+        const chats = (JSON.parse(context ?? '') as { chats?: unknown }).chats;
+        const files = chats && typeof chats === 'object' ? Object.values(chats).map((c) => (c as { prompt?: unknown } | null)?.prompt) : [];
+        return files.every((f) => typeof f === 'string' && /^prompt-[0-9]+\.txt$/.test(f)) ? [...new Set(files as string[])] : [];
+      } catch {
+        return [];
+      }
+    })();
+    const prompts = await Promise.all(promptFiles.map((f) => readRegular(join(got.server, 'chat', f))));
+    if (context === null || promptFiles.length === 0 || prompts.some((p) => p === null)) {
+      return { status: 'fail', line: 'chat budget: server/chat/ has no context.json, or not every prompt-<n>.txt it names — the server won\'t start', fix: ['rebuild with az build'] };
+    }
+    const lengths = prompts.map((p) => p!.length);
     const { CHARS_PER_TOKEN } = await import('../../backend/src/server/chat.ts');
     const { HISTORY_CHARS } = await import('../../backend/src/server/chat-text.ts');
     const known = (() => {
@@ -185,10 +199,11 @@ const chatBudget: Check = {
     const tableChars = known > 0 ? (await import('../../backend/src/server/chat-knows.ts')).KNOWS_LIMITS.tableChars : 0;
     // The tools' lines in the per-request system text (chat-tools.ts toolsText), on a page that may use them.
     const toolChars = chat.tools.length > 0 ? (await import('../../backend/src/server/chat-tools.ts')).toolsText(chat.tools).length : 0;
-    const cost = answerCost({
-      prompt: prompt.length + toolChars, context: context.length, knows: known, maxOutput: chat.maxOutputTokens,
+    const costOf = (prompt: number) => answerCost({
+      prompt: prompt + toolChars, context: context.length, knows: known, maxOutput: chat.maxOutputTokens,
       charsPerToken: CHARS_PER_TOKEN, historyChars: HISTORY_CHARS, tableChars,
     });
+    const cost = { least: costOf(Math.min(...lengths)).least, most: costOf(Math.max(...lengths)).most };
     const daily = chat.dailyTokens;
     if (daily < cost.least) {
       return {

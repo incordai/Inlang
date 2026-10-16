@@ -27,7 +27,7 @@ import { client, listen, SECRET, SITE } from './helpers.ts';
 const CONTEXT = JSON.stringify({
   site: { name: 'Studio' },
   pages: [],
-  chats: { '/': { allow: 'anyone', limit: 10, show: ['chart', 'cta'] }, '/members': { allow: 'signedin', limit: 10, show: ['chart'] } },
+  chats: { '/': { allow: 'anyone', limit: 10, prompt: 'prompt-1.txt', show: ['chart', 'cta'] }, '/members': { allow: 'signedin', limit: 10, prompt: 'prompt-1.txt', show: ['chart'] } },
   routes: ['/', '/members', '/contact'],
   answer: { quotes: [], destinations: ['/contact'] },
 });
@@ -51,7 +51,7 @@ async function start(env: Record<string, string> = {}, clock = { now: Date.UTC(2
   const context = parseChatContext(CONTEXT);
   if (typeof context === 'string') throw new Error(context);
   const chat = createChat({
-    config: loaded.config.chat!, secret: loaded.config.secret, db, prompt: 'Answer.', context, adapter: createFakeAdapter(SCRIPT),
+    config: loaded.config.chat!, secret: loaded.config.secret, db, prompts: { 'prompt-1.txt': 'Answer.' }, context, adapter: createFakeAdapter(SCRIPT),
     log: () => {}, now: () => clock.now,
   });
   const app = createApp({ config: loaded.config, store: createStore(db, loaded.config.secret), mailer: { send: async () => {} }, oidc: createOidc(fetch), log: () => {}, chat });
