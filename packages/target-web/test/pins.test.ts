@@ -62,6 +62,18 @@ test('every emitted pin matches its VERIFIED row', () => {
   assert.equal(PINS.typesReact, verifiedVersion('@types/react'));
   assert.equal(PINS.typesReactDom, verifiedVersion('@types/react-dom'));
   assert.equal(PINS.typesThree, verifiedVersion('@types/three'));
+  // A map site's three (chat-block-spec §21.4, stack-evaluation §19).
+  assert.equal(PINS.maplibre, verifiedVersion('maplibre-gl'));
+  assert.equal(PINS.pmtiles, verifiedVersion('pmtiles'));
+  assert.equal(PINS.basemaps, verifiedVersion('@protomaps/basemaps'));
+});
+
+test('a map site\'s packages are the versions this repo type-checks and tests the map runtime with', () => {
+  // The overlay runtime's map module is type-checked, and the map fixture read, against the repository's own installs.
+  const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { devDependencies?: Record<string, string> };
+  assert.equal(PINS.maplibre, rootPkg.devDependencies?.['maplibre-gl']);
+  assert.equal(PINS.pmtiles, rootPkg.devDependencies?.pmtiles);
+  assert.equal(PINS.basemaps, rootPkg.devDependencies?.['@protomaps/basemaps']);
 });
 
 test('the type declarations a generated project pins are the ones this repo type-checks generated code with', () => {

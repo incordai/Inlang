@@ -11,7 +11,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
 import { emitProject } from '../src/emit.ts';
-import { CHAT_FILE, chatTsx } from '../src/chat.ts';
+import { CHAT_FILE, CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES, MAP_TILES_ENV, chatTsx, mapCss } from '../src/chat.ts';
+import { PINS } from '../src/emit.ts';
 import { WEB_EMITTERS } from '../../words/registry.ts';
 
 const wordsDir = new URL('../../words/', import.meta.url);
@@ -146,4 +147,53 @@ test('a chat that draws charts gets the theme\'s six series colours, in both sch
   assert.match(file(project(SITE('    model default\n', '  chat panel\n    show explore\n')), 'src/theme.css'), /--az-color-series-6: /);
   assert.doesNotMatch(file(project(SITE('    model default\n', '  chat panel\n    show faq\n')), 'src/theme.css'), /series-/);
   assert.doesNotMatch(file(project(SITE('', '')), 'src/theme.css'), /series-/);
+});
+
+/* ---- C8 (chat-block-spec §21.4): maps, on a map site only ---------------- */
+
+test('a chat that shows maps: the module hands the panel the map drawer and the build\'s third-party archive, if set; App unchanged', () => {
+  const p = project(SITE('    model default\n', '  chat panel\n    show map\n    allow anyone\n'));
+  assert.equal(p.map, true);
+  const chat = file(p, CHAT_FILE);
+  assert.equal(chat, chatTsx('src/az', true));
+  assert.match(chat, /import \{ drawMap \} from "\.\.\/az\/chat-map-draw\.ts";/);
+  assert.match(chat, new RegExp(`const TILES: string \\| null = import\\.meta\\.env\\.${MAP_TILES_ENV} \\|\\| null;`));
+  assert.match(chat, /drawMap: \(d, data\) => drawMap\(\{ \.\.\.d, tiles: TILES \}, data\),/);
+  // The library is never imported by the module itself: the drawer imports it when the first map arrives.
+  assert.doesNotMatch(chat, /maplibre|pmtiles|chat-map-gl/);
+  assert.equal(MAP_TILES_ENV, 'AZ_PUBLIC_MAP_TILES_URL');
+});
+
+test('a map site depends on the three pinned map packages and gives the library\'s popup the theme; no other site does', () => {
+  const pkg = (src: string) => JSON.parse(file(project(src), 'package.json')) as { dependencies: Record<string, string> };
+  const map = pkg(SITE('    model default\n', '  chat panel\n    show map\n'));
+  assert.deepEqual(
+    { maplibre: map.dependencies['maplibre-gl'], pmtiles: map.dependencies.pmtiles, basemaps: map.dependencies['@protomaps/basemaps'] },
+    { maplibre: PINS.maplibre, pmtiles: PINS.pmtiles, basemaps: PINS.basemaps },
+  );
+  for (const src of [SITE('    model default\n', '  chat panel\n    show chart explore\n'), SITE('', '')]) {
+    const deps = pkg(src).dependencies;
+    assert.equal(deps['maplibre-gl'] ?? deps.pmtiles ?? deps['@protomaps/basemaps'], undefined, 'CONTROL: no map, no map packages');
+  }
+  const css = file(project(SITE('    model default\n', '  chat panel\n    show map\n')), 'src/az.css');
+  const theme = file(project(SITE('    model default\n', '  chat panel\n    show map\n')), 'src/theme.css');
+  assert.ok(css.includes('.az-chat-map-stage .maplibregl-popup-content') || theme.includes('.az-chat-map-stage .maplibregl-popup-content'), 'the popup rules ship');
+  assert.doesNotMatch(file(project(SITE('    model default\n', '  chat panel\n    show chart\n')), 'src/theme.css'), /maplibregl/);
+  // Its pins are a series token, so a map site has them.
+  assert.match(theme, /--az-color-series-1: /);
+});
+
+test('mapCss: the popup\'s box and tip from the theme\'s tokens — two classes deep, never a literal colour', () => {
+  const t = { color: { bg: 'var(--az-color-bg)', text: 'var(--az-color-text)', 'border-strong': 'var(--az-color-border-strong)' }, radius: { sm: 4 }, space: { 8: 8, 12: 12 } };
+  const css = mapCss(t as unknown as Parameters<typeof mapCss>[0]);
+  assert.match(css, /^\.az-chat-map-stage \.maplibregl-popup-content \{ background: var\(--az-color-bg\); color: var\(--az-color-text\);/m);
+  assert.equal((css.match(/maplibregl-popup-tip \{ border-(?:top|bottom|left|right)-color: var\(--az-color-border-strong\); \}/g) ?? []).length, 8, 'every anchor\'s tip');
+  assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgb\(|hsl\(/i);
+});
+
+test('the map runtime files are their own list: never among the chat\'s, copied only to a map site (cli az.ts)', () => {
+  assert.deepEqual([...MAP_RUNTIME_FILES], ['chat-map.ts', 'chat-map-draw.ts', 'chat-map-gl.ts']);
+  assert.ok(MAP_RUNTIME_FILES.every((f) => !CHAT_RUNTIME_FILES.includes(f)));
+  assert.equal(project(SITE('    model default\n', '  chat panel\n    show chart\n')).map, false);
+  assert.equal(project(SITE('', '')).map, false);
 });

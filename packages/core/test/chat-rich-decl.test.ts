@@ -131,3 +131,18 @@ test('the rich components are not words: a page that writes one is refused as un
   assert.ok(errors(src).length > 0);
   assert.ok(!manifests.has('chart') && !manifests.has('dashboard') && !manifests.has('stats'));
 });
+
+test('C8 (§21.4): map is a value of show — it takes the public tables; a dashboard cannot hold one (AZ1270); a page cannot write one', () => {
+  const src = `${HEAD}${DATA}${page('map')}`;
+  assert.deepEqual(errors(src), []);
+  const answer = chatOf(src)?.chat?.answer;
+  assert.deepEqual(answer?.show, ['map']);
+  assert.deepEqual(answer?.tables?.map((t) => t.name), ['orders'], 'a map may take a table\'s rows');
+  assert.deepEqual(errors(`${HEAD}${page('dashboard map')}`), ['AZ1270'], 'a map is not a tile');
+  // The table named tool is refused beside a map too: it takes `from`.
+  assert.deepEqual(errors(`${HEAD}${DATA.replace('  data orders', '  data tool')}${page('map')}`), ['AZ1272']);
+  assert.ok(errors(`${HEAD}page /\n  map\n    title "x"\n  chat panel\n`).length > 0, 'not a word');
+  assert.ok(!manifests.has('map'));
+  // All eleven at once is a valid show.
+  assert.deepEqual(errors(`${HEAD}${DATA}${page('faq cta feature chart table stats cards dashboard explore map')}`), []);
+});

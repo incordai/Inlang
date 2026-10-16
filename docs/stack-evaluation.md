@@ -676,6 +676,9 @@ before pinning if this document is more than a few weeks old.**
 | `react` | `19.2.8` | MIT | **VERIFIED** [↗](https://registry.npmjs.org/react/latest) |
 | `motion` | `13.1.1` | MIT | **VERIFIED** — current package name [↗](https://registry.npmjs.org/motion/latest) |
 | `framer-motion` | `13.1.1` | MIT | **VERIFIED** — same version line; upgrade guide says swap to `motion` [↗](https://registry.npmjs.org/framer-motion/latest) |
+| `maplibre-gl` | `6.13.0` | BSD-3-Clause | **VERIFIED** 2026-10-16 — only a site whose chat shows maps (§19); the newest release older than the 7-day `minimumReleaseAge` (published 2026-10-06; `6.14.0`, published 2026-10-11, was 5 days old) [↗](https://registry.npmjs.org/maplibre-gl/6.13.0) |
+| `pmtiles` | `4.5.0` | BSD-3-Clause | **VERIFIED** 2026-10-16 — only beside `maplibre-gl` (§19); the latest, published 2026-08-10; one dependency, `fflate ^0.8.2` (MIT) [↗](https://registry.npmjs.org/pmtiles/4.5.0) |
+| `@protomaps/basemaps` | `5.7.2` | BSD-3-Clause | **VERIFIED** 2026-10-16 — only beside `maplibre-gl` (§19); the latest, published 2026-03-10; no dependencies [↗](https://registry.npmjs.org/@protomaps/basemaps/5.7.2) |
 
 ### Build (`target-web` / project scaffold)
 
@@ -1030,3 +1033,87 @@ over HTTP and reads its streamed answer. Evaluated 2026-10-15 for C1:
 | a generic multi-provider client library | **REJECT** | a second abstraction over ours; its provider list is a vendor list in our lockfile; supply-chain surface |
 | an SSE parsing package | **REJECT** | the format is a few dozen lines (line framing, `data:`, blank-line dispatch); `chat-sse.ts` is tested against chunks split at every byte offset and a line cap |
 | Node built-ins (`fetch`, `AbortSignal`, `TextDecoder`, `crypto`) | **ADOPT** | already required (Node ≥ 22.18, backend-spec §8); the adapters (`chat-adapters.ts`) are named by wire shape — `completions`, `fake` — and every endpoint, key and model id comes from `.env` |
+
+## 19. Maps in chat answers — **ADOPT `maplibre-gl` 6.13.0, `pmtiles` 4.5.0, `@protomaps/basemaps` 5.7.2, only on a site whose chat shows maps**
+
+Chat-block-spec §21.4 (phase C8, owner-decided 2026-10-16, §17 Q19a–Q19h)
+draws a map in a chat answer: pins and routes, from a public table's rows or
+from numbers the model wrote. The research is the chat spec's [R11]; this
+section is the vetting global rule 11 asks for, done again when C8 was built
+(2026-10-16).
+
+| Package | Role | Version pinned | Licence | Dependencies |
+|---|---|---|---|---|
+| `maplibre-gl` | the WebGL vector-map renderer; ESM, its own type declarations; draws in a module worker (`dist/maplibre-gl-worker.mjs`) | `6.13.0` | BSD-3-Clause | 18, all MIT, ISC, BSD-2/3 or (MIT OR Apache-2.0) |
+| `pmtiles` | reads a single-file tile archive over HTTP `Range` and hands the renderer its tiles (an `addProtocol` handler) | `4.5.0` | BSD-3-Clause | `fflate` (MIT) |
+| `@protomaps/basemaps` | the basemap's style layers for that archive's schema, in a light and a dark set the page re-colours from its tokens | `5.7.2` | BSD-3-Clause | none |
+
+**FACT** (registry, 2026-10-16): `maplibre-gl` `latest` is `6.14.0`,
+published 2026-10-11 — five days old, inside the workspace's 7-day
+`minimumReleaseAge` (`pnpm-workspace.yaml`, 10 080 minutes). The newest
+release past it is **`6.13.0`** (2026-10-06), which is pinned; R11's `6.14.0`
+is the next bump once it is a week old. `pmtiles` `4.5.0` (2026-08-10) and
+`@protomaps/basemaps` `5.7.2` (2026-03-10) are each the latest.
+`npm audit` on the three at these versions (28 packages, a clean install
+outside the repository): **0 vulnerabilities**; `pnpm audit` in the
+repository after adding them as development dependencies: no known
+vulnerabilities. Licences of the 28 packages in the tree: BSD-3-Clause (5),
+ISC (8), MIT (12, the type-only `@types/geojson` among them), BSD-2-Clause
+(2), (MIT OR Apache-2.0) (1).
+
+**Where they go.** They are runtime dependencies of a *generated* site,
+pinned exactly in its `package.json` (target-web `PINS.maplibre`,
+`PINS.pmtiles`, `PINS.basemaps`; `pins.test.ts` ties them to the rows of §13)
+— and only a site whose chat shows `map` gets them, with the map runtime
+files; every other site's package.json and output are unchanged. The
+repository has them as development dependencies, at the same versions, so
+the overlay runtime's map module type-checks and the generated-types test
+checks a map site against them.
+
+**Measured** (a built map site, 2026-10-16, gzip -9): the map module chunk
+(renderer, archive reader, styles) 292 KB, its worker 144 KB, its stylesheet
+10 KB — **446 KB**, loaded by a dynamic `import()` only when the first map
+event arrives on a chat page that shows maps (Q19f accepts ≈ 440 KB). The
+page's own bundle grows by the map's list and drawing code only.
+
+**What each brings to the page's policy, measured in Chromium, Firefox and
+WebKit (2026-10-16):**
+
+- The renderer's worker. Started from the same-origin URL, a worker is
+  governed by its own response, not the page's `<meta>` policy (Q19b). The
+  page starts it from a `blob:` URL whose one line imports the site's worker
+  file, which the renderer's `setWorkerUrl` takes; a worker from `blob:`
+  inherits the page's policy. The policy gains `worker-src 'self' blob:` on
+  map pages only — nothing else.
+- The renderer's navigation control draws its icons from `data:` images: on
+  a page whose `img-src` has no `data:` that is three violations per map
+  (measured). It is never added; the chat word's own buttons zoom and reset.
+- The renderer's popup close button writes `&#215;` with `innerHTML`; popups
+  are made with `closeButton: false` and their content is an element
+  (`setDOMContent`) whose text is `textContent`.
+- The stylesheet ships as a build file (`style-src 'self'`); the renderer
+  sets sizes and transforms through the CSSOM, which a policy does not
+  govern. No `'unsafe-eval'`, no `'wasm-unsafe-eval'`.
+- The build's secret guard read the renderer's minified bundle as holding
+  keys: `NAME=value` sequences in its shaders and code, a path of words in a
+  message link, and the worker file's own hashed name. The guard now reads a
+  key's run with `=` only as trailing padding, skips a `/`-path none of whose
+  segments mixes letters and digits, and allows the build's own file names
+  (core `secrets.ts`); a key in any of those places is still found
+  (`secrets.test.ts`).
+
+**Rejected alternatives** (R11): a raster tile service (every pan a request
+to a third party, and a key in the page); the renderer's own CDN build (a
+third-party script origin); a hosted vector tile service by default (its
+origin in `connect-src`, and every place a visitor looks sent to it — kept as
+the operator's explicit choice, `AZ_PUBLIC_MAP_TILES_URL`, which `az doctor`
+names).
+
+**Data.** The default archive is the world to zoom 6 (≈ 46 MB), which the
+operator downloads and serves from their own backend
+(docs/self-hosting.md); the tests make a few-kilobyte archive of their own
+(`scripts/lib/map-fixture.mjs`) and never download one. The map data's
+licence (ODbL for the usual source) requires its attribution under every
+map: the operator writes it in `AZ_MAP_ATTRIBUTION`, which the server
+refuses to start without once an archive is set.
+

@@ -404,3 +404,38 @@ test('an explore ships real controls: a labelled range with an <output>, a date 
   // CONTROL: a chat that does not show explore ships none of it.
   assert.equal(partOf(exploreChat('chart'), 'explore').length, 0);
 });
+
+/* ---- C8: a map's templates (chat-block-spec §21.4.3, §21.4.5) ---- */
+
+test('a map ships its stage as a focusable image, az\'s own three buttons, the attribution line, the note and the list equivalent; the popup a part of its own', () => {
+  const root = exploreChat('map');
+  const [part] = partOf(root, 'map');
+  assert.ok(part, 'the map part');
+  const slots = (name: string) => walk(part).filter((n) => n.attrs?.['data-az-chat-slot'] === name);
+  const [figure] = (part.children ?? []) as EmittedNode[];
+  assert.deepEqual([figure.tag, figure.attrs?.['data-az-chat-map']], ['figure', 'loading']);
+  const [stage] = slots('stage');
+  assert.deepEqual([stage.attrs?.role, stage.attrs?.tabindex], ['img', '0'], 'an image the arrow and + − keys move');
+  assert.equal((stage.children ?? []).length, 0, 'the library fills it');
+  const buttons = walk(slots('controls')[0]).filter((n) => n.tag === 'button');
+  assert.deepEqual(buttons.map((b) => [b.attrs?.type, b.attrs?.['data-az-chat-slot'], texts(b).join('').trim()]),
+    [['button', 'zoom-in', 'Zoom in'], ['button', 'zoom-out', 'Zoom out'], ['button', 'reset', 'Reset view']]);
+  assert.equal(slots('attribution')[0].tag, 'p');
+  assert.equal(slots('note')[0].attrs?.hidden, 'hidden');
+  const [list] = slots('list');
+  assert.equal(list.tag, 'details');
+  assert.deepEqual(texts(walk(list).find((n) => n.tag === 'summary')!).join('').trim(), 'Show the places as a list');
+  assert.equal(slots('pins')[0].tag, 'ol');
+  assert.equal(slots('route')[0].attrs?.role, 'group');
+  assert.notEqual(slots('route-title')[0].tag, 'h4', 'no heading inside the transcript\'s list');
+  const [popup] = partOf(root, 'map-popup');
+  assert.ok(popup, 'the popup part');
+  assert.deepEqual(walk(popup).filter((n) => n.attrs?.['data-az-chat-slot']).map((n) => [n.tag, n.attrs?.['data-az-chat-slot']]), [['strong', 'label'], ['span', 'src']]);
+  for (const n of [...walk(part), ...walk(popup)]) {
+    assert.ok(!['script', 'iframe', 'object', 'embed', 'img', 'canvas'].includes(n.tag), n.tag);
+    for (const a of Object.keys(n.attrs ?? {})) assert.ok(!/^on/i.test(a) && a !== 'style' && a !== 'href' && a !== 'src', `${n.tag} ${a}`);
+  }
+  // CONTROL: a chat that does not show maps ships none of it.
+  assert.equal(partOf(exploreChat('chart'), 'map').length, 0);
+  assert.equal(partOf(exploreChat('chart'), 'map-popup').length, 0);
+});

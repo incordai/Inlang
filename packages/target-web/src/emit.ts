@@ -45,7 +45,7 @@ import type { PageNeeds } from './csp.ts';
 import { DATA_DIR, dataClient } from './data-client.ts';
 import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminValuesTs } from './data-admin.ts';
 import { ROWS_FILE, fromTables, rowsTsx } from './data-rows.ts';
-import { CHAT_FILE, SHARED_ROUTE, chatTsx, showsCards, usesChat, usesSeries, withSharedPage } from './chat.ts';
+import { CHAT_FILE, MAP_TILES_ENV, SHARED_ROUTE, chatTsx, mapCss, showsCards, showsMap, usesChat, usesMap, usesSeries, withSharedPage } from './chat.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
 import { imageSizes, sizeImages } from './image-dims.ts';
 import { bytesSource, type ByteSource } from './image-size.ts';
@@ -91,6 +91,15 @@ export const PINS = {
   typesReact: '19.2.18',
   typesReactDom: '19.2.7',
   typesThree: '0.186.0',
+  /**
+   * Only a site whose chat shows maps depends on these (chat-block-spec
+   * §21.4, Q19a): the vector-map renderer (its own types), the tile-archive
+   * reader and the basemap style set. Loaded only on its chat pages, by a
+   * dynamic import when the first map arrives.
+   */
+  maplibre: '6.13.0',
+  pmtiles: '4.5.0',
+  basemaps: '5.7.2',
 } as const;
 
 /**
@@ -909,7 +918,10 @@ if (warnings.length > 0) {
  * - uploaded images (data-spec §8) come from the backend, on the admin
  *   pages, the pages whose `from` blocks show rows, and the pages with an
  *   author component (`raw`/`slot`), which may show rows through the client;
- * - a 3D model may be compressed, and its decoder is WebAssembly in a worker.
+ * - a 3D model may be compressed, and its decoder is WebAssembly in a worker;
+ * - a page whose chat shows maps starts the map library's worker from a
+ *   blob: URL (chat-block-spec §21.4.3), and reads a third-party tile
+ *   archive's origin only when the build names one.
  */
 function pageNeeds(
   spec: Spec, pages: readonly { route: string; nodes: EmittedNode[] }[], admin: readonly string[], dataIcon: boolean,
@@ -926,11 +938,13 @@ function pageNeeds(
   const model = has((n) => n.attrs?.['data-az-model'] !== undefined);
   const component = has((n) => n.tag === COMPONENT_TAG);
   const out: Record<string, PageNeeds> = {};
+  const maps = new Set(spec.pages.filter((p) => showsMap(blocksFor(spec, p))).map((p) => p.route));
   for (const p of pages) {
     const shows = reads.has(p.route) || component(p.nodes);
-    out[htmlFileFor(p.route)] = { dataIcon, connect, images: shows ? images : [], decoder: model(p.nodes) };
+    const map = maps.has(p.route);
+    out[htmlFileFor(p.route)] = { dataIcon, connect: map ? [...connect, MAP_TILES_ENV] : connect, images: shows ? images : [], decoder: model(p.nodes), map };
   }
-  for (const route of admin) out[htmlFileFor(route)] = { dataIcon, connect, images, decoder: false };
+  for (const route of admin) out[htmlFileFor(route)] = { dataIcon, connect, images, decoder: false, map: false };
   return out;
 }
 
@@ -964,6 +978,8 @@ export interface EmittedProject {
    * is left out, so such a site's output is exactly what it was before.
    */
   readonly chat: boolean;
+  /** A chat shows maps (§21.4): the caller copies the map runtime (MAP_RUNTIME_FILES) too; no other site gets it. */
+  readonly map: boolean;
   /** Build-time warnings the emitter found in files it read (text-spec §10), for the caller's report. */
   readonly warnings: string[];
 }
@@ -1084,6 +1100,8 @@ export function emitProject(source: Spec, options: EmitOptions = {}): EmittedPro
   const rowTables = spec.site.data ? fromTables(spec) : [];
   // A chat panel (chat-block-spec §7) needs the auth adapter for its session; core refuses chat without it (AZ1250, AZ1507).
   const chat = usesChat(spec) && plan !== null;
+  // A chat that shows maps (§21.4): the map runtime, its three libraries and its popup rules, on this site only.
+  const map = chat && usesMap(spec);
   const files: EmittedFile[] = [
     { path: 'src/App.tsx', content: appTsx(spec, pages, moduleList, theme, plan, admin, rowTables.length > 0, chat) },
     // The build guard, for every site (auth-spec §4): nothing may ship a key.
@@ -1095,7 +1113,7 @@ export function emitProject(source: Spec, options: EmitOptions = {}): EmittedPro
     // The typed data client only with tables (data-spec §7).
     ...(spec.site.data ? [{ path: `${DATA_DIR}/client.ts`, content: dataClient(spec.site.data, chat) }] : []),
     ...(rowTables.length > 0 ? [{ path: ROWS_FILE, content: rowsTsx(rowTables, RUNTIME_DIR) }] : []),
-    ...(chat ? [{ path: CHAT_FILE, content: chatTsx(RUNTIME_DIR) }] : []),
+    ...(chat ? [{ path: CHAT_FILE, content: chatTsx(RUNTIME_DIR, map) }] : []),
     ...(spec.site.data && admin.length > 0 ? [
       { path: ADMIN_FILE, content: adminTsx(chat) },
       { path: ADMIN_VALUES_FILE, content: adminValuesTs(spec.site.data) },
@@ -1173,7 +1191,7 @@ dialog[data-az-overlay]::backdrop { background: var(--az-color-overlay); }
   html { scroll-behavior: smooth; }
 }
 
-${frameCss(theme)}${schemeCss(named)}${gradientCss(isPaired(named))}${patternCss(pattern)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${admin.length > 0 ? adminCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}`,
+${frameCss(theme)}${schemeCss(named)}${gradientCss(isPaired(named))}${patternCss(pattern)}${pinnedNavCss(spec, theme)}${solidNavCss(spec, theme)}${sideLayoutCss(spec, theme)}${plan ? authCss(theme) : ''}${admin.length > 0 ? adminCss(theme) : ''}${seeded.used ? threeCss(theme) : ''}${map ? mapCss(theme) : ''}`,
     },
     {
       /**
@@ -1201,6 +1219,7 @@ ${frameCss(theme)}${schemeCss(named)}${gradientCss(isPaired(named))}${patternCss
           // react-dom ships in lockstep with react and must match it exactly.
           'react-dom': PINS.react,
           ...(seeded.used ? { three: PINS.three } : {}),
+          ...(map ? { 'maplibre-gl': PINS.maplibre, pmtiles: PINS.pmtiles, '@protomaps/basemaps': PINS.basemaps } : {}),
         },
         // The declarations `tsc --noEmit` reads; the build itself needs none of them.
         devDependencies: {
@@ -1296,6 +1315,7 @@ export default defineConfig({
     three: seeded.used,
     rows: rowTables.length > 0,
     chat,
+    map,
     warnings: [...new Set(warnings)],
   };
 }

@@ -49,7 +49,7 @@
     },
     "show": {
       "type": "list",
-      "max": 10,
+      "max": 11,
       "description": "Components an answer may hold besides text",
       "valueDescriptions": {
         "pricing": "The site's own pricing block, quoted as its page shows it",
@@ -61,7 +61,8 @@
         "stats": "Up to four key figures with their change",
         "cards": "Up to four cards; images only from this site's galleries or tables",
         "dashboard": "Stats, charts, tables and cards under one title",
-        "explore": "A data set with sliders, dates, toggles or a form that recompute its tables, stats and charts in the page"
+        "explore": "A data set with sliders, dates, toggles or a form that recompute its tables, stats and charts in the page",
+        "map": "A map of pins and routes from public table rows, or labelled AI-placed, with its places listed as text"
       }
     },
     "knows": {

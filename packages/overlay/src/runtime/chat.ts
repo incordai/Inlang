@@ -1,8 +1,8 @@
 /**
  * @az runtime chat
  * Purpose: runs a `chat` panel: sends a question to the site's backend, reads the answer's event stream, writes it as text.
- * Spec: docs/chat-block-spec.md §3.2, §4.2, §5.4, §7, §9, §20, §21.1, §21.3
- * Exports: attachChat, ChatOptions
+ * Spec: docs/chat-block-spec.md §3.2, §4.2, §5.4, §7, §9, §20, §21.1, §21.3, §21.4
+ * Exports: attachChat, ChatOptions, MapDrawer
  * Edit guide: answers are textContent in copies of the shell's templates, never markup; each shell once (late content via MutationObserver); attachChat() returns full cleanup.
  * Tests: packages/overlay/test/chat.test.ts, packages/overlay/test/chat-float.test.ts, scripts/chat-e2e.mjs
  */
@@ -43,7 +43,9 @@
  * A rich component (chat, table, stats, cards, dashboard — §20) is drawn by
  * chat-draw.ts into its templates, an explore (§21.3) by chat-explore-draw.ts,
  * whose controls recompute its views in the page and whose send form asks
- * through the same `ask` as typing; an answer whose `done` carries share
+ * through the same `ask` as typing; a map (§21.4) by the `drawMap` a site
+ * that shows maps passes in (chat-map-draw.ts), so no other site carries any
+ * map code; an answer whose `done` carries share
  * tags gets the Share control (chat-shared.ts). On the build's
  * shared-answer page the shell is read-only: it reads one stored answer by
  * the link's fragment and draws it the same way (runShared).
@@ -69,7 +71,7 @@ import {
 import { FOCUSABLE, lockScroll, wireSheetDrag } from './behaviours.ts';
 import { trapIndex } from './logic.ts';
 import { POLICY } from './policy.ts';
-import { drawRich } from './chat-draw.ts';
+import { drawRich, type RichDraw } from './chat-draw.ts';
 import { drawExplore } from './chat-explore-draw.ts';
 import { shareControl } from './chat-shared.ts';
 import { spokenText } from './chat-markdown.ts';
@@ -89,7 +91,16 @@ export interface ChatOptions {
   readonly onSession?: (fn: (account: string | null) => void) => () => void;
   /** The fetch to send with; the page's own by default. */
   readonly fetch?: typeof fetch;
+  /**
+   * Draws a map (§21.4, chat-map-draw.ts) — given only by a site whose chat
+   * shows maps, so a site without them ships no map code; without it a map
+   * is not drawn.
+   */
+  readonly drawMap?: MapDrawer;
 }
+
+/** What chat-map-draw.ts drawMap is to this module: a drawer, with what ends its map and how it speaks. */
+export type MapDrawer = (d: RichDraw & { readonly signal: AbortSignal; readonly announce?: (text: string) => void }, data: unknown) => { el: HTMLElement; said: string } | null;
 
 /** §9: the status region hears at most one update in this long. */
 const ANNOUNCE_MS = 1500;
@@ -321,6 +332,8 @@ interface Place {
   readonly observe?: (el: Element, redraw: () => void) => () => void;
   readonly ask?: (q: string) => void;
   readonly announce?: (text: string) => void;
+  /** The site's map drawer (ChatOptions.drawMap); absent, a map is not drawn. */
+  readonly drawMap?: MapDrawer;
 }
 
 function drawBlock(doc: Document, p: Pick<Parts, 'components'>, config: ChatConfig, block: ChatBlock, suffix: string, place: Place): { el: HTMLElement; said: string } | null {
@@ -329,7 +342,7 @@ function drawBlock(doc: Document, p: Pick<Parts, 'components'>, config: ChatConf
   if (block.kind === 'ask') return null;
   if (block.kind === 'rich') {
     // A rich component the page shows (its note is the server's, for any of them); checked and drawn by chat-draw.ts.
-    const shown = block.word === 'unavailable' ? config.show.some((w) => ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore'].includes(w)) : shows(block.word);
+    const shown = block.word === 'unavailable' ? config.show.some((w) => ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'].includes(w)) : shows(block.word);
     if (!shown || !p.components) return null;
     const draw = {
       doc, components: p.components, allowed: (to: string) => allowedDestination(config, to), link: (a: Element, to: string) => setDestination(a, config, to), backend: place.base,
@@ -337,7 +350,9 @@ function drawBlock(doc: Document, p: Pick<Parts, 'components'>, config: ChatConf
     };
     const made = block.word === 'explore'
       ? drawExplore({ ...draw, signal: place.signal, ...(place.ask ? { ask: place.ask } : {}), ...(place.announce ? { announce: place.announce } : {}) }, block.data)
-      : drawRich(draw, block.word, block.data);
+      : block.word === 'map'
+        ? place.drawMap?.({ ...draw, signal: place.signal, ...(place.announce ? { announce: place.announce } : {}) }, block.data) ?? null
+        : drawRich(draw, block.word, block.data);
     if (made) restore(made.el);
     return made;
   }
@@ -423,6 +438,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     within, base: options.base, signal, observe: resizes,
     // An explore's send form asks as a follow-up does; its summaries are said at once, it keeps them to one in 1.5 s itself.
     ask: (q) => ask(q), announce: (t) => announce(t, true),
+    ...(options.drawMap ? { drawMap: options.drawMap } : {}),
   });
 
   const setState = (state: string) => p.host.setAttribute('data-az-chat-state', state);
@@ -1079,7 +1095,9 @@ function runShared(host: HTMLElement, config: ChatConfig, options: ChatOptions, 
         drawn.text(e.s);
       } else if (e.type === 'block' && e.block && typeof e.block === 'object' && !Array.isArray(e.block)) {
         const block = blockOf(e.block as Record<string, unknown>);
-        const made = block && drawBlock(doc, { components }, config, block, `shared${++n}`, { within: answer, base: options.base, signal, announce: say, ...(resizes ? { observe: resizes } : {}) });
+        const made = block && drawBlock(doc, { components }, config, block, `shared${++n}`, {
+          within: answer, base: options.base, signal, announce: say, ...(resizes ? { observe: resizes } : {}), ...(options.drawMap ? { drawMap: options.drawMap } : {}),
+        });
         if (!made) continue;
         drawn.part(made.el);
         said.push(made.said);

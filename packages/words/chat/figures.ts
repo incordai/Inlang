@@ -1,8 +1,8 @@
 /**
  * @az module chat-figures
- * Purpose: the hidden templates an answer's charts, tables, stat cards, image cards, dashboards, explores and share control are drawn from.
- * Spec: docs/chat-block-spec.md §20.4, §20.6, §20.7, §20.8, §21.3.4
- * Exports: FIGURE_COPY, SERIES_PARTS, richParts, assetParts, sharePart
+ * Purpose: the hidden templates an answer's charts, tables, stat cards, image cards, dashboards, explores, maps and share control are drawn from.
+ * Spec: docs/chat-block-spec.md §20.4, §20.6, §20.7, §20.8, §21.3.4, §21.4.3, §21.4.5
+ * Exports: FIGURE_COPY, MAP_COPY, SERIES_PARTS, richParts, assetParts, sharePart
  * Edit guide: every paint is a class from a theme token — the runtime copies a part's class, never writes a colour or a style;
  *   a slot the runtime fills is an element marked data-az-chat-slot, filled with textContent only.
  * Tests: packages/words/test/chat-shell.test.ts, scripts/chat-e2e.mjs
@@ -43,6 +43,15 @@ export const FIGURE_COPY = {
   shareCreate: 'Create link',
   shareLink: 'Link to this answer',
   shareDelete: 'Link to delete it (keep it private)',
+} as const;
+
+/** A map's fixed copy (§21.4.3, §21.4.5); the runtime's own is in overlay chat-map.ts MAP_TEXT, the same words. */
+export const MAP_COPY = {
+  zoomIn: 'Zoom in',
+  zoomOut: 'Zoom out',
+  reset: 'Reset view',
+  list: 'Show the places as a list',
+  show: 'Show on the map',
 } as const;
 
 /** The paint parts a chart's marks name (overlay chat-chart.ts), each a class here. */
@@ -382,6 +391,126 @@ function explore(t: ThemeLike, ctx: EmitContext): EmittedNode {
 }
 
 /**
+ * A map (§21.4.3): its title and the fixed labels its source earns, the
+ * stage the map draws in (an image named by its summary, which the arrow
+ * and + − keys move), az's own zoom and reset buttons, the attribution line,
+ * the fallback note, and the list equivalent — the places in order, each its
+ * coordinates in words, and each route's stops — in a <details> that is the
+ * whole component when the map cannot be drawn. The popup a pin opens is a
+ * part of its own, filled by textContent and handed to the map library.
+ */
+function map(t: ThemeLike, ctx: EmitContext): EmittedNode {
+  const small = { margin: 0, fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'] };
+  const ring = { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } };
+  const button = (name: string, label: string): EmittedNode => {
+    const b = ctx.submit(label, { hierarchy: 'secondary' });
+    return { ...b, attrs: { ...b.attrs, type: 'button', 'data-az-chat-slot': name } };
+  };
+  const label = { ...small, padding: `0 ${px(t.space[8])}`, border: `1px solid ${t.color['border-strong']}`, borderRadius: px(t.radius.sm), color: t.color.text };
+  return {
+    tag: 'figure', attrs: { class: 'az-chat-map', 'data-az-chat-map': 'loading' },
+    style: {
+      display: 'grid', gap: px(t.space[8]), margin: 0, padding: px(t.space[12]),
+      background: t.color.bg, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0,
+    },
+    children: [
+      {
+        tag: 'figcaption', attrs: { class: 'az-chat-map-caption' },
+        style: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: `${px(t.space[4])} ${px(t.space[12])}` },
+        children: [
+          slot('title', 'span', { fontWeight: t.type['weight-bold'], fontSize: t.typeSize.base, color: t.color.text }, { class: 'az-chat-map-title' }),
+          // §21.4.4: fixed copy the runtime picks by the source the server set — the model cannot remove it.
+          slot('label', 'span', label, { class: 'az-chat-map-label' }),
+          {
+            tag: 'span', attrs: { class: 'az-chat-source', 'data-az-chat-slot': 'source' },
+            style: { ...small, color: t.color.muted },
+            children: [`${FIGURE_COPY.source} · `, slot('asOf', 'span', {})],
+          },
+        ],
+      },
+      {
+        // The map's own box: a fixed shape, so nothing moves when it draws; the library fills it.
+        tag: 'div', attrs: { class: 'az-chat-map-stage', 'data-az-chat-slot': 'stage', role: 'img', tabindex: '0' },
+        style: {
+          position: 'relative', overflow: 'hidden', width: '100%', aspectRatio: '4 / 3', minWidth: 0,
+          background: t.color['surface-alt'], borderRadius: px(t.radius.sm),
+        },
+        states: ring,
+        children: [],
+      },
+      {
+        tag: 'div', attrs: { class: 'az-chat-map-controls', 'data-az-chat-slot': 'controls' },
+        style: { display: 'flex', flexWrap: 'wrap', gap: px(t.space[8]) },
+        children: [button('zoom-in', MAP_COPY.zoomIn), button('zoom-out', MAP_COPY.zoomOut), button('reset', MAP_COPY.reset)],
+      },
+      // §21.4.3: the map data's attribution, the operator's line from the server, always visible under the map.
+      slot('attribution', 'p', { ...small, color: t.color.muted }, { class: 'az-chat-map-attribution' }),
+      slot('note', 'p', { ...small, color: t.color.text }, { class: 'az-chat-map-note', hidden: 'hidden' }),
+      {
+        tag: 'details', attrs: { class: 'az-chat-map-list', 'data-az-chat-slot': 'list' },
+        style: { ...small },
+        children: [
+          {
+            tag: 'summary', attrs: { class: 'az-chat-map-summary' },
+            style: { cursor: 'pointer', color: t.color.text, minHeight: px(t.size.tap), display: 'flex', alignItems: 'center' },
+            states: ring,
+            children: [MAP_COPY.list],
+          },
+          {
+            tag: 'ol', attrs: { class: 'az-chat-map-pins', 'data-az-chat-slot': 'pins' },
+            style: { display: 'grid', gap: px(t.space[8]), margin: 0, paddingInlineStart: px(t.space[24]), color: t.color.text },
+            children: [{
+              tag: 'li', attrs: { class: 'az-chat-map-pin', 'data-az-chat-slot': 'pin' },
+              style: { display: 'grid', gap: px(t.space[4]) },
+              children: [
+                slot('pin-label', 'span', { fontWeight: t.type['weight-bold'] }),
+                slot('pin-where', 'span', { color: t.color.muted }),
+                slot('pin-src', 'span', { color: t.color.muted }),
+                {
+                  tag: 'button', attrs: { type: 'button', class: 'az-chat-map-show', 'data-az-chat-slot': 'pin-show' },
+                  style: {
+                    justifySelf: 'start', minHeight: px(t.size.tap), padding: `0 ${px(t.space[8])}`, font: 'inherit', fontSize: t.typeSize.sm,
+                    background: 'transparent', color: t.color.accent, border: 0, textDecoration: 'underline', cursor: 'pointer',
+                  },
+                  states: ring,
+                  children: [MAP_COPY.show],
+                },
+              ],
+            }],
+          },
+          {
+            tag: 'div', attrs: { class: 'az-chat-map-routes', 'data-az-chat-slot': 'routes' },
+            style: { display: 'grid', gap: px(t.space[8]) },
+            children: [{
+              // A group named by its title (the runtime ties them): a heading here would break the transcript's order.
+              tag: 'section', attrs: { class: 'az-chat-map-route', 'data-az-chat-slot': 'route', role: 'group' },
+              style: { display: 'grid', gap: px(t.space[4]) },
+              children: [
+                slot('route-title', 'p', { margin: 0, fontSize: t.typeSize.sm, fontWeight: t.type['weight-bold'], color: t.color.text }),
+                {
+                  tag: 'ol', attrs: { 'data-az-chat-slot': 'stops' },
+                  style: { margin: 0, paddingInlineStart: px(t.space[24]), color: t.color.text },
+                  children: [slot('stop', 'li', {})],
+                },
+              ],
+            }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** A pin's popup: its label and its source's label, handed to the map library as an element (setDOMContent, §21.4.3). */
+function mapPopup(t: ThemeLike): EmittedNode {
+  return {
+    tag: 'div', attrs: { class: 'az-chat-map-popup' },
+    style: { display: 'grid', gap: px(t.space[4]), fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'], color: t.color.text },
+    children: [slot('label', 'strong', {}), slot('src', 'span', { color: t.color.muted })],
+  };
+}
+
+/**
  * The rich templates a chat's `show` needs (chat-block-spec §20): the paint
  * classes and the figure frame for any of them, then each component's own.
  * An explore draws charts, tables and stat cards too (§21.3.4).
@@ -389,7 +518,7 @@ function explore(t: ThemeLike, ctx: EmitContext): EmittedNode {
 export function richParts(answer: SpecChatAnswer, ctx: EmitContext): EmittedNode[] {
   const t = ctx.theme;
   const show = answer.show;
-  const rich = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore'].filter((w) => show.includes(w));
+  const rich = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'].filter((w) => show.includes(w));
   if (rich.length === 0) return [];
   const has = (...words: string[]) => words.some((w) => show.includes(w));
   return [
@@ -400,6 +529,7 @@ export function richParts(answer: SpecChatAnswer, ctx: EmitContext): EmittedNode
     ...(has('cards', 'dashboard') ? [part('cards', cards(t))] : []),
     ...(has('dashboard') ? [part('dashboard', dashboard(t))] : []),
     ...(has('explore') ? [part('explore', explore(t, ctx))] : []),
+    ...(has('map') ? [part('map', map(t, ctx)), part('map-popup', mapPopup(t))] : []),
     part('unavailable', unavailable(t)),
   ];
 }

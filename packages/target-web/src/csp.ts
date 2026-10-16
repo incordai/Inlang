@@ -43,6 +43,16 @@ export interface PageNeeds {
    * in every tested engine, so img-src needs no blob: (test:3d measures both).
    */
   readonly decoder: boolean;
+  /**
+   * The page's chat may show a map (chat-block-spec §21.4.3): the map
+   * library's worker is started from a blob: URL whose one line imports the
+   * site's own worker file — a worker from a same-origin URL is not governed
+   * by this <meta> policy, one from blob: is — so worker-src 'self' blob:,
+   * and nothing else. Its tiles, glyphs and sprites are the backend's, which
+   * `connect` already names (and a third-party archive's origin when the
+   * build sets one, through `connect` too).
+   */
+  readonly map: boolean;
 }
 
 /** The tag build.mjs writes, right after the page's charset. */
@@ -160,7 +170,7 @@ export function pagePolicy(needs: PageNeeds, html: string, env: Readonly<Record<
     ['style-src', ["'self'", ...(attrs.length > 0 ? ["'unsafe-hashes'"] : []), ...sorted([...attrs, ...sheets])]],
     ['img-src', ["'self'", ...(needs.dataIcon ? ['data:'] : []), ...origins(needs.images)]],
     ['connect-src', ["'self'", ...(needs.decoder ? ['blob:'] : []), ...origins(needs.connect)]],
-    ...(needs.decoder ? [['worker-src', ["'self'", 'blob:']] as [string, string[]]] : []),
+    ...(needs.decoder || needs.map ? [['worker-src', ["'self'", 'blob:']] as [string, string[]]] : []),
     ['object-src', ["'none'"]],
     ['base-uri', ["'self'"]],
     ['form-action', ["'self'"]],

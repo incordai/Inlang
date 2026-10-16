@@ -1,8 +1,8 @@
 /**
  * @az module doctor-chat
  * Purpose: az doctor's chat checks — the chat keys in the server's .env, the budget against one answer's cost, the built context against the tables.
- * Spec: docs/chat-block-spec.md §11.2 (and §6.4, §6.5, §8.1, §8.2, §20.7, §21.2.7) · docs/word-quality-gate.md §5
- * Exports: CHAT_DOCTOR_CHECKS, chatEnvProblems, chatToolsProblems, answerCost, ChatServer
+ * Spec: docs/chat-block-spec.md §11.2 (and §6.4, §6.5, §8.1, §8.2, §20.7, §21.2.7, §21.4.3) · docs/word-quality-gate.md §5
+ * Exports: CHAT_DOCTOR_CHECKS, chatEnvProblems, chatToolsProblems, chatMapState, answerCost, ChatServer
  * Edit guide: detect and instruct only; names, never values — a key's value, the model URL and the model id are never printed; a site without chat is a skip.
  * Tests: packages/cli/test/doctor-chat.test.ts
  */
@@ -25,6 +25,12 @@
  *   a budget that cannot refuses every question (the tools' lines in the
  *   system text count too). The default left in place,
  *   and the kill switch on, are said too.
+ * - **chat map** — a chat that shows maps (§21.4.3): the tile archives,
+ *   glyph and sprite folders and attribution `.env` names, opened as the
+ *   server opens them at start; maps that can only be lists (no archive);
+ *   and a third-party tile archive the build was given
+ *   (AZ_PUBLIC_MAP_TILES_URL), named by its origin — it learns where every
+ *   visitor looks.
  * - **chat context** — the built `server/chat/context.json` as the server
  *   reads it: the tables a chat knows must still be ones a signed-out
  *   visitor may read and only admins write (the start-up check,
@@ -35,19 +41,20 @@
  */
 
 import { stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { parseEnv } from 'node:util';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { loadConfig, toolKey, type Setup } from '../../backend/src/server/env.ts';
 import type { Check, CheckResult, DoctorContext } from './doctor.ts';
 import { readRegular } from './shipped.ts';
+import { DOTENV_FILES, parseDotenv } from './az.ts';
 
 /** What the built server says of itself (az.config.json): its setup, and whether it has a chat. */
 export type ChatServer = Setup & { readonly chat: boolean };
 
 /** The built server's setup, or null when there is none az wrote. */
 async function chatServer(serverDir: string): Promise<ChatServer | null> {
-  let o: { database?: unknown; email?: unknown; data?: unknown; images?: unknown; chat?: unknown };
+  let o: { database?: unknown; email?: unknown; data?: unknown; images?: unknown; chat?: unknown; map?: unknown };
   try {
     const text = await readRegular(join(serverDir, 'az.config.json'));
     if (text === null) return null;
@@ -58,7 +65,10 @@ async function chatServer(serverDir: string): Promise<ChatServer | null> {
   const { database, email } = o ?? {};
   if (database !== 'sqlite' && database !== 'postgres' && database !== 'mysql') return null;
   if (email !== 'smtp' && email !== 'api') return null;
-  return { database, email, ...(o.data === true ? { data: true } : {}), ...(o.images === true ? { images: true } : {}), chat: o.chat === true };
+  return {
+    database, email, ...(o.data === true ? { data: true } : {}), ...(o.images === true ? { images: true } : {}), chat: o.chat === true,
+    ...(o.map === true ? { map: true } : {}),
+  };
 }
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
@@ -328,5 +338,91 @@ const chatToolsCheck: Check = {
   },
 };
 
+/** What a map check found (§21.4.3): the keys the server refuses, a file it cannot open, or what it serves. */
+export type MapState =
+  | { readonly kind: 'refused'; readonly keys: readonly string[] }
+  | { readonly kind: 'unreadable'; readonly problem: string }
+  | { readonly kind: 'ok'; readonly world: number | null; readonly region: number | null; readonly glyphs: boolean; readonly sprites: boolean; readonly geocoder: boolean };
+
+/**
+ * The map keys as the server reads them, and their files opened as it opens
+ * them at start-up (backend chat-tiles.ts openTiles), each path taken from
+ * the server's folder, where it runs. Key names only, never a value.
+ */
+export async function chatMapState(setup: ChatServer, env: Readonly<Record<string, string>>, server: string): Promise<MapState> {
+  const loaded = loadConfig(env, { database: setup.database, email: setup.email, ...(setup.images === true ? { images: true } : {}), chat: true, map: true }, 'site');
+  const refused = loaded.ok ? [] : [...new Set(loaded.problems.map((p) => /^AZ_(?:MAP|GEOCODER)_[A-Z_]+/.exec(p)?.[0] ?? '').filter((k) => k !== ''))];
+  if (refused.length > 0) return { kind: 'refused', keys: refused };
+  if (!loaded.ok || !loaded.config.map) return { kind: 'refused', keys: [] };
+  const m = loaded.config.map;
+  const at = (p: string | null) => (p === null || isAbsolute(p) ? p : join(server, p));
+  const { openTiles, TilesProblem } = await import('../../backend/src/server/chat-tiles.ts');
+  try {
+    const files = await openTiles({ ...m, world: at(m.world), region: at(m.region), glyphs: at(m.glyphs), sprites: at(m.sprites) });
+    return {
+      kind: 'ok', world: files.archives.world?.header.maxZoom ?? null, region: files.archives.region?.header.maxZoom ?? null,
+      glyphs: files.glyphs !== null, sprites: files.sprites !== null, geocoder: loaded.config.chat?.geocoder !== null && loaded.config.chat?.geocoder !== undefined,
+    };
+  } catch (e) {
+    if (e instanceof TilesProblem) return { kind: 'unreadable', problem: e.message };
+    throw e;
+  }
+}
+
+const chatMap: Check = {
+  id: 'chat-map',
+  title: 'chat map',
+  run: async (ctx) => {
+    const got = await serverAndEnv(ctx, 'chat map');
+    if ('status' in got) return got;
+    if (got.setup.map !== true) return { status: 'skip', line: 'chat map: no chat shows a map' };
+    const state = await chatMapState(got.setup, got.env, got.server);
+    if (state.kind === 'refused') {
+      return {
+        status: 'fail', line: `chat map: ${state.keys.join(', ') || 'a map key'} ${state.keys.length === 1 ? 'is' : 'are'} refused by the server — it won't start`,
+        fix: ['.env.example says what each map key takes — names checked, no value printed'],
+      };
+    }
+    if (state.kind === 'unreadable') return { status: 'fail', line: `chat map: ${state.problem} — the server won't start`, fix: ['set the path from the server\'s folder, to a PMTiles v3 file or a folder the server can read'] };
+    // The build's own environment, as az build reads it (the output folder's .env files, then the process): a third-party archive is the operator's choice, said.
+    const files: Record<string, string> = {};
+    for (const name of DOTENV_FILES) {
+      const text = await readRegular(join(ctx.outDir, name));
+      if (text !== null) parseDotenv(text, files);
+    }
+    const { MAP_TILES_ENV } = await import('../../target-web/src/chat.ts');
+    const third = ({ ...files, ...ctx.probe.env } as Record<string, string | undefined>)[MAP_TILES_ENV]?.trim() ?? '';
+    let origin: string | null = null;
+    if (third !== '') {
+      try {
+        origin = new URL(third).origin;
+      } catch {
+        return { status: 'fail', line: `chat map: ${MAP_TILES_ENV} is not a URL — the build refuses it`, fix: [`set ${MAP_TILES_ENV} to the archive's https URL, or remove it to serve the tiles from this server`] };
+      }
+    }
+    if (state.world === null && origin === null) {
+      return {
+        status: 'warn', line: 'chat map: AZ_MAP_WORLD is not set — every map shows its list of places only',
+        fix: ['make a world archive (zoom 0–6) and set AZ_MAP_WORLD and AZ_MAP_ATTRIBUTION; docs/self-hosting.md says how'],
+      };
+    }
+    const parts = [
+      origin !== null ? 'the world archive from a third party' : `the world archive to zoom ${state.world}`,
+      ...(state.region !== null ? [`a regional extract to zoom ${state.region}`] : []),
+      state.glyphs ? 'labels' : 'no labels (AZ_MAP_GLYPHS unset)',
+      state.sprites ? 'icons' : 'no icons (AZ_MAP_SPRITES unset)',
+      'attribution set',
+      state.geocoder ? 'addresses placed by the geocoder' : 'no geocoder (optional)',
+    ];
+    if (origin !== null) {
+      return {
+        status: 'warn', line: `chat map: tiles come from ${origin} (${MAP_TILES_ENV}) — that third party learns where every visitor's maps look`,
+        fix: [parts.join('; '), `remove ${MAP_TILES_ENV} and set AZ_MAP_WORLD to serve the tiles from this server only`],
+      };
+    }
+    return { status: 'pass', line: `chat map: ${parts.join('; ')}; tiles, glyphs and sprites from this server only` };
+  },
+};
+
 /** The chat's doctor checks, in the order they print. */
-export const CHAT_DOCTOR_CHECKS: readonly Check[] = [chatEnv, chatToolsCheck, chatBudget, chatContext];
+export const CHAT_DOCTOR_CHECKS: readonly Check[] = [chatEnv, chatToolsCheck, chatMap, chatBudget, chatContext];

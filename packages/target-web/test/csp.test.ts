@@ -39,7 +39,7 @@ function needsOf(src: string): Record<string, PageNeeds> {
   return JSON.parse(m[1]) as Record<string, PageNeeds>;
 }
 
-const PLAIN: PageNeeds = { dataIcon: true, connect: [], images: [], decoder: false };
+const PLAIN: PageNeeds = { dataIcon: true, connect: [], images: [], decoder: false, map: false };
 const page = (body: string) => `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n    <title>t</title>\n` +
   `    <script type="module" crossorigin src="./assets/main.js"></script>\n  </head>\n  <body>\n    <div id="root">${body}</div>\n  </body>\n</html>\n`;
 /** The base64 SHA-256 of exactly these characters, computed here independently of csp.ts. */
@@ -101,6 +101,20 @@ test('a page with a 3D model: wasm-unsafe-eval and a blob: worker for the decode
   assert.doesNotMatch(pagePolicy(PLAIN, page(''), {}), /wasm|worker-src|blob:/, 'CONTROL: none of it without a model');
 });
 
+test('a page whose chat shows maps: worker-src \'self\' blob: and nothing else new — no wasm, no blob: fetch, no data: image', () => {
+  const env = { AZ_PUBLIC_BACKEND_URL: 'https://api.example.org' };
+  const plain = pagePolicy({ ...PLAIN, connect: ['AZ_PUBLIC_BACKEND_URL'] }, page(''), env);
+  const map = pagePolicy({ ...PLAIN, connect: ['AZ_PUBLIC_BACKEND_URL', 'AZ_PUBLIC_MAP_TILES_URL'], map: true }, page(''), env);
+  assert.equal(map, plain.replace("; object-src", "; worker-src 'self' blob:; object-src"), 'the plain page\'s policy plus exactly worker-src');
+  assert.doesNotMatch(map, /wasm|'unsafe-eval'|img-src[^;]*data:[^;]*blob:|connect-src[^;]*blob:/);
+  // A third-party tile archive the build names: its origin, and only then, in connect-src.
+  const third = pagePolicy({ ...PLAIN, connect: ['AZ_PUBLIC_BACKEND_URL', 'AZ_PUBLIC_MAP_TILES_URL'], map: true }, page(''),
+    { ...env, AZ_PUBLIC_MAP_TILES_URL: 'https://tiles.example.net/world.pmtiles' });
+  assert.match(third, /connect-src 'self' https:\/\/api\.example\.org https:\/\/tiles\.example\.net; /);
+  // A model and a map on one page: worker-src once.
+  assert.equal((pagePolicy({ ...PLAIN, decoder: true, map: true }, page(''), {}).match(/worker-src/g) ?? []).length, 1);
+});
+
 test('origins come from the public variables a page names, and nothing else', () => {
   const env = { AZ_PUBLIC_AUTH_URL: 'https://auth.example.org/v1/', AZ_PUBLIC_BACKEND_URL: 'https://api.example.org', AZ_PUBLIC_OTHER_URL: 'https://other.example.org' };
   const policy = pagePolicy({ ...PLAIN, connect: ['AZ_PUBLIC_AUTH_URL'], images: ['AZ_PUBLIC_BACKEND_URL'] }, page(''), env);
@@ -159,10 +173,35 @@ page /mine
 page /login
   auth login
 `);
-  assert.deepEqual(data['index.html'], { dataIcon: true, connect: ['AZ_PUBLIC_BACKEND_URL'], images: [], decoder: false });
+  assert.deepEqual(data['index.html'], { dataIcon: true, connect: ['AZ_PUBLIC_BACKEND_URL'], images: [], decoder: false, map: false });
   assert.deepEqual(data['list/index.html'].images, ['AZ_PUBLIC_BACKEND_URL']);
   assert.deepEqual(data['mine/index.html'].images, ['AZ_PUBLIC_BACKEND_URL'], 'an author component may show rows through the client');
   assert.deepEqual(data['login/index.html'].images, [], 'CONTROL: a page that cannot show rows');
+
+  // Maps (chat-block-spec §21.4.3): the page whose chat shows them, and the shared-answer page that may draw one — no other.
+  const maps = needsOf(`az 1
+site shop
+  auth
+    adapter azbackend
+  backend
+    database sqlite
+    email smtp
+    model default
+page /
+  hero center
+    title "Hi"
+  chat panel
+    show map
+page /plain
+  chat panel
+    show chart
+page /login
+  auth login
+`);
+  assert.deepEqual(maps['index.html'], { dataIcon: true, connect: ['AZ_PUBLIC_BACKEND_URL', 'AZ_PUBLIC_MAP_TILES_URL'], images: [], decoder: false, map: true });
+  assert.equal(maps['chat/shared/index.html'].map, true, 'a shared map draws on the shared page');
+  assert.deepEqual(maps['plain/index.html'], { dataIcon: true, connect: ['AZ_PUBLIC_BACKEND_URL'], images: [], decoder: false, map: false });
+  assert.equal(maps['login/index.html'].map, false);
   const admin = Object.keys(data).filter((f) => f.startsWith('admin'));
   assert.ok(admin.length > 0 && admin.every((f) => data[f].images[0] === 'AZ_PUBLIC_BACKEND_URL'), admin.join(' '));
 });

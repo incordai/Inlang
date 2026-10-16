@@ -243,7 +243,7 @@ test('cspProblems: blob: and data: pass only where az\'s own policy uses them, f
 });
 
 test('cspProblems: az\'s page policy with every need at once still grades strict', () => {
-  const need: PageNeeds = { dataIcon: true, decoder: true, connect: ['AZ_PUBLIC_AUTH_URL'], images: ['AZ_PUBLIC_BACKEND_URL'] };
+  const need: PageNeeds = { dataIcon: true, decoder: true, map: true, connect: ['AZ_PUBLIC_AUTH_URL'], images: ['AZ_PUBLIC_BACKEND_URL'] };
   const html = '<meta charset="utf-8" /><div id="root"><p style="color:red">hi</p></div><script>1</script><style>p{}</style>';
   const policy = pagePolicy(need, html, { AZ_PUBLIC_AUTH_URL: 'https://auth.example.org', AZ_PUBLIC_BACKEND_URL: 'http://127.0.0.1:8787' });
   assert.match(policy, /img-src 'self' data: http:\/\/127\.0\.0\.1:8787; connect-src 'self' blob: https:\/\/auth\.example\.org; worker-src 'self' blob:/);

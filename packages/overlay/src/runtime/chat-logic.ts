@@ -63,10 +63,13 @@ export const mayFollow = (following: boolean, scrollTop: number, known: number):
 export const floatPreset = (width: number, narrow: number): 'sheet' | 'dropdown' => (width < narrow ? 'sheet' : 'dropdown');
 
 /** The closed list `show` takes. */
-export const CHAT_WORDS = ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard', 'explore'] as const;
+export const CHAT_WORDS = ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'] as const;
 
-/** The block keys of the rich components (§20, explore §21.3) and their note, drawn by chat-draw.ts and chat-explore-draw.ts after their own checks. */
-export const RICH_BLOCKS: readonly string[] = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'unavailable'];
+/**
+ * The block keys of the rich components (§20, explore §21.3, map §21.4) and their note, drawn by chat-draw.ts,
+ * chat-explore-draw.ts and (on a site that shows maps) chat-map-draw.ts after their own checks.
+ */
+export const RICH_BLOCKS: readonly string[] = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map', 'unavailable'];
 export type ChatWord = (typeof CHAT_WORDS)[number];
 
 /** One component of an answer, as the server validated it — and as this module validates it again. */

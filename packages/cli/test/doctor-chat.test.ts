@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,11 +100,11 @@ async function check(id: string, p: { dir: string; file: string; out: string }) 
 
 test('chat checks run between backend .env and build secrets, and skip a site without chat', async () => {
   const ids = CHECKS.map((c) => c.id);
-  assert.deepEqual(ids.slice(ids.indexOf('backend-env'), ids.indexOf('build-secrets') + 1), ['backend-env', 'chat-env', 'chat-tools', 'chat-budget', 'chat-context', 'build-secrets']);
+  assert.deepEqual(ids.slice(ids.indexOf('backend-env'), ids.indexOf('build-secrets') + 1), ['backend-env', 'chat-env', 'chat-tools', 'chat-map', 'chat-budget', 'chat-context', 'build-secrets']);
   const plain = mkdtempSync(join(tmpdir(), 'az-doctor-chat-'));
   writeFileSync(join(plain, 'site.az'), 'az 1\nsite aurora\npage /\n  hero center\n    title "Hi"\n');
   const p = { dir: plain, file: join(plain, 'site.az'), out: join(plain, '.az-build') };
-  for (const id of ['chat-env', 'chat-tools', 'chat-budget', 'chat-context']) assert.equal((await check(id, p)).status, 'skip', id);
+  for (const id of ['chat-env', 'chat-tools', 'chat-map', 'chat-budget', 'chat-context']) assert.equal((await check(id, p)).status, 'skip', id);
 });
 
 test('chat .env: the keys by name only — the fake model, a URL with the completions path, a refused key, moderation without its URL; CONTROL passes', async () => {
@@ -287,4 +287,49 @@ test('chat context: AZ1257 counts text bodies kept in files, as az build does �
   const refused = az(p.dir, 'build', 'site.az');
   assert.notEqual(refused.status, 0, 'the build refuses the same body');
   assert.match(refused.stderr, /points outside the project/);
+});
+
+/** A 127-byte PMTiles v3 header (zoom 0–6) and a little data: an archive as the server opens it. */
+function pmtiles(): Buffer {
+  const header = Buffer.alloc(127);
+  header.write('PMTiles', 0, 'latin1');
+  header.writeUInt8(3, 7);
+  header.writeUInt8(0, 100);
+  header.writeUInt8(6, 101);
+  return Buffer.concat([header, Buffer.alloc(64)]);
+}
+
+test('chat map (§21.4.3): the archive, folders and attribution as the server opens them; no archive warns; a refused key or a foreign file fails; a third-party archive is named; CONTROL passes', async () => {
+  const p = built(CHAT_SITE().replace('    show     faq cta\n', '    show     faq cta map\n'));
+  const r0 = await check('chat-map', p);
+  assert.equal(r0.status, 'warn', r0.line);
+  assert.equal(r0.line, 'chat map: AZ_MAP_WORLD is not set — every map shows its list of places only');
+  // Paths are the server folder's, where it runs.
+  mkdirSync(join(p.server, 'map', 'glyphs'), { recursive: true });
+  mkdirSync(join(p.server, 'map', 'sprites'));
+  writeFileSync(join(p.server, 'map', 'world.pmtiles'), pmtiles());
+  writeFileSync(join(p.server, 'map', 'notes.txt'), 'not an archive at /secret/place. '.repeat(8));
+  p.setEnv({ AZ_MAP_WORLD: './map/world.pmtiles', AZ_MAP_GLYPHS: './map/glyphs', AZ_MAP_SPRITES: './map/sprites', AZ_MAP_ATTRIBUTION: 'Map data: the fixture' });
+  const ok = await check('chat-map', p);
+  assert.equal(ok.status, 'pass', ok.line);
+  assert.equal(ok.line, 'chat map: the world archive to zoom 6; labels; icons; attribution set; no geocoder (optional); tiles, glyphs and sprites from this server only');
+  p.setEnv({ AZ_MAP_WORLD: './map/world.pmtiles', AZ_MAP_ATTRIBUTION: '' });
+  const noLine = await check('chat-map', p);
+  assert.equal(noLine.status, 'fail');
+  assert.equal(noLine.line, 'chat map: AZ_MAP_ATTRIBUTION is refused by the server — it won\'t start');
+  p.setEnv({ AZ_MAP_WORLD: './map/notes.txt', AZ_MAP_ATTRIBUTION: 'Map data: the fixture' });
+  const foreign = await check('chat-map', p);
+  assert.equal(foreign.status, 'fail');
+  assert.equal(foreign.line, 'chat map: AZ_MAP_WORLD is not a PMTiles archive — the server won\'t start');
+  assert.ok(!JSON.stringify(foreign).includes('/secret/place'), 'never a value or a path');
+  // The site's build given a third-party archive: its origin named, as a warning, the backend's own still checked.
+  p.setEnv({ AZ_MAP_WORLD: './map/world.pmtiles', AZ_MAP_ATTRIBUTION: 'Map data: the fixture' });
+  writeFileSync(join(p.out, '.env'), 'AZ_PUBLIC_MAP_TILES_URL=https://tiles.example.net/world.pmtiles\n');
+  const third = await check('chat-map', p);
+  assert.equal(third.status, 'warn', third.line);
+  assert.equal(third.line, 'chat map: tiles come from https://tiles.example.net (AZ_PUBLIC_MAP_TILES_URL) — that third party learns where every visitor\'s maps look');
+  // CONTROL: a chat that shows no maps is skipped.
+  const plain = await check('chat-map', built());
+  assert.equal(plain.status, 'skip');
+  assert.equal(plain.line, 'chat map: no chat shows a map');
 });

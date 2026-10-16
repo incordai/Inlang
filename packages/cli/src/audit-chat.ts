@@ -35,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { scanText } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { RUNTIME_DIR } from '../../target-web/src/emit.ts';
-import { CHAT_RUNTIME_FILES } from '../../target-web/src/chat.ts';
+import { CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../../target-web/src/chat.ts';
 import type { ContextTable } from '../../backend/src/server/chat.ts';
 import type { Table } from '../../backend/src/server/data-values.ts';
 import type { AuditContext } from './audit.ts';
@@ -52,6 +52,8 @@ const RUNTIME_SOURCE = fileURLToPath(new URL('../../overlay/src/runtime/', impor
 const SINKS: readonly (readonly [RegExp, string])[] = [
   [/\binnerHTML\b/, 'innerHTML'], [/\bouterHTML\b/, 'outerHTML'], [/\binsertAdjacentHTML\b/, 'insertAdjacentHTML'],
   [/\bdocument\.write/, 'document.write'], [/\beval\s*\(/, 'eval('], [/\bFunction\s*\(/, 'Function('],
+  // The map library's HTML setter (chat-block-spec §21.4.4): a popup is handed an element, never a string.
+  [/\.setHTML\b/, 'setHTML'],
 ];
 
 /** The sinks one runtime file's code uses — comments may name what the code never does, so they are left out. */
@@ -164,7 +166,8 @@ const chatRuntime: Check<AuditContext> = {
     const found: string[] = [];
     const differs: string[] = [];
     let files = 0;
-    for (const f of CHAT_RUNTIME_FILES) {
+    // A site that shows maps ships the map runtime too (§21.4); it is read the same way.
+    for (const f of [...CHAT_RUNTIME_FILES, ...MAP_RUNTIME_FILES]) {
       const built = await readRegular(join(ctx.outDir, RUNTIME_DIR, f));
       if (built === null) continue;
       files++;
@@ -187,7 +190,7 @@ const chatRuntime: Check<AuditContext> = {
         fix: ['rebuild with az build — the runtime is generated, never edited'],
       };
     }
-    return { status: 'pass', line: `chat runtime: ${count(files, 'file')}, none with innerHTML, insertAdjacentHTML, outerHTML, document.write, eval or Function` };
+    return { status: 'pass', line: `chat runtime: ${count(files, 'file')}, none with innerHTML, insertAdjacentHTML, outerHTML, document.write, eval, Function or setHTML` };
   },
 };
 

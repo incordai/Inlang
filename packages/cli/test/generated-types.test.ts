@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,12 +41,17 @@ const DATA = `  data products
 `;
 const PAGES = (chat: string) => `page /\n  hero center\n    title "Hi"\n${chat}page /login\n  auth login\n    alt "Create an account" /signup\npage /signup\n  auth signup\n    terms /terms\npage /terms\n  hero center\n    title "Terms"\n`;
 const CHAT_ALL = '  chat panel\n    allow anyone\n    show chart table stats cards dashboard cta\n';
+/** A chat that shows maps (chat-block-spec §21.4): its map runtime files import the three map packages. */
+const CHAT_MAP = '  chat panel\n    allow anyone\n    show map explore\n';
+/** The packages a map site's generated code imports, as the repository installs them (their own declarations). */
+const MAP_PACKAGES = ['maplibre-gl', 'pmtiles', '@protomaps/basemaps'];
 
 /** The sites whose generated code is checked: every combination that changes what src/ holds. */
 const SITES: readonly { readonly name: string; readonly source: string; readonly data: boolean }[] = [
   { name: 'data, chat with every component, auth', source: `${HEAD}${BACKEND(true)}${DATA}${PAGES(CHAT_ALL)}`, data: true },
   { name: 'data and auth, no chat', source: `${HEAD}${BACKEND(false)}${DATA}${PAGES('')}`, data: true },
   { name: 'a chat float, no data', source: `${HEAD}${BACKEND(true)}  chat float\n    allow anyone\n    show cta\n${PAGES('')}`, data: false },
+  { name: 'a chat that shows maps, with data', source: `${HEAD}${BACKEND(true)}${DATA}${PAGES(CHAT_MAP)}`, data: true },
   { name: 'auth only, no backend', source: `az 1\nsite studio\n  auth\n    adapter session\n${PAGES('')}`, data: false },
 ];
 
@@ -77,7 +82,7 @@ function built(source: string, data: boolean): string {
   return out;
 }
 
-test('every generated src/ file type-checks under the generated tsconfig, strict, with React\'s types — four kinds of site', async () => {
+test('every generated src/ file type-checks under the generated tsconfig, strict, with React\'s types — five kinds of site', async () => {
   const projects = SITES.map((s) => ({ ...s, out: built(s.source, s.data) }));
   const checks = projects.map(async (p) => {
     const config = JSON.parse(readFileSync(join(p.out, 'tsconfig.json'), 'utf8').replace(/^\/\/[^\n]*\n|^\/\*[\s\S]*?\*\/\n?/, '')) as { compilerOptions: Record<string, unknown> };
@@ -96,8 +101,16 @@ test('every generated src/ file type-checks under the generated tsconfig, strict
       'interface ImportMetaEnv { readonly [key: string]: string | undefined }',
       'interface ImportMeta { readonly env: ImportMetaEnv }',
       "declare module '*.css' {}",
+      // A file's URL by `?url` (the map's worker file, chat-block-spec §21.4.3), as the bundler declares it.
+      "declare module '*?url' { const src: string; export default src; }",
       '',
     ].join('\n'));
+    // A map site's three packages, as the repository installs them: the generated map module imports them — on that site only.
+    assert.equal(existsSync(join(p.out, 'src/az/chat-map-gl.ts')), p.source.includes('show map'), `${p.name}: the map runtime ships with maps only`);
+    if (existsSync(join(p.out, 'src/az/chat-map-gl.ts'))) {
+      mkdirSync(join(modules, '@protomaps'), { recursive: true });
+      for (const name of MAP_PACKAGES) symlinkSync(realpathSync(join(ROOT, 'node_modules', name)), join(modules, name), 'dir');
+    }
     const r = await run(process.execPath, [TSC, '--noEmit', '-p', 'tsconfig.json'], p.out);
     return { name: p.name, ...r };
   });

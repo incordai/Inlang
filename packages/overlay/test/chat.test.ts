@@ -236,8 +236,11 @@ test('every refusal reads as fixed copy — never the server\'s text', () => {
 
 /* ---- §5.4 rule 3: no way from a string to markup or code ---------------- */
 
-const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts']
+const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts',
+  'chat-map.ts', 'chat-map-draw.ts', 'chat-map-gl.ts']
   .map((f) => [f, readFileSync(new URL(`../src/runtime/${f}`, import.meta.url), 'utf8')] as const);
+/** chat-map-gl.ts's one object URL (§21.4.3, Q19b): the worker's blob, one line importing the site's own worker file, handed to the library. */
+const WORKER_FN = /function start\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
 /** chat-history.ts's one way to the browser's storage (§21.1.4): the property read, inside try. */
 const STORAGE_FN = /export function browserStorage\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
 /** chat-draw.ts's one image write (§20.6): a row's image, at the backend's own path, checked in the same function. */
@@ -249,7 +252,22 @@ const SINKS = [
   /\blocalStorage\b/, /\bsessionStorage\b/, /\bindexedDB\b/, /\bcreateElement\(\s*['"](?:img|script|iframe|a)['"]/,
   // An assignment to `.href` or `.src` — not a comparison of an event's `src` field (§20.2), which is `===`.
   /\.(?:href|src)\s*=(?!=)/,
+  // The map library's HTML setters (§21.4.4, Q19d): a popup gets an element (setDOMContent), never a string; and no object URL but the worker's.
+  /\.setHTML\b/, /\.setText\b/, /\bcreateObjectURL\b/,
 ];
+
+test('the map\'s worker is the runtime\'s one object URL: a blob of one line importing the site\'s own worker file, handed to the library', () => {
+  const [, src] = SOURCES.find(([f]) => f === 'chat-map-gl.ts')!;
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const fn = WORKER_FN.exec(code)?.[1] ?? '';
+  assert.match(fn, /const worker = new URL\(workerUrl, doc\.baseURI\)\.href;\s*const blob = URL\.createObjectURL\(new Blob\(\[`import \$\{JSON\.stringify\(worker\)\};\\n`\], \{ type: 'text\/javascript' \}\)\);\s*setWorkerUrl\(blob\);/,
+    'the blob imports the bundled worker file and nothing else');
+  assert.equal((code.match(/\bcreateObjectURL\b/g) ?? []).length, 1, 'one object URL in chat-map-gl.ts');
+  assert.match(code, /import workerUrl from 'maplibre-gl\/dist\/maplibre-gl-worker\.mjs\?url';/, 'the worker file is the site\'s own build file');
+  // A popup's content is an element (§21.4.4): setDOMContent, and the library's control that draws from data: images never added.
+  assert.match(code, /\.setDOMContent\(el\)/);
+  assert.equal(/NavigationControl|AttributionControl|addControl/.test(code), false, 'no control of the library\'s (Q19c)');
+});
 
 test('a URL is written in exactly one place: setDestination, right after the allow-list check', () => {
   const [, src] = SOURCES.find(([f]) => f === 'chat.ts')!;
@@ -288,7 +306,8 @@ test('storage is reached in one place: chat-history.ts browserStorage, inside tr
 test('the chat runtime has no sink: no HTML parsing, no eval, no style or URL written, no storage', () => {
   for (const [file, raw] of SOURCES) {
     // The row-image write and the storage read are each held to their own test.
-    const src = file === 'chat-draw.ts' ? raw.replace(ROW_IMAGE_FN, '') : file === 'chat-history.ts' ? raw.replace(STORAGE_FN, '') : raw;
+    const src = file === 'chat-draw.ts' ? raw.replace(ROW_IMAGE_FN, '') : file === 'chat-history.ts' ? raw.replace(STORAGE_FN, '')
+      : file === 'chat-map-gl.ts' ? raw.replace(WORKER_FN, '') : raw;
     // Comments may name what the code never does.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     for (const sink of SINKS) assert.equal(sink.test(code), false, `${file} uses ${sink}`);
@@ -297,7 +316,8 @@ test('the chat runtime has no sink: no HTML parsing, no eval, no style or URL wr
 
 test('CONTROL: the scan finds a sink when one is there', () => {
   for (const line of ['el.innerHTML = s;', 'el.insertAdjacentHTML("beforeend", s);', 'eval(s);', 'new Function(s)', 'el.style.color = c;',
-    'el.setAttribute("src", u);', 'el.setAttribute("onclick", u);', 'a.href = u;', 'img.src = u;', 'localStorage.setItem("chat", s);', 'document.createElement("img")']) {
+    'el.setAttribute("src", u);', 'el.setAttribute("onclick", u);', 'a.href = u;', 'img.src = u;', 'localStorage.setItem("chat", s);', 'document.createElement("img")',
+    'popup.setHTML(s);', 'popup.setText(s);', 'URL.createObjectURL(b)']) {
     assert.ok(SINKS.some((s) => s.test(line)), line);
   }
 });

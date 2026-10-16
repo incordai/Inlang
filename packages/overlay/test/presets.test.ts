@@ -71,11 +71,27 @@ test('the runtime touches nothing at import: a server render never reaches windo
   assert.equal(typeof runtime.attach, 'function');
 });
 
-test('the runtime imports only its siblings — it is copied alone into each project', () => {
+/**
+ * The map's library module (chat-block-spec §21.4, Q19a) is the one runtime
+ * file that imports packages: exactly the three a map site pins, the
+ * library's worker file by URL and its stylesheet.
+ */
+const MAP_LIBRARY_IMPORTS = ['maplibre-gl', 'pmtiles', '@protomaps/basemaps', 'maplibre-gl/dist/maplibre-gl-worker.mjs?url', 'maplibre-gl/dist/maplibre-gl.css'];
+
+test('the runtime imports only its siblings — it is copied alone into each project; the map library module, only the three pinned packages', () => {
   const dir = fileURLToPath(new URL('../src/runtime/', import.meta.url));
   for (const f of readdirSync(dir)) {
-    for (const m of readFileSync(join(dir, f), 'utf8').matchAll(/from\s+['"]([^'"]+)['"]/g)) {
-      assert.match(m[1], /^\.\/[a-z-]+\.ts$/, `${f} imports '${m[1]}'`);
+    const src = readFileSync(join(dir, f), 'utf8');
+    const imports = [...src.matchAll(/(?:from\s+|^import\s+)['"]([^'"]+)['"]/gm)].map((m) => m[1]);
+    for (const m of imports) {
+      if (f === 'chat-map-gl.ts' && MAP_LIBRARY_IMPORTS.includes(m)) continue;
+      assert.match(m, /^\.\/[a-z-]+\.ts$/, `${f} imports '${m}'`);
+    }
+    // A dynamic import is a sibling too: chat-map-draw.ts's of the library module, the only one.
+    for (const m of src.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+      assert.equal(`${f} → ${m[1]}`, 'chat-map-draw.ts → ./chat-map-gl.ts', 'the one dynamic import');
     }
   }
+  const lib = readFileSync(join(dir, 'chat-map-gl.ts'), 'utf8');
+  assert.deepEqual([...lib.matchAll(/(?:from\s+|^import\s+)['"]([^'./][^'"]*)['"]/gm)].map((m) => m[1]).sort(), [...MAP_LIBRARY_IMPORTS].sort(), 'CONTROL: the map module imports exactly these');
 });

@@ -37,7 +37,7 @@ export const PALETTE_DIR = '.az-build/.palette';
 export const PALETTE_FILE = 'index.html';
 
 /** What the page loads beyond itself: only its `data:` icon. */
-export const PALETTE_POLICY_NEEDS: PageNeeds = { dataIcon: true, connect: [], images: [], decoder: false };
+export const PALETTE_POLICY_NEEDS: PageNeeds = { dataIcon: true, connect: [], images: [], decoder: false, map: false };
 
 const SCHEMES: readonly Scheme[] = ['light', 'dark'];
 /** The tokens a hue decides (accent.ts) and the ones a pair adds (gradient.ts PAIR_TOKENS). */
