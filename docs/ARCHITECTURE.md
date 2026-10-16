@@ -10,21 +10,37 @@ wins** — change it deliberately, in its own commit.
 ```
 az/
 ├── packages/
-│   ├── core/          grammar, parser, AST, Spec, graph, validation
-│   ├── cli/           `az` binary, target loader, install policy, doctor
-│   ├── theme/         token schema, official themes, theme resolver
-│   ├── target-web/    React + Vite + R3F emitter
-│   ├── words/         official word packs (one dir per word)
-│   │   ├── hero/
-│   │   ├── nav/
-│   │   └── ...
-│   ├── overlay/       overlay engine (portal, focus, dismiss, positioning)
-│   ├── lsp/           [M6+] language server
-│   └── playground/    [M6+] browser compiler UI
-├── fixtures/          .az files used by tests
+│   ├── core/          @az/core — the compiler API: grammar, lexer, parser, link, Spec,
+│   │                  validation, diagnostics, the prompt and describe tables
+│   ├── theme/         @az/theme — token schema, official themes, accents, CSS, theme lint
+│   ├── target-web/    @az/target-web — Spec → React + Vite + R3F project: App, per-route
+│   │                  HTML, pre-render, stylesheet, CSP, images, markdown, data client
+│   ├── words/         official word packs, one dir per word (not a workspace package)
+│   │   ├── auth/  chat/  cta/  faq/  feature/  footer/
+│   │   ├── gallery/  hero/  nav/  pricing/  scene/  text/
+│   │   ├── registry.ts   every bundled word's web emitter, as static imports
+│   │   └── test/
+│   ├── overlay/       @az/overlay — overlay presets from theme tokens, and the browser
+│   │                  runtime copied into a site: behaviours, `from` rows, the chat panel
+│   ├── auth-runtime/  @az/auth-runtime — auth adapters (session, azbackend, hosted) and
+│   │                  form wiring, copied whole into a site that uses auth
+│   ├── scene-runtime/ @az/scene-runtime — the lazily loaded 3D chunk, copied whole into
+│   │                  a site that uses 3D
+│   ├── backend/       @az/backend — the optional built-in backend: the server/ files
+│   │                  `az build` writes, OpenAPI, data DDL, and the server itself (src/server/)
+│   ├── mcp/           @az/mcp — `az mcp`: MCP over stdio, the tool schemas, the root sandbox
+│   └── cli/           @az/cli — the `az` binary: build, dev, spec, check, lint, migrate,
+│                      eject, backend, mcp, explain, palette, prompt, doctor, audit
+├── fixtures/          .az files used by tests (minimal.az, broken.az)
+├── scripts/           verify:build, the word gate, browser e2e suites, generators, benchmarks
+├── spike-m0/          the M0 hand-built hero spike, its own pnpm project
 ├── docs/              agent files, planning docs, and one spec per block
-└── examples/          real sites built with AZ (M5 output lives here)
+└── .github/           CI and security workflows, dependency updates
 ```
+
+Not in the tree yet: `packages/lsp/` (language server) and
+`packages/playground/` (browser compiler UI), both M6+, and `examples/`
+(real sites built with AZ; M5 output lives there).
 
 Monorepo, **pnpm workspaces**, TypeScript throughout, ESM only.
 
