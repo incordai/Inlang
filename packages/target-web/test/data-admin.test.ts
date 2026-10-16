@@ -98,6 +98,18 @@ test('a site with tables and a chat: /admin shows the chat\'s usage (chat-block-
   assert.match(tsx, /<\/section>\n {10}<ChatUsageView \/>\n {10}<Audit \/>/);
   assert.match(tsx, /<caption id="az-admin-chat-days">The last 30 days, newest first \(UTC\)<\/caption>/);
   assert.match(tsx, /<th scope="col">Messages<\/th>/);
+  assert.match(tsx, /<th scope="col">Blocked by moderation<\/th>/);
+  assert.match(tsx, /<td>\{n\(d\.blocked\)\}<\/td>/);
+  // One fixed grouping in every engine and every visitor's locale (chat-block-spec §19.11): never the browser's own.
+  assert.match(tsx, /const COUNTS = new Intl\.NumberFormat\("en-US"\);/);
+  assert.match(tsx, /const n = \(v: number\) => COUNTS\.format\(v\);/);
+  assert.doesNotMatch(tsx, /toLocaleString\(\)\s*;?\s*\n\s*return \(\n\s*<section aria-labelledby="az-admin-chat">/);
+  assert.doesNotMatch(tsx.slice(tsx.indexOf('function ChatUsageView'), tsx.indexOf('const ACTION_TEXT')), /toLocaleString/);
+  // The admin's share delete (chat-block-spec §20.7): the route, a labelled field, a confirm that names the share.
+  assert.match(client, /removeChatShare: \(id: string\) => call<Record<string, never>>\("DELETE", "\/admin\/chat\/shares\/" \+ encodeURIComponent\(id\)\),/);
+  assert.match(tsx, /<label htmlFor="az-admin-share">Its link or id<\/label>/);
+  assert.match(tsx, /"Delete shared answer " \+ confirming \+ "\? Its link stops working for everyone\."/);
+  assert.match(tsx, /e\.table === CHAT_SHARES \? " shared chat answer " \+ e\.row/);
   // Counts only: nothing in the view could hold a message.
   assert.doesNotMatch(tsx, /question|events|\.text\b/);
   // CONTROL: a site with tables and no chat gets exactly what it got before.

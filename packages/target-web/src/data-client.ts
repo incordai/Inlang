@@ -141,6 +141,8 @@ export interface ChatUsageDay {
   readonly input: number;
   readonly output: number;
   readonly dropped: number;
+  /** Questions the moderation hook blocked: the model was never asked. */
+  readonly blocked: number;
   readonly shares: number;
 }
 
@@ -156,7 +158,9 @@ export interface ChatUsage {
 
 const CHAT_USAGE_ROUTE = `
   /** The chat's daily counts and the budget left (chat-block-spec §11.4) — never a message. */
-  chatUsage: () => call<{ usage: ChatUsage }>("GET", "/admin/chat"),`;
+  chatUsage: () => call<{ usage: ChatUsage }>("GET", "/admin/chat"),
+  /** Delete one shared chat answer by its id (chat-block-spec §20.7): audited by id, its text never read. */
+  removeChatShare: (id: string) => call<Record<string, never>>("DELETE", "/admin/chat/shares/" + encodeURIComponent(id)),`;
 
 /** The client module's text for these tables; `chat`: the site shows a chat, so its admins may read its usage. */
 export function dataClient(tables: readonly SpecTable[], chat = false): string {
@@ -285,7 +289,8 @@ export interface AdminRow {
 ${chat ? CHAT_USAGE_TYPE : ''}/** One admin write: who, which row, when — never a value (data-spec §11). */
 export interface AuditEntry {
   readonly id: string;
-  readonly table: TableName;
+  /** The table of the row changed${chat ? ', or "chat_shares" for a shared chat answer an admin deleted (its id is the row)' : ''}. */
+  readonly table: TableName${chat ? ' | "chat_shares"' : ''};
   readonly row: string;
   readonly action: "create" | "edit" | "delete";
   readonly at: number;

@@ -247,7 +247,15 @@ export const hrefOf = (table: string, row?: string) => "/admin/" + table + (row 
  * today against the daily budget, the last 30 days' counts, the shares kept.
  * The server answers it to admins only; it never holds a message.
  */
-const CHAT_USAGE_VIEW = `/** The chat's daily counts (chat-block-spec §11.4): counts only — no message is kept to be shown. */
+const CHAT_USAGE_VIEW = `/**
+ * Every count on the chat's usage view, grouped one fixed way: a site has no
+ * declared locale (the page is lang="en"; pricing's locale is one block's),
+ * so the browser's own would show 281,362 as 2,81,362 in one engine and
+ * 281 362 in another. "en-US" is what az backend usage prints too.
+ */
+const COUNTS = new Intl.NumberFormat("en-US");
+
+/** The chat's daily counts (chat-block-spec §11.4): counts only — no message is kept to be shown. */
 function ChatUsageView() {
   const [usage, setUsage] = useState<ChatUsage | null>(null);
   const [state, setState] = useState<"loading" | "ready" | DataErrorCode>("loading");
@@ -259,7 +267,7 @@ function ChatUsageView() {
     });
     return () => { alive = false; };
   }, []);
-  const n = (v: number) => v.toLocaleString();
+  const n = (v: number) => COUNTS.format(v);
   return (
     <section aria-labelledby="az-admin-chat">
       <h2 id="az-admin-chat">Chat usage</h2>
@@ -276,14 +284,15 @@ function ChatUsageView() {
                 <thead>
                   <tr>
                     <th scope="col">Day</th><th scope="col">Messages</th><th scope="col">Input tokens</th>
-                    <th scope="col">Output tokens</th><th scope="col">Dropped components</th><th scope="col">Shares made</th>
+                    <th scope="col">Output tokens</th><th scope="col">Dropped components</th><th scope="col">Blocked by moderation</th>
+                    <th scope="col">Shares made</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usage.days.map((d) => (
                     <tr key={d.day}>
                       <th scope="row">{d.day}</th><td>{n(d.messages)}</td><td>{n(d.input)}</td>
-                      <td>{n(d.output)}</td><td>{n(d.dropped)}</td><td>{n(d.shares)}</td>
+                      <td>{n(d.output)}</td><td>{n(d.dropped)}</td><td>{n(d.blocked)}</td><td>{n(d.shares)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -292,12 +301,76 @@ function ChatUsageView() {
           )}
         </>
       ) : null}
+      <ChatShareDelete />
     </section>
   );
 }
 
-`;
+/** A share id's shape (the server's): 16 random bytes, base64url. */
+const SHARE_ID = /^[A-Za-z0-9_-]{22}$/;
 
+/**
+ * The share id in what an admin pasted: the id, a share link
+ * (/chat/shared#<id>) or its delete link (#<id>&<token>) — the token is never
+ * sent. Null when it holds none.
+ */
+function shareIdOf(text: string): string | null {
+  const hash = text.indexOf("#");
+  const id = (hash >= 0 ? text.slice(hash + 1) : text).split("&")[0].trim();
+  return SHARE_ID.test(id) ? id : null;
+}
+
+/**
+ * Delete one shared answer someone reported (chat-block-spec §20.7): its
+ * link or id, then a confirm that names it. The server audits it by id; the
+ * answer itself is never read here.
+ */
+function ChatShareDelete() {
+  const [typed, setTyped] = useState("");
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [said, say] = useAnnounce();
+  const [problem, setProblem] = useState("");
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (confirming) confirmRef.current?.focus(); }, [confirming]);
+  const remove = (id: string) => {
+    void admin.removeChatShare(id).then((r) => {
+      setConfirming(null);
+      inputRef.current?.focus();
+      if (r.ok) { setTyped(""); setProblem(""); say("Shared answer " + id + " is deleted."); return; }
+      setProblem(r.code === "not_found" ? "No shared answer has that id — it may already be gone (deleted or expired)." : problemText(r.code));
+    });
+  };
+  return (
+    <form className="az-admin-tools" aria-labelledby="az-admin-share-delete"
+      onSubmit={(e: FormEvent) => {
+        e.preventDefault();
+        const id = shareIdOf(typed);
+        if (id === null) { setProblem("That is not a shared answer's link or id."); return; }
+        setProblem("");
+        setConfirming(id);
+      }}>
+      <h3 id="az-admin-share-delete">Delete a shared answer</h3>
+      <div className="az-admin-field" data-invalid={problem ? "" : undefined}>
+        <label htmlFor="az-admin-share">Its link or id</label>
+        <input id="az-admin-share" ref={inputRef} value={typed} maxLength={2048} aria-describedby="az-admin-share-hint az-admin-share-error"
+          aria-invalid={problem ? true : undefined} onChange={(e) => { setTyped(e.target.value); setConfirming(null); }} />
+        <p id="az-admin-share-hint" className="az-admin-hint">The link a visitor reported, or the id after its #.</p>
+      </div>
+      <p id="az-admin-share-error" role="alert" className="az-admin-error">{problem}</p>
+      {confirming ? (
+        <div className="az-admin-actions">
+          <p>{"Delete shared answer " + confirming + "? Its link stops working for everyone."}</p>
+          <button type="button" ref={confirmRef} className="az-admin-button az-admin-button--danger" onClick={() => remove(confirming)}>Delete it</button>
+          <button type="button" className="az-admin-button" onClick={() => { setConfirming(null); inputRef.current?.focus(); }}>Cancel</button>
+        </div>
+      ) : <button type="submit" className="az-admin-button">Delete…</button>}
+      <p role="status" className="az-admin-status">{said}</p>
+    </form>
+  );
+}
+
+`;
 /** src/data/admin.tsx: the pages, the same for every site (the tables are in admin-values.ts); `chat` adds the chat's usage to /admin. */
 export function adminTsx(chat = false): string {
   return `${generated('the /admin pages: tables, rows, editor, delete confirm, audit (data-spec §11)')}/*
@@ -406,7 +479,9 @@ function Home() {
   );
 }
 
-${chat ? CHAT_USAGE_VIEW : ''}const ACTION_TEXT: Record<AuditEntry["action"], string> = { create: "created", edit: "edited", delete: "deleted" };
+${chat ? CHAT_USAGE_VIEW : ''}const ACTION_TEXT: Record<AuditEntry["action"], string> = { create: "created", edit: "edited", delete: "deleted" };${chat ? `
+/** The audit log's name for a shared chat answer an admin deleted (the server's CHAT_SHARES_AUDIT): never a table's name. */
+const CHAT_SHARES = "chat_shares";` : ''}
 
 /** The audit log, newest first: who changed which row, when — never a value. */
 function Audit() {
@@ -438,8 +513,9 @@ function Audit() {
           {items.map((e) => (
             <li key={e.id}>
               <span>{new Date(e.at).toLocaleString()}</span>
-              <span>{(e.admin ?? "A removed account") + " " + ACTION_TEXT[e.action] + " a row in " + e.table}</span>
-              {e.action === "delete" ? null : <a href={hrefOf(e.table, e.row)}>Open the row</a>}
+${chat ? `              <span>{(e.admin ?? "A removed account") + " " + ACTION_TEXT[e.action] + (e.table === CHAT_SHARES ? " shared chat answer " + e.row : " a row in " + e.table)}</span>
+              {e.action === "delete" || e.table === CHAT_SHARES ? null : <a href={hrefOf(e.table, e.row)}>Open the row</a>}` : `              <span>{(e.admin ?? "A removed account") + " " + ACTION_TEXT[e.action] + " a row in " + e.table}</span>
+              {e.action === "delete" ? null : <a href={hrefOf(e.table, e.row)}>Open the row</a>}`}
             </li>
           ))}
         </ul>
