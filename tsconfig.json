@@ -15,5 +15,5 @@
     "types": ["node"]
   },
   "include": ["packages/*/src", "packages/*/test"],
-  "exclude": ["packages/*/test/fixture-assets", "packages/overlay/src/runtime/behaviours.ts", "packages/overlay/src/runtime/rows.ts", "packages/overlay/src/runtime/chat.ts", "packages/overlay/src/runtime/chat-draw.ts", "packages/overlay/src/runtime/chat-shared.ts", "packages/overlay/src/runtime/chat-prose.ts", "packages/auth-runtime/src/runtime/form.ts", "packages/scene-runtime/src/runtime/gate.ts", "packages/scene-runtime/src/runtime/colours.ts", "packages/scene-runtime/src/runtime/stage.ts", "packages/scene-runtime/src/runtime/index.ts"]
+  "exclude": ["packages/*/test/fixture-assets", "packages/overlay/src/runtime/behaviours.ts", "packages/overlay/src/runtime/rows.ts", "packages/overlay/src/runtime/chat.ts", "packages/overlay/src/runtime/chat-draw.ts", "packages/overlay/src/runtime/chat-explore-draw.ts", "packages/overlay/src/runtime/chat-shared.ts", "packages/overlay/src/runtime/chat-prose.ts", "packages/auth-runtime/src/runtime/form.ts", "packages/scene-runtime/src/runtime/gate.ts", "packages/scene-runtime/src/runtime/colours.ts", "packages/scene-runtime/src/runtime/stage.ts", "packages/scene-runtime/src/runtime/index.ts"]
 }

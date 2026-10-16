@@ -2,7 +2,7 @@
  * @az runtime chat-draw
  * Purpose: draws an answer's chart, table, stat cards, image cards, dashboard or unavailable note into copies of the chat word's templates.
  * Spec: docs/chat-block-spec.md §20.2, §20.4, §20.6, §20.8, §21.2.4
- * Exports: drawRich, RichDraw, RICH_KEYS, DRAW_COPY
+ * Exports: drawRich, RichDraw, RICH_KEYS, DRAW_COPY, frame, tableOf, drawChart, formatter, provenance, clonePart, slot, fill, drop
  * Edit guide: text only through textContent; attributes only geometry, classes copied from the templates, ids, aria and
  *   checked URLs (a destination on the allow-list, a row image at the backend's own path); never a style or markup.
  * Tests: scripts/chat-e2e.mjs, packages/overlay/test/chat-figures.test.ts
@@ -70,23 +70,23 @@ const partEl = (components: HTMLElement, key: string, extra?: [string, string]):
   }
   return null;
 };
-const clonePart = (components: HTMLElement, key: string): HTMLElement | null => {
+export const clonePart = (components: HTMLElement, key: string): HTMLElement | null => {
   const el = partEl(components, key);
   return el ? el.cloneNode(true) as HTMLElement : null;
 };
 /** A slot by its name — names are this module's constants, never network text. */
-const slot = (root: Element, name: string): HTMLElement | null => root.querySelector<HTMLElement>(`[data-az-chat-slot="${name}"]`);
-const fill = (root: Element, name: string, text: string) => {
+export const slot = (root: Element, name: string): HTMLElement | null => root.querySelector<HTMLElement>(`[data-az-chat-slot="${name}"]`);
+export const fill = (root: Element, name: string, text: string) => {
   const el = slot(root, name);
   if (el) el.textContent = text;
 };
-const drop = (root: Element, name: string) => slot(root, name)?.remove();
+export const drop = (root: Element, name: string) => slot(root, name)?.remove();
 
 /** The page's language, for numbers and dates. */
 const langOf = (doc: Document) => doc.documentElement.lang || 'en';
 
 /** A number as the page shows it, in its unit: a currency, a percentage, or none. */
-function formatter(doc: Document, unit: string | null): (n: number) => string {
+export function formatter(doc: Document, unit: string | null): (n: number) => string {
   const lang = langOf(doc);
   let f: Intl.NumberFormat;
   try {
@@ -118,6 +118,13 @@ function minuteText(doc: Document, minute: string): string {
 /** A tool's source line: the operator's label and when its figures were read — operator copy and the server's clock, never the model's. */
 const toolLine = (doc: Document, source: string, asOf: string) => `${DRAW_COPY.from} ${source} · ${minuteText(doc, asOf)}`;
 
+/** What a stat card says of where its figure came from: the AI label, a tool's source line, or the site's read day. */
+export function provenance(doc: Document, src: FigureSource, asOf: string | null, source: string | null): string {
+  if (src === 'model') return DRAW_COPY.ai;
+  if (src === 'tool') return source && asOf ? toolLine(doc, source, asOf) : '';
+  return asOf ? dayText(doc, asOf) : '';
+}
+
 /** What the page knows that an event cannot tell it: its gallery images (from the parts), the allow-list, the backend. */
 function figureContext(d: RichDraw): FigureContext {
   const assets = new Map<string, { src: string; srcset: string | null; width: number; height: number; alt: string }>();
@@ -134,7 +141,7 @@ function figureContext(d: RichDraw): FigureContext {
 }
 
 /** A figure's frame: title, then the AI label for model figures or the source line for the site's or a tool's. */
-function frame(d: RichDraw, title: string, src: FigureSource, asOf: string | null, source: string | null): HTMLElement | null {
+export function frame(d: RichDraw, title: string, src: FigureSource, asOf: string | null, source: string | null): HTMLElement | null {
   const f = clonePart(d.components, 'figure');
   if (!f) return null;
   fill(f, 'title', title);
@@ -173,7 +180,7 @@ function fontOf(d: RichDraw): number {
 }
 
 /** A table element from the table part: caption, headers (sortable when asked), rows. */
-function tableOf(d: RichDraw, id: string, caption: string, head: readonly { label: string; type: 'text' | 'number'; unit: string | null }[],
+export function tableOf(d: RichDraw, id: string, caption: string, head: readonly { label: string; type: 'text' | 'number'; unit: string | null }[],
   rows: readonly (readonly (string | number | null)[])[], sortable: boolean): HTMLElement | null {
   const wrap = clonePart(d.components, 'table');
   if (!wrap) return null;
@@ -228,7 +235,7 @@ function tableOf(d: RichDraw, id: string, caption: string, head: readonly { labe
 }
 
 /** A chart in its frame: the SVG, its summary, its legend, its table equivalent; redrawn when its width changes. */
-function drawChart(d: RichDraw, c: ChartData): HTMLElement | null {
+export function drawChart(d: RichDraw, c: ChartData): HTMLElement | null {
   const classOf = painter(d);
   const f = frame(d, c.title, c.src, c.asOf, c.source);
   const body = f && slot(f, 'body');
@@ -323,7 +330,7 @@ function drawStats(d: RichDraw, items: readonly StatItem[]): HTMLElement | null 
       fill(card, 'glyph', w.glyph);
       fill(card, 'words', w.words);
     }
-    fill(card, 'ai', s.src === 'model' ? DRAW_COPY.ai : s.src === 'tool' && s.source && s.asOf ? toolLine(d.doc, s.source, s.asOf) : s.asOf ? dayText(d.doc, s.asOf) : '');
+    fill(card, 'ai', provenance(d.doc, s.src, s.asOf, s.source));
     return card;
   }));
   return list;

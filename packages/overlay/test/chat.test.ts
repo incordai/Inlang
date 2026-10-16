@@ -236,7 +236,7 @@ test('every refusal reads as fixed copy — never the server\'s text', () => {
 
 /* ---- §5.4 rule 3: no way from a string to markup or code ---------------- */
 
-const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts']
+const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts']
   .map((f) => [f, readFileSync(new URL(`../src/runtime/${f}`, import.meta.url), 'utf8')] as const);
 /** chat-history.ts's one way to the browser's storage (§21.1.4): the property read, inside try. */
 const STORAGE_FN = /export function browserStorage\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
