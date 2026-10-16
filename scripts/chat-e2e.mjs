@@ -53,12 +53,20 @@
  * twice from a fresh page and byte-compared (the fake adapter makes them
  * deterministic), light and dark told apart, the PNGs written to
  * .visual-out/chat/ for review.
+ *
+ * C4 (§14, §6.8, §11.4): every question passes the server's moderation hook,
+ * a local endpoint here speaking its shape; a question it blocks is refused
+ * in each engine with the panel's fixed copy and never reaches the model,
+ * and the next question is answered; the operator's usage view on /admin —
+ * a verified account listed in AZ_ADMIN_EMAILS — shows today's counts with
+ * no visitor's words, axe-clean; another signed-in account is refused it
+ * (403) by the server.
  */
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
-import { request as httpRequest } from 'node:http';
+import { createServer as createHttpServer, request as httpRequest } from 'node:http';
 import { createServer as createHttpsServer, request as httpsRequest } from 'node:https';
 import { createServer as createNetServer } from 'node:net';
 import { spawn } from 'node:child_process';
@@ -372,6 +380,31 @@ const freePort = () => new Promise((done) => {
   probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => done(port)); });
 });
 
+/** The moderation hook's other side (chat-block-spec §6.8): POST { text } → { allow }; it blocks what holds MODERATE_BLOCK. */
+const MODERATE_BLOCK = 'moderate-block';
+function startModeration() {
+  const seen = { asked: 0, blocked: 0 };
+  const server = createHttpServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      let text = '';
+      try { text = String(JSON.parse(body).text ?? ''); } catch { /* answered as a block below */ }
+      const allow = text !== '' && !text.includes(MODERATE_BLOCK);
+      seen.asked++;
+      if (!allow) seen.blocked++;
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ allow }));
+    });
+  });
+  return new Promise((done) => server.listen(0, '127.0.0.1', () =>
+    done({ url: `http://127.0.0.1:${server.address().port}/check`, seen, close: () => server.close() })));
+}
+
+/** The site's admins (data-spec §11), one per engine: their accounts are made, then verified, in adminFlow. */
+const ENGINES = ['chromium', 'firefox', 'webkit'];
+const adminEmail = (engine) => `admin-${engine}@lantern.test`;
+
 /** An SMTP listener that accepts and drops: sign-up sends no mail, but the server needs a relay to start. */
 function startSmtpSink() {
   const server = createNetServer((socket) => {
@@ -419,6 +452,7 @@ if (!site.dist || !themed.every((s) => s.dist)) {
 }
 
 const smtp = await startSmtpSink();
+const moderation = await startModeration();
 const host = await startSite(normalize(site.dist));
 /** Each theme's copy on its own origin, the default theme's being the main site. */
 const themeHosts = [{ theme: DEFAULT_THEME, url: host.url, close: host.close }];
@@ -445,6 +479,8 @@ const child = spawn(process.execPath, ['src/main.ts'], {
     AZ_SQLITE_PATH: join(serverDir, 'data/test.db'),
     AZ_EMAIL_FROM: 'Lantern <no-reply@lantern.test>', AZ_SMTP_HOST: '127.0.0.1', AZ_SMTP_PORT: String(smtp.port),
     AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: fakeFile,
+    AZ_CHAT_MODERATION_URL: moderation.url,
+    AZ_ADMIN_EMAILS: ENGINES.map(adminEmail).join(','),
     // Three engines ask the whole corpus: room for it under the per-address limit and the day's budget.
     AZ_CHAT_PER_ADDRESS: '500/hour', AZ_CHAT_DAILY_TOKENS: '100000000',
   },
@@ -463,7 +499,7 @@ const up = await new Promise((done) => {
 check('the generated server starts with the fake model adapter', up, serverLog.trim().split('\n').slice(0, 4).join(' / '));
 if (!up) {
   child.kill('SIGTERM');
-  proxy.close(); smtp.close();
+  proxy.close(); smtp.close(); moderation.close();
   for (const h of themeHosts) h.close();
   console.log(`\n1 CHECK(S) FAILED — work dir kept: ${work}`);
   run.clear();
@@ -499,11 +535,11 @@ function recordRequests(page, seen) {
   });
 }
 
-async function signUp(page, name) {
+async function signUp(page, name, email = `${name.toLowerCase()}-${randomBytes(3).toString('hex')}@lantern.test`) {
   await page.goto(`${host.url}/signup`);
   const form = page.locator('form[data-flow="signup"]');
   await form.locator('input[name="name"]').fill(name);
-  await form.locator('input[name="email"]').fill(`${name.toLowerCase()}-${randomBytes(3).toString('hex')}@lantern.test`);
+  await form.locator('input[name="email"]').fill(email);
   await form.locator('input[name="password"]').fill(PASSWORD);
   await form.locator('input[name="passwordConfirm"]').fill(PASSWORD);
   await form.locator('input[name="terms"]').check();
@@ -1165,6 +1201,73 @@ const SNAP_STATES = [
   { name: 'dashboard', viewport: { width: 1280, height: 2200 }, route: '/figures', ask: 'figures-dashboard', float: false, whole: false },
 ];
 
+/* ---- C4: the moderation hook and the operator's usage view ------------ */
+
+/** A question the hook blocks (§6.8): fixed copy, no answer, the model never asked — and the chat goes on. */
+async function moderationFlow(b, name, origins) {
+  const ctx = await watchedContext(b, csp, CONTEXT);
+  try {
+    const page = await ctx.newPage();
+    recordRequests(page, origins);
+    await page.goto(`${host.url}/ask`);
+    await ready(page);
+    const before = await answerCount(page);
+    const input = panel(page).locator('[data-az-chat-input]');
+    await input.fill(`Please ${MODERATE_BLOCK} ${VISITOR_MARK}`);
+    await input.press('Enter');
+    const error = panel(page).locator('[data-az-chat-error]');
+    await page.waitForFunction(() => (document.querySelector('[data-az-chat-error]')?.textContent ?? '') !== '', null, { timeout: STATE_MS });
+    check(`${name}: a question the moderation hook blocks is refused in fixed copy, with no answer drawn`,
+      (await error.textContent()) === 'This question can’t be answered here — try asking it another way.' && (await answerCount(page)) === before
+      && !(await panel(page).locator('[data-az-chat-retry]').isVisible()),
+      `${await error.textContent()} · answers ${await answerCount(page)} (was ${before})`);
+    await axe(page, `${name} blocked by moderation`);
+    // The question after it is the visitor's own: allowed, it is answered.
+    const answer = await ask(page, 'How bright is it?');
+    check(`${name}: after a block the next question is judged afresh and answered`, answer.paragraphs.join('') === 'It is bright: 800 lumens. Dimmable too.', JSON.stringify(answer.paragraphs));
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} moderation context close`)) && closed;
+  }
+}
+
+/** The usage view (§11.4): /admin to a verified, listed account — today's counts, never a message; others refused by the server. */
+async function adminFlow(b, name, origins) {
+  const ctx = await watchedContext(b, csp, CONTEXT);
+  try {
+    const page = await ctx.newPage();
+    recordRequests(page, origins);
+    // Another signed-in account first: the server refuses it the usage, whatever the page would show.
+    await signUp(page, `Visitor${name}`);
+    const refused = await page.evaluate(async (base) => (await fetch(`${base}/admin/chat`, { credentials: 'include' })).status, proxy.url);
+    check(`${name}: a signed-in account not listed as an admin is refused the chat usage (403)`, refused === 403, String(refused));
+    await page.evaluate(async (base) => { await fetch(`${base}/auth/sign-out`, { method: 'POST', credentials: 'include', headers: { 'x-az-request': '1' } }); }, proxy.url);
+    // The admin: signed up with a listed address, which the site's operator has verified.
+    await signUp(page, `Admin${name}`, adminEmail(name));
+    {
+      const db = new DatabaseSync(join(serverDir, 'data/test.db'));
+      try { db.prepare('UPDATE az_users SET email_verified = 1 WHERE email = ?').run(adminEmail(name)); } finally { db.close(); }
+    }
+    await page.goto(`${host.url}/admin`);
+    await page.locator('#az-admin-chat-days').waitFor({ state: 'visible', timeout: STATE_MS });
+    const view = await page.evaluate(() => {
+      const section = document.querySelector('[aria-labelledby="az-admin-chat"]');
+      const rows = [...section.querySelectorAll('tbody tr')].map((tr) => [...tr.children].map((c) => c.textContent));
+      return { text: section.textContent, rows, heads: [...section.querySelectorAll('thead th')].map((th) => th.textContent) };
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    const todayRow = view.rows.find((r) => r[0] === today);
+    check(`${name}: /admin shows the chat's usage to its admin — today's messages and tokens, the budget left`,
+      Boolean(todayRow) && Number(todayRow[1].replace(/\D/g, '')) > 0 && /tokens spent, [\d,.\s  ]+ left\./.test(view.text)
+      && JSON.stringify(view.heads) === JSON.stringify(['Day', 'Messages', 'Input tokens', 'Output tokens', 'Dropped components', 'Shares made']),
+      JSON.stringify(view).slice(0, 300));
+    const whole = await page.evaluate(() => document.body.textContent ?? '');
+    check(`${name}: the usage view holds no visitor's or model's words`, !whole.includes(VISITOR_MARK) && !whole.includes(ANSWER_MARK) && !whole.includes(MODERATE_BLOCK) && !whole.includes('lumens'));
+    await axe(page, `${name} admin chat usage`);
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} admin context close`)) && closed;
+  }
+}
+
 /** One answered state as a PNG, from a fresh page: nothing moving, fonts loaded, the caret hidden. */
 async function snapshot(b, url, scheme, state) {
   const ctx = await watchedContext(b, csp, { ...CONTEXT, viewport: state.viewport, colorScheme: scheme, reducedMotion: 'reduce' });
@@ -1231,6 +1334,8 @@ try {
       await componentsFlow(b, name, origins);
       await richFlow(b, name, origins);
       await floatFlow(b, name, origins);
+      await moderationFlow(b, name, origins);
+      await adminFlow(b, name, origins);
       const others = [...origins].filter((o) => o !== host.url && o !== backendOrigin);
       check(`${name}: every request went to the site or its backend — nothing else`, others.length === 0 && origins.has(backendOrigin), [...origins].join(' '));
       // Gate item 3's method, in the engine the gate's screenshots use.
@@ -1252,11 +1357,14 @@ try {
     && !serverLog.includes('private-mark') && !serverLog.includes('Expected next quarter') && !serverLog.includes(GUIDE_SECRET)
     && !serverLog.includes('lifetime warranty'));
   check('the server logged the corpus\'s drops as counts and reasons only', /dropped \d+ \([a-z_,]+\)/.test(serverLog));
+  check('the moderation hook was asked, and blocked once per engine', moderation.seen.asked > 0 && moderation.seen.blocked === ENGINES.length, JSON.stringify(moderation.seen));
+  check('the server logged each block as a code, never the words', (serverLog.match(/chat: blocked by moderation/g) ?? []).length === ENGINES.length && !serverLog.includes(MODERATE_BLOCK));
 } finally {
   child.kill('SIGTERM');
   proxy.close();
   for (const h of themeHosts) h.close();
   smtp.close();
+  moderation.close();
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED — work dir kept: ${work}`);

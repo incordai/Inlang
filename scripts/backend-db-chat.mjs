@@ -8,8 +8,9 @@
  * aggregation form equal to SQLite's, buckets in UTC. C3 (§8.2): the rows a
  * chat knows, read through the anonymous list on this engine — the search,
  * the newest rows, money in major units, no private value — and a table the
- * server would refuse never read. Run by backend-db.mjs inside its
- * containers.
+ * server would refuse never read. C4 (§11.4): the operator's usage report,
+ * its window, its order and its shares by day. Run by backend-db.mjs inside
+ * its containers.
  */
 
 import { createServer } from 'node:http';
@@ -26,7 +27,7 @@ import { createShareStore, SHARE_LIMITS } from '../packages/backend/src/server/c
 import { createApp } from '../packages/backend/src/server/app.ts';
 import { createFakeAdapter } from '../packages/backend/src/server/chat-adapters.ts';
 import { createChat, parseChatContext } from '../packages/backend/src/server/chat.ts';
-import { createUsage, migrateChat, USAGE_KEEP_DAYS, utcDay } from '../packages/backend/src/server/chat-usage.ts';
+import { createUsage, migrateChat, usageReport, USAGE_KEEP_DAYS, utcDay } from '../packages/backend/src/server/chat-usage.ts';
 import { loadConfig } from '../packages/backend/src/server/env.ts';
 import { createOidc } from '../packages/backend/src/server/oidc.ts';
 import { createStore } from '../packages/backend/src/server/store.ts';
@@ -193,6 +194,42 @@ export async function knowsChecks(engine, db, check) {
     knowsProblems(forged, tables).length > 0 && (await createKnows({ db, database: engine, tables, known: forged })(['chatnotes'], 'note')) === '');
 }
 
+/**
+ * chat-block-spec §11.4 on this engine: the operator's usage report — the
+ * 30-day window, newest first, shares counted by the UTC day they were made
+ * (whole-number division of a BIGINT on each engine), expired ones not, and
+ * never a share's text. In a window of its own, far from the other checks' days.
+ */
+export async function usageReportChecks(engine, db, check) {
+  const now = Date.UTC(2031, 0, 20, 12);
+  const usage = createUsage(db);
+  await usage.add('2031-01-20', 900, 90, 1);
+  await usage.add('2031-01-20', 100, 10, 0);
+  await usage.add('2030-12-22', 5, 5, 0);
+  await usage.add('2030-12-21', 7, 7, 0);
+  const words = 'shared-words-the-report-never-reads';
+  await createShareStore({ db, days: 30, max: 10_000, now: () => now }).create(JSON.stringify([{ type: 'text', s: words }]), words);
+  await createShareStore({ db, days: 30, max: 10_000, now: () => Date.UTC(2031, 0, 18, 23, 59, 59, 999) }).create('[]', null);
+  await createShareStore({ db, days: 30, max: 10_000, now: () => Date.UTC(2031, 0, 19) }).create('[]', null);
+  await createShareStore({ db, days: 1, max: 10_000, now: () => Date.UTC(2031, 0, 2) }).create('[]', null);
+  const r = await usageReport(db, { dailyTokens: 1_500, sharesEnabled: true }, now);
+  const want = {
+    today: '2031-01-20',
+    budget: { daily: 1_500, spent: 1_100, left: 400 },
+    days: [
+      { day: '2031-01-20', input: 1000, output: 100, messages: 2, dropped: 1, shares: 1 },
+      { day: '2031-01-19', input: 0, output: 0, messages: 0, dropped: 0, shares: 1 },
+      { day: '2031-01-18', input: 0, output: 0, messages: 0, dropped: 0, shares: 1 },
+      { day: '2030-12-22', input: 5, output: 5, messages: 1, dropped: 0, shares: 0 },
+    ],
+  };
+  const { shares, ...rest } = r;
+  check(`${engine} chat usage report: the 30-day window newest first, today against the budget, shares by the UTC day made`,
+    JSON.stringify(rest) === JSON.stringify(want), JSON.stringify(r));
+  // The other checks' shares are long expired by 2031; only these three are kept.
+  check(`${engine} chat usage report: the shares kept now, and never a share's text`, shares.kept === 3 && shares.enabled === true && !JSON.stringify(r).includes(words), JSON.stringify(shares));
+}
+
 export async function chatSuite(engine, db, openAgain, check, url) {
   check(`${engine} chat: the usage and share migrations apply`, (await migrateChat(db)).join() === '1,2');
   check(`${engine} chat: …and is a no-op the second time`, (await migrateChat(db)).length === 0);
@@ -231,6 +268,7 @@ export async function chatSuite(engine, db, openAgain, check, url) {
   await shareChecks(engine, db, check);
   await figureChecks(engine, db, check);
   await knowsChecks(engine, db, check);
+  await usageReportChecks(engine, db, check);
 
   // Through the route on this engine: an answer is counted in today's row.
   const loaded = loadConfig({
