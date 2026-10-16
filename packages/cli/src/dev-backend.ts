@@ -37,6 +37,7 @@ import { createApp, type ChatRoutes, type DataRoutes } from '../../backend/src/s
 import { createAdapter } from '../../backend/src/server/chat-adapters.ts';
 import { createChat, parseChatContext } from '../../backend/src/server/chat.ts';
 import { createQueries, figuresRun } from '../../backend/src/server/chat-query.ts';
+import { createKnows, knowsProblems } from '../../backend/src/server/chat-knows.ts';
 import { migrateChat } from '../../backend/src/server/chat-usage.ts';
 import { migrate, openSqlite } from '../../backend/src/server/db.ts';
 import { createData, parseAdminEmails } from '../../backend/src/server/data-api.ts';
@@ -339,6 +340,10 @@ export async function startDevBackend(
     if (typeof context === 'string') throw new Error(`the dev backend cannot start — server/chat/context.json ${context}`);
     // A chat's figures from the dev tables (chat-block-spec §20.5), as the generated server does.
     const figures = dataTables ? figuresRun(createQueries({ db, database: db.dialect, publicBase: config.publicUrl }), dataTables, context.tables) : undefined;
+    // The rows a chat knows (chat-block-spec §8.2), from the dev tables, checked as the generated server checks them.
+    const problems = context.knows.length > 0 ? knowsProblems(context.knows, dataTables) : [];
+    if (problems.length > 0) throw new Error(`the dev backend cannot start — server/chat/context.json does not match the tables:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
+    const knows = context.knows.length > 0 && dataTables ? createKnows({ db, database: db.dialect, tables: dataTables, known: context.knows }) : undefined;
     let adapter;
     try {
       adapter = await createAdapter(config.chat);
@@ -347,7 +352,7 @@ export async function startDevBackend(
     }
     chatRoutes = createChat({
       config: config.chat, secret: config.secret, db, prompt: chat.prompt, context, adapter,
-      log: (line) => print(`backend: ${line}`), ...(figures ? { figures } : {}),
+      log: (line) => print(`backend: ${line}`), ...(figures ? { figures } : {}), ...(knows ? { knows } : {}),
     });
     print(`az dev: chat answers from ${config.chat.api === 'fake' ? `the demo script in ${DEV_DIR}/chat-demo.json` : 'the model set in .az-dev/backend.env'}`);
   }

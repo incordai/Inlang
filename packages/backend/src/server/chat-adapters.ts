@@ -158,6 +158,12 @@ export function createCompletionsAdapter(
 export interface FakeAnswer {
   /** Chosen when this is a case-insensitive part of the latest visitor message; without it, the default. */
   readonly when?: string;
+  /**
+   * …and only when the system text the server sent holds this exactly — so a
+   * test can see what the model was given (a `knows` row reached it; a
+   * private value did not) without the adapter ever echoing it.
+   */
+  readonly system?: string;
   readonly chunks: readonly string[];
   /** A pause before each chunk, ms. */
   readonly delayMs?: number;
@@ -186,6 +192,7 @@ export function parseFakeScript(text: string): FakeScript | string {
     const where = `answer ${i + 1}`;
     if (!x || typeof x !== 'object') return `${where} is not an object`;
     if (x.when !== undefined && typeof x.when !== 'string') return `${where}: when must be text`;
+    if (x.system !== undefined && (typeof x.system !== 'string' || x.system === '')) return `${where}: system must be text`;
     if (!Array.isArray(x.chunks) || !x.chunks.every((c) => typeof c === 'string')) return `${where}: chunks must be a list of text`;
     if (x.delayMs !== undefined && !(count(x.delayMs) !== null && (x.delayMs as number) <= FAKE_DELAY_MAX)) return `${where}: delayMs must be 0–${FAKE_DELAY_MAX}`;
     const u = x.usage as { input?: unknown; output?: unknown } | undefined;
@@ -208,7 +215,8 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * The `fake` adapter: the first answer whose `when` the latest visitor
- * message contains, else the first without one. `aborted` counts the
+ * message contains (and whose `system`, if it has one, the system text
+ * holds), else the first without one. `aborted` counts the
  * streams whose signal ended them, so a test can see upstream stopped.
  */
 export function createFakeAdapter(script: FakeScript): ChatAdapter & { readonly aborted: () => number; readonly calls: () => number } {
@@ -223,8 +231,9 @@ export function createFakeAdapter(script: FakeScript): ChatAdapter & { readonly 
       req.signal.addEventListener('abort', onAbort, { once: true });
       try {
         const latest = [...req.turns].reverse().find((t) => t.role === 'user')?.text.toLowerCase() ?? '';
-        const answer = script.answers.find((a) => a.when !== undefined && latest.includes(a.when.toLowerCase()))
-          ?? script.answers.find((a) => a.when === undefined);
+        const told = (a: FakeAnswer) => a.system === undefined || req.system.includes(a.system);
+        const answer = script.answers.find((a) => a.when !== undefined && latest.includes(a.when.toLowerCase()) && told(a))
+          ?? script.answers.find((a) => a.when === undefined && told(a));
         if (!answer) throw new AdapterError('status', 404);
         if (answer.stall) {
           await new Promise((_, fail) => {

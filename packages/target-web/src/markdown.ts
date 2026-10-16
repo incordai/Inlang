@@ -2,7 +2,7 @@
  * @az module markdown
  * Purpose: a `text` body file (.md) → EmittedNode tree at build time — text-spec §5, §8, §10.
  * Spec: docs/text-block-spec.md §5 · §8 · §10
- * Exports: markdownToNodes, MarkdownError, WEAK_LINK_TEXT
+ * Exports: markdownToNodes, markdownText, MarkdownError, WEAK_LINK_TEXT
  * Edit guide: the accepted subset is the NODE switch below (unknown node kinds render nothing); styles are theme
  *   tokens only. Keep: no raw HTML ever reaches the tree; never an <h1>; headings clamp at h4; scrolling regions
  *   (pre, table wrapper) are keyboard-reachable; link schemes on the AZ1404 allow-list.
@@ -72,6 +72,45 @@ interface Md {
 
 const textOf = (n: Md): string => n.value ?? (n.children ?? []).map(textOf).join('');
 const base = (file: string) => file.split('/').pop() ?? file;
+
+/** The markdown kinds whose text is the reader's words; every other kind adds none. */
+const BLOCK_TEXT: ReadonlySet<string> = new Set(['paragraph', 'heading', 'code', 'tableRow']);
+
+/**
+ * A body file's words as plain text (chat-block-spec §8.1): what a visitor
+ * reads on the page, each paragraph, heading, list item and table row its
+ * own line, a blank line between blocks. A link keeps its words and loses
+ * its address; an image, raw HTML and a reference's definition add nothing —
+ * so nothing here is a URL the build did not declare.
+ */
+export function markdownText(source: string): string {
+  const tree = fromMarkdown(source, {
+    extensions: [gfmTable(), gfmStrikethrough()],
+    mdastExtensions: [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown()],
+  }) as unknown as Md;
+  const inline = (n: Md): string => {
+    switch (n.type) {
+      case 'text': case 'inlineCode': case 'code': return n.value ?? '';
+      case 'break': return ' ';
+      case 'image': case 'imageReference': case 'html': case 'definition': return '';
+      // A table row reads cell by cell.
+      case 'tableRow': return (n.children ?? []).map(inline).join(' · ');
+      default: return (n.children ?? []).map(inline).join('');
+    }
+  };
+  const blocks: string[] = [];
+  const walk = (n: Md) => {
+    if (BLOCK_TEXT.has(n.type)) {
+      const t = inline(n).replace(/[ \t]+/g, ' ').trim();
+      if (t) blocks.push(t);
+      return;
+    }
+    if (n.type === 'html' || n.type === 'definition') return;
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(tree);
+  return blocks.join('\n\n');
+}
 
 export function markdownToNodes(source: string, options: MarkdownOptions): MarkdownResult {
   const { theme: t, file } = options;

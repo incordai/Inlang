@@ -154,3 +154,18 @@ test('fake: a script is validated; the matching answer streams; abort is seen', 
   assert.equal(fake.aborted(), 1);
   assert.equal(fake.calls(), 4);
 });
+
+test('fake: an answer with `system` is chosen only when the system text holds it — so a test sees what the model was given', async () => {
+  assert.equal(typeof parseFakeScript('{"answers":[{"chunks":[],"system":""}]}'), 'string', 'an empty system is refused');
+  const script = parseFakeScript(JSON.stringify({ answers: [
+    { when: 'warranty', system: 'private-mark', chunks: ['LEAKED'] },
+    { when: 'warranty', system: 'Lifetime warranty', chunks: ['Grounded.'] },
+    { when: 'warranty', chunks: ['Not grounded.'] },
+  ] }));
+  assert.ok(typeof script !== 'string');
+  const fake = createFakeAdapter(script);
+  const run = (system: string) => collect(fake.stream({ system, turns: [{ role: 'user', text: 'The warranty?' }], maxOutputTokens: 600, signal: AbortSignal.timeout(5_000) }));
+  assert.deepEqual(await run('<site-rows table="guides">\n{"body":"Lifetime warranty on every lamp."}\n</site-rows>'), [{ text: 'Grounded.' }]);
+  assert.deepEqual(await run('nothing about it'), [{ text: 'Not grounded.' }]);
+  assert.deepEqual(await run('Lifetime warranty, private-mark'), [{ text: 'LEAKED' }], 'CONTROL: the probe does fire when the text is there');
+});

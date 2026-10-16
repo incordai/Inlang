@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
 import { emitProject } from '../src/emit.ts';
-import { markdownToNodes, MarkdownError } from '../src/markdown.ts';
+import { markdownText, markdownToNodes, MarkdownError } from '../src/markdown.ts';
 import { WEB_EMITTERS } from '../../words/registry.ts';
 import { resolve, THEMES } from '../../theme/src/index.ts';
 import type { EmittedNode, ThemeLike } from '../../core/src/emit-contract.ts';
@@ -183,4 +183,15 @@ test('CONTROL: an inline body is text, and nothing is read', () => {
   const p = emitProject(r.spec!, { emitters: WEB_EMITTERS, readText: (path) => { read.push(path); return ''; } });
   assert.deepEqual(read, []);
   assert.ok(p.files.some((f) => f.content.includes('Forty pairs a month.')));
+});
+
+test('markdownText (chat-block-spec §8.1): a body file\'s words, a blank line between blocks — no address, image, raw HTML or definition', () => {
+  const source = [
+    '# Care', '', 'Wax them **monthly**, see [the guide](https://evil.example/x?d=1) or [ref][g].', '',
+    '![a lamp](https://img.example/lamp.png)', '', '<script>alert(1)</script>', '', '- Brush\n- Air dry', '',
+    '| Part | Weeks |\n|---|---|\n| Sole | 4 |', '', '[g]: https://refs.example/g', '', '```\ncode stays text\n```',
+  ].join('\n');
+  assert.equal(markdownText(source), 'Care\n\nWax them monthly, see the guide or ref.\n\nBrush\n\nAir dry\n\nPart · Weeks\n\nSole · 4\n\ncode stays text');
+  assert.ok(!/https?:|example|script|lamp/.test(markdownText(source)), 'no URL, no image alt, no markup');
+  assert.equal(markdownText(''), '');
 });

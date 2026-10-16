@@ -195,9 +195,20 @@ if (config.chat) {
     const queries = createQueries({ db, database: db.dialect, publicBase: config.publicUrl, log: (line) => process.stderr.write(`backend: ${line}\n`) });
     figures = figuresRun(queries, dataTables, context.tables);
   }
+  // The tables a chat knows (§8.2): re-checked against this server's own rules before anything is read.
+  let knows;
+  if (context.knows.length > 0) {
+    const { createKnows, knowsProblems } = await import('./chat-knows.ts');
+    const problems = knowsProblems(context.knows, dataTables);
+    if (problems.length > 0) {
+      process.stderr.write(`backend: cannot start — chat/context.json does not match the tables; rebuild the site to regenerate server/:\n${problems.map((p) => `  - ${p}`).join('\n')}\n`);
+      process.exit(1);
+    }
+    knows = createKnows({ db, database: db.dialect, tables: dataTables!, known: context.knows, log: (line) => process.stderr.write(`backend: ${line}\n`) });
+  }
   chat = createChat({
     config: config.chat, secret: config.secret, db, prompt: read('prompt.txt'), context, adapter,
-    log: (line) => process.stderr.write(`backend: ${line}\n`), ...(figures ? { figures } : {}),
+    log: (line) => process.stderr.write(`backend: ${line}\n`), ...(figures ? { figures } : {}), ...(knows ? { knows } : {}),
   });
 }
 if (args.images !== null) {

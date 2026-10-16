@@ -38,7 +38,7 @@ import { ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
 import { CHAT_RUNTIME_FILES } from '../../target-web/src/chat.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
 import { IconError } from '../../target-web/src/head.ts';
-import { MarkdownError } from '../../target-web/src/markdown.ts';
+import { MarkdownError, markdownText } from '../../target-web/src/markdown.ts';
 import { AUTH_DIR, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
 import { backendFiles, SERVER_DIR } from '../../backend/src/emit.ts';
@@ -319,7 +319,10 @@ export function build(options: BuildOptions): BuildOutcome {
   const { assets, modules } = project;
   const tables = result.spec.site.data;
   // What the chat server is told (chat-block-spec §8.1), only for a site with a chat panel and a backend.
-  const chat = project.chat && result.spec.site.backend ? chatBackend(result.spec) : undefined;
+  // A `text` body kept in a file is read for it too, as the plain text of its markdown, through the same sandbox.
+  const chat = project.chat && result.spec.site.backend
+    ? chatBackend(result.spec, { bodyText: (path) => { const source = readProjectText(projectDir, safeAssetPath(path)); return source === null ? null : markdownText(source); } })
+    : undefined;
   // The behaviour runtime ships with every site, copied verbatim from the
   // overlay package into RUNTIME_DIR — part of the output, so it is written
   // and checked like any emitted file. The build guard's scanner and the
@@ -351,8 +354,8 @@ export function build(options: BuildOptions): BuildOutcome {
           tables ? { tables, steps: readLockSteps(options.source) } : undefined, chat),
          ...copied('../../backend/src/server/', `${SERVER_DIR}/src`, (f) => (tables !== undefined || !f.startsWith('data-'))
            && (chat !== undefined || !f.startsWith('chat'))
-           // A chat's figures read the tables (chat-block-spec §20.5): with both only.
-           && (f !== 'chat-query.ts' || (chat !== undefined && tables !== undefined)))]
+           // A chat's figures and the rows it knows read the tables (chat-block-spec §20.5, §8.2): with both only.
+           && ((f !== 'chat-query.ts' && f !== 'chat-knows.ts') || (chat !== undefined && tables !== undefined)))]
       : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
   // A preview says so on every page, with the whole file's problems.
