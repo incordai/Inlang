@@ -7,7 +7,7 @@ chat is complete** (§19: what was built, and where it differs; C3 is §19.7, C4
 2026-10-15** (§20: charts, tables, stats, image cards, dashboards and share
 links in answers, on the owner's Q13–Q15; §19.6: as built) · **C5–C8 specified 2026-10-16** (§21:
 follow-ups, formatting and history, operator tools, interactive controls, maps, on
-the owner's Q16–Q19) · Extends backend-spec.md,
+the owner's Q16–Q19; **C5 built 2026-10-16**, §19.9) · Extends backend-spec.md,
 data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12)
 
 The owner's goal: **a visitor on an az site asks a question and gets an
@@ -367,7 +367,7 @@ As built in C1 (each with a case in `packages/core/test/chat-decl.test.ts`):
     "radius.md", "radius.sm", "shadow.lg", "size.gutter-sm", "size.measure-body", "size.measure-display",
     "size.ring", "size.ring-offset", "size.tap", "space.4", "space.8", "space.12", "space.16", "space.24",
     "space.32", "space.48", "space.96", "space.128", "type.display", "type.leading-body", "type.leading-tight",
-    "type.size.2xl", "type.size.base", "type.size.sm", "type.weight-bold", "type.weight-display"
+    "type.mono", "type.size.2xl", "type.size.base", "type.size.sm", "type.weight-bold", "type.weight-display"
   ],
   "checks": ["AZ2220 … AZ2229, the table above"]
 }
@@ -1171,7 +1171,7 @@ described and must be re-read before C1 relies on it.
 
 ---
 
-## 19. C0, C1, C2, C2b, C3 and C4 as built — deviations and findings (2026-10-15/16)
+## 19. C0, C1, C2, C2b, C3, C4 and C5 as built — deviations and findings (2026-10-15/16)
 
 ### 19.1 Against §14's C1 list
 
@@ -1498,6 +1498,63 @@ checks: the usage report's window, order and shares by UTC day on PostgreSQL
 (96), `pnpm test:data` (323), `pnpm test:cloud-auth` (17) and `pnpm gate
 --every-variant`. No real model or moderation service was reachable from
 this machine: both were local servers speaking their shapes.
+
+### 19.9 C5 as built (2026-10-16)
+
+Against §21.1 (its tests, §21.1.7):
+
+| Item | State |
+|---|---|
+| follow-up questions (`ask "…"`) | built: `server/chat-answer.ts` — `ask` holds a line; `ask STRING` alone is the form (any other line starting with the word is prose: `ask me anything` stays text); 1–80 characters, no line break, at most 3 (the 4th and later `too_many`, the answer goes on), not counted as components, a child line `shape`; each is a `block { ask }` and its canonical line in the record. The page (`chat-logic.ts` `{ kind: 'ask' }`, `chat-prose.ts` `followUps`) collects them while the answer streams and draws them once it is `done`, as the answer's last part, a list "Follow-up questions" of the button primitive's secondary buttons; a tap is `ask()` — the same path as typing; announced once, "2 follow-up questions." Share accepts the key (`chat-share.ts` `BLOCK_KEYS`, events per answer `2 × (4 + 3) + 1`); the shared page draws none |
+| fences on the server | built: a line at the margin starting ```` ``` ```` opens a code block; inside it every line is prose (no keyword is read, no child line is taken); only the backticks alone, trailing spaces allowed, close it — the page's rule, to the character |
+| the prose subset | built: `overlay/runtime/chat-markdown.ts` (pure: `proseBlocks`, `proseInlines`, `spokenText`), one pass with a stack of depth 2, code-span closers found by a per-length index so nothing is rescanned; `chat-prose.ts` draws it from the word's templates (`[data-az-chat-prose]`: `strong`, `em`, inline `code`, `ul > li`, `ol`, the code block with its bar and `pre[tabindex=0]`, the follow-up list) by `cloneNode` and `textContent` only — no `createElement`; a numbered list's start is the `start` property; the code block's `aria-label` is "Code" or "Code, <lang>" |
+| Copy code | built: `navigator.clipboard.writeText` of the code element's `textContent`; "Code copied." or "Copy did not work — select the code to copy it." in the status region; on the shared page too |
+| the conversation in the browser | built: `overlay/runtime/chat-history.ts` — the key `az-chat:v1`, 256 K UTF-16 units, 8 conversations, 7 days, a float's under `float` and a panel's under `panel:<route>`; read once when the panel first lets the visitor ask, each turn re-checked (`visitorText`, the record cap, the tag's shape, every event through `blockOf`), a conversation that fails any check dropped whole and the key rewritten without it; saved after every tagged answer with its events, consecutive text joined as a share holds them (a model streaming word by word would otherwise pass the 15 events an answer may keep); every storage call through one `access` wrapper inside `try`, the property read in `browserStorage` inside `try` (`chat.test.ts` holds both) |
+| Clear history and the note | built: `div.az-chat-history` under the form — the note and a secondary button; shown only when a probe write succeeds |
+| sign-out, tampered | built: on a `signedin` chat, a session read that says signed out removes the key; `400 tampered` removes this chat's kept conversation, starts the panel over and shows the fixed line of §21.1.4 |
+| the prompt | built (`chat-context.ts`): "no links, no URLs, no HTML, no images, no headings and no tables", the formatting rule, and a "Follow-up questions" section on every chat — prose-only ones too, whose per-request line now says "write no component (follow-up questions are still allowed)" |
+
+Where the build differs from §21.1:
+
+- **The cap is 256 K UTF-16 code units of the key's JSON**, not bytes:
+  that is what an engine's per-origin quota counts.
+- **A signed-out read clears, not only a sign-out.** The runtime sees a
+  session, not an event of signing out: on a `signedin` chat any session
+  read that says "signed out" (opening the page signed out included)
+  removes every kept conversation on the site.
+- **Clear history clears every chat on the site; New chat this chat's
+  own** (§21.1.4 said so of Clear; New chat's half is the build's: a new
+  conversation must not leave the old one to be restored).
+- **A question refused as `tampered` is not sent again**: the panel starts
+  over and asks the visitor to ask again — the kept conversation it rested
+  on is gone, and re-sending it alone could answer out of context.
+- **The page collapses a repeated follow-up** within one answer; the server
+  does not (the record keeps what the model wrote).
+- **Earlier answers keep their follow-ups**; a tap on one while an answer
+  streams does nothing, as on a suggested question.
+- **`chat-prose.ts` has no unit test of its own**: the node test runner has
+  no DOM here (no new dependency, §4.3's rule), so its drawing is held by
+  `test:chat` in three engines and its sources by the sink scan.
+
+What was measured (2026-10-16): `pnpm verify` (2 924 tests), `pnpm lint`,
+`pnpm test:chat` (412 checks, up from 345, in Chromium, Firefox and WebKit:
+strong, em and inline code, both lists numbered from the model's first
+number, a fenced block verbatim with its language and a named scroll
+region, a component written inside the fence left as code, markup and a
+link in formatted prose literal, the follow-ups a named list last in the
+answer and announced once, Copy code — the clipboard read back in Chromium,
+"Code copied." said in all three — a tapped follow-up sent and answered, the
+conversation kept with its tags, restored after a reload drawn as it was and
+continued, an edited saved answer refused as `tampered` and cleared, Clear
+history emptying the panel and the storage and a reload staying empty, the
+panel working with storage blocked and no page error, axe in each state, no
+request off the site and its backend, no CSP violation, neither the code nor
+a follow-up in the server's log), `pnpm verify:build` (204 checks: the chat pages'
+policies still the plain page's, hashes aside) and `pnpm gate words/chat`
+(all 12 points). Every new unit test was run
+against the C4 code (`78c6b45`) first: the parser's follow-up and fence
+tests and the prompt's fail there, and the overlay tests fail to import
+(`chat-markdown.ts`, `chat-history.ts` do not exist).
 
 ---
 
@@ -2126,7 +2183,8 @@ dashboard in each theme, both schemes (gate item 3's method).
 ## 21. C5–C8 — answers that offer, format, remember, fetch, react and map
 
 **Status** specified 2026-10-16 on the owner's approval of that day (§17,
-Q16–Q19) · C5 next to build; C6, C7, C8 specified, not built · C8's map
+Q16–Q19) · **C5 built 2026-10-16** (§19.9: what was built, and where it
+differs) · C6, C7, C8 specified, not built · C8's map
 library and tile source vetted and decided 2026-10-16 (§17 Q19a–Q19h) ·
 builds on C2's parser, events and templates (§5.3, §5.4) and C2b's rich
 components (§20), which it extends and never forks.
