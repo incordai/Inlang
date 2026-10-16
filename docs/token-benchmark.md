@@ -9,9 +9,9 @@ tokens that file is, against the same site written in other ways an AI could
 write it: as JSON data, as a component tree, as HTML. Every number below was
 produced by the script on this repository; nothing is estimated by hand.
 
-**Result, in one line:** over all 34 sites, the median site takes
-**1.50×** the `.az` source's tokens as a minimal component tree, **2.71×**
-as minified Spec JSON, and **9.0×** as its pre-rendered body HTML. The
+**Result, in one line:** over all 35 sites, the median site takes
+**1.48×** the `.az` source's tokens as a minimal component tree, **2.68×**
+as minified Spec JSON, and **9×** as its pre-rendered body HTML. The
 `.az` source is the smallest representation of every site. The worst case
 (the site where `.az` saves least) is `text.columns`, a page that is mostly
 prose: there the tree takes 1.12× and the HTML 1.55×.
@@ -19,15 +19,15 @@ prose: there the tree takes 1.12× and the HTML 1.55×.
 ## 1. Corpus
 
 Every `.az` source in the repository that compiles, plus two full sites
-written for this benchmark. All 34 are reported; none is left out.
+written for this benchmark. All 35 are reported; none is left out.
 
 | Group | Sites | Source |
 |---|---|---|
 | fixture | `minimal` | `fixtures/minimal.az` |
 | fixture | `grammar-fixture` | `packages/core/test/fixture-site.az` (GRAMMAR §8), with its `fixture-assets/` |
-| preview | 28 sites, one per word preview and variant preview (`auth`, `auth.signup`, `chat`, … `text.columns`) | `packages/words/<word>/preview*.az`, with the word's `preview-assets/` |
+| preview | 29 sites, one per word preview and variant preview (`auth`, `auth.signup`, `chat`, `chat.float`, … `text.columns`) | `packages/words/<word>/preview*.az`, with the word's `preview-assets/` |
 | site | `combined` | the `COMBINED` source in `scripts/lighthouse.mjs`: nav, 3D hero, feature, gallery, pricing and cta on one page |
-| site | `data-e2e` | the `SITE` source in `scripts/data-e2e.mjs`: auth, a backend, six data tables and eleven pages |
+| site | `data-e2e` | the `SITE` source in `scripts/data-e2e.mjs`: auth, a backend, six data tables and twelve pages |
 | site | `ledger` | `scripts/token-benchmark/ledger.az`: a product site, six pages (nav, hero, feature, text, cta, pricing, two faqs, footer) |
 | site | `harbour` | `scripts/token-benchmark/harbour.az`: a restaurant site, five pages |
 
@@ -116,7 +116,8 @@ person writing markup would not). The two that differ, by design:
   measurement): its two author
   components (`raw`, `slot after`) are left out here. Their markup is the
   author's own TSX, which no representation counts.
-- `data-e2e` (10,701 here, 9,820 pre-rendered): `/private` is a protected
+- `data-e2e` (10,701 here, 9,820 pre-rendered, at that first
+  measurement): `/private` is a protected
   page. The pre-render writes a "Checking that you are signed in…"
   placeholder there; this counts the page's content, which is what the
   source describes. Its `/notes` page is an author component, left out.
@@ -178,11 +179,14 @@ The package is named once, in `package.json`: its `imports` map
 
 ## 4. Results
 
-`pnpm bench:tokens`, 2026-10-15, regenerated after `fixtures/minimal.az` and
-the GRAMMAR fixture declared the pages they link to (`minimal` is now 78
-tokens over two pages, `grammar-fixture` 673 over eight) and the `chat`
-preview joined the corpus. `o200k_base` tokens; the multiple is the
-representation's tokens over the `.az` source's.
+`pnpm bench:tokens`, 2026-10-16, regenerated after the `chat.float`
+preview joined the corpus (35 sites), the `footer` preview gained a page
+that leaves the site footer out (`footer none`: 91 tokens over five pages),
+the `data-e2e` site gained a twelfth page (628 tokens) and the `chat`
+preview's markup grew from 915 to 1,437 tokens as the chat word's emitter
+changed (its `.az` is the same 92).
+`o200k_base` tokens; the multiple is the representation's tokens over the
+`.az` source's.
 
 ### 4.1 Every site
 
@@ -192,14 +196,15 @@ representation's tokens over the `.az` source's.
 | grammar-fixture | 8 | 673 | 1633 (2.4×) | 2781 (4.1×) | 932 (1.4×) | 10980 (16.3×) | 4099 (6.1×) | 25236 (37.5×) |
 | auth | 3 | 65 | 185 (2.8×) | 331 (5.1×) | 112 (1.7×) | 663 (10.2×) | 663 (10.2×) | 2972 (45.7×) |
 | auth.signup | 4 | 81 | 204 (2.5×) | 360 (4.4×) | 139 (1.7×) | 3414 (42.1×) | 3414 (42.1×) | 10892 (134.5×) |
-| chat | 1 | 92 | 265 (2.9×) | 461 (5.0×) | 134 (1.5×) | 915 (9.9×) | 915 (9.9×) | 3609 (39.2×) |
+| chat | 1 | 92 | 265 (2.9×) | 461 (5.0×) | 134 (1.5×) | 1437 (15.6×) | 1437 (15.6×) | 4722 (51.3×) |
+| chat.float | 1 | 107 | 277 (2.6×) | 478 (4.5×) | 151 (1.4×) | 1743 (16.3×) | 1743 (16.3×) | 5330 (49.8×) |
 | cta | 2 | 87 | 256 (2.9×) | 443 (5.1×) | 132 (1.5×) | 387 (4.4×) | 387 (4.4×) | 2342 (26.9×) |
 | cta.split | 2 | 80 | 214 (2.7×) | 364 (4.5×) | 123 (1.5×) | 388 (4.8×) | 388 (4.8×) | 2374 (29.7×) |
 | faq | 1 | 127 | 315 (2.5×) | 521 (4.1×) | 175 (1.4×) | 1140 (9.0×) | 1140 (9.0×) | 3702 (29.1×) |
 | faq.columns | 1 | 127 | 315 (2.5×) | 521 (4.1×) | 179 (1.4×) | 1143 (9.0×) | 1143 (9.0×) | 3705 (29.2×) |
 | feature | 3 | 462 | 723 (1.6×) | 1036 (2.2×) | 540 (1.2×) | 983 (2.1×) | 983 (2.1×) | 3541 (7.7×) |
 | feature.rows | 1 | 149 | 330 (2.2×) | 545 (3.7×) | 197 (1.3×) | 574 (3.9×) | 574 (3.9×) | 2858 (19.2×) |
-| footer | 4 | 83 | 302 (3.6×) | 545 (6.6×) | 152 (1.8×) | 1143 (13.8×) | 489 (5.9×) | 4108 (49.5×) |
+| footer | 5 | 91 | 340 (3.7×) | 617 (6.8×) | 179 (2.0×) | 1198 (13.2×) | 544 (6.0×) | 4138 (45.5×) |
 | footer.columns | 6 | 123 | 482 (3.9×) | 877 (7.1×) | 244 (2.0×) | 2788 (22.7×) | 783 (6.4×) | 8085 (65.7×) |
 | footer.mega | 10 | 189 | 767 (4.1×) | 1406 (7.4×) | 387 (2.0×) | 13104 (69.3×) | 1854 (9.8×) | 33205 (175.7×) |
 | gallery | 1 | 123 | 303 (2.5×) | 512 (4.2×) | 157 (1.3×) | 400 (3.3×) | 400 (3.3×) | 2456 (20.0×) |
@@ -219,22 +224,22 @@ representation's tokens over the `.az` source's.
 | text | 2 | 84 | 220 (2.6×) | 368 (4.4×) | 124 (1.5×) | 319 (3.8×) | 319 (3.8×) | 2210 (26.3×) |
 | text.columns | 1 | 230 | 326 (1.4×) | 426 (1.9×) | 257 (1.1×) | 356 (1.5×) | 356 (1.5×) | 2192 (9.5×) |
 | combined | 4 | 768 | 1542 (2.0×) | 2508 (3.3×) | 950 (1.2×) | 4811 (6.3×) | 2783 (3.6×) | 11416 (14.9×) |
-| data-e2e | 11 | 579 | 1932 (3.3×) | 3476 (6.0×) | 1369 (2.4×) | 10701 (18.5×) | 10701 (18.5×) | 24783 (42.8×) |
+| data-e2e | 12 | 628 | 2078 (3.3×) | 3740 (6.0×) | 1462 (2.3×) | 11720 (18.7×) | 11720 (18.7×) | 26652 (42.4×) |
 | ledger | 6 | 948 | 2528 (2.7×) | 4442 (4.7×) | 1321 (1.4×) | 10844 (11.4×) | 5744 (6.1×) | 24638 (26.0×) |
 | harbour | 5 | 694 | 1671 (2.4×) | 2838 (4.1×) | 938 (1.4×) | 7587 (10.9×) | 4499 (6.5×) | 16910 (24.4×) |
 
-### 4.2 Median, worst and best (34 sites, `o200k_base`)
+### 4.2 Median, worst and best (35 sites, `o200k_base`)
 
 "Worst" is the smallest multiple: the site where `.az` saves least.
 
 | vs `.az` | median | worst | best |
 |---|---:|---|---|
-| tree | 1.50× | 1.12× (`text.columns`) | 2.36× (`data-e2e`) |
-| spec min | 2.71× | 1.42× (`text.columns`) | 4.18× (`nav.mega`) |
-| spec pretty | 4.65× | 1.85× (`text.columns`) | 7.60× (`nav.mega`) |
-| html shared | 6.64× | 1.55× (`text.columns`) | 42.15× (`auth.signup`) |
-| html | 8.99× | 1.55× (`text.columns`) | 69.33× (`footer.mega`) |
-| App.tsx | 29.42× | 7.66× (`feature`) | 175.69× (`footer.mega`) |
+| tree | 1.48× | 1.12× (`text.columns`) | 2.33× (`data-e2e`) |
+| spec min | 2.68× | 1.42× (`text.columns`) | 4.18× (`nav.mega`) |
+| spec pretty | 4.61× | 1.85× (`text.columns`) | 7.60× (`nav.mega`) |
+| html shared | 6.81× | 1.55× (`text.columns`) | 42.15× (`auth.signup`) |
+| html | 9.00× | 1.55× (`text.columns`) | 69.33× (`footer.mega`) |
+| App.tsx | 29.68× | 7.66× (`feature`) | 175.69× (`footer.mega`) |
 
 On the five full sites alone (`grammar-fixture`, `combined`, `data-e2e`,
 `ledger`, `harbour`) the medians are: tree 1.38×, spec min 2.43×, spec
@@ -244,19 +249,19 @@ Corpus totals:
 
 | | tokens | characters | characters per token |
 |---|---:|---:|---:|
-| .az | 7,499 | 27,352 | 3.65 |
-| spec min | 19,656 | 72,458 | 3.69 |
-| spec pretty | 33,865 | 161,123 | 4.76 |
-| tree | 11,333 | 42,228 | 3.73 |
-| html | 108,733 | 325,262 | 2.99 |
-| html shared | 55,863 | 176,768 | 3.16 |
-| App.tsx | 289,038 | 1,523,142 | 5.27 |
+| .az | 7,663 | 27,958 | 3.65 |
+| spec min | 20,117 | 74,145 | 3.69 |
+| spec pretty | 34,679 | 164,517 | 4.74 |
+| tree | 11,604 | 43,236 | 3.73 |
+| html | 112,072 | 335,704 | 3.00 |
+| html shared | 59,202 | 187,210 | 3.16 |
+| App.tsx | 297,380 | 1,568,910 | 5.28 |
 
 ### 4.3 The second vocabulary
 
-With `cl100k_base` the medians move by 8.1% or less: tree 1.40×,
-spec min 2.49×, spec pretty 4.51×, html shared 6.48×, html 8.84×, App.tsx
-28.80×; the worst case is the same site for every representation. `.az` is
+With `cl100k_base` the medians move by 7.8% or less: tree 1.38×,
+spec min 2.47×, spec pretty 4.47×, html shared 6.54×, html 8.85×, App.tsx
+28.81×; the worst case is the same site for every representation. `.az` is
 the smallest on every site under both.
 
 ### 4.4 Characters per token, and why the estimate is not enough
@@ -277,7 +282,7 @@ quarter, so the counted tokens are the figures to use.
   to 1.1× on `text.columns`, a page that is mostly a long paragraph of prose,
   which costs the same in any format.
 - Against what an AI would otherwise write to ship a page, raw markup, the
-  median is 9× (6.6× with shared chrome written once), before any CSS.
+  median is 9× (6.8× with shared chrome written once), before any CSS.
 - The structure a word expands to is where the gap is widest: a sign-up form
   (`auth.signup`, 42×), a mega menu (`nav.mega`, 12× with the nav written
   once), a mega footer.
@@ -300,7 +305,7 @@ quarter, so the counted tokens are the figures to use.
 - **Author code is out.** `raw` and `slot` components, and the data lock
   file `az backend schema` writes (derived from the source), are counted by
   no representation.
-- **Previews dominate the median.** 28 of the 34 sites are single-word
+- **Previews dominate the median.** 29 of the 35 sites are single-word
   previews; §4.2 gives the five full sites separately.
 - **Two sites were written for this.** `ledger` and `harbour` are realistic
   but are this benchmark's own; their results sit inside the range of the
@@ -330,15 +335,21 @@ the site table and written to the JSON as `answers` and `chatInput`.
 
 A chat answer can be written as the restricted `.az` subset the model is
 taught (`show pricing /pricing`, `faq` with `item`/`text`, `cta "…" /route`,
-`feature`), as a compact JSON document of the same events, or as
-markdown. Each answer below is written all three ways, and each `.az` form
-is first run through the real answer parser (server `chat-answer.ts`): it
-must hold exactly the blocks its JSON form carries, so this compares one
-content in three spellings. Markdown cannot quote a block, so where the
-`.az` form quotes the site's pricing the markdown form spells out the
-table (the chat e2e site's two plans, as their page renders them).
+`feature`, and the rich components of chat-block-spec §20.3: `dashboard`,
+`stat`, `chart`, `table`, `cards`), as a compact JSON document of the same
+events, or as markdown. Each answer below is written all three ways, and
+each `.az` form is first run through the real answer parser (server
+`chat-answer.ts`): it must hold exactly the blocks its JSON form carries,
+so this compares one content in three spellings. Markdown cannot quote a
+block, so where the `.az` form quotes the site's pricing the markdown form
+spells out the table (the chat e2e site's two plans, as their page renders
+them); and where the `.az` form asks the server for figures (`from …`, one
+line however many figures it yields) the markdown form writes those
+figures out, as the table a server chart would draw.
 
-`o200k_base` tokens, 2026-10-15 (`cl100k_base` is within 4% on every row):
+`o200k_base` tokens, 2026-10-16. With `cl100k_base` the `.az` and markdown
+totals over the ten answers are the same and the JSON total is 4% lower
+(676 against 703); no single cell moves by more than 6 tokens.
 
 | Answer | `.az` subset | compact JSON | markdown |
 |---|---:|---:|---:|
@@ -348,23 +359,30 @@ table (the chat e2e site's two plans, as their page renders them).
 | cta | 8 | 18 (2.25×) | 8 (1.00×) |
 | feature, 3 items | 58 | 62 (1.07×) | 48 (0.83×) |
 | prose + faq (2) + cta | 86 | 101 (1.17×) | 76 (0.88×) |
-| **the six together** | **279** | **340 (1.22×)** | **299 (1.07×)** |
+| dashboard: a stat, 2 server charts, a model chart | 78 | 136 (1.74×) | 131 (1.68×) |
+| model chart, 2 series of 3 | 67 | 76 (1.13×) | 51 (0.76×) |
+| tables: a server table, a model table | 46 | 85 (1.85×) | 81 (1.76×) |
+| cards: model cards, server cards | 44 | 66 (1.50×) | 70 (1.59×) |
+| **the ten together** | **514** | **703 (1.37×)** | **632 (1.23×)** |
 | composed two-plan pricing (refused in answers) | 50 | 76 (1.52×) | 58 (1.16×) |
 
-Characters per token: `.az` 3.99, JSON 3.77, markdown 3.69 — so the
-server's fallback estimate of 3 characters per token, used only when a
-provider reports no usage, over-charges rather than under.
+Characters per token, over the ten: `.az` 3.79, JSON 3.68, markdown
+3.24 — so the server's fallback estimate of 3 characters per token, used
+only when a provider reports no usage, over-charges rather than under.
 
 **What the model is sent besides the conversation**, for the chat e2e site
 (8 pages, a chat that shows every component): the generated `prompt.txt`
-553 tokens (2 346 characters) and `context.json` 732 tokens (2 887
+731 tokens (3 132 characters) and `context.json` 750 tokens (2 964
 characters).
 
-What the numbers say: the subset is smaller than JSON on every answer and
-18% smaller over the six; markdown is smaller for composed lists, because
-it has no `item`/`text` keywords, but it cannot quote and brings exactly
-what an answer must never hold — links, images, raw HTML. The quote is
-where the subset wins outright: one line for the author's whole table.
+What the numbers say: the subset is smaller than JSON on every answer,
+27% smaller over the ten, and 19% smaller than markdown over the ten.
+Markdown is smaller for composed lists and a model chart's points, because
+it has no `item`/`text`/`point` keywords, but it cannot quote, cannot ask
+the server for figures, and brings exactly what an answer must never hold —
+free links, images and raw HTML (the subset names only the site's own
+routes and assets). The quote and `from` are where the subset wins
+outright: one line for the author's whole table or the server's figures.
 
 Limits: the same as §5's, and these are tokens written, not a model's
 success rate at writing each form; `az backend probe` reports, per model,
