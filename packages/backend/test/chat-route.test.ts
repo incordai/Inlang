@@ -348,7 +348,7 @@ test('env: chat keys are checked only for a chat site, each problem named', () =
   assert.ok(r.ok && r.config.chat);
   assert.deepEqual({ ...r.config.chat, url: r.config.chat.url }, {
     api: 'completions', url: 'https://models.example.test/v1', key: '', model: 'model-a', dailyTokens: 300_000, maxOutputTokens: 600,
-    perAddress: { hour: 20, day: 60 }, perAccount: { day: 100 }, concurrency: 4, timeoutMs: 60_000, enabled: true, fakeFile: '',
+    perAddress: { hour: 20, day: 60 }, perAccount: { day: 100 }, concurrency: 4, timeoutMs: 60_000, enabled: true, fakeFile: '', moderation: null,
     shares: { enabled: true, days: 30, max: 10_000, perAddress: { hour: 10, day: 30 }, perAccount: { day: 30 } },
   });
   const cases: [Record<string, string>, RegExp][] = [
@@ -374,8 +374,15 @@ test('env: chat keys are checked only for a chat site, each problem named', () =
     [{ ...good, AZ_CHAT_FAKE_FILE: './x.json' }, /^AZ_CHAT_FAKE_FILE is only read with AZ_CHAT_API=fake/],
     [{ AZ_CHAT_API: 'fake' }, /^AZ_CHAT_FAKE_FILE is missing/],
     [{ AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: './x.json' }, /^AZ_CHAT_API=fake is for development only/],
+    [{ ...good, AZ_CHAT_MODERATION_URL: 'http://judge.example.test/check' }, /^AZ_CHAT_MODERATION_URL must use https/],
+    [{ ...good, AZ_CHAT_MODERATION_URL: 'not a url' }, /^AZ_CHAT_MODERATION_URL is not a URL/],
+    [{ ...good, AZ_CHAT_MODERATION_KEY: 'judge-key' }, /^AZ_CHAT_MODERATION_KEY is only sent to AZ_CHAT_MODERATION_URL/],
   ];
   for (const [env, want] of cases) assert.ok(problems(env).some((p) => want.test(p)), `${JSON.stringify(env)}: ${problems(env).join(' | ')}`);
+  // The moderation hook (§6.8): its URL and key, or null without one.
+  const judged = loadConfig({ ...base, ...good, AZ_CHAT_MODERATION_URL: 'https://judge.example.test/check', AZ_CHAT_MODERATION_KEY: 'judge-key' }, setup, 'Studio');
+  assert.ok(judged.ok && judged.config.chat);
+  assert.deepEqual(judged.config.chat.moderation, { url: 'https://judge.example.test/check', key: 'judge-key' });
   // A loopback server may use the fake model, and a local model server over http.
   assert.ok(loadConfig({ ...base, AZ_BACKEND_PUBLIC_URL: 'http://127.0.0.1:8787', AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: './x.json' }, setup, 'Studio').ok);
   assert.deepEqual(problems({ ...good, AZ_CHAT_URL: 'http://localhost:11434/v1' }), []);

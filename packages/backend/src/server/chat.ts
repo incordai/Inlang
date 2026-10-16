@@ -2,9 +2,9 @@
  * @az server chat
  * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer parsed into typed events and streamed to the page.
  * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §8.2, §8.3, §20.5, §20.7)
- * Exports: createChat, parseChatContext, rulesFor, systemText, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS
+ * Exports: createChat, parseChatContext, rulesFor, systemText, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, CHARS_PER_TOKEN
  * Edit guide: every limit is the server's, never the request's; nothing the model wrote reaches the page but chat-answer.ts's events; abort upstream whenever the answer stops; logs carry codes and counts, never text.
- * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts, packages/backend/test/chat-knows.test.ts
+ * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts, packages/backend/test/chat-knows.test.ts, packages/backend/test/chat-moderation.test.ts
  */
 
 /**
@@ -12,7 +12,8 @@
  * is app.ts's, as for /data. From there:
  *
  *   kill switch → body → who may chat → conversation length → address and
- *   account limits → the day's budget → a slot in the queue → the stream.
+ *   account limits → the moderation hook, when one is set → the day's
+ *   budget → a slot in the queue → the stream.
  *
  * Refusals before the stream are JSON `{ error }`. Once the stream starts
  * every event is one of `text`, `block`, `done`, `error`: the model's text
@@ -28,6 +29,12 @@
  * marked `src: site`. When shares are on, `done` also carries the share tag
  * over the answer's events as sent (chat-share.ts), so the page can keep
  * exactly this answer under a link if the visitor asks.
+ *
+ * The moderation hook (§6.8, chat-moderation.ts) judges the visitor's words
+ * the model would be given — every visitor turn sent, since a visitor turn
+ * carries no tag and an earlier one could be one never judged — and fails
+ * closed: a block is `400 blocked`, a hook that errs or is late is
+ * `503 unavailable`, and the model is never asked.
  *
  * A chat that `knows` tables (§8.2) is told, with each question, rows of
  * them read as a signed-out visitor reads them (`knows`, chat-knows.ts),
@@ -51,6 +58,7 @@ import { createShareRoutes, createShareStore, mergeText, shareKey, shareTag, SHA
 import { createQueue, createRateLimits } from './chat-limits.ts';
 import { sseEvent } from './chat-sse.ts';
 import { historyKey, readChatRequest, tagTurn, trimHistory } from './chat-text.ts';
+import { createModeration, type Moderation } from './chat-moderation.ts';
 import { createUsage, utcDay } from './chat-usage.ts';
 import { randomToken } from './crypto.ts';
 import type { Db } from './db.ts';
@@ -58,7 +66,7 @@ import type { ChatConfig } from './env.ts';
 import { BodyError, send, SECURITY_HEADERS } from './http.ts';
 
 /** Characters per token when a provider reports no usage — a conservative estimate (§6.5, INFERENCE). */
-const CHARS_PER_TOKEN = 3;
+export const CHARS_PER_TOKEN = 3;
 
 /** The model's first token must arrive within this (§6.5). */
 export const CHAT_FIRST_TOKEN_MS = 15_000;
@@ -244,6 +252,8 @@ export interface ChatOptions {
   readonly figures?: FiguresRun;
   /** Reads the rows a chat knows (chat-knows.ts); absent on a site whose chats know no table. */
   readonly knows?: KnowsRun;
+  /** The moderation hook; by default the one config.moderation names, or none. */
+  readonly moderation?: Moderation;
 }
 
 /** A whole-number token estimate for `chars` characters. */
@@ -269,6 +279,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
     store: shareStore, key: shareTagKey, config: o.config.shares, now,
     allowOf: (page) => (Object.hasOwn(o.context.chats, page) ? o.context.chats[page].allow : null),
   });
+  const moderation = o.moderation ?? (o.config.moderation ? createModeration(o.config.moderation) : null);
   /** The day the budget last ran out, so it is logged once per day. */
   let exhaustedOn = '';
 
@@ -385,6 +396,20 @@ export function createChat(o: ChatOptions): ChatRoutes {
       return;
     }
     if (!limits.take(req.ip, user)) return refuse(429, 'rate_limited');
+    // Before anything is read or sent for it, the visitor's words are judged; only an allow goes on (§6.8).
+    if (moderation) {
+      const words = trimHistory(ask.turns).filter((t) => t.role === 'user').map((t) => t.text).join('\n\n');
+      const judged = await moderation.check(words, req.closed);
+      if (req.closed.aborted) return;
+      if (judged.verdict === 'block') {
+        log('chat: blocked by moderation');
+        return refuse(400, 'blocked');
+      }
+      if (judged.verdict === 'failed') {
+        log(`chat: moderation failed: ${judged.why} — the question was refused`);
+        return refuse(503, 'unavailable');
+      }
+    }
     // The budget is a ceiling: a request whose largest cost would cross it is refused before it is sent.
     const day = utcDay(now());
     // The rows the page's chat knows, read for this question as a signed-out visitor reads them (§8.2).

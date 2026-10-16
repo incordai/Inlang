@@ -119,6 +119,8 @@ const PROBLEMS: Readonly<Record<string, string>> = {
   disabled: 'Chat is not available right now.',
   busy: 'Chat is busy — try again in a moment.',
   unavailable: 'The answer could not be finished — try again.',
+  /** The site's moderation hook refused the question (chat-block-spec §6.8). */
+  blocked: 'This question can\u2019t be answered here — try asking it another way.',
   too_long: CHAT_TEXT.tooLong,
   conversation_full: CHAT_TEXT.full,
   unknown: 'Something went wrong — start a new chat.',

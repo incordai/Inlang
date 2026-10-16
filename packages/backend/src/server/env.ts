@@ -94,6 +94,8 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_CHAT_SHARE_MAX', about: 'Shared answers kept at once, all visitors together; past it a share is refused until older ones expire (default 10000, 1–1000000).', when: (s) => s.chat === true, required: false, example: '10000' },
   { name: 'AZ_CHAT_SHARES_PER_ADDRESS', about: 'Shares one address may make, in the form of AZ_CHAT_PER_ADDRESS (default 10/hour,30/day).', when: (s) => s.chat === true, required: false, example: '10/hour,30/day' },
   { name: 'AZ_CHAT_SHARES_PER_ACCOUNT', about: 'Shares one signed-in account may make (default 30/day).', when: (s) => s.chat === true, required: false, example: '30/day' },
+  { name: 'AZ_CHAT_MODERATION_URL', about: 'Optional: an endpoint that judges each question before the model sees it. It is sent POST { "text": "…" } as JSON and must answer { "allow": true } or { "allow": false } within 3 s; any other answer, an error or no answer refuses the question (it fails closed). https, or plain http only for localhost.', when: (s) => s.chat === true, required: false, example: '' },
+  { name: 'AZ_CHAT_MODERATION_KEY', about: 'Sent as `Authorization: Bearer <key>` to AZ_CHAT_MODERATION_URL; may be empty.', when: (s) => s.chat === true, required: false, secret: true },
   { name: 'AZ_CHAT_FAKE_FILE', about: 'With AZ_CHAT_API=fake only: a JSON file of scripted answers, for tests and local development.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_OAUTH_SIGNUP', about: '`allow` lets a provider create a new account for a verified email; `deny` (default) only signs in to existing ones.', when: always, required: false, example: 'deny' },
 ];
@@ -174,6 +176,8 @@ export interface ChatConfig {
   readonly timeoutMs: number;
   readonly enabled: boolean;
   readonly fakeFile: string;
+  /** The input-moderation hook (chat-block-spec §6.8): null when AZ_CHAT_MODERATION_URL is unset. */
+  readonly moderation: { readonly url: string; readonly key: string } | null;
   /** Share links (chat-block-spec §20.7): whether new ones may be made, how long they last, how many at once, how often. */
   readonly shares: {
     readonly enabled: boolean;
@@ -473,6 +477,14 @@ function chatConfig(get: (k: string) => string, publicUrl: string, problems: str
   if (enabled !== 'on' && enabled !== 'off') problems.push('AZ_CHAT_ENABLED must be on or off');
   const shares = (get('AZ_CHAT_SHARES') || 'on').toLowerCase();
   if (shares !== 'on' && shares !== 'off') problems.push('AZ_CHAT_SHARES must be on or off');
+  const moderationUrl = get('AZ_CHAT_MODERATION_URL');
+  const moderationKey = get('AZ_CHAT_MODERATION_KEY');
+  if (moderationUrl) {
+    const p = urlProblem(moderationUrl, { base: false });
+    if (p) problems.push(`AZ_CHAT_MODERATION_URL ${p}`);
+  } else if (moderationKey) {
+    problems.push('AZ_CHAT_MODERATION_KEY is only sent to AZ_CHAT_MODERATION_URL — set that too, or remove the key');
+  }
   return {
     api: api === 'fake' ? 'fake' : 'completions',
     url: url.replace(/\/+$/, ''),
@@ -486,6 +498,7 @@ function chatConfig(get: (k: string) => string, publicUrl: string, problems: str
     timeoutMs: bounded(get, 'AZ_CHAT_TIMEOUT_SECONDS', CHAT_LIMITS.timeoutSeconds, problems) * 1000,
     enabled: enabled !== 'off',
     fakeFile,
+    moderation: moderationUrl ? { url: moderationUrl, key: moderationKey } : null,
     shares: {
       enabled: shares !== 'off',
       days: bounded(get, 'AZ_CHAT_SHARE_DAYS', CHAT_LIMITS.shareDays, problems),
