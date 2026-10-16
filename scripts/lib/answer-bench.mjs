@@ -204,19 +204,29 @@ export function parsedBlocks(az) {
   return events.filter((e) => e.type === 'block').map((e) => e.block);
 }
 
+/** The answer as the model is sent it back on its next question (chat-block-spec §19.14): the parser's own history. */
+export function historyOf(az) {
+  const p = createAnswerParser(ANSWER_RULES);
+  p.push(az);
+  p.end();
+  return p.history();
+}
+
 /** Every case counted in every form and encoding; throws when an `.az` answer does not parse to its blocks. */
 export function measureAnswers(counters) {
   return answerCases().map((c) => {
     if (c.blocks !== null && JSON.stringify(parsedBlocks(c.az)) !== JSON.stringify(c.blocks)) {
       throw new Error(`answer ${c.name}: the .az form does not parse to its blocks`);
     }
-    const forms = {};
-    for (const f of ANSWER_FORMS) {
+    const count = (text) => {
       const tokens = {};
-      for (const [name, fn] of Object.entries(counters)) tokens[name] = fn(c[f]);
-      forms[f] = { chars: c[f].length, tokens };
-    }
-    return { name: c.name, quotable: c.blocks !== null, forms };
+      for (const [name, fn] of Object.entries(counters)) tokens[name] = fn(text);
+      return { chars: text.length, tokens };
+    };
+    const forms = {};
+    for (const f of ANSWER_FORMS) forms[f] = count(c[f]);
+    // What each later question pays for this answer again: its history, not its .az form.
+    return { name: c.name, quotable: c.blocks !== null, forms, ...(c.blocks !== null ? { history: count(historyOf(c.az)) } : {}) };
   });
 }
 

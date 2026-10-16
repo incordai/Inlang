@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ANSWER_FORMS, answerCases, measureAnswers, measureChatInput, parsedBlocks } from './answer-bench.mjs';
+import { ANSWER_FORMS, answerCases, historyOf, measureAnswers, measureChatInput, parsedBlocks } from './answer-bench.mjs';
 import { ENCODINGS, loadCounters } from './token-bench.mjs';
 
 test('each .az answer parses to exactly the blocks its JSON form carries; the refused one is refused', () => {
@@ -38,4 +38,15 @@ test('every answer is counted in every form and encoding; the chat input is the 
   assert.ok(quote.forms.az.tokens[ENCODINGS[0]] < quote.forms.markdown.tokens[ENCODINGS[0]]);
   const input = measureChatInput(counters);
   assert.ok(input.prompt.chars > 1000 && input.context.chars > 500, JSON.stringify(input));
+});
+
+test('§19.14: each answer as history — what later questions pay again — is the parser\'s own, and the long components cost a fraction of their form', async () => {
+  const { counters } = await loadCounters();
+  const answers = measureAnswers(counters);
+  for (const a of answers.filter((x) => x.quotable)) assert.ok(a.history.chars > 0 && a.history.tokens[ENCODINGS[0]] > 0, a.name);
+  assert.equal(historyOf('faq\n  item "Q?"\n    text "A long answer."'), '[shown: faq "Q?"]\n');
+  for (const name of ['faq (3 items)', 'feature (3 items)', 'dashboard (2 server charts, a model chart)', 'model chart (2 series of 3)']) {
+    const a = answers.find((x) => x.name === name);
+    assert.ok(a.history.tokens[ENCODINGS[0]] * 2 < a.forms.az.tokens[ENCODINGS[0]], name);
+  }
 });

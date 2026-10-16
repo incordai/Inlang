@@ -33,6 +33,7 @@
     ],
     "dropped": [
       "components"
-    ]
+    ],
+    "history": "Links.\ncta \"One\" /\ncta \"Two\" /contact\ncta \"Three\" /pricing\ncta \"Four\" /open\n(dropped: cta, components)\n"
   }
 }

@@ -391,3 +391,138 @@ test('a fence opens only at the margin; an unclosed one runs to the end; it clos
   assert.deepEqual(inner.blocks, [{ cta: { label: 'Go', to: '/contact' } }]);
   assert.equal(inner.text, '```\n```js\ncta "Go" /contact\n```  \n');
 });
+
+/* ---- the history the model is sent back (§19.14) -------------------------- */
+
+const ALL: AnswerRules = {
+  ...RULES, show: ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'], images: ['i1'],
+};
+
+/** An answer read whole: its history, its record and what it dropped. */
+function historyOf(answer: string, rules: AnswerRules = ALL): { history: string; record: string; dropped: string[]; blocks: unknown[] } {
+  const p = createAnswerParser(rules);
+  const events = [...p.push(answer), ...p.end()];
+  return { history: p.history(), record: p.record, dropped: [...p.dropped], blocks: events.filter((e) => e.type === 'block').map((e) => (e as { block: unknown }).block) };
+}
+
+test('§19.14 history: each long component a one-line stand-in, prose and ask lines as they are; the record keeps the canonical lines', () => {
+  const answer = [
+    'Here is this month.',
+    'dashboard "This month"',
+    '  stat "Orders" from orders count',
+    '  chart bar "By status" from orders count by status',
+    'chart line "Expected"',
+    '  point "Nov" 140',
+    '  point "Dec" 180',
+    'faq',
+    '  item "Can I cancel?"',
+    '    text "Yes, from your account page, at any time."',
+    '  item "Do you ship abroad?"',
+    '    text "Yes, to most countries."',
+    'Anything else?',
+    'ask "How do I cancel?"',
+  ].join('\n');
+  const r = historyOf(answer);
+  assert.equal(r.blocks.length, 4);
+  assert.equal(r.history, [
+    'Here is this month.',
+    '[shown: dashboard "This month"]',
+    '[shown: chart line "Expected" (your own figures)]',
+    '[shown: faq "Can I cancel?" "Do you ship abroad?"]',
+    'Anything else?',
+    'ask "How do I cancel?"',
+    '',
+  ].join('\n'));
+  assert.match(r.record, /^ {2}point "Nov" 140$/m, 'the record is the canonical lines, as before');
+  assert.ok(r.history.length * 3 < r.record.length * 2, `${r.history.length} against ${r.record.length}`);
+});
+
+test('§19.14 history: every component\'s stand-in names its word, kind, title and where its figures came from — never a row, point or cell', () => {
+  const cases: [string, string][] = [
+    ['show pricing /plans#2', 'show pricing /plans#2\n'],
+    ['cta "Talk to us" /contact', 'cta "Talk to us" /contact\n'],
+    ['feature\n  item "Bright"\n    text "800 lumens."\n  item "Quiet"', '[shown: feature "Bright" "Quiet"]\n'],
+    ['chart bar "By status" from orders count by status', '[shown: chart bar "By status" (site data)]\n'],
+    ['table "Plans" sortable\n  columns "Plan" "Seats"\n  row "Team" 10\n  row "Studio" 50', '[shown: table "Plans" (your own figures)]\n'],
+    ['table "Newest" from orders columns item total', '[shown: table "Newest" (site data)]\n'],
+    ['stats\n  stat "Orders" from orders count\n  stat "Conversion" 3.2 unit percent', '[shown: stats "Orders" "Conversion"]\n'],
+    ['cards\n  card "Linen shirt"\n    text "Breathable."\n  card "Wool scarf"', '[shown: cards "Linen shirt" "Wool scarf"]\n'],
+    ['cards from orders title item', '[shown: cards (site data)]\n'],
+    ['explore "Plan cost"\n  columns "Plan" "Seats"\n  row "Team" 10\n  row "Studio" 50\n  view table', '[shown: explore "Plan cost"]\n'],
+    ['map "Where"\n  pin "Shop" 52.52 13.40', '[shown: map "Where"]\n'],
+    ['map "Stores" from orders label item lat total lon total', '[shown: map "Stores" (site data)]\n'],
+    ['faq\n  item "A \\"quoted\\" question\\nsplit"\n    text "Yes."', '[shown: faq "A \\"quoted\\" question\\nsplit"]\n'],
+  ];
+  for (const [answer, want] of cases) {
+    const r = historyOf(answer);
+    assert.equal(r.blocks.length, 1, `${answer}: ${r.dropped.join(',')}`);
+    assert.equal(r.history, want, answer);
+  }
+});
+
+test('§19.14 history: a component dropped whole is one note of its word and reason code — no text the model or a visitor wrote', () => {
+  const answer = [
+    'Two goes.',
+    'chart bar "Orders"',
+    '  point "W1" NaN',
+    '  point "W2" 3',
+    'faq',
+    ...Array.from({ length: 7 }, (_, i) => `  item "Question ${i + 1}?"\n    text "Answer."`),
+    'show pricing /secret-visitor-route',
+    'cta "Go" https://evil.example/',
+    'feature',
+    '  item "T"',
+    '    text "x"',
+    '      text "too deep"',
+    'stats',
+    '  stat "Orders" from tool nothing count',
+    'ask "One?"',
+    'ask "Two?"',
+    'ask "Three?"',
+    'ask "Four?"',
+    'pricing cards',
+    '  plan "Free"',
+  ].join('\n');
+  const r = historyOf(answer);
+  assert.deepEqual(r.dropped, ['number', 'too_many', 'no_quote', 'destination', 'shape', 'tool', 'too_many', 'composed_pricing']);
+  assert.equal(r.history, [
+    'Two goes.',
+    '(dropped: chart, number)',
+    '(dropped: faq, too_many)',
+    '(dropped: pricing, no_quote)',
+    '(dropped: cta, destination)',
+    '(dropped: feature, shape)',
+    '(dropped: stats, tool)',
+    'ask "One?"',
+    'ask "Two?"',
+    'ask "Three?"',
+    '(dropped: ask, too_many)',
+    '(dropped: pricing, composed_pricing)',
+    '',
+  ].join('\n'));
+  for (const word of ['secret-visitor-route', 'evil.example', 'NaN', 'Question', 'nothing', 'Free', 'Four']) assert.ok(!r.history.includes(word), word);
+  // A `show` of a word no answer may hold is noted as a show, never by the word the model wrote.
+  assert.equal(historyOf('show gallery-of-secrets /pricing').history, '(dropped: show, not_shown)\n');
+  // A line too long to be a component is noted by its keyword.
+  assert.equal(historyOf(`faq ${'x'.repeat(ANSWER_LIMITS.line + 10)}`).history, '(dropped: faq, too_long)\n');
+});
+
+test('§19.14 history: the route\'s own drops become notes in place; notes never take the history past the record cap', () => {
+  const p = createAnswerParser(ALL);
+  const events = [...p.push('Look.\nchart bar "A" from orders count by status\ncta "Talk" /contact\n'), ...p.end()];
+  const chart = events.find((e) => e.type === 'block' && 'chart' in e.block)!;
+  assert.ok(chart.type === 'block');
+  assert.equal(p.history(new Map([[chart.block, 'figures']])), 'Look.\n(dropped: chart, figures)\ncta "Talk" /contact\n');
+  assert.equal(p.history(), 'Look.\n[shown: chart bar "A" (site data)]\ncta "Talk" /contact\n', 'CONTROL: without the route\'s drop, the stand-in');
+  // Prose to the cap, then drops: the notes that do not fit are left out, the text never cut.
+  const prose = `${'p'.repeat(3_000)}\n`;
+  const full = createAnswerParser(ALL);
+  full.push(`${prose.repeat(4).slice(0, ANSWER_LIMITS.prose - 50)}\n`);
+  for (let i = 0; i < 400; i++) full.push(`cta "Go" /nowhere-${i}\n`);
+  full.end();
+  const h = full.history();
+  assert.equal(full.dropped.length, 400, 'every drop still counted');
+  assert.ok(h.length <= ANSWER_LIMITS.record && h.length > ANSWER_LIMITS.record - 1_000, String(h.length));
+  assert.ok(h.startsWith(prose.slice(0, 3_000)), 'the prose whole');
+  assert.ok((h.match(/\(dropped: cta, destination\)/g) ?? []).length < 400, 'the notes past the cap are left out');
+});

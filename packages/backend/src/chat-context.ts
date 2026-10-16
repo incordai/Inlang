@@ -106,6 +106,7 @@ ${forms.join('\n\n')}
 - Write each string in double quotes; inside one, write ${'\\"'} for a quote, ${'\\\\'} for a backslash and ${'\\n'} for a line break.
 - Use only these components. A component that breaks any rule is not shown at all, so keep to the forms exactly.
 - Prose stays prose: no URL, no price of your own, no markup but the formatting above. Keep components out of the middle of a sentence, and out of a code block.
+- Earlier answers note a component as [shown: …] or (dropped: …, why); never write either.
 `;
 }
 

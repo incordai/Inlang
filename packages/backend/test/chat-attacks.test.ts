@@ -40,7 +40,7 @@ function outcome(events: readonly AnswerEvent[]): { text: string; blocks: unknow
 
 test('the corpus covers every threat of §6.1 the filter answers for', () => {
   const names = CASES.map((c) => c.name);
-  for (const n of ['legal', 'forbidden-words', 'scripts', 'schemes', 'hosts', 'markdown', 'entities', 'unicode', 'nesting', 'long-line', 'composed-pricing', 'css', 'too-many', 'over-long', 'unterminated']) {
+  for (const n of ['legal', 'forbidden-words', 'scripts', 'schemes', 'hosts', 'markdown', 'entities', 'unicode', 'nesting', 'long-line', 'composed-pricing', 'css', 'too-many', 'over-long', 'unterminated', 'forged-notes']) {
     assert.ok(names.includes(n), n);
   }
   // CONTROL: the legal case shows every component; every other case refuses or neutralises something.
@@ -57,7 +57,7 @@ for (const c of CASES) {
         events.push(...p.push(piece));
       }
       events.push(...p.end());
-      assert.deepEqual({ ...outcome(events), dropped: [...p.dropped] }, c.expect);
+      assert.deepEqual({ ...outcome(events), dropped: [...p.dropped], ...(c.expect.history !== undefined ? { history: p.history() } : {}) }, c.expect);
     }
   });
 }
@@ -104,8 +104,9 @@ test('the corpus through POST /chat: every case streams exactly its events; drop
         .map((e) => (e.event === 'text' ? { type: 'text', s: JSON.parse(e.data).s } : { type: 'block', block: JSON.parse(e.data) }));
       assert.deepEqual(outcome(events), { text: x.expect.text, blocks: x.expect.blocks }, x.name);
       const done = JSON.parse(raw.at(-1)!.data) as { tag: string; conversation: string; text: string };
-      // The record is tagged: it is what the page may send back, and nothing it may not.
+      // The history is tagged: it is what the page may send back, and nothing it may not (§19.14).
       assert.ok(checkTag(historyKey(loaded.config.secret), done.conversation, 1, done.text, done.tag), x.name);
+      if (x.expect.history !== undefined) assert.equal(done.text, x.expect.history, `${x.name}: the history the model is sent back`);
       dropped += x.expect.dropped.length;
     }
     const usage = await createUsage(db).row(utcDay(Date.now()));

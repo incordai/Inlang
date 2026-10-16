@@ -2139,6 +2139,51 @@ else is ignored. They are added up per day in `az_chat_usage.cached_tokens`
 `cached n`. They count in the budget as input like any other — what the
 provider charges for them is the operator's price, not the server's.
 
+**Past components are stand-ins in the history; dropped ones are notes
+(§4.2, §5.3 changed).** The parser keeps two copies of an answer: the
+`record` (prose and canonical lines, on which every cap is still judged)
+and the `history`, what the model is sent back on its next question. In the
+history, prose and `ask` lines are as they were, a quote and a `cta` are
+their one canonical line, and every longer component is one stand-in line —
+`[shown: faq "Can I cancel?" "Do you ship abroad?"]`, `[shown: feature
+"Bright" "Quiet"]`, `[shown: chart bar "Orders by status" (site data)]`,
+`[shown: table "Plans" (your own figures)]`, `[shown: stats "Orders"]`,
+`[shown: cards "Linen shirt"]` or `[shown: cards (tool data)]`,
+`[shown: dashboard "This month"]`, `[shown: explore "Plan cost"]`,
+`[shown: map "Stores" (site data)]` — its word, kind and title (questions,
+titles or labels for a list), and where its figures came from; never a
+row, point, cell or answer. Each component dropped whole is one note of its
+word and its reason code, the codes `chat_dropped` already counts:
+`(dropped: chart, number)`, `(dropped: faq, too_many)`,
+`(dropped: pricing, composed_pricing)`. The word is always one of the
+parser's keywords (a `show` of anything else is noted as `show`), so no
+text the model or a visitor wrote reaches a note — not a route, a title or
+a value. A component the route drops after the parser passed it (`figures`,
+or the answer past what one share holds) is its note in its place. Drops of
+part of a component (`image`, `view`, `place`) leave the component's
+stand-in and add no note. The history is never longer than the record's cap
+(12 000 characters): the stand-ins are held within it as components are
+shown, and a note that would pass it is left out (the drop is still
+counted).
+
+What is tagged is the history: `done.text` is it, the HMAC of §4.2 is over
+it, and it is exactly the text the model is sent when the page sends the
+answer back — so the tag still proves every byte the model reads as the
+site's own, and a stand-in or a note edited by a visitor is `tampered`. The
+page keeps the answer's events, as before, to draw it again and to share
+it; the full component never goes back upstream. A history kept from before
+this change is still a valid tagged text and is sent as it is. Prose the
+model writes in the shape of a stand-in or a note is prose: shown as text,
+drawn as nothing, counted as no drop (the corpus case `forged-notes`). Each
+chat prompt with components says, in one line, that these are notes and
+never forms to write (+25 tokens to every component prompt).
+
+Measured (`pnpm bench:tokens`, `o200k_base`): the ten answers of
+token-benchmark §7 cost 514 tokens as written and 202 as history; a
+dashboard 78 → 9, a three-item faq 87 → 24, a model chart of two series
+67 → 16 — paid again by every later question until `trimHistory` drops the
+turn.
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links

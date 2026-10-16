@@ -17,8 +17,15 @@ import type { AnswerRules } from '../src/server/chat-answer.ts';
 
 const DIR = new URL('./fixtures/chat-attacks/', import.meta.url);
 
-/** What a case must become: its prose (text events joined), its components in order, and why the others were dropped. */
-export interface CorpusExpect { readonly text: string; readonly blocks: readonly Record<string, unknown>[]; readonly dropped: readonly string[] }
+/**
+ * What a case must become: its prose (text events joined), its components in
+ * order, and why the others were dropped; and, where a case says, the history
+ * the model is sent back (chat-block-spec §19.14) — what the answer is tagged as.
+ */
+export interface CorpusExpect {
+  readonly text: string; readonly blocks: readonly Record<string, unknown>[]; readonly dropped: readonly string[];
+  readonly history?: string;
+}
 
 export interface CorpusCase {
   readonly name: string;

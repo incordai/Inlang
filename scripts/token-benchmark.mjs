@@ -70,16 +70,18 @@ function summaryLines(s) {
 /** The answer-format table: tokens per form, each as a multiple of the .az subset's; then what a chat model is sent besides the conversation. */
 function answerLines(answers, chatInput, encoding) {
   const nameWidth = Math.max(...answers.map((a) => a.name.length));
-  const lines = [`\nchat answers, ${encoding} tokens (.az subset · JSON · markdown):`];
+  const lines = [`\nchat answers, ${encoding} tokens (.az subset · JSON · markdown · as history, what each later question pays again):`];
   for (const a of answers) {
     const az = a.forms.az.tokens[encoding];
     const cell = (f) => `${a.forms[f].tokens[encoding]} (${(a.forms[f].tokens[encoding] / az).toFixed(2)}x)`;
-    lines.push(`  ${a.name.padEnd(nameWidth)}  ${String(az).padStart(5)}  ${cell('json').padStart(13)}  ${cell('markdown').padStart(13)}`);
+    const history = a.history ? `${a.history.tokens[encoding]} (${(a.history.tokens[encoding] / az).toFixed(2)}x)` : '—';
+    lines.push(`  ${a.name.padEnd(nameWidth)}  ${String(az).padStart(5)}  ${cell('json').padStart(13)}  ${cell('markdown').padStart(13)}  ${history.padStart(13)}`);
   }
   const allowed = answers.filter((a) => a.quotable);
   const total = (f) => allowed.reduce((n, a) => n + a.forms[f].tokens[encoding], 0);
   const chars = (f) => allowed.reduce((n, a) => n + a.forms[f].chars, 0);
-  lines.push(`  answers an answer may hold, together: .az ${total('az')} · JSON ${total('json')} (${(total('json') / total('az')).toFixed(2)}x) · markdown ${total('markdown')} (${(total('markdown') / total('az')).toFixed(2)}x)`);
+  const history = allowed.reduce((n, a) => n + a.history.tokens[encoding], 0);
+  lines.push(`  answers an answer may hold, together: .az ${total('az')} · JSON ${total('json')} (${(total('json') / total('az')).toFixed(2)}x) · markdown ${total('markdown')} (${(total('markdown') / total('az')).toFixed(2)}x) · as history ${history} (${(history / total('az')).toFixed(2)}x)`);
   lines.push(`  characters per token: .az ${(chars('az') / total('az')).toFixed(2)} · JSON ${(chars('json') / total('json')).toFixed(2)} · markdown ${(chars('markdown') / total('markdown')).toFixed(2)} (the server estimates 3 when a provider reports none)`);
   lines.push(`\nwhat the chat e2e site's model is sent besides the conversation, ${encoding} tokens:`);
   for (const [name, c] of Object.entries(chatInput)) lines.push(`  ${name.padEnd(8)} ${String(c.tokens[encoding]).padStart(6)} tokens · ${c.chars} characters · ${(c.chars / c.tokens[encoding]).toFixed(2)} per token`);

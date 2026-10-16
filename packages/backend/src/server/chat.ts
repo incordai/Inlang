@@ -21,8 +21,10 @@
  * goes through the answer parser (chat-answer.ts), which sends prose as
  * `text` and each component that passes every rule as one `block` — the
  * page never receives a byte the parser did not produce. The finished
- * answer's record (its prose and its components' canonical lines) is
- * tagged, so the page can send it back as history.
+ * answer's history — its prose, a one-line stand-in for each component and
+ * a note for each one dropped (§19.14) — is tagged, so the page can send it
+ * back: the tag covers exactly the text the model is sent next time, and
+ * the page draws from the events it kept.
  *
  * A rich component (§20) is resolved before it is written: numbers the
  * model wrote are marked `src: model`; each `from` request is answered by
@@ -353,6 +355,8 @@ export function createChat(o: ChatOptions): ChatRoutes {
     /** Every event sent, as the share tag covers them; and what a rich component's resolving dropped. */
     const sent_: Sent[] = [];
     const resolvedDrops: DropReason[] = [];
+    /** The components the parser passed that the route then dropped whole: the history notes them instead (§19.14). */
+    const lost = new Map<AnswerBlock, DropReason>();
     let bytes = 0;
     const day = utcDay(started);
     // In order, each rich component resolved first; nothing is written to a connection the visitor already closed.
@@ -362,12 +366,15 @@ export function createChat(o: ChatOptions): ChatRoutes {
         if (e.type === 'text') out = e;
         else if (isRich(e.block)) {
           const r = await resolveRich(e.block, o.figures ?? null, day, toolRun, o.context.images.map((i) => i.key), (why) => resolvedDrops.push(why), geocodeRun);
-          if (r === null) { resolvedDrops.push('figures'); continue; }
+          if (r === null) { resolvedDrops.push('figures'); lost.set(e.block, 'figures'); continue; }
           out = { type: 'block', block: r };
         } else out = { type: 'block', block: e.block as unknown as Record<string, unknown> };
         // The whole answer stays within what one share may hold (§20.7).
         const size = Buffer.byteLength(JSON.stringify(out), 'utf8');
-        if (bytes + size > SHARE_LIMITS.eventsBytes) { if (out.type === 'block') resolvedDrops.push('too_long'); continue; }
+        if (bytes + size > SHARE_LIMITS.eventsBytes) {
+          if (e.type === 'block') { resolvedDrops.push('too_long'); lost.set(e.block, 'too_long'); }
+          continue;
+        }
         bytes += size;
         sent_.push(out);
         if (!res.destroyed) res.write(wire(out));
@@ -403,6 +410,8 @@ export function createChat(o: ChatOptions): ChatRoutes {
     if (outcome === 'done' || outcome === 'capped') await write(parser.end());
     const record = parser.record;
     if ((outcome === 'done' || outcome === 'capped') && record.trim() === '') outcome = 'empty';
+    // What the model is sent back next time, and so what the tag covers: the page sends this text, never the events.
+    const history = parser.history(lost);
     // A connection the visitor closed has nobody left to tell.
     if (!res.destroyed) {
       const question = turns.at(-1)?.text ?? '';
@@ -413,7 +422,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
         ? { share: { at, tag: shareTag(shareTagKey, conversation, index, at, events, null), tagq: shareTag(shareTagKey, conversation, index, at, events, question) } }
         : {};
       const last = outcome === 'done' || outcome === 'capped'
-        ? sseEvent('done', { tag: tagTurn(key, conversation, index, record), left, conversation, text: record, ...share })
+        ? sseEvent('done', { tag: tagTurn(key, conversation, index, history), left, conversation, text: history, ...share })
         : outcome === 'gone' ? '' : sseEvent('error', { code: 'unavailable' });
       res.end(last);
     }

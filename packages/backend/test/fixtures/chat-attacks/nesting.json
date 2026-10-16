@@ -11,6 +11,7 @@
       "shape",
       "shape",
       "too_long"
-    ]
+    ],
+    "history": "Deep.\n(dropped: faq, shape)\n(dropped: feature, shape)\n(dropped: faq, shape)\n(dropped: faq, too_long)\n"
   }
 }

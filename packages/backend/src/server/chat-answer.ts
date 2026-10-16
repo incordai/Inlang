@@ -46,6 +46,15 @@
  * Caps per answer: ANSWER_LIMITS. Past the prose cap or the component cap
  * the parser ends (`ended`), and the route stops reading the model.
  *
+ * Two copies of the answer are kept as it is read (chat-block-spec §19.14):
+ * `record`, the prose and every shown component's canonical lines, which
+ * every cap is judged on; and `history`, what the model is sent back on its
+ * next question — the same prose, each long component as a one-line
+ * stand-in (`[shown: faq "Can I cancel?"]`; a quote, a cta and an ask stay
+ * the one line they are), and each component dropped whole as a note of its
+ * word and reason code only (`(dropped: chart, number)`). The route tags the
+ * history; the page draws from the events.
+ *
  * The rich components — chart, table, stats, cards, dashboard (§20),
  * explore (§21.3) and map (§21.4) — are held the same way and read whole by chat-rich.ts;
  * their `from` figures and rows are filled by the route (chat.ts) before the
@@ -54,7 +63,7 @@
  * Copied into a generated server; imports chat-rich.ts, and env.ts's tool types.
  */
 
-import { linesCap, RICH_FORMS, RICH_LIMITS, RICH_WORDS, richBlock, richLines, type RichBlock, type RichLine, type RichWord } from './chat-rich.ts';
+import { linesCap, RICH_FORMS, RICH_LIMITS, RICH_WORDS, richBlock, richLines, richStandIn, type RichBlock, type RichLine, type RichWord } from './chat-rich.ts';
 import type { ChatToolShape } from './env.ts';
 
 /** Every cap the parser holds (chat-block-spec §5.3, §6.1). The prompt is generated from these too. */
@@ -251,6 +260,8 @@ const CHART_KINDS: readonly string[] = ['bar', 'line', 'area', 'pie', 'donut'];
 /** A component being read: its first line, its items, and the first rule it broke. */
 interface Open {
   readonly kind: BlockKind;
+  /** The word its note names when it is dropped — always one of KEYWORDS, never the model's own text. */
+  readonly word: string;
   readonly head: readonly LineToken[];
   readonly items: { title: string; text: string | null }[];
   /** A rich component's child lines, depth 1 or 2 (chat-rich.ts reads them whole). */
@@ -269,8 +280,33 @@ export interface AnswerParser {
   readonly prose: number;
   /** Components dropped so far, by reason. */
   readonly dropped: readonly DropReason[];
-  /** The answer as the page will send it back: prose, and each shown component's canonical lines. */
+  /** The answer whole: prose, and each shown component's canonical lines — what every cap is judged on. */
   readonly record: string;
+  /**
+   * The answer as the model is sent it back (§19.14): prose, a stand-in for
+   * each shown component, a note for each one dropped whole. `lost` names the
+   * components the route dropped after the parser passed them (their figures
+   * failed, the answer was full): each is its note instead. Never longer than
+   * ANSWER_LIMITS.record — a note that would pass it is left out.
+   */
+  history(lost?: ReadonlyMap<AnswerBlock, DropReason>): string;
+}
+
+/** One part of the answer as the model reads it back: prose, a shown component's stand-in, or a dropped one's note. */
+type HistoryPart =
+  | { readonly kind: 'text'; readonly s: string }
+  | { readonly kind: 'shown'; readonly block: AnswerBlock; readonly word: string; readonly line: string }
+  | { readonly kind: 'note'; readonly line: string };
+
+/** A component dropped whole, as the model is told of it: its word and the reason code, nothing it wrote. */
+const droppedNote = (word: string, why: DropReason): string => `(dropped: ${word}, ${why})\n`;
+
+/** A shown component as the model reads it back: its canonical line when it is one line, else a stand-in. */
+function standIn(block: AnswerBlock, lines: string): string {
+  if ('faq' in block) return `[shown: faq ${block.faq.map((i) => quoted(i.q)).join(' ')}]\n`;
+  if ('feature' in block) return `[shown: feature ${block.feature.map((i) => quoted(i.title)).join(' ')}]\n`;
+  if ('quote' in block || 'cta' in block || 'ask' in block) return lines;
+  return richStandIn(block);
 }
 
 /**
@@ -311,6 +347,14 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     for (; !extra && k < piece.length; k++) if (piece[k] !== ' ') extra = true;
   };
   let record = '';
+  /** The answer as the model reads it back, in parts (§19.14). */
+  const parts: HistoryPart[] = [];
+  /**
+   * The history's length without its notes, a line break counted before each
+   * stand-in: held within ANSWER_LIMITS.record as components are shown, so
+   * notes are the only part ever left out.
+   */
+  let base = 0;
   /** Data points and `from` requests across the answer's rich components (§20.2). */
   let points = 0;
   let queries = 0;
@@ -342,7 +386,11 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     }
     prose += piece.length;
     record += piece;
+    base += piece.length;
     pendingText += piece;
+    const last = parts.at(-1);
+    if (last?.kind === 'text') parts[parts.length - 1] = { kind: 'text', s: last.s + piece };
+    else parts.push({ kind: 'text', s: piece });
   };
 
   /** Prose of a streamed line, holding back its last character (and marks) until the next arrives. */
@@ -362,19 +410,26 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     say(cleanText(all.slice(0, cut)));
   };
 
-  const drop = (reason: DropReason) => { dropped.push(reason); };
+  /** A drop counted; with `word`, a whole component, noted in the history by its word and reason (§19.14). */
+  const drop = (reason: DropReason, word?: string) => {
+    dropped.push(reason);
+    if (word !== undefined) parts.push({ kind: 'note', line: droppedNote(word, reason) });
+  };
 
   /** A component that passed every rule: sent, and its canonical lines added to the record. */
-  const emit = (block: AnswerBlock, lines: string) => {
+  const emit = (block: AnswerBlock, lines: string, word: string) => {
     if (shown >= ANSWER_LIMITS.components) {
-      drop('components');
+      drop('components', word);
       ended = true;
       return;
     }
-    if (record.length + lines.length > ANSWER_LIMITS.record) { drop('record'); return; }
+    const line = standIn(block, lines);
+    if (record.length + lines.length > ANSWER_LIMITS.record || base + line.length + 1 > ANSWER_LIMITS.record) { drop('record', word); return; }
     shown++;
     flushText();
     record += lines;
+    base += line.length + 1;
+    parts.push({ kind: 'shown', block, word, line });
     out.push({ type: 'block', block });
   };
 
@@ -393,79 +448,82 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     open = null;
     if (!b) return;
     // A pricing block the model wrote is refused for what it is, whatever its shape (L8).
-    if (b.kind === 'pricing') { drop('composed_pricing'); return; }
-    if (b.kind === 'dropped' || b.broken) { drop(b.broken ?? 'shape'); return; }
+    if (b.kind === 'pricing') { drop('composed_pricing', b.word); return; }
+    if (b.kind === 'dropped' || b.broken) { drop(b.broken ?? 'shape', b.word); return; }
     if (b.kind === 'rich') {
       const read = richBlock(b.head, b.lines, {
         show: rules.show, destinations: rules.destinations, images: rules.images ?? [], tools: rules.tools ?? [], geocoder: rules.geocoder === true,
       }, cleanText);
-      if (!read.ok) { drop(read.why); return; }
+      if (!read.ok) { drop(read.why, b.word); return; }
       for (let i = 0; i < read.lostImages; i++) drop('image');
       for (let i = 0; i < read.lostViews; i++) drop('view');
       for (const why of read.lostMap) drop(why);
       // The answer's own caps: points across its components, requests the server will run.
       if (points + read.points > RICH_LIMITS.answerPoints || queries + read.queries > RICH_LIMITS.answerQueries
-        || calls + read.calls > RICH_LIMITS.answerCalls || places + read.places > RICH_LIMITS.answerPlaces) { drop('too_many'); return; }
+        || calls + read.calls > RICH_LIMITS.answerCalls || places + read.places > RICH_LIMITS.answerPlaces) { drop('too_many', b.word); return; }
       points += read.points;
       queries += read.queries;
       calls += read.calls;
       places += read.places;
-      emit(read.block, richLines(read.block));
+      emit(read.block, richLines(read.block), b.word);
       return;
     }
     if (b.kind === 'show') {
       const word = b.head[1].value;
       const dest = b.head[2].value;
-      if (word !== 'pricing' || !allowed('pricing')) { drop('not_shown'); return; }
+      if (word !== 'pricing' || !allowed('pricing')) { drop('not_shown', b.word); return; }
       const hash = dest.indexOf('#');
       const route = hash < 0 ? dest : dest.slice(0, hash);
       const suffix = hash < 0 ? '1' : dest.slice(hash + 1);
       // `#2` is the page's second pricing block; anything else after # is no block.
       const nth = /^[1-9][0-9]{0,2}$/.test(suffix) ? Number(suffix) - 1 : -1;
-      if (!rules.quotes.some((q) => q.word === 'pricing' && q.route === route && q.n === nth)) { drop('no_quote'); return; }
-      emit({ quote: 'pricing', route, n: nth }, `show pricing ${route}${nth > 0 ? `#${nth + 1}` : ''}\n`);
+      if (!rules.quotes.some((q) => q.word === 'pricing' && q.route === route && q.n === nth)) { drop('no_quote', b.word); return; }
+      emit({ quote: 'pricing', route, n: nth }, `show pricing ${route}${nth > 0 ? `#${nth + 1}` : ''}\n`, b.word);
       return;
     }
     if (b.kind === 'ask') {
       // A follow-up is one line of question: no line break, within the `ask` key's cap; past three, the rest go.
       const q = value(b.head[1].value, ANSWER_LIMITS.ask, true);
-      if ('why' in q) { drop(q.why); return; }
-      if (q.v.includes('\n')) { drop('shape'); return; }
-      if (asked >= ANSWER_LIMITS.asks) { drop('too_many'); return; }
+      if ('why' in q) { drop(q.why, b.word); return; }
+      if (q.v.includes('\n')) { drop('shape', b.word); return; }
+      if (asked >= ANSWER_LIMITS.asks) { drop('too_many', b.word); return; }
       const lines = `ask ${quoted(q.v)}\n`;
-      if (record.length + lines.length > ANSWER_LIMITS.record) { drop('record'); return; }
+      if (record.length + lines.length > ANSWER_LIMITS.record || base + lines.length + 1 > ANSWER_LIMITS.record) { drop('record', b.word); return; }
       asked++;
       flushText();
       record += lines;
-      out.push({ type: 'block', block: { ask: q.v } });
+      base += lines.length + 1;
+      const block = { ask: q.v };
+      parts.push({ kind: 'shown', block, word: 'ask', line: lines });
+      out.push({ type: 'block', block });
       return;
     }
     if (b.kind === 'cta') {
-      if (!allowed('cta')) { drop('not_shown'); return; }
+      if (!allowed('cta')) { drop('not_shown', b.word); return; }
       const label = value(b.head[1].value, ANSWER_LIMITS.label, true);
-      if ('why' in label) { drop(label.why); return; }
+      if ('why' in label) { drop(label.why, b.word); return; }
       const to = b.head[2].value;
       // The allow-list is exact: the destination as the .az file wrote it, nothing near it.
-      if (!rules.destinations.includes(to)) { drop('destination'); return; }
-      emit({ cta: { label: label.v, to } }, `cta ${quoted(label.v)} ${to}\n`);
+      if (!rules.destinations.includes(to)) { drop('destination', b.word); return; }
+      emit({ cta: { label: label.v, to } }, `cta ${quoted(label.v)} ${to}\n`, b.word);
       return;
     }
     // faq / feature: composed lists.
     const word = b.kind;
-    if (!allowed(word)) { drop('not_shown'); return; }
-    if (b.items.length === 0) { drop('empty'); return; }
+    if (!allowed(word)) { drop('not_shown', word); return; }
+    if (b.items.length === 0) { drop('empty', word); return; }
     const [titleMax, textMax] = word === 'faq' ? [ANSWER_LIMITS.question, ANSWER_LIMITS.answer] : [ANSWER_LIMITS.title, ANSWER_LIMITS.text];
     const items: { title: string; text: string }[] = [];
     for (const it of b.items) {
       const title = value(it.title, titleMax, true);
-      if ('why' in title) { drop(title.why); return; }
+      if ('why' in title) { drop(title.why, word); return; }
       // An faq answer is required; a feature's text is not.
       const text = it.text === null ? (word === 'faq' ? { why: 'empty' as const } : { v: '' }) : value(it.text, textMax, word === 'faq');
-      if ('why' in text) { drop(text.why); return; }
+      if ('why' in text) { drop(text.why, word); return; }
       items.push({ title: title.v, text: text.v });
     }
     const lines = `${word}\n${items.map((i) => `  item ${quoted(i.title)}\n${i.text ? `    text ${quoted(i.text)}\n` : ''}`).join('')}`;
-    emit(word === 'faq' ? { faq: items.map((i) => ({ q: i.title, a: i.text })) } : { feature: items }, lines);
+    emit(word === 'faq' ? { faq: items.map((i) => ({ q: i.title, a: i.text })) } : { feature: items }, lines, word);
   };
 
   /** An indented line inside the open component: an item, or an item's text. Anything else breaks it. */
@@ -503,8 +561,9 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
   const head = (raw: string, newline: boolean) => {
     const asProse = () => say(cleanText(raw) + (newline ? '\n' : ''));
     if (over) {
-      // Too long to be a component; too long to show as the line it is.
-      open = { kind: 'dropped', head: [], items: [], lines: [], broken: 'too_long' };
+      // Too long to be a component; too long to show as the line it is. Its first word was a keyword, or it was never held.
+      const first = raw.slice(0, raw.indexOf(' '));
+      open = { kind: 'dropped', word: KEYWORDS.includes(first) ? first : 'component', head: [], items: [], lines: [], broken: 'too_long' };
       return;
     }
     const t = lineTokens(raw);
@@ -518,15 +577,16 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
         else asProse();
         return;
       case 'show':
-        if (rest.length === 2 && bare(0) && bare(1)) open = { kind: 'show', head: t, items: [], lines: [], broken: null };
+        // The note names the quoted word only when it is one an answer may hold; the route is the model's and never noted.
+        if (rest.length === 2 && bare(0) && bare(1)) open = { kind: 'show', word: (ANSWER_WORDS as readonly string[]).includes(rest[0].value) ? rest[0].value : 'show', head: t, items: [], lines: [], broken: null };
         else asProse();
         return;
       case 'cta':
-        if (rest.length === 2 && str(0) && bare(1)) open = { kind: 'cta', head: t, items: [], lines: [], broken: null };
+        if (rest.length === 2 && str(0) && bare(1)) open = { kind: 'cta', word: 'cta', head: t, items: [], lines: [], broken: null };
         else asProse();
         return;
       case 'ask':
-        if (rest.length === 1 && str(0)) open = { kind: 'ask', head: t, items: [], lines: [], broken: null };
+        if (rest.length === 1 && str(0)) open = { kind: 'ask', word: 'ask', head: t, items: [], lines: [], broken: null };
         else asProse();
         return;
       case 'faq':
@@ -534,7 +594,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
       case 'pricing': {
         const words = OPENER_WORDS[first.value];
         if (rest.every((r) => r.kind === 'bare' && words.includes(r.value)) && rest.length <= 2) {
-          open = { kind: first.value, head: t, items: [], lines: [], broken: null };
+          open = { kind: first.value, word: first.value, head: t, items: [], lines: [], broken: null };
         } else asProse();
         return;
       }
@@ -555,7 +615,7 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
           explore: rest.length === 1 && str(0),
           map: str(0) && (rest.length === 1 || (bare(1) && rest[1].value === 'from')),
         };
-        if (shaped[first.value as RichWord]) open = { kind: 'rich', head: t, items: [], lines: [], broken: null };
+        if (shaped[first.value as RichWord]) open = { kind: 'rich', word: first.value, head: t, items: [], lines: [], broken: null };
         else asProse();
         return;
       }
@@ -669,5 +729,28 @@ export function createAnswerParser(rules: AnswerRules): AnswerParser {
     get prose() { return prose; },
     get dropped() { return dropped; },
     get record() { return record; },
+    history(lost = new Map()) {
+      // What the notes may take: the cap less the prose and the stand-ins that stand (each with its line break).
+      let room = ANSWER_LIMITS.record - base;
+      for (const p of parts) if (p.kind === 'shown' && lost.has(p.block)) room += p.line.length + 1;
+      let s = '';
+      /** A line of its own; a note only while it fits the room, in the answer's order. */
+      const add = (line: string, note: boolean) => {
+        if (note) {
+          if (line.length + 1 > room) return;
+          room -= line.length + 1;
+        }
+        s += s !== '' && !s.endsWith('\n') ? `\n${line}` : line;
+      };
+      for (const p of parts) {
+        if (p.kind === 'text') s += p.s;
+        else if (p.kind === 'note') add(p.line, true);
+        else {
+          const why = lost.get(p.block);
+          add(why === undefined ? p.line : droppedNote(p.word, why), why !== undefined);
+        }
+      }
+      return s;
+    },
   };
 }

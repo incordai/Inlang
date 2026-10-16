@@ -4,7 +4,7 @@
  * Spec: docs/chat-block-spec.md §20.2, §20.3, §20.5, §20.6, §21.2.3, §21.3, §21.4
  * Exports: RICH_WORDS, RichWord, RICH_LIMITS, RICH_FORMS, RichLine, RichBlock, RichChart, RichTable, RichStat, RichCard, RichCards,
  *   RichDashboard, RichTile, RichRules, RichRead, Resolved, FiguresRun, ToolRequest, ToolShape, ToolsRun, ToolAnswer, GeocodeRun, richBlock,
- *   resolveRich, clampText, parseNumber, richLines, linesCap
+ *   resolveRich, clampText, parseNumber, richLines, richStandIn, linesCap
  * Edit guide: the model's numbers are numbers or the component goes; its words never reach SQL (a `from` is resolved by
  *   chat-query.ts against the public schema) nor a URL (a `from tool` names a declared tool and typed values, called by
  *   chat-tools.ts); `src` is set here and nowhere else; an image is a build key, never a URL.
@@ -742,6 +742,28 @@ export function richLines(block: RichBlock): string {
     }
   }
   return `${out.join('\n')}\n`;
+}
+
+/** Where a component's figures come from, as its stand-in says it: the site's tables, an operator's tool, or the model. */
+const sourceOf = (x: object): string => ('from' in x ? 'site data' : 'tool' in x ? 'tool data' : 'your own figures');
+
+/**
+ * A rich component as the model reads it back in the history (chat-block-spec
+ * §19.14): one line that names it — its word, kind and title, where its
+ * figures came from — and none of its rows, points or cells, which the page
+ * keeps. `[shown: chart bar "Orders by status" (site data)]`.
+ */
+export function richStandIn(block: RichBlock): string {
+  const names = (xs: readonly string[]) => xs.map(quoted).join(' ');
+  let what: string;
+  if ('chart' in block) what = `chart ${block.chart.kind} ${quoted(block.chart.title)} (${sourceOf(block.chart)})`;
+  else if ('table' in block) what = `table ${quoted(block.table.title)} (${sourceOf(block.table)})`;
+  else if ('stats' in block) what = `stats ${names(block.stats.map((s) => s.label))}`;
+  else if ('cards' in block) what = Array.isArray(block.cards) ? `cards ${names(block.cards.map((c) => c.title))}` : `cards (${sourceOf(block.cards)})`;
+  else if ('explore' in block) what = `explore ${quoted(block.explore.title)}`;
+  else if ('map' in block) what = `map ${quoted(block.map.title)}${'from' in block.map ? ' (site data)' : ''}`;
+  else what = `dashboard ${quoted(block.dashboard.title)}`;
+  return `[shown: ${what}]\n`;
 }
 
 /** A `from` request answered: the kind of answer it wants decides which parse chat-query runs. */
