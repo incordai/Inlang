@@ -29,7 +29,7 @@
     "test:patterns": "node --experimental-strip-types scripts/patterns.test.ts"
   },
   "dependencies": {
-    "@react-three/drei": "10.7.8",
+    "@react-three/drei": "10.7.9",
     "@react-three/fiber": "9.8.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
