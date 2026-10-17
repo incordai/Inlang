@@ -34,20 +34,20 @@
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@protomaps/basemaps": "5.7.2",
-    "@types/node": "26.2.0",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.7",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "@types/three": "0.186.0",
     "gpt-tokenizer": "4.0.0",
     "lighthouse": "13.5.0",
     "maplibre-gl": "6.13.0",
-    "mysql2": "3.24.4",
-    "nodemailer": "10.0.10",
-    "pg": "8.23.0",
-    "playwright": "1.63.0",
+    "mysql2": "3.24.5",
+    "nodemailer": "10.0.16",
+    "pg": "8.23.1",
+    "playwright": "1.64.0",
     "pmtiles": "4.5.0",
     "sharp": "0.35.5",
-    "three": "0.186.0",
+    "three": "0.186.1",
     "typescript": "7.0.2"
   }
 }

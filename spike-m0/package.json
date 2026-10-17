@@ -33,21 +33,21 @@
     "@react-three/fiber": "9.8.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "three": "0.186.0"
+    "three": "0.186.1"
   },
   "devDependencies": {
-    "@gltf-transform/core": "4.5.0",
-    "@gltf-transform/extensions": "4.5.0",
-    "@types/node": "26.2.0",
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@types/node": "26.6.5",
     "@types/pngjs": "6.0.5",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@types/three": "0.186.0",
-    "@vitejs/plugin-react": "6.1.0",
+    "@vitejs/plugin-react": "6.1.2",
     "draco3dgltf": "1.5.7",
-    "playwright": "1.62.1",
+    "playwright": "1.64.0",
     "pngjs": "7.0.0",
     "typescript": "7.0.2",
-    "vite": "8.2.2"
+    "vite": "8.3.4"
   }
 }
