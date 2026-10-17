@@ -281,7 +281,10 @@ symlink permissions all bite a JS build tool there (word-quality-gate §5.3).
 A Windows failure found nightly is cheap; found by a contributor is not.
 
 Required to merge: every job above except lighthouse, which runs only
-nightly and on demand.
+nightly and on demand. The repository ruleset "main: required checks" names
+them (dependency review counts on pull requests, where it runs); repository
+admins may bypass it, so the owner can still push to `main` directly. Branch
+protection on `main` refuses force pushes and deletion, admins included.
 Visual snapshots may be updated in a PR **only with a written explanation of
 what changed and why** (CONVENTIONS §9).
 
