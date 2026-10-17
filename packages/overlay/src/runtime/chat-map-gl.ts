@@ -276,6 +276,9 @@ export async function mountMap(o: MapMount): Promise<MapHandle> {
     map.on('error', onError);
     signal.addEventListener('abort', () => fail(new Error('ended')), { once: true });
   });
+  // One more frame once loaded. WebKit on Linux can go on showing the frame before the one that fired `load`: measured,
+  // every tile had arrived before that render, yet the stage showed bare water until another frame was drawn.
+  map.triggerRepaint();
   // After it loads, a tile that fails is a gap in the map, not an answer that fails: kept quiet, never a console error.
   map.on('error', () => undefined);
 

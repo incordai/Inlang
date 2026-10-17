@@ -274,9 +274,16 @@ async function engineFlow(b, name) {
 /** Ask for the map, wait until it has drawn, and judge its stage's pixels — in a context whose policy is bypassed: WebKit's screenshot injects a stylesheet. */
 async function pixelFlow(b, name) {
   const ctx = await b.newContext({ bypassCSP: true });
+  // What this context asked of the basemap, and what went wrong, so a blank picture names its cause.
+  const tiles = [];
+  const trouble = [];
+  ctx.on('response', (r) => { if (new URL(r.url()).pathname === '/tiles/world.pmtiles') tiles.push(`${r.request().headers().range ?? 'whole'} ${r.status()}`); });
+  ctx.on('requestfailed', (r) => trouble.push(`${new URL(r.url()).pathname} ${r.failure()?.errorText ?? 'failed'}`));
   try {
     const page = await ctx.newPage();
     page.setDefaultTimeout(STATE_MS);
+    page.on('console', (m) => { if (m.type() === 'error') trouble.push(`console: ${m.text().slice(0, 160)}`); });
+    page.on('pageerror', (e) => trouble.push(`pageerror: ${e.message.slice(0, 160)}`));
     await page.goto(`${host.url}/`);
     await page.waitForFunction(() => document.querySelector('[data-az-chat]')?.getAttribute('data-az-chat-state') === 'idle'
       && document.documentElement.hasAttribute('data-az-ready'), null, { timeout: STATE_MS });
@@ -298,7 +305,7 @@ async function pixelFlow(b, name) {
     }
     writeFileSync(join(work, `map-${name}.png`), shot);
     check(`${name}: #4 the map is not a blank box — land and water each cover at least a tenth of it`, c.first >= 0.1 && c.second >= 0.1,
-      `top two ${(c.first * 100).toFixed(1)}% ${(c.second * 100).toFixed(1)}% (${c.top.join(' | ')}), ${c.colours} colours`);
+      `top two ${(c.first * 100).toFixed(1)}% ${(c.second * 100).toFixed(1)}% (${c.top.join(' | ')}), ${c.colours} colours; tiles [${tiles.join(', ')}]${trouble.length ? `; ${trouble.join(' | ')}` : ''}`);
   } catch (e) {
     check(`${name}: the pixel flow completed`, false, e.message.split('\n')[0]);
   } finally {
