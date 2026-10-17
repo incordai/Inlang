@@ -943,6 +943,26 @@ async function announcements(page, work) {
   return page.evaluate(() => globalThis.azSaid);
 }
 
+/**
+ * Watch the transcript for a site answer marked aria-busy="true". An observer
+ * sees every change, even one set and cleared within a frame, where polling
+ * the attribute misses a short stream.
+ */
+async function watchBusy(page) {
+  await page.evaluate(() => {
+    const transcript = document.querySelector('.az-chat-transcript');
+    const answer = (el) => el instanceof Element && el.matches('.az-chat-message--site');
+    globalThis.azBusySeen = false;
+    new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === 'attributes' && answer(r.target) && (r.oldValue === 'true' || r.target.getAttribute('aria-busy') === 'true')) globalThis.azBusySeen = true;
+        if (r.type === 'childList') for (const n of r.addedNodes) if (answer(n) && n.getAttribute('aria-busy') === 'true') globalThis.azBusySeen = true;
+      }
+    }).observe(transcript, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-busy'], attributeOldValue: true });
+  });
+  return () => page.evaluate(() => globalThis.azBusySeen);
+}
+
 async function anonymousFlow(b, name, origins) {
   const ctx = await watchedContext(b, csp, CONTEXT);
   try {
@@ -984,11 +1004,11 @@ async function anonymousFlow(b, name, origins) {
     await page.keyboard.type('second line');
     check(`${name}: Shift+Enter is a new line, not a send`, (await input.inputValue()) === `First line ${VISITOR_MARK}\nsecond line`);
     const before = await answerCount(page);
+    const busySeen = await watchBusy(page);
     const said = await announcements(page, async () => {
       await page.keyboard.press('Enter');
-      const busy = await page.waitForFunction(() => document.querySelector('.az-chat-transcript > .az-chat-message--site:last-child')?.getAttribute('aria-busy') === 'true', null, { timeout: STATE_MS }).then(() => true, () => false);
-      check(`${name}: the answer is aria-busy while it streams`, busy);
       const answer = await nextAnswer(page, before);
+      check(`${name}: the answer is aria-busy while it streams`, await busySeen());
       check(`${name}: the answer streams in as text, in paragraphs`,
         JSON.stringify(answer.paragraphs) === JSON.stringify([`Planted ${ANSWER_MARK}. Second sentence.`, 'A new paragraph.']),
         JSON.stringify(answer.paragraphs));
