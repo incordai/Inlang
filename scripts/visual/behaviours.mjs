@@ -306,9 +306,15 @@ export async function solid(page) {
     const shown = [...nav.querySelectorAll('[data-az-logo]')].filter((i) => getComputedStyle(i).display !== 'none');
     return { scrolled: nav.getAttribute('data-scrolled'), bg: getComputedStyle(nav).backgroundColor, logos: shown.map((i) => i.getAttribute('data-az-logo')) };
   });
+  // Read the bar once the scroll event has been delivered, not after a fixed pause: a loaded WebKit delivers it after
+  // the next rendering update, measured at up to 270ms. The runtime listened first, so it has run when this one does.
   const at = async (y) => {
-    await page.evaluate((v) => window.scrollTo({ top: v, behavior: 'instant' }), y);
-    await page.waitForTimeout(50);
+    await page.evaluate(({ v, bound }) => new Promise((done) => {
+      if (window.scrollY === v) { done(); return; }
+      const timer = setTimeout(done, bound);
+      window.addEventListener('scroll', () => { clearTimeout(timer); done(); }, { once: true });
+      window.scrollTo({ top: v, behavior: 'instant' });
+    }), { v: y, bound: WAIT_MS });
     return state();
   };
   const problems = [];
@@ -1045,17 +1051,25 @@ export async function sheetDrag(page) {
     await page.evaluate((d) => document.querySelector(`[aria-controls="${d}"]`)?.click(), id);
     return until(page, (d) => document.getElementById(d)?.open === true, id);
   };
+  // The handle is measured where it rests: an opening slide, or the spring back after a drag, runs longer than a fixed
+  // pause on a loaded machine, and a handle measured mid-slide is not where the pointer then presses. Two frames first:
+  // a transition starts at the style update after the change that caused it, so until then there is none to wait on.
+  const settled = () => page.evaluate(({ d, bound }) => Promise.race([
+    new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)))
+      .then(() => Promise.all(document.getElementById(d).getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined)))),
+    new Promise((done) => setTimeout(done, bound)),
+  ]), { d: id, bound: WAIT_MS });
   const drag = async (dy) => {
     const box = await page.$eval(`#${id} [data-az-drag]`, (h) => { const r = h.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
     await page.mouse.move(box.x, box.y);
     await page.mouse.down();
     for (let i = 1; i <= 8; i++) await page.mouse.move(box.x, box.y + (dy * i) / 8);
     await page.mouse.up();
-    await page.waitForTimeout(400);
+    await settled();
   };
   const problems = [];
   if (!(await openIt())) return { pass: false, detail: 'the sheet did not open from its trigger' };
-  await page.waitForTimeout(400);
+  await settled();
   await drag(20);
   if (!(await page.evaluate((d) => document.getElementById(d).open, id))) problems.push('a 20px drag closed the sheet');
   await drag(300);
