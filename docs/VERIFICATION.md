@@ -202,10 +202,14 @@ than guess.
 ## 7. CI
 
 `.github/workflows/ci.yml` runs on every push to `main`, every PR, nightly
-(03:00 UTC) and on demand. Seven parallel jobs on every run, and an eighth
-nightly and on demand, each on Ubuntu and Node 22 unless noted, each step a
-command from §1, so CI and a local run cannot differ. A push does not cancel
-the nightly run (the concurrency group holds the event):
+(03:00 UTC) and on demand. Eight parallel jobs on every run, and a ninth
+nightly and on demand, each on Ubuntu 24.04 and Node 22 unless noted, each
+step a command from §1, so CI and a local run cannot differ. A push does not
+cancel the nightly run (the concurrency group holds the event). Firefox on
+Linux has WebGL only with a display, so every suite that draws scenes or maps
+in it runs under `xvfb-run -a`. The runner has 4 cores, which the capability
+gate caps at `lite` (motion-tiers-spec §2); a check of the scroll-linked
+camera emulates a capable device and first confirms it entered a `full` rung:
 
 - **verify** (typecheck + unit) — `pnpm verify`: the typecheck and every
   unit suite (dependency rules, determinism, offline build); then
@@ -213,21 +217,24 @@ the nightly run (the concurrency group holds the event):
   fails when a corpus site does not compile). On a
   push or PR it runs on Ubuntu, Node 22; nightly it runs across Ubuntu,
   macOS and Windows on Node 22 and 24.
-- **build** (end-to-end build and render) — `pnpm verify:build`.
-- **visual** (12-point word gate and thumbnails) — after installing the
-  pinned Playwright's Chromium, Firefox and WebKit: `pnpm lint`,
-  `pnpm test:visual --self-test`, `pnpm gate --self-test`, `pnpm gate` (all
-  12 items for every word; it runs the browser checks itself),
-  `pnpm test:auth` (auth forms, `<Protected>` and the reset flow against a
-  local mock provider), `pnpm test:dev` (`az dev` with no setup, the dev
-  mailbox, reload on save, a clean Ctrl-C), `pnpm test:3d` (the 3D runtime,
-  on software WebGL), `pnpm thumbnails --verify` and `pnpm test:palette`
-  (the palette gallery in three engines, theme-spec §14).
+- **build** (end-to-end build and render) — after installing the three
+  engines: `pnpm verify:build`.
+- **gate** (12-point word gate) — after installing the three engines:
+  `pnpm gate --self-test`, then `xvfb-run -a pnpm gate` (all 12 items for
+  every word; it runs the browser checks itself).
+- **visual** (visual, auth, dev, 3D, thumbnails and palette) — after
+  installing the pinned Playwright's Chromium, Firefox and WebKit:
+  `pnpm lint`, `pnpm test:visual --self-test`, `pnpm test:auth` (auth
+  forms, `<Protected>` and the reset flow against a local mock provider),
+  `pnpm test:dev` (`az dev` with no setup, the dev mailbox, reload on save,
+  a clean Ctrl-C), `xvfb-run -a pnpm test:3d` (the 3D runtime, on software
+  WebGL), `pnpm thumbnails --verify` and `pnpm test:palette` (the palette
+  gallery in three engines, theme-spec §14).
 - **backend-db** (built-in backend on PostgreSQL and MySQL) —
   `pnpm test:backend-db`, which starts and removes its pinned database
   images itself (backend-spec §10).
 - **chat** (chat block end to end) — after installing the three engines:
-  `pnpm test:chat` (chat-block-spec §12), over local https with a
+  `xvfb-run -a pnpm test:chat` (chat-block-spec §12), over local https with a
   certificate made at test time; no model is called.
 - **data** (data tables end to end) — after installing the three engines:
   `pnpm test:data` (data-spec §14), over local https likewise.
@@ -261,9 +268,9 @@ an artifact for 14 days.
 weekly (Monday 04:30 UTC) and on demand — see docs/security-scanning.md:
 
 - **codeql** — CodeQL (security-extended) over `javascript-typescript` and
-  over `actions`, one job each;
-- **dependency-review** (dependency review) — PRs only, failing on
-  moderate or worse;
+  over `actions`, one job each; on a public repository only;
+- **dependency-review** (dependency review) — PRs on a public repository
+  only, failing on moderate or worse;
 - **secrets** (secret scan, full history) — `pnpm scan:secrets`;
 - **dependencies** (dependency vulnerabilities) — `pnpm scan:deps`;
 - **workflows** (workflow lint) — `pnpm scan:actions`.

@@ -461,6 +461,7 @@ export class Stage {
       if (!v.counted) { v.counted = true; arrived = true; }
       if (!onScreen) continue;
 
+      const k = 1 - Math.exp(-DAMPING * dt);
       // motion-tiers-spec §5: `lite` rungs hold a static camera for every
       // view, so only rungs with a scroll-linked camera move (scene-spec §8).
       if (rung.scrollLinkedCamera) {
@@ -471,10 +472,12 @@ export class Stage {
         } else if (v.motion === 'scroll' || v.motion === 'parallax' || v.kind === 'orbit') {
           v.target = Math.min(1, Math.max(0, (h - r.top) / (h + r.height)));
         }
-        const k = 1 - Math.exp(-DAMPING * dt);
         v.damped += (v.target - v.damped) * k;
-        v.yaw += (v.yawTarget - v.yaw) * k;
       }
+      // scene-block-spec §9: the visitor's own turn (arrow keys, drag) is not
+      // the scroll-linked camera, so it holds on every live rung — an orbit
+      // view that takes focus answers its keys on `lite` too.
+      v.yaw += (v.yawTarget - v.yaw) * k;
       const x = r.left;
       const y = h - r.bottom;
       this.renderer.setViewport(x, y, r.width, r.height);

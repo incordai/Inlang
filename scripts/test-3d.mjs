@@ -319,9 +319,22 @@ const browser = await chromium.launch({ args: GL_ARGS });
  */
 const violations = [];
 
-async function open(site, path, { reducedMotion = 'no-preference' } = {}) {
+/**
+ * A device the capability gate lets reach `full` (motion-tiers-spec §2: more
+ * than 4 cores, more than 2 GB). A CI runner has 4 cores, which caps it at
+ * `lite`; a check of the scroll-linked camera says it wants this device.
+ */
+const CAPABLE = { cores: 8, memory: 8 };
+
+async function open(site, path, { reducedMotion = 'no-preference', device = null } = {}) {
   server.serve(site.dist);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion });
+  if (device) {
+    await context.addInitScript(({ cores, memory }) => {
+      Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', { get: () => cores, configurable: true });
+      Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => memory, configurable: true });
+    }, device);
+  }
   await watchCsp(context, violations);
   const page = await context.newPage();
   const requests = [];
@@ -433,8 +446,10 @@ for (const [label, path, reducedMotion] of [
 }
 
 /* ---- camera orbit answers the keyboard ------------------------------------ */
-{
-  const { page, context } = await open(procedural, '/?az-probe=off');
+// scene-block-spec §9: an orbit view that takes focus turns on its keys on
+// every live rung — `lite` holds the scroll-linked camera, not the visitor's turn.
+for (const [label, path] of [['', '/?az-probe=off'], [' (lite)', '/?az-tier=lite&az-probe=off']]) {
+  const { page, context } = await open(procedural, path);
   const view = page.locator('.az-scene-view[data-az-camera="orbit"]');
   await view.scrollIntoViewIfNeeded();
   await waitFor(page, () => document.querySelector('.az-scene-view[data-az-camera="orbit"][data-live="true"]'));
@@ -445,7 +460,7 @@ for (const [label, path, reducedMotion] of [
     focused = await page.evaluate(() => document.activeElement?.getAttribute('data-az-camera') === 'orbit');
   }
   const ring = await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle);
-  check('§9: the orbit view is reachable by Tab and shows a focus ring', focused && ring !== 'none', `outline ${ring}`);
+  check(`§9${label}: the orbit view is reachable by Tab and shows a focus ring`, focused && ring !== 'none', `outline ${ring}, rung ${await rung(page)}`);
 
   const box = await view.boundingBox();
   const shot = () => page.screenshot({ clip: box });
@@ -453,7 +468,7 @@ for (const [label, path, reducedMotion] of [
   const before = await shot();
   await page.waitForTimeout(SETTLE_MS);
   const still = await shot();
-  check('CONTROL: without input the orbit view holds its pose', before.equals(still));
+  check(`CONTROL${label}: without input the orbit view holds its pose`, before.equals(still));
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
   // The turn shows on a later frame; a slow machine needs more than one settle for it. Wait for it, bounded.
   let turned = false;
@@ -461,7 +476,8 @@ for (const [label, path, reducedMotion] of [
     await page.waitForTimeout(SETTLE_MS);
     turned = !before.equals(await shot());
   }
-  check('§9: arrow keys turn the object', turned);
+  check(`§9${label}: arrow keys turn the object`, turned, `rung ${await rung(page)}`);
+  if (label) check('CONTROL (lite): the page holds the lite rung, whose camera is static', (await rung(page)) === '6');
   await context.close();
 }
 
@@ -755,7 +771,11 @@ await checkTextured(browser, `chromium ${browser.version()}`);
 {
   // The backdrop animates at rest, so its pixels are no witness: with
   // ?az-probe-trace the stage publishes the scroll position it is following.
-  const { page, context } = await open(backdrop, '/?az-probe=off&az-probe-trace');
+  // Only a `full` rung's camera follows the page (motion-tiers-spec §5), so the device is one that reaches it.
+  const { page, context } = await open(backdrop, '/?az-probe=off&az-probe-trace', { device: CAPABLE });
+  await waitFor(page, () => document.documentElement.hasAttribute('data-az3d-rung'));
+  const entry = await rung(page);
+  check('CONTROL: a capable device enters a full rung, whose camera follows the page', Number(entry) < 6, `rung ${entry}`);
   await page.evaluate(() => { document.body.style.minHeight = '4000px'; });
   await page.evaluate(() => window.scrollTo({ top: 800, behavior: 'instant' }));
   // The stage publishes the position on a frame after the scroll: wait for it, bounded, not a fixed settle.
