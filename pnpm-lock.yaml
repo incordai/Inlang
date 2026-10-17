@@ -84,8 +84,8 @@ importers:
         specifier: 2.0.3
         version: 2.0.3
       mdast-util-gfm-strikethrough:
-        specifier: 2.0.0
-        version: 2.0.0
+        specifier: 2.0.1
+        version: 2.0.1
       mdast-util-gfm-table:
         specifier: 2.0.0
         version: 2.0.0
@@ -812,8 +812,8 @@ packages:
   kdbush@4.1.0:
     resolution: {integrity: sha512-e9vurzrXJQrFX6ckpHP3bvj5l+9CnYzkxDNnNQ1h2QTqdWsUAJgXiKdGNcOa1EY85dU8KbQ+z/FdQdB7P+9yfQ==}
 
-  legacy-javascript@0.0.1:
-    resolution: {integrity: sha512-lPyntS4/aS7jpuvOlitZDFifBCb4W8L/3QU0PLbUTUj+zYah8rfVjYic88yG7ZKTxhS5h9iz7duT8oUXKszLhg==}
+  legacy-javascript@0.0.3:
+    resolution: {integrity: sha512-1r6MT4dVaJyXt4G07Cm2cQ0AUaLJdefiEp4SmIAylA++gnEQ82YvmzE58RkM5EP0fk5hROLCslUPGnwIYdZQVA==}
 
   lighthouse-logger@2.0.2:
     resolution: {integrity: sha512-vWl2+u5jgOQuZR55Z1WM0XDdrJT6mzMP8zHUct7xTlWhuQs+eV0g+QL0RQdFjT54zVmbhLCP8vIVpy1wGn/gCg==}
@@ -855,8 +855,8 @@ packages:
   mdast-util-from-markdown@2.0.3:
     resolution: {integrity: sha512-W4mAWTvSlKvf8L6J+VN9yLSqQ9AOAAvHuoDAmPkz4dHf553m5gVj2ejadHJhoJmcmxEnOv6Pa8XJhpxE93kb8Q==}
 
-  mdast-util-gfm-strikethrough@2.0.0:
-    resolution: {integrity: sha512-mKKb915TF+OC5ptj5bJ7WFRPdYtuHv0yTRxK2tJvi+BDqbkiG7h7u/9SI89nRAYcmap2xHQL9D+QG/6wSrTtXg==}
+  mdast-util-gfm-strikethrough@2.0.1:
+    resolution: {integrity: sha512-OuJHqvr455pwu2OaOrir7dbzqs4jlWKOtlu9L6GjcIjjQwNyw02VntQsr/Ek6/A13vgnXfUhBekWRUP1OkNivw==}
 
   mdast-util-gfm-table@2.0.0:
     resolution: {integrity: sha512-78UEvebzz/rJIxLvE7ZtDd/vIQ0RHv+3Mh5DR96p7cS7HsBhYIICDBCu8csTNWNO6tBWfqXPWekRuj2FNOGOZg==}
@@ -866,6 +866,9 @@ packages:
 
   mdast-util-to-markdown@2.1.2:
     resolution: {integrity: sha512-xj68wMTvGXVOKonmog6LwyJKrYXZPvlwabaryTjLh9LuvovB/KAH+kvi8Gjj+7rJjsFi23nkUxRQv1KqSroMqA==}
+
+  mdast-util-to-markdown@2.2.0:
+    resolution: {integrity: sha512-2Jn/ADrHFFyyniBMi0bncTbJqU78K3/TEYvzvwrWWzD9MYPUa/Gm4r3nOeKFQg/PDM5BsbDYdc8ackW4NTY6NA==}
 
   mdast-util-to-string@4.0.0:
     resolution: {integrity: sha512-0H44vDimn51F0YwvxSJSm0eCDOJTRlmN0R1yBh4HLj9wiV1Dn0QoXGbvFAWj2hSItVTlCmBF1hqKlIyUBVFLPg==}
@@ -1481,7 +1484,7 @@ snapshots:
 
   '@paulirish/trace_engine@0.0.65':
     dependencies:
-      legacy-javascript: 0.0.1
+      legacy-javascript: 0.0.3
       third-party-web: 0.30.0
 
   '@protomaps/basemaps@5.7.2': {}
@@ -1827,7 +1830,7 @@ snapshots:
 
   kdbush@4.1.0: {}
 
-  legacy-javascript@0.0.1: {}
+  legacy-javascript@0.0.3: {}
 
   lighthouse-logger@2.0.2:
     dependencies:
@@ -1929,11 +1932,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  mdast-util-gfm-strikethrough@2.0.0:
+  mdast-util-gfm-strikethrough@2.0.1:
     dependencies:
       '@types/mdast': 4.0.4
       mdast-util-from-markdown: 2.0.3
-      mdast-util-to-markdown: 2.1.2
+      mdast-util-to-markdown: 2.2.0
     transitivePeerDependencies:
       - supports-color
 
@@ -1961,6 +1964,20 @@ snapshots:
       mdast-util-to-string: 4.0.0
       micromark-util-classify-character: 2.0.1
       micromark-util-decode-string: 2.0.1
+      unist-util-visit: 5.1.0
+      zwitch: 2.0.4
+
+  mdast-util-to-markdown@2.2.0:
+    dependencies:
+      '@types/mdast': 4.0.4
+      '@types/unist': 3.0.3
+      longest-streak: 3.1.0
+      mdast-util-phrasing: 4.1.0
+      mdast-util-to-string: 4.0.0
+      micromark-util-character: 2.1.1
+      micromark-util-classify-character: 2.0.1
+      micromark-util-decode-string: 2.0.1
+      micromark-util-html-tag-name: 2.0.1
       unist-util-visit: 5.1.0
       zwitch: 2.0.4
 
