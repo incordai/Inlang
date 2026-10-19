@@ -106,8 +106,8 @@ test('every generated src/ file type-checks under the generated tsconfig, strict
       '',
     ].join('\n'));
     // A map site's three packages, as the repository installs them: the generated map module imports them — on that site only.
-    assert.equal(existsSync(join(p.out, 'src/az/chat-map-gl.ts')), p.source.includes('show map'), `${p.name}: the map runtime ships with maps only`);
-    if (existsSync(join(p.out, 'src/az/chat-map-gl.ts'))) {
+    assert.equal(existsSync(join(p.out, 'src/az/chat-render/chat-map-gl.ts')), p.source.includes('show map'), `${p.name}: the map runtime ships with maps only`);
+    if (existsSync(join(p.out, 'src/az/chat-render/chat-map-gl.ts'))) {
       mkdirSync(join(modules, '@protomaps'), { recursive: true });
       for (const name of MAP_PACKAGES) symlinkSync(realpathSync(join(ROOT, 'node_modules', name)), join(modules, name), 'dir');
     }

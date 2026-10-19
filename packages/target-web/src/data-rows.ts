@@ -2,7 +2,7 @@
  * @az module data-rows
  * Purpose: src/data/rows.tsx — connects every `from` block to the typed client, after the page renders.
  * Spec: docs/data-spec.md §10.3
- * Exports: ROWS_FILE, ROWS_RUNTIME_FILES, fromTables, rowsTsx
+ * Exports: ROWS_FILE, ROWS_RUNTIME_FILES, ROWS_RENDER_FILES, fromTables, rowsTsx
  * Edit guide: only the tables some block reads; the DOM work is the behaviour runtime's rows.ts, not this file.
  * Tests: packages/target-web/test/data-rows.test.ts
  */
@@ -24,6 +24,9 @@ export const ROWS_FILE = `${DATA_DIR}/rows.tsx`;
 
 /** The behaviour runtime's files that only a site with a `from` block ships. */
 export const ROWS_RUNTIME_FILES: readonly string[] = ['rows.ts', 'rows-logic.ts', 'cover-sizes.ts'];
+
+/** The chat renderer's one file the rows runtime reads: a row image's srcset and URL rule (chat-render row-image.ts, in chat.ts CHAT_RENDER_DIR). */
+export const ROWS_RENDER_FILES: readonly string[] = ['row-image.ts'];
 
 /** The tables `from` blocks read, sorted and once each. */
 export function fromTables(spec: Spec): string[] {

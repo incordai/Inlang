@@ -32,6 +32,9 @@ az/
 │   │                  tool shapes, history tags; copied into a server's src/chat-answer/
 │   ├── chat-instructions/ @az/chat-instructions — what a chat's model is told: fixed rules,
 │   │                  content outline, the per-question system text; copied beside it
+│   ├── chat-render/   @az/chat-render — the chat's page renderer: answer view, figures, maps,
+│   │                  prose; per-theme shells for apps; copied into a site's src/az/chat-render/
+│   ├── chat-react/    @az/chat-react — <AzAnswer> for React apps, over chat-render
 │   ├── mcp/           @az/mcp — `az mcp`: MCP over stdio, the tool schemas, the root sandbox
 │   └── cli/           @az/cli — the `az` binary: build, dev, spec, check, lint, migrate,
 │                      eject, backend, mcp, explain, palette, prompt, doctor, audit
@@ -86,7 +89,7 @@ the banned-import list in §2 rather than being merely discouraged.
 core     → (nothing)
 theme    → core
 target-* → core, theme, overlay
-overlay  → theme
+overlay  → theme, chat-render (by alias)
 words/*  → core, theme, overlay        (never a target directly)
 cli      → everything
 auth-runtime → (nothing)                 (copied whole into a site that uses auth)
@@ -96,6 +99,8 @@ backend  → core (types, data)           (its server/ is node built-ins + pinne
 mcp      → (nothing but node:*)          (the CLI injects every operation)
 chat-answer → (nothing)                 (runs in Node, a browser, an app webview)
 chat-instructions → chat-answer (by alias)
+chat-render → (nothing; its map module: the three pinned map packages)
+chat-react → chat-render (by alias), react
 ```
 
 The chat packages (chat-block-spec §22) are imported by an **alias**,
@@ -129,6 +134,15 @@ the model is told (§22.2): the build writes its fixed rules to each chat's
 prompt file, the server assembles the rest per question, an app calls
 `buildInstructions` — one text for the same input. It imports only its own
 files and the answer checker's forms and caps.
+
+`chat-render` is the chat's page renderer (§22.3): the site's panel
+(`overlay` chat.ts) draws every answer with it, and an app does too —
+through `mountAnswer` or `chat-react`'s `<AzAnswer>` — over the chat word's
+shell, generated per theme into `chat-render/themes/` by
+`scripts/gen-chat-themes.mjs` (target-web `chat-library.ts`, the same
+emitters and stylesheet compiler a build runs). `az build` copies it into
+`src/az/chat-render/` of a site with a chat (only `row-image.ts` for a site
+with a `from` block alone) and maps `#chat-render/*` there.
 
 `auth-runtime` (M4) is the adapter layer a generated site runs: the §3
 contract, the `hosted` and `session` adapters and the form behaviour. It

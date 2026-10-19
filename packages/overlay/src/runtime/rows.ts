@@ -30,11 +30,12 @@
  * `document`. Content rendered later (a page behind <Protected>) is found by
  * a MutationObserver. Every block is loaded once per attach; the returned
  * cleanup removes every listener and puts each shell back as it shipped.
- * Imports only its siblings.
+ * Imports only its siblings and the chat renderer (#chat-render).
  */
 
 import { COVER_ATTR, coverSizes } from './cover-sizes.ts';
-import { attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowSrcset, rowText, type RowImage, type RowsConfig } from './rows-logic.ts';
+import { attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText, type RowsConfig } from './rows-logic.ts';
+import { rowSrcset, type RowImage } from '#chat-render/row-image.ts';
 
 /**
  * A row image's `sizes` widened for its cover box (gallery-spec §7 rule 3):

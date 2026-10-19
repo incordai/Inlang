@@ -194,20 +194,20 @@ test('chat runtime: an HTML sink planted in a runtime copy fails by file and sin
   const b = built();
   const good = await check('chat-runtime', b);
   assert.equal(good.status, 'pass', good.line);
-  assert.equal(good.line, 'chat runtime: 15 files, none with innerHTML, insertAdjacentHTML, outerHTML, document.write, eval, Function or setHTML');
+  assert.equal(good.line, 'chat runtime: 16 files, none with innerHTML, insertAdjacentHTML, outerHTML, document.write, eval, Function or setHTML');
 
-  const logic = join(b.out, 'src/az/chat-logic.ts');
+  const logic = join(b.out, 'src/az/chat-render/chat-logic.ts');
   const original = readFileSync(logic, 'utf8');
   appendFileSync(logic, '\n// Never innerHTML here.\n');
   const commented = await check('chat-runtime', b);
   assert.equal(commented.status, 'warn', 'no sink, but not az\'s own copy');
-  assert.equal(commented.line, 'chat runtime: no sink, but src/az/chat-logic.ts is not what this az writes');
+  assert.equal(commented.line, 'chat runtime: no sink, but src/az/chat-render/chat-logic.ts is not what this az writes');
 
   writeFileSync(logic, `${original}\nexport const draw = (el: HTMLElement, s: string) => { el.innerHTML = s; };\n`);
   const sunk = await check('chat-runtime', b);
   assert.equal(sunk.status, 'fail');
   assert.equal(sunk.line, 'chat runtime: 1 way from a string to markup or code in the chat\'s page runtime — a model\'s words could run as code');
-  assert.equal(sunk.fix![0], 'src/az/chat-logic.ts: innerHTML');
+  assert.equal(sunk.fix![0], 'src/az/chat-render/chat-logic.ts: innerHTML');
 
   // A site without chat has no runtime to judge.
   const plain = mkdtempSync(join(tmpdir(), 'az-audit-chat-'));

@@ -24,8 +24,8 @@
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { stripTypeScriptTypes } from 'node:module';
-import { join } from 'node:path';
+import { createRequire, stripTypeScriptTypes } from 'node:module';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { chromium, firefox, webkit } from 'playwright';
@@ -34,6 +34,7 @@ import { violationControl, watchedContext } from './visual/csp.mjs';
 import { chunksOf, corpusCases, corpusRules } from '../packages/chat-answer/test/corpus.ts';
 import { historyKey, tagTurn } from '../packages/backend/src/server/chat-text.ts';
 import { buildInstructions } from '../packages/chat-instructions/src/instructions.ts';
+import { createAnswerChecker } from '../packages/chat-answer/src/checker.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -43,17 +44,6 @@ const STEP_MS = 30_000;
 const CLOSE_MS = 10_000;
 const progress = { last: 'start' };
 const run = watchdog(RUN_MS, 'chat-lib-e2e', progress);
-
-/** The packages an app's page may load, by the alias name it imports them with. */
-const PACKAGES = ['chat-answer', 'chat-instructions'];
-
-/** The page's policy: its own scripts and requests only — no inline script or style, nothing from elsewhere. */
-const POLICY = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'";
-
-const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="${POLICY}" />
-<title>Chat library</title><script type="module" src="/harness.js"></script></head>
-<body><main id="root"><h1>Chat library</h1></main></body></html>`;
 
 /** The page's script: the packages' entry points, called from the test by name. */
 const HARNESS = `import { createAnswerChecker } from '/pkg/chat-answer/checker.ts';
@@ -97,29 +87,111 @@ window.azLib = {
 document.documentElement.dataset.azReady = 'yes';
 `;
 
-/** A package source as a browser module: its types stripped, its `#name/` aliases pointed at the served package. */
-function moduleOf(name, file) {
-  const path = join(ROOT, 'packages', name, 'src', `${file}.ts`);
-  if (!existsSync(path)) return null;
-  const js = stripTypeScriptTypes(readFileSync(path, 'utf8'));
-  return js.replace(/from '#([a-z-]+)\/([a-z0-9-]+\.ts)'/g, (m, alias, f) => (PACKAGES.includes(alias) ? `from '/pkg/${alias}/${f}'` : m));
+/** The answer page's script: the renderer core and <AzAnswer> (scripts/chat-lib-e2e/answer.js). */
+const ANSWER_HARNESS = readFileSync(fileURLToPath(new URL('./chat-lib-e2e/answer.js', import.meta.url)), 'utf8');
+
+/** The packages an app's page may load, by the alias name it imports them with. */
+const PACKAGES = ['chat-answer', 'chat-instructions', 'chat-render', 'chat-react'];
+
+/** The page's policy: its own scripts, styles and requests only — no inline script or style, nothing from elsewhere. */
+const POLICY = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'";
+
+const page = (script, theme = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="${POLICY}" />
+<title>Chat library</title>${theme ? `<link rel="stylesheet" href="/pkg/chat-render/themes/${theme}.css" />` : ''}<script type="module" src="${script}"></script></head>
+<body><main id="root"><h1>Chat library</h1><div id="app"></div><p id="status" role="status"></p></main></body></html>`;
+
+/** React and React DOM as one module of their CommonJS builds, each run in its own scope — an app's bundler does the same. */
+function reactBundle() {
+  const need = createRequire(join(ROOT, 'packages/chat-react/package.json'));
+  const dir = (pkg, from = need) => dirname(from.resolve(`${pkg}/package.json`));
+  const dom = dir('react-dom');
+  const files = {
+    react: join(dir('react'), 'cjs/react.production.js'),
+    scheduler: join(dir('scheduler', createRequire(join(dom, 'package.json'))), 'cjs/scheduler.production.js'),
+    'react-dom': join(dom, 'cjs/react-dom.production.js'),
+    'react-dom/client': join(dom, 'cjs/react-dom-client.production.js'),
+  };
+  const defs = Object.entries(files).map(([id, f]) => `${JSON.stringify(id)}: function (module, exports, require) {\n${readFileSync(f, 'utf8')}\n}`);
+  return `const sources = {\n${defs.join(',\n')}\n};
+const cache = {};
+function require(id) {
+  if (cache[id]) return cache[id].exports;
+  const module = { exports: {} };
+  cache[id] = module;
+  sources[id](module, module.exports, require);
+  return module.exports;
 }
+export const React = require('react');
+export const ReactDOMClient = require('react-dom/client');
+`;
+}
+
+/** The names the packages import from React, re-exported from the bundle. */
+const REACT_NAMES = ['createElement', 'useEffect', 'useLayoutEffect', 'useRef', 'useState', 'useCallback', 'useMemo', 'useSyncExternalStore', 'Fragment'];
+const REACT_MODULE = `import { React } from '/vendor/react-cjs.js';\n${REACT_NAMES.map((n) => `export const ${n} = React.${n};`).join('\n')}\nexport default React;\n`;
+const REACT_DOM_MODULE = `import { ReactDOMClient } from '/vendor/react-cjs.js';\nexport const createRoot = ReactDOMClient.createRoot;\n`;
+
+/** A package source as a browser module: its types stripped, its `#name/` aliases and React pointed at what is served. */
+function moduleOf(name, path) {
+  const file = join(ROOT, 'packages', name, /^(?:themes|examples)\//.test(path) ? '' : 'src', path);
+  if (!existsSync(file)) return null;
+  const js = stripTypeScriptTypes(readFileSync(file, 'utf8'));
+  return js
+    .replace(/(from |import\()'#([a-z-]+)\/((?:themes\/)?[a-z0-9-]+\.ts)'/g, (m, how, alias, f) => (PACKAGES.includes(alias) ? `${how}'/pkg/${alias}/${f}'` : m))
+    .replace(/from '@az\/([a-z-]+)\/((?:themes\/)?[a-z0-9-]+\.ts)'/g, (m, pkg, f) => (PACKAGES.includes(pkg) ? `from '/pkg/${pkg}/${f}'` : m))
+    .replace(/from 'react'/g, "from '/vendor/react.js'")
+    .replace(/from 'react-dom\/client'/g, "from '/vendor/react-dom-client.js'");
+}
+
+/** Every request the pages make, by path: the tests read which modules a page loaded, and when. */
+const requested = [];
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
+  requested.push(url.pathname);
   const send = (status, type, body) => {
     res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
     res.end(body);
   };
-  if (url.pathname === '/') return send(200, 'text/html; charset=utf-8', PAGE);
+  if (url.pathname === '/') return send(200, 'text/html; charset=utf-8', page('/harness.js'));
+  if (url.pathname === '/answer.html') {
+    const theme = url.searchParams.get('theme');
+    return send(200, 'text/html; charset=utf-8', page('/answer.js', theme !== null && /^(?:midnight|paper|signal|clay|petal|volt)$/.test(theme) ? theme : 'midnight'));
+  }
   if (url.pathname === '/harness.js') return send(200, 'text/javascript; charset=utf-8', HARNESS);
-  const m = /^\/pkg\/([a-z-]+)\/([a-z0-9-]+)\.ts$/.exec(url.pathname);
+  if (url.pathname === '/answer.js') return send(200, 'text/javascript; charset=utf-8', ANSWER_HARNESS);
+  if (url.pathname === '/vendor/react-cjs.js') return send(200, 'text/javascript; charset=utf-8', reactBundle());
+  if (url.pathname === '/vendor/react.js') return send(200, 'text/javascript; charset=utf-8', REACT_MODULE);
+  if (url.pathname === '/vendor/react-dom-client.js') return send(200, 'text/javascript; charset=utf-8', REACT_DOM_MODULE);
+  const css = /^\/pkg\/chat-render\/themes\/([a-z]+)\.css$/.exec(url.pathname);
+  if (css && existsSync(join(ROOT, 'packages/chat-render/themes', `${css[1]}.css`))) {
+    return send(200, 'text/css; charset=utf-8', readFileSync(join(ROOT, 'packages/chat-render/themes', `${css[1]}.css`), 'utf8'));
+  }
+  const example = /^\/example\/([a-z-]+)\/([a-z0-9-]+)$/.exec(url.pathname);
+  if (example && PACKAGES.includes(example[1]) && existsSync(join(ROOT, 'packages', example[1], 'examples', `${example[2]}.ts`))) {
+    return send(200, 'text/html; charset=utf-8', page(`/pkg/${example[1]}/examples/${example[2]}.ts`, 'midnight'));
+  }
+  const m = /^\/pkg\/([a-z-]+)\/((?:themes\/|examples\/)?[a-z0-9-]+\.ts)$/.exec(url.pathname);
   const js = m && PACKAGES.includes(m[1]) ? moduleOf(m[1], m[2]) : null;
   if (js !== null) return send(200, 'text/javascript; charset=utf-8', js);
   return send(404, 'text/plain; charset=utf-8', 'not found');
 });
-await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+/**
+ * `--serve`: no tests — the pages stay up for a person to open, the packages' README examples among them
+ * (/example/<package>/<name>), on SERVE_PORT, for at most SERVE_MS.
+ */
+const SERVING = process.argv.includes('--serve');
+const SERVE_PORT = 4800;
+const SERVE_MS = 30 * 60 * 1000;
+await new Promise((ok) => server.listen(SERVING ? SERVE_PORT : 0, '127.0.0.1', ok));
 const origin = `http://127.0.0.1:${server.address().port}`;
+if (SERVING) {
+  run.clear();
+  console.log(`chat-lib-e2e --serve: ${origin}/example/chat-react/answer and ${origin}/example/chat-render/answer, for ${human(SERVE_MS)} (Ctrl+C ends it)`);
+  setTimeout(() => process.exit(0), SERVE_MS).unref();
+  await new Promise(() => undefined);
+}
 
 const RULES = corpusRules();
 const OPTIONS = { components: RULES.show, quotes: RULES.quotes, destinations: RULES.destinations, ...(RULES.presets ? { presets: RULES.presets } : {}) };
@@ -138,6 +210,114 @@ const APP_INPUT = {
   content: { site: { name: 'Acme', description: 'Lamps.' }, pages: [{ route: '/help', blocks: [{ block: 'faq', title: 'Questions', questions: [{ question: 'Do you ship?', answer: 'Yes.' }] }] }], notes: ['Ships in two days — ünïcode.'] },
   rules: { extra: ['Answer in English.'] },
 };
+
+/** A model's answer with prose, components, an injection and a follow-up, as the answer checker turns it into events. */
+const MODEL_ANSWER = `Here is **what we have**.
+
+faq
+  item "Do you ship?" "Yes, worldwide."
+
+cta "Talk to us" /contact
+cta "Elsewhere" https://elsewhere.example
+
+<img src=x onerror=alert(1)> stays text.
+
+chart bar "Orders"
+  points "paid" 3 "open" 1
+
+table "Plans" sortable
+  columns "Plan" "Seats"
+  row "Team" 10
+  row "Solo" 1
+
+ask "How do I cancel?"
+`;
+const MAP_ANSWER = 'Visit us:\n\nmap "Visit"\n  pin "Shop" 52.52 13.405\n';
+const ANSWER_OPTIONS = { components: ['faq', 'cta', 'chart', 'table', 'map'], destinations: ['/contact'] };
+
+/** The events the checker sends for `text`, in order. */
+async function checkerEvents(text) {
+  async function* one() { yield text; }
+  const out = [];
+  for await (const e of createAnswerChecker(ANSWER_OPTIONS).read(one())) out.push(e.type === 'done' ? { type: 'done' } : e);
+  return out;
+}
+
+/**
+ * <AzAnswer> and the renderer core in one engine (#36): an answer streamed in three renders — its prose, its placeholder while a
+ * chart is read, then whole — drawn with the site's renderer; the injection inert; the theme applied; a map's library loaded only
+ * when a map arrives; nothing left after unmount; the core alone, with no framework, drawing the same.
+ */
+async function answerChecks(name, ctx) {
+  // Where this engine's requests start: the map module is judged by its own.
+  const mark = requested.length;
+  const events = await checkerEvents(MODEL_ANSWER);
+  const hold = events.findIndex((e) => e.type === 'hold');
+  const page = await ctx.newPage();
+  await page.goto(`${origin}/answer.html?theme=midnight`, { waitUntil: 'load', timeout: STEP_MS });
+  await page.waitForFunction(() => document.documentElement.dataset.azReady === 'yes', null, { timeout: STEP_MS });
+  const render = (list, extra = {}) => within(STEP_MS, `${name} render`, () => page.evaluate(([e, o]) => window.azAnswer.render({ ...o, events: e }), [list, { ...ANSWER_OPTIONS, theme: 'midnight', ...extra }]));
+  // The theme loads by name on first use: wait for its root, then stream.
+  await render(events.slice(0, 1));
+  await page.waitForFunction(() => document.querySelector('[data-az-chat-root]') !== null, null, { timeout: STEP_MS });
+  const first = await render(events.slice(0, 1));
+  check(name, '<AzAnswer>: the theme loads by name; the first words replace the dots, bold as bold, the answer busy', first.roots === 1 && first.theme === 'midnight'
+    && first.thinking === 0 && first.strong === 1 && first.busy === 'true' && first.hiddenShell === true, JSON.stringify(first).slice(0, 200));
+  const held = await render(events.slice(0, hold + 1));
+  check(name, '<AzAnswer>: a held component stands as a placeholder of its shape while its figures are read', held.skeletons === 1 && held.faq.length === 1, JSON.stringify(held).slice(0, 200));
+  const whole = await render(events);
+  check(name, '<AzAnswer>: the whole answer — FAQ, the listed call to action only, a chart, a sortable table, the follow-up, the bar',
+    whole.busy === 'false' && whole.skeletons === 0 && whole.faq[0] === 'Do you ship?' && JSON.stringify(whole.links) === '["/contact"]'
+      && whole.svgMarks > 0 && whole.tableRows === 2 && whole.follows[0] === 'How do I cancel?' && whole.bar === 1,
+    JSON.stringify({ ...whole, text: undefined }).slice(0, 400));
+  check(name, '<AzAnswer>: the injection is text — no element, no style attribute, no handler from the answer',
+    whole.text.includes('<img src=x onerror=alert(1)> stays text.') && whole.foreign === 0 && whole.styled === 0 && whole.handlers === 0, JSON.stringify({ foreign: whole.foreign, styled: whole.styled, handlers: whole.handlers }));
+  const planted = await page.evaluate(() => {
+    const li = document.querySelector('[data-az-chat-root] > ol > li');
+    const img = document.createElement('img');
+    // An on- attribute no event has and a style set through the CSSOM: counted, with nothing the policy refuses.
+    img.setAttribute('onazcontrol', 'x');
+    img.style.color = 'red';
+    li.append(img);
+    const seen = window.azAnswer.describe();
+    img.remove();
+    return seen;
+  });
+  check(name, 'CONTROL: an element, a style and a handler planted in the answer are each counted', planted.foreign === 1 && planted.styled === 1 && planted.handlers === 1);
+  check(name, '<AzAnswer>: the theme\'s tokens reach the answer (the surface colour declared, the figure framed in a theme colour)',
+    whole.surface !== '' && whole.figureBorder !== null && whole.figureBorder !== 'rgba(0, 0, 0, 0)', `${whole.surface} ${whole.figureBorder}`);
+  await within(STEP_MS, `${name} follow-up`, () => page.evaluate(() => window.azAnswer.click('[data-az-chat-root] > ol .az-chat-follows button')));
+  const asked = await page.evaluate(() => window.azAnswer.asked());
+  const said = await page.evaluate(() => window.azAnswer.said());
+  check(name, '<AzAnswer>: a follow-up\'s button asks its question; the status lines are sentences and one line a component', asked[0] === 'How do I cancel?'
+    && said.includes('Answer finished. 1 follow-up question.') && said.includes('1 question and answer.') && new Set(said).size === said.length, JSON.stringify({ asked, said }).slice(0, 300));
+  const before = requested.slice(mark).filter((p) => p.includes('chat-map-gl')).length;
+  check(name, '<AzAnswer>: no map code is loaded while no answer holds a map', before === 0);
+  await render(await checkerEvents(MAP_ANSWER));
+  await page.waitForFunction(() => document.querySelector('[data-az-chat-root] .az-chat-map-list') !== null, null, { timeout: STEP_MS });
+  const map = await page.evaluate(() => window.azAnswer.describe());
+  for (const until = Date.now() + STEP_MS; !requested.slice(mark).some((p) => p.includes('chat-map-gl')) && Date.now() < until;) await new Promise((done) => setTimeout(done, 50));
+  check(name, '<AzAnswer>: another answer starts the drawing again; its map is listed at once, and the map\'s module is asked for only now',
+    map.mapList === 1 && map.faq.length === 0 && requested.slice(mark).some((p) => p.includes('chat-map-gl')), JSON.stringify(map).slice(0, 200));
+  const gone = await within(STEP_MS, `${name} unmount`, () => page.evaluate(() => window.azAnswer.unmount()));
+  check(name, '<AzAnswer>: unmounted, nothing of it is left in the page', gone.roots === 0 && gone.children === 0, JSON.stringify(gone));
+  const core = await within(STEP_MS, `${name} core`, () => page.evaluate(([o, e]) => window.azAnswer.core(o, e), [ANSWER_OPTIONS, events]));
+  check(name, 'the renderer core with no framework draws the same answer, and destroy() leaves nothing',
+    core.faq[0] === 'Do you ship?' && JSON.stringify(core.links) === '["/contact"]' && core.tableRows === 2 && core.foreign === 0 && core.after === 0, JSON.stringify(core).slice(0, 200));
+  await closeWithin(page, CLOSE_MS, `${name} answer page.close`);
+  // The packages' README examples, as a person runs them (`--serve`): each draws its answer.
+  for (const pkg of ['chat-react', 'chat-render']) {
+    const ex = await ctx.newPage();
+    await ex.goto(`${origin}/example/${pkg}/answer`, { waitUntil: 'load', timeout: STEP_MS });
+    await ex.waitForFunction(() => document.documentElement.dataset.azExample === 'drawn', null, { timeout: STEP_MS });
+    const drawn = await ex.evaluate(() => {
+      const li = document.querySelector('[data-az-chat-root] > ol > li');
+      return { svg: li?.querySelectorAll('svg').length ?? 0, links: [...(li?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('href')), busy: li?.getAttribute('aria-busy') ?? null };
+    });
+    check(name, `the ${pkg} README example draws its answer: a chart, the listed link, finished`, drawn.svg > 0 && JSON.stringify(drawn.links) === '["/contact"]' && drawn.busy === 'false', JSON.stringify(drawn));
+    await closeWithin(ex, CLOSE_MS, `${name} ${pkg} example.close`);
+  }
+}
 
 const failures = [];
 const check = (engine, what, ok, detail = '') => {
@@ -189,6 +369,9 @@ try {
       progress.last = `${name}: instructions`;
       const told = await within(STEP_MS, `${name} instructions`, () => page.evaluate((input) => window.azLib.instructions(input), APP_INPUT));
       check(name, 'buildInstructions gives the text Node gives for the same app input', told === buildInstructions(APP_INPUT) && told.includes('from tool'), told.slice(0, 80));
+
+      progress.last = `${name}: answer`;
+      await answerChecks(name, ctx);
 
       check(name, 'no Content-Security-Policy violation', (sinks[name] ?? []).length === 0, (sinks[name] ?? []).join(' | '));
       check(name, 'no request leaves the page\'s origin', away.length === 0, away.join(' '));

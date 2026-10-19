@@ -56,7 +56,7 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp', 'chat-answer', 'chat-instructions'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp', 'chat-answer', 'chat-instructions', 'chat-render', 'chat-react'];
 
 /**
  * The chat packages (ARCHITECTURE §2, chat-block-spec §22) are imported by an
@@ -67,13 +67,15 @@ const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene
 const ALIASES: Readonly<Record<string, readonly string[]>> = {
   backend: ['chat-answer', 'chat-instructions'],
   'chat-instructions': ['chat-answer'],
+  overlay: ['chat-render'],
+  'chat-react': ['chat-render'],
 };
 
 /** What is wrong with `pkg`'s alias imports (`#name/…`), as messages: an alias it may not use, or one its package.json does not map to that package. */
 function aliasProblems(pkg: string, specs: readonly string[], manifest: { imports?: Record<string, string>; dependencies?: Record<string, string> }): string[] {
   const out: string[] = [];
   for (const spec of specs.filter((s) => s.startsWith('#'))) {
-    const m = /^#([a-z-]+)\/[a-z0-9-]+\.ts$/.exec(spec);
+    const m = /^#([a-z-]+)\/(?:themes\/)?[a-z0-9-]+\.ts$/.exec(spec);
     const name = m?.[1];
     if (!name || !(ALIASES[pkg] ?? []).includes(name)) { out.push(`${pkg} imports '${spec}' — not an alias it may use`); continue; }
     if (manifest.imports?.[`#${name}/*`] !== `@az/${name}/*` || manifest.dependencies?.[`@az/${name}`] !== 'workspace:*') {
@@ -123,6 +125,29 @@ test('the instructions import only their siblings and the answer checker — no 
     for (const spec of importsOf(file)) {
       assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec) || /^#chat-answer\/[a-z0-9-]+\.ts$/.test(spec),
         `chat-instructions/${file.split(/[\\/]/).pop()} imports '${spec}' — only its siblings and #chat-answer/`);
+    }
+  }
+});
+
+test('the chat renderer imports only its siblings, and its map module the three pinned map packages — it is copied into a site and bundled into an app (chat-block-spec §22.3)', () => {
+  const files = sources('packages/chat-render');
+  assert.ok(files.length >= 16, 'CONTROL: the renderer sources are found');
+  const map = ['maplibre-gl', 'pmtiles', '@protomaps/basemaps', 'maplibre-gl/dist/maplibre-gl-worker.mjs?url', 'maplibre-gl/dist/maplibre-gl.css'];
+  for (const file of files) {
+    for (const spec of importsOf(file)) {
+      assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec) || (file.endsWith(`${sep}chat-map-gl.ts`) && map.includes(spec)),
+        `chat-render/${file.split(/[\\/]/).pop()} imports '${spec}' — only its siblings`);
+    }
+  }
+});
+
+test('the React components import only their siblings, the renderer and React — never a site\'s runtime or the compiler (chat-block-spec §22.3)', () => {
+  const files = sources('packages/chat-react');
+  assert.ok(files.length >= 1, 'CONTROL: the components\' sources are found');
+  for (const file of files) {
+    for (const spec of importsOf(file)) {
+      assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec) || /^#chat-render\/(?:themes\/)?[a-z0-9-]+\.ts$/.test(spec) || spec === 'react',
+        `chat-react/${file.split(/[\\/]/).pop()} imports '${spec}' — only its siblings, #chat-render/ and react`);
     }
   }
 });
@@ -255,7 +280,7 @@ test('mcp imports only its siblings and node built-ins — the CLI injects every
 });
 
 test('nothing imports from cli — ARCHITECTURE §2', () => {
-  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'chat-answer', 'chat-instructions']) {
+  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'chat-answer', 'chat-instructions', 'chat-render', 'chat-react']) {
     for (const file of sources(`packages/${pkg}`)) {
       for (const spec of importsOf(file)) {
         assert.ok(crossPackage(spec) !== 'cli', `${pkg} imports from cli (${spec})`);

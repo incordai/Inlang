@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { END_SLACK_PX, INPUT_MAX_ROWS, atEnd, floatPreset, inputRows, mayFollow, offersLatest, parseChatConfig } from '../src/runtime/chat-logic.ts';
+import { END_SLACK_PX, INPUT_MAX_ROWS, atEnd, floatPreset, inputRows, mayFollow, offersLatest, parseChatConfig } from '#chat-render/chat-logic.ts';
 import { POLICY } from '../src/runtime/policy.ts';
 
 test('atEnd: the end, within a line of it, and above it', () => {

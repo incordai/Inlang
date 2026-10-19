@@ -1,0 +1,28 @@
+az 1
+
+site library
+  theme midnight
+  backend
+    database sqlite
+    model    default
+
+page /
+  hero center
+    title "Library"
+    cta   "Contact" /contact
+    alt   "Docs" https://example.com/docs
+  cta band
+    title "Reach us"
+    cta "Mail" mailto:hello@example.com
+    alt "Call" tel:+15550100
+  chat panel
+    title    "Ask a question"
+    greeting "Ask me anything."
+    show     all
+    allow    anyone
+    ask "A suggested question"
+
+page /contact
+  text
+    title "Contact"
+    body  "Write to us."

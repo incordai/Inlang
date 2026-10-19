@@ -36,7 +36,7 @@ import { watchCsp, cspResult } from './visual/csp.mjs';
 import { scanDifferences } from '../packages/target-web/test/legacy-scan.ts';
 import { startTags } from '../packages/target-web/src/html-scan.ts';
 import { DEFAULT_THEME, THEMES } from '../packages/theme/src/themes.ts';
-import { CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../packages/target-web/src/chat.ts';
+import { CHAT_RENDER_DIR, CHAT_RENDER_FILES, CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../packages/target-web/src/chat.ts';
 import { PINS } from '../packages/target-web/src/emit.ts';
 import { ROWS_RUNTIME_FILES } from '../packages/target-web/src/data-rows.ts';
 
@@ -240,17 +240,18 @@ try {
   // has none of.
   {
     const runtimeDir = join(ROOT, 'packages/overlay/src/runtime');
-    // The build's own lists: rows-logic.ts is on both (a row image's srcset, chat-block-spec §20.6).
+    // The build's own lists.
     const ROWS = ROWS_RUNTIME_FILES;
     const CHAT = CHAT_RUNTIME_FILES;
-    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts') && !ROWS.includes(f) && !CHAT.includes(f) && !MAP_RUNTIME_FILES.includes(f));
+    const shipped = readdirSync(runtimeDir).filter((f) => f.endsWith('.ts') && !ROWS.includes(f) && !CHAT.includes(f));
     check('behaviour runtime shipped verbatim into src/az/',
       shipped.length > 0 && shipped.every((f) =>
         existsSync(join(proj, 'src/az', f)) &&
         readFileSync(join(proj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8')),
       shipped.join(' '));
     check('a site without a from block ships no rows runtime', ROWS.every((f) => !existsSync(join(proj, 'src/az', f))));
-    check('a site without a chat that shows maps ships no map runtime (chat-block-spec §21.4)', MAP_RUNTIME_FILES.every((f) => !existsSync(join(proj, 'src/az', f))));
+    check('a site without a chat panel or a from block ships no chat renderer and maps no alias to it (chat-block-spec §22.3)',
+      !existsSync(join(proj, 'src/az', CHAT_RENDER_DIR)) && JSON.parse(readFileSync(join(proj, 'package.json'), 'utf8')).imports === undefined);
     check('a site without a chat panel ships no chat runtime, no chat module and no chat server',
       CHAT.every((f) => !existsSync(join(proj, 'src/az', f))) && !existsSync(join(proj, 'src/chat')) && !existsSync(join(proj, 'server/chat')));
   }
@@ -778,8 +779,11 @@ try {
       [1, 2, 3, 4, 5, 6].every((n) => readdirSync(join(chatProj, 'dist/assets')).some((f) => f.endsWith('.css') && readFileSync(join(chatProj, 'dist/assets', f), 'utf8').includes(`--az-color-series-${n}:`)))
         && !readdirSync(join(plainProj, 'dist/assets')).some((f) => f.endsWith('.css') && readFileSync(join(plainProj, 'dist/assets', f), 'utf8').includes('--az-color-series-')));
     const runtimeDir = join(ROOT, 'packages/overlay/src/runtime');
-    check('chat: the chat runtime ships verbatim with a chat panel, beside its generated module',
+    const renderDir = join(ROOT, 'packages/chat-render/src');
+    check('chat: the chat runtime and the renderer it draws with ship verbatim with a chat panel, beside its generated module; the alias maps to the renderer',
       CHAT_RUNTIME_FILES.every((f) => readFileSync(join(chatProj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8'))
+        && CHAT_RENDER_FILES.every((f) => readFileSync(join(chatProj, 'src/az', CHAT_RENDER_DIR, f), 'utf8') === readFileSync(join(renderDir, f), 'utf8'))
+        && JSON.parse(readFileSync(join(chatProj, 'package.json'), 'utf8')).imports?.['#chat-render/*'] === `./src/az/${CHAT_RENDER_DIR}/*`
         && existsSync(join(chatProj, 'src/chat/runtime.tsx')));
     check('chat §7: the page ships the shell — the greeting as text, the form hidden until the runtime runs, a noscript line',
       /data-az-chat="/.test(chatPage) && chatPage.includes('Ask about anything on this site.')
@@ -842,8 +846,8 @@ try {
         && pageScripts.length > 0 && pageScripts.every((f) => !/chat-map-gl|maplibre/.test(f)),
       `${assets.filter((f) => /map/.test(f)).join(' ')} | page: ${pageScripts.join(' ')}`);
     check('C8: the map runtime ships verbatim with a chat that shows maps, and with no other site',
-      MAP_RUNTIME_FILES.every((f) => readFileSync(join(mapProj, 'src/az', f), 'utf8') === readFileSync(join(runtimeDir, f), 'utf8'))
-        && MAP_RUNTIME_FILES.every((f) => !existsSync(join(chatProj, 'src/az', f)) && !existsSync(join(plainProj, 'src/az', f))));
+      MAP_RUNTIME_FILES.every((f) => readFileSync(join(mapProj, 'src/az', CHAT_RENDER_DIR, f), 'utf8') === readFileSync(join(renderDir, f), 'utf8'))
+        && MAP_RUNTIME_FILES.every((f) => !existsSync(join(chatProj, 'src/az', CHAT_RENDER_DIR, f)) && !existsSync(join(plainProj, 'src/az', CHAT_RENDER_DIR, f))));
     // The guard passed the map bundle (the build above); az audit reads the same folder with the same scan (siteScanner)
     // and must pass it too — the library's code, its links and its worker's name are not keys.
     const mapAudit = spawnSync(process.execPath, [CLI, 'audit', '--out', mapProj, '--json'], {

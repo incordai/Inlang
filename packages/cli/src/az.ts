@@ -34,8 +34,8 @@ import { isFromMark } from '../../core/src/emit-contract.ts';
 import { compilePreview } from '../../core/src/preview.ts';
 import { bannerHtml, withBanner } from './preview-banner.ts';
 import type { Spec } from '../../core/src/spec.ts';
-import { ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
-import { CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../../target-web/src/chat.ts';
+import { ROWS_RENDER_FILES, ROWS_RUNTIME_FILES } from '../../target-web/src/data-rows.ts';
+import { CHAT_RENDER_DIR, CHAT_RENDER_FILES, CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../../target-web/src/chat.ts';
 import { SvgError } from '../../target-web/src/svg.ts';
 import { IconError } from '../../target-web/src/head.ts';
 import { MarkdownError, markdownText } from '../../target-web/src/markdown.ts';
@@ -353,13 +353,14 @@ export function build(options: BuildOptions): BuildOutcome {
   // that uses auth.
   const generated = [
     ...project.files,
-    // Its rows module only with a `from` block (data-spec §10.3), its chat module only with a chat panel, its map
-    // modules only with a chat that shows maps (chat-block-spec §21.4). A file both lists name (rows-logic.ts: a row
-    // image's srcset, chat-block-spec §20.6) ships with either.
+    // Its rows module only with a `from` block (data-spec §10.3), its chat panel only with a chat (chat-block-spec §7).
     ...copied('../../overlay/src/runtime/', RUNTIME_DIR, (f) => (project.rows && ROWS_RUNTIME_FILES.includes(f))
       || (project.chat && CHAT_RUNTIME_FILES.includes(f))
-      || (project.map && MAP_RUNTIME_FILES.includes(f))
-      || (!ROWS_RUNTIME_FILES.includes(f) && !CHAT_RUNTIME_FILES.includes(f) && !MAP_RUNTIME_FILES.includes(f))),
+      || (!ROWS_RUNTIME_FILES.includes(f) && !CHAT_RUNTIME_FILES.includes(f))),
+    // The chat renderer the panel draws with (chat-block-spec §22.3), into its own folder: its files with a chat panel, its map
+    // files only with a chat that shows maps, and the row image's rules with a `from` block too — the site maps its alias there.
+    ...copied('../../chat-render/src/', `${RUNTIME_DIR}/${CHAT_RENDER_DIR}`, (f) => (project.chat && CHAT_RENDER_FILES.includes(f))
+      || (project.map && MAP_RUNTIME_FILES.includes(f)) || (project.rows && ROWS_RENDER_FILES.includes(f))),
     ...copied('../../core/src/', GUARD_DIR, (f) => f === 'secrets.ts'),
     // And the walk that reads back what the build wrote (az audit's too).
     ...copied('./', GUARD_DIR, (f) => f === 'shipped.ts'),

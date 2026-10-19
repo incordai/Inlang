@@ -111,6 +111,8 @@ works — a change that breaks one is sent back:
 | `packages/backend` | the generated server's source and its emitter |
 | `packages/chat-answer` | the chat's answer checker, for the generated server and for any app (chat-block-spec §22) |
 | `packages/chat-instructions` | what a chat's model is told, for the build, the generated server and any app |
+| `packages/chat-render` | the chat's page renderer, for a site's panel and any app; per-theme shells in `themes/` (`node scripts/gen-chat-themes.mjs` after a change to the chat word or a theme) |
+| `packages/chat-react` | `<AzAnswer>` for React apps |
 | `packages/cli` | the `az` binary |
 | `packages/mcp` | the MCP server behind `az mcp` |
 | `docs/` | product, grammar, architecture, one spec per block, verification |

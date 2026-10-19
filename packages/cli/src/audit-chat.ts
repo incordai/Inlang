@@ -35,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { scanText } from '../../core/src/secrets.ts';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
 import { RUNTIME_DIR } from '../../target-web/src/emit.ts';
-import { CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../../target-web/src/chat.ts';
+import { CHAT_RENDER_DIR, CHAT_RENDER_FILES, CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES } from '../../target-web/src/chat.ts';
 import type { ContextTable } from '../../backend/src/server/chat.ts';
 import type { Table } from '../../backend/src/server/data-values.ts';
 import type { AuditContext } from './audit.ts';
@@ -47,6 +47,8 @@ export const CONTEXT_FILE_MAX = 1024 * 1024;
 
 /** az's own copies of the page runtime, which a build copies verbatim. */
 const RUNTIME_SOURCE = fileURLToPath(new URL('../../overlay/src/runtime/', import.meta.url));
+/** The chat renderer's own files, copied into the runtime's chat-render folder (chat-block-spec §22.3). */
+const RENDER_SOURCE = fileURLToPath(new URL('../../chat-render/src/', import.meta.url));
 
 /** §11.2: a way from a string to markup or code. */
 const SINKS: readonly (readonly [RegExp, string])[] = [
@@ -166,14 +168,18 @@ const chatRuntime: Check<AuditContext> = {
     const found: string[] = [];
     const differs: string[] = [];
     let files = 0;
-    // A site that shows maps ships the map runtime too (§21.4); it is read the same way.
-    for (const f of [...CHAT_RUNTIME_FILES, ...MAP_RUNTIME_FILES]) {
-      const built = await readRegular(join(ctx.outDir, RUNTIME_DIR, f));
+    // The panel's files, and the renderer it draws with; a site that shows maps ships the map runtime too (§21.4), read the same way.
+    const shipped = [
+      ...CHAT_RUNTIME_FILES.map((f) => [f, RUNTIME_SOURCE] as const),
+      ...[...CHAT_RENDER_FILES, ...MAP_RUNTIME_FILES].map((f) => [`${CHAT_RENDER_DIR}/${f}`, RENDER_SOURCE, f] as const),
+    ];
+    for (const [path, source, name = path] of shipped) {
+      const built = await readRegular(join(ctx.outDir, RUNTIME_DIR, path));
       if (built === null) continue;
       files++;
-      for (const sink of runtimeSinks(built)) found.push(`${RUNTIME_DIR}/${f}: ${sink}`);
-      const own = await readRegular(join(RUNTIME_SOURCE, f));
-      if (own === null || own.replace(/\r\n/g, '\n') !== built.replace(/\r\n/g, '\n')) differs.push(`${RUNTIME_DIR}/${f}`);
+      for (const sink of runtimeSinks(built)) found.push(`${RUNTIME_DIR}/${path}: ${sink}`);
+      const own = await readRegular(join(source, name));
+      if (own === null || own.replace(/\r\n/g, '\n') !== built.replace(/\r\n/g, '\n')) differs.push(`${RUNTIME_DIR}/${path}`);
     }
     if (files === 0) return { status: 'skip', line: 'chat runtime: the site has no chat' };
     if (found.length > 0) {

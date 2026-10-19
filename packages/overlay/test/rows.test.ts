@@ -7,8 +7,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowSrcset, rowText, safeUrl,
+  attributeValue, emptyWithout, markerProp, paragraphs, parseRowsConfig, problemCopy, rowImage, rowText,
 } from '../src/runtime/rows-logic.ts';
+import { rowSrcset, safeUrl } from '#chat-render/row-image.ts';
 
 const MARK = (prop: string) => `\u{E000}${prop}\u{E000}`;
 const CONFIG = {

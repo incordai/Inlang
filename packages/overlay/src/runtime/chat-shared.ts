@@ -22,7 +22,7 @@
  * Referer.
  */
 
-import { SHARED_PATH, SHARE_TEXT, mergeText, shareProblem, type ShareTags } from './chat-logic.ts';
+import { SHARED_PATH, SHARE_TEXT, mergeText, shareProblem, type ShareTags } from '#chat-render/chat-logic.ts';
 
 export interface ShareInput {
   /** The backend's base URL. */

@@ -71,27 +71,17 @@ test('the runtime touches nothing at import: a server render never reaches windo
   assert.equal(typeof runtime.attach, 'function');
 });
 
-/**
- * The map's library module (chat-block-spec §21.4, Q19a) is the one runtime
- * file that imports packages: exactly the three a map site pins, the
- * library's worker file by URL and its stylesheet.
- */
-const MAP_LIBRARY_IMPORTS = ['maplibre-gl', 'pmtiles', '@protomaps/basemaps', 'maplibre-gl/dist/maplibre-gl-worker.mjs?url', 'maplibre-gl/dist/maplibre-gl.css'];
-
-test('the runtime imports only its siblings — it is copied alone into each project; the map library module, only the three pinned packages', () => {
+test('the runtime imports only its siblings and the chat renderer — it is copied into each project with it (chat-block-spec §22.3)', () => {
   const dir = fileURLToPath(new URL('../src/runtime/', import.meta.url));
+  let aliased = 0;
   for (const f of readdirSync(dir)) {
     const src = readFileSync(join(dir, f), 'utf8');
     const imports = [...src.matchAll(/(?:from\s+|^import\s+)['"]([^'"]+)['"]/gm)].map((m) => m[1]);
     for (const m of imports) {
-      if (f === 'chat-map-gl.ts' && MAP_LIBRARY_IMPORTS.includes(m)) continue;
-      assert.match(m, /^\.\/[a-z-]+\.ts$/, `${f} imports '${m}'`);
+      if (m.startsWith('#chat-render/')) aliased++;
+      assert.match(m, /^(?:\.\/|#chat-render\/)[a-z-]+\.ts$/, `${f} imports '${m}'`);
     }
-    // A dynamic import is a sibling too: chat-map-draw.ts's of the library module, the only one.
-    for (const m of src.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)) {
-      assert.equal(`${f} → ${m[1]}`, 'chat-map-draw.ts → ./chat-map-gl.ts', 'the one dynamic import');
-    }
+    assert.equal([...src.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)].length, 0, `${f}: no dynamic import (the map's is the renderer's)`);
   }
-  const lib = readFileSync(join(dir, 'chat-map-gl.ts'), 'utf8');
-  assert.deepEqual([...lib.matchAll(/(?:from\s+|^import\s+)['"]([^'./][^'"]*)['"]/gm)].map((m) => m[1]).sort(), [...MAP_LIBRARY_IMPORTS].sort(), 'CONTROL: the map module imports exactly these');
+  assert.ok(aliased > 0, 'CONTROL: the chat panel imports the renderer by its alias');
 });

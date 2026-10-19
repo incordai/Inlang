@@ -1,0 +1,25 @@
+{
+  "name": "@az/chat-react",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./*.ts": "./src/*.ts"
+  },
+  "imports": {
+    "#chat-render/*": "@az/chat-render/*"
+  },
+  "peerDependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "dependencies": {
+    "@az/chat-render": "workspace:*"
+  },
+  "devDependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "@az/chat-answer": "workspace:*"
+  }
+}

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
 import { emitProject } from '../src/emit.ts';
-import { CHAT_FILE, CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES, MAP_TILES_ENV, chatTsx, mapCss } from '../src/chat.ts';
+import { CHAT_FILE, CHAT_RENDER_DIR, CHAT_RENDER_FILES, CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES, MAP_TILES_ENV, chatTsx, mapCss } from '../src/chat.ts';
 import { PINS } from '../src/emit.ts';
 import { WEB_EMITTERS } from '../../words/registry.ts';
 
@@ -156,7 +156,7 @@ test('a chat that shows maps: the module hands the panel the map drawer and the 
   assert.equal(p.map, true);
   const chat = file(p, CHAT_FILE);
   assert.equal(chat, chatTsx('src/az', true));
-  assert.match(chat, /import \{ drawMap \} from "\.\.\/az\/chat-map-draw\.ts";/);
+  assert.match(chat, /import \{ drawMap \} from "\.\.\/az\/chat-render\/chat-map-draw\.ts";/);
   assert.match(chat, new RegExp(`const TILES: string \\| null = import\\.meta\\.env\\.${MAP_TILES_ENV} \\|\\| null;`));
   assert.match(chat, /drawMap: \(d, data\) => drawMap\(\{ \.\.\.d, tiles: TILES \}, data\),/);
   // The library is never imported by the module itself: the drawer imports it when the first map arrives.
@@ -189,6 +189,16 @@ test('mapCss: the popup\'s box and tip from the theme\'s tokens — two classes 
   assert.match(css, /^\.az-chat-map-stage \.maplibregl-popup-content \{ background: var\(--az-color-bg\); color: var\(--az-color-text\);/m);
   assert.equal((css.match(/maplibregl-popup-tip \{ border-(?:top|bottom|left|right)-color: var\(--az-color-border-strong\); \}/g) ?? []).length, 8, 'every anchor\'s tip');
   assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgb\(|hsl\(/i);
+});
+
+test('every file of the chat renderer is on a list the build copies, or the app\'s alone (chat-block-spec §22.3)', () => {
+  const dir = new URL('../../chat-render/src/', import.meta.url);
+  const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).sort();
+  // Built from a theme's templates: an app's, never a site's, whose page carries its shell.
+  const appOnly = ['chat-templates.ts', 'chat-answer-mount.ts'];
+  assert.ok(files.length >= 18, 'CONTROL: the renderer\'s files are found');
+  assert.deepEqual([...CHAT_RENDER_FILES, ...MAP_RUNTIME_FILES, ...appOnly].sort(), files);
+  assert.equal(CHAT_RENDER_DIR, 'chat-render');
 });
 
 test('the map runtime files are their own list: never among the chat\'s, copied only to a map site (cli az.ts)', () => {

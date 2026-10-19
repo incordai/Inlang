@@ -167,7 +167,7 @@ import { chunksOf, corpusCases, corpusRules } from '../packages/chat-answer/test
 import { mapFixture } from './lib/map-fixture.mjs';
 import sharp from 'sharp';
 import { THEMES, DEFAULT_THEME } from '../packages/theme/src/index.ts';
-import { INPUT_MAX_ROWS } from '../packages/overlay/src/runtime/chat-logic.ts';
+import { INPUT_MAX_ROWS } from '../packages/chat-render/src/chat-logic.ts';
 
 /*
  * Deadlines (lib/bounded.mjs): a normal run takes a few minutes — six theme
@@ -1410,7 +1410,7 @@ async function tabTo(page, locator, max = 60, key = 'Tab') {
   }
   return isFocused(locator);
 }
-/** The transcript is scrolled to its end (overlay chat-logic.ts atEnd, the same slack). */
+/** The transcript is scrolled to its end (chat-render chat-logic.ts atEnd, the same slack). */
 const transcriptAtEnd = (page) => page.evaluate(() => {
   const t = document.querySelector('[data-az-chat-transcript]');
   return t.scrollHeight - t.scrollTop - t.clientHeight <= 24;

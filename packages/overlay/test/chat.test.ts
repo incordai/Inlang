@@ -7,11 +7,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import {
   BLOCK_LIMITS, CHAT_TEXT, EVENT_LINE_MAX, allowedDestination, blockCopy, createEventReader, finishedSentences, leftCopy, linkKind,
   parseChatConfig, problemCopy, REQUEST_MAX, requestBody, RETRYABLE, visitorText, type ChatEvent, type ChatTurn,
-} from '../src/runtime/chat-logic.ts';
+} from '#chat-render/chat-logic.ts';
 
 const CONFIG = { page: '/pricing', allow: 'signedin', limit: 20, signin: '/login' };
 /** A prose-only shell's config, as parsed: nothing to show, nowhere to link. */
@@ -249,13 +249,18 @@ test('every refusal reads as fixed copy — never the server\'s text', () => {
 
 /* ---- §5.4 rule 3: no way from a string to markup or code ---------------- */
 
-const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-chart-ui.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-busy.ts', 'chat-bar.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts',
-  'chat-map.ts', 'chat-map-draw.ts', 'chat-map-gl.ts']
-  .map((f) => [f, readFileSync(new URL(`../src/runtime/${f}`, import.meta.url), 'utf8')] as const);
+/** The chat's page runtime: the panel's own files here, and every file of the renderer it draws with (chat-render, §22.3). */
+const RENDER = new URL('../../chat-render/src/', import.meta.url);
+const SOURCES = [
+  ...['chat.ts', 'chat-shared.ts'].map((f) => [f, readFileSync(new URL(`../src/runtime/${f}`, import.meta.url), 'utf8')] as const),
+  ...readdirSync(RENDER).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).sort().map((f) => [f, readFileSync(new URL(f, RENDER), 'utf8')] as const),
+];
 /** chat-map-gl.ts's one object URL (§21.4.3, Q19b): the worker's blob, one line importing the site's own worker file, handed to the library. */
 const WORKER_FN = /function start\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
 /** chat-history.ts's one way to the browser's storage (§21.1.4): the property read, inside try. */
 const STORAGE_FN = /export function browserStorage\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
+/** chat-templates.ts's image writes (§22.3): the app's own image map, each address checked in the same function — the app's configuration, never an answer's. */
+const HOST_IMAGES_FN = /export function hostImages\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
 /** chat-draw.ts's one image write (§20.6): a row's image, at the backend's own path, checked in the same function. */
 const ROW_IMAGE_FN = /function rowImage\([^)]*\)[^{]*\{([\s\S]*?)\n\}/;
 /** Every sink that would parse a string as HTML or run it, write a style, or keep the conversation. */
@@ -283,14 +288,14 @@ test('the map\'s worker is the runtime\'s one object URL: a blob of one line imp
 });
 
 test('a URL is written in exactly one place: setDestination, right after the allow-list check', () => {
-  const [, src] = SOURCES.find(([f]) => f === 'chat.ts')!;
+  const [, src] = SOURCES.find(([f]) => f === 'chat-answer-view.ts')!;
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const writes = code.match(/setAttribute\(\s*['"]href['"]/g) ?? [];
   assert.equal(writes.length, 1, 'one href write');
   const fn = /function setDestination\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(code)?.[1] ?? '';
   assert.match(fn, /allowedDestination\(config, to\)[\s\S]*return false;[\s\S]*setAttribute\('href', to\)/, 'the write follows the check');
-  // CONTROL: the other chat module writes none.
-  assert.equal(/setAttribute\(\s*['"]href/.test(SOURCES.find(([f]) => f === 'chat-logic.ts')![1]), false);
+  // CONTROL: no other chat module writes one.
+  for (const [f, other] of SOURCES.filter(([f]) => f !== 'chat-answer-view.ts')) assert.equal(/setAttribute\(\s*['"]href/.test(other), false, f);
 });
 
 test('a row image is the one image address an answer writes, after the backend-path check in the same function', () => {
@@ -299,6 +304,13 @@ test('a row image is the one image address an answer writes, after the backend-p
   assert.match(fn, /if \(!template \|\| !ours\(image\.src\) \|\| !set\) return null;[\s\S]*setAttribute\('src', image\.src\)/, 'the write follows the check');
   const rest = src.replace(ROW_IMAGE_FN, '');
   assert.equal(/setAttribute\(\s*['"](?:src|srcset|href)/.test(rest), false, 'nowhere else in chat-draw.ts');
+});
+
+test('the app\'s images are the other image address the renderer writes: from its own map, a checked key and https or its own path', () => {
+  const [, src] = SOURCES.find(([f]) => f === 'chat-templates.ts')!;
+  const fn = HOST_IMAGES_FN.exec(src)?.[1] ?? '';
+  assert.match(fn, /if \(!IMAGE_KEY\.test\(key\) \|\| typeof image\.src !== 'string' \|\| !IMAGE_URL\.test\(image\.src\)[^\n]*continue;[\s\S]*setAttribute\('src', image\.src\)/, 'the write follows the check');
+  assert.equal(/setAttribute\(\s*['"](?:src|srcset|href)/.test(src.replace(HOST_IMAGES_FN, '')), false, 'nowhere else in chat-templates.ts');
 });
 
 test('storage is reached in one place: chat-history.ts browserStorage, inside try — every call after it through one try/catch', () => {
@@ -320,6 +332,7 @@ test('the chat runtime has no sink: no HTML parsing, no eval, no style or URL wr
   for (const [file, raw] of SOURCES) {
     // The row-image write and the storage read are each held to their own test.
     const src = file === 'chat-draw.ts' ? raw.replace(ROW_IMAGE_FN, '') : file === 'chat-history.ts' ? raw.replace(STORAGE_FN, '')
+      : file === 'chat-templates.ts' ? raw.replace(HOST_IMAGES_FN, '')
       : file === 'chat-map-gl.ts' ? raw.replace(WORKER_FN, '') : raw;
     // Comments may name what the code never does.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

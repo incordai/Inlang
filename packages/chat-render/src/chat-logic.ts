@@ -1,0 +1,594 @@
+/**
+ * @az runtime chat-logic
+ * Purpose: the chat runtime's pure rules: the shell's config, the event-stream reader, a visitor's text, finished sentences, fixed copy.
+ * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
+ * Exports: Motion, motionOf, SKELETON_OF, TreeNode, caretHost, ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, REQUEST_MAX, SHARE_TAG_MAX_MS, requestBody, parseChatConfig, atEnd, mayFollow, offersLatest, INPUT_MAX_ROWS, inputRows, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
+ * Edit guide: no DOM here; every event is checked against its closed shape and an unknown one is dropped, never guessed at.
+ * Tests: packages/overlay/test/chat.test.ts
+ */
+
+/**
+ * The page never parses what a model wrote: the server does, and sends a
+ * CLOSED set of small events (chat-block-spec §4.2). This module reads
+ * them — server-sent-event framing over a `fetch` body, because
+ * `EventSource` can neither POST nor send the CSRF header — and checks each
+ * against its shape: an unknown event, an unknown key's absence of a known
+ * one, a wrong type, is dropped. Prose is only ever handed back as a string
+ * for `textContent`.
+ */
+
+/** What the shell's `data-az-chat` holds (the chat word's config()). */
+export interface ChatConfig {
+  readonly page: string;
+  readonly allow: 'signedin' | 'anyone';
+  readonly limit: number;
+  readonly signin: string | null;
+  /** The components an answer may hold (`show`); empty, answers are prose only. */
+  readonly show: readonly ChatWord[];
+  /** The destinations an answer's call to action may use — the .az file's own (chat-block-spec §6.2). */
+  readonly to: readonly string[];
+  /** The build's shared-answer page (§20.7): shows one stored answer, read-only. */
+  readonly shared: boolean;
+  /** A float (§3.2): below this viewport width it opens as a sheet, at or above it as a side panel; null for a panel. */
+  readonly narrow: number | null;
+}
+
+/**
+ * How near the end of the transcript still counts as at its end (§9): a
+ * rounding pixel or a line's leading must not stop it following. One line of
+ * body text, in CSS pixels.
+ */
+export const END_SLACK_PX = 24;
+
+/** The transcript is scrolled to its end — the visitor is reading the newest words (§9). */
+export const atEnd = (scrollTop: number, scrollHeight: number, clientHeight: number): boolean =>
+  scrollHeight - scrollTop - clientHeight <= END_SLACK_PX;
+
+/**
+ * New words may move the transcript to its end (§9). `following` is what the
+ * last scroll event decided, and `known` where the transcript was then (or
+ * where following last put it). A scroll event comes a frame after the
+ * scroll: words arriving in between find the transcript above `known` — the
+ * visitor has scrolled up, and their place wins over the newest words.
+ */
+export const mayFollow = (following: boolean, scrollTop: number, known: number): boolean =>
+  following && scrollTop >= known - END_SLACK_PX;
+
+/**
+ * Jump to latest is offered (§9, issue #2) only when the visitor has moved
+ * away from the newest words: not at the end — and, once the newest answer
+ * has arrived, not reading it from its start either, where jumping to its
+ * end would skip what they are reading. `start` is where that answer begins,
+ * in CSS pixels from the transcript's visible top (negative once scrolled
+ * past), or null while no answer has arrived (none yet, or still streaming).
+ */
+export const offersLatest = (end: boolean, start: number | null, clientHeight: number): boolean =>
+  !end && !(start !== null && start >= -END_SLACK_PX && start <= clientHeight - END_SLACK_PX);
+
+/**
+ * The input starts as one line and grows with its text to this many lines,
+ * then scrolls (issue #2): room for a question on a phone without pushing
+ * the answer out of the sheet.
+ */
+export const INPUT_MAX_ROWS = 5;
+
+/**
+ * How many lines the input needs for its text, given the scroll height it
+ * has at `rows` lines and the height of one line: never fewer than one,
+ * never more than INPUT_MAX_ROWS.
+ */
+export const inputRows = (scrollHeight: number, clientHeight: number, rows: number, lineHeight: number): number => {
+  if (lineHeight <= 0) return rows;
+  const extra = Math.ceil(Math.max(0, scrollHeight - clientHeight) / lineHeight);
+  return Math.min(INPUT_MAX_ROWS, Math.max(1, rows + extra));
+};
+
+/**
+ * The overlay preset a float opens as at this viewport width (chat-block-spec
+ * §3.2): the bottom `sheet` below the float's narrow width — modal, focus
+ * trapped, the page locked (overlays-spec §2) — and above it a side panel,
+ * the `dropdown` policy's non-modal kind, whose focus returns but is not held.
+ */
+export const floatPreset = (width: number, narrow: number): 'sheet' | 'dropdown' => (width < narrow ? 'sheet' : 'dropdown');
+
+/** The closed list `show` takes. */
+export const CHAT_WORDS = ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'] as const;
+
+/**
+ * The block keys of the rich components (§20, explore §21.3, map §21.4) and their note, drawn by chat-draw.ts,
+ * chat-explore-draw.ts and (on a site that shows maps) chat-map-draw.ts after their own checks.
+ */
+export const RICH_BLOCKS: readonly string[] = ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map', 'unavailable'];
+export type ChatWord = (typeof CHAT_WORDS)[number];
+
+/** One component of an answer, as the server validated it — and as this module validates it again. */
+export type ChatBlock =
+  | { readonly kind: 'quote'; readonly route: string; readonly n: number }
+  | { readonly kind: 'faq'; readonly items: readonly { readonly q: string; readonly a: string }[] }
+  | { readonly kind: 'cta'; readonly label: string; readonly to: string }
+  | { readonly kind: 'feature'; readonly items: readonly { readonly title: string; readonly text: string }[] }
+  /** A follow-up question (§21.1.2): a button that asks it, drawn after the rest of the answer. */
+  | { readonly kind: 'ask'; readonly q: string }
+  | { readonly kind: 'rich'; readonly word: string; readonly data: unknown };
+
+/** The share tags a finished answer carries when the server makes share links (§20.7). */
+export interface ShareTags { readonly at: number; readonly tag: string; readonly tagq: string }
+
+/** One event of the answer stream; anything else is dropped. */
+export type ChatEvent =
+  | { readonly type: 'text'; readonly s: string }
+  | { readonly type: 'block'; readonly block: ChatBlock; readonly raw: Record<string, unknown> }
+  /** Issue #28: the server is reading a rich component's figures — its kind only, for a placeholder of its shape; never kept or shared. */
+  | { readonly type: 'hold'; readonly word: string }
+  | {
+    readonly type: 'done'; readonly tag: string; readonly left: number; readonly conversation: string; readonly text: string; readonly share: ShareTags | null;
+    /** An answer of the site's own, given without the model (§19.17): a suggested question's, or a match; null for the model's. */
+    readonly by: 'suggested' | 'match' | null;
+  }
+  | { readonly type: 'error'; readonly code: string };
+
+/**
+ * The caps a component's values keep (the server's answer parser holds the
+ * same, chat-block-spec §5.3): one past them is not a component the server
+ * sends, so it is dropped.
+ */
+export const BLOCK_LIMITS = { items: 6, question: 160, answer: 600, title: 80, text: 300, label: 40, record: 12_000, components: 4, asks: 3, ask: 80 } as const;
+
+/** One turn as the request carries it; a site turn carries its server tag. */
+export interface ChatTurn {
+  readonly role: 'visitor' | 'site';
+  readonly text: string;
+  readonly tag?: string;
+}
+
+/** A line of the stream longer than this is not one the server writes: the stream is broken. */
+export const EVENT_LINE_MAX = 64 * 1024;
+
+/** The most answer text one stream may add (the server caps prose at 4 000 characters). */
+export const ANSWER_MAX = 20_000;
+
+/** chat-block-spec §4.2: a visitor message, trimmed, is 1–1 000 characters. */
+const VISITOR_MAX = 1000;
+
+/** The panel's fixed copy (§7): never server text. */
+export const CHAT_TEXT = {
+  signin: 'Sign in to ask a question.',
+  full: 'This chat is full — start a new chat to ask more.',
+  stopped: 'Stopped.',
+  answered: 'Answer finished.',
+  /** The name an answer holding components takes when it becomes a stop in the Tab order (§9). */
+  region: 'Answer',
+  tooLong: `Keep your question under ${VISITOR_MAX.toLocaleString('en-US')} characters.`,
+  /** C5 (§21.1.4, §21.1.6): the history kept in this browser, and the code blocks' Copy. */
+  restored: 'Your earlier chat is restored.',
+  cleared: 'History cleared.',
+  copied: 'Code copied.',
+  copyFailed: 'Copy did not work — select the code to copy it.',
+  follows: (n: number) => (n === 1 ? '1 follow-up question.' : `${n} follow-up questions.`),
+  /** §19.11: the same chat open in two tabs — one tab drew what the other saved, or could not keep what it answered. */
+  synced: 'This chat went on in another tab — it is shown as it is now.',
+  notKept: 'This chat went on in another tab, so this answer is not kept in this browser.',
+  clearedElsewhere: 'This chat was cleared in another tab.',
+  /** §19.11: a long chat sends only its latest exchanges, to fit what one request may carry. */
+  trimmed: 'Earlier messages in this chat are no longer sent with new questions.',
+  /** §19.17: under an answer the site gave from its own content because the question matched it — the same question, to the model. */
+  askModel: 'Ask the AI instead',
+  /** Issue #28: said once when a question is sent — the dots the page shows are not read out. */
+  working: 'Answering your question.',
+  /** Issue #30: the answer bar's Copy. */
+  answerCopied: 'Answer copied.',
+  answerCopyFailed: 'Copy did not work — select the answer to copy it.',
+} as const;
+
+/**
+ * The longest request body the page sends, in UTF-8 bytes: the server's JSON
+ * body cap (backend http.ts, 16 KB). A longer conversation sends its latest
+ * whole exchanges that fit, with `from` (chat-block-spec §19.11).
+ */
+export const REQUEST_MAX = 16 * 1024;
+
+/** A share tag is good this long after its answer (server chat-share.ts SHARE_LIMITS.tagMaxAgeMs): the history's 7 days. */
+export const SHARE_TAG_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The request for `question` after `history`: from the start when it fits
+ * REQUEST_MAX, else the latest whole exchanges that do — `from` the position
+ * of the first message sent (even: a visitor's), every earlier one left out.
+ * The question alone always fits (it is at most VISITOR_MAX characters).
+ * `via` says how it was asked (§19.17): by a suggested question's button,
+ * or by "Ask the AI instead"; typed, it is left out.
+ */
+export function requestBody(
+  page: string, conversation: string | null, history: readonly ChatTurn[], question: string, via: 'suggested' | 'model' | null = null,
+): { readonly body: string; readonly from: number } {
+  const size = (s: string) => new TextEncoder().encode(s).length;
+  for (let from = 0; ; from += 2) {
+    const messages = [...history.slice(from), { role: 'visitor', text: question }];
+    const body = JSON.stringify({ page, ...(conversation ? { conversation } : {}), ...(from > 0 ? { from } : {}), messages, ...(via ? { via } : {}) });
+    if (size(body) <= REQUEST_MAX || from >= history.length) return { body, from };
+  }
+}
+
+/** One fixed line per refusal or failure (§7); an unknown code reads as the generic one. */
+const PROBLEMS: Readonly<Record<string, string>> = {
+  signin_required: CHAT_TEXT.signin,
+  rate_limited: 'You have asked a lot of questions — try again later.',
+  budget_exhausted: 'Chat has answered all it can for today — try again tomorrow.',
+  disabled: 'Chat is not available right now.',
+  busy: 'Chat is busy — try again in a moment.',
+  unavailable: 'The answer could not be finished — try again.',
+  /** The site's moderation hook refused the question (chat-block-spec §6.8). */
+  blocked: 'This question can\u2019t be answered here — try asking it another way.',
+  too_long: CHAT_TEXT.tooLong,
+  /** A kept conversation the server no longer accepts — its key was rotated (§21.1.4). */
+  tampered: 'This saved chat can\u2019t be continued — it was cleared. Ask your question again.',
+  conversation_full: CHAT_TEXT.full,
+  unknown: 'Something went wrong — start a new chat.',
+};
+
+export const problemCopy = (code: string): string => (Object.hasOwn(PROBLEMS, code) ? PROBLEMS[code] : PROBLEMS.unknown);
+
+/** The codes a visitor may simply try again after. */
+export const RETRYABLE: ReadonlySet<string> = new Set(['unavailable', 'busy']);
+
+/** What the note says once an answer is done: nothing until the conversation is nearly full. */
+export function leftCopy(left: number): string {
+  if (left <= 0) return CHAT_TEXT.full;
+  if (left > 3) return '';
+  return left === 1 ? '1 question left in this chat.' : `${left} questions left in this chat.`;
+}
+
+const isRoute = (v: unknown): v is string => typeof v === 'string' && v.startsWith('/') && !v.startsWith('//') && v.length <= 2048;
+
+/** Anything a browser would read past: space, controls, a backslash (which a URL parser turns into a slash). */
+const UNSAFE = /[\s\u0000-\u001F\u007F\\]/;
+
+/**
+ * How a destination is followed, which picks the call-to-action template it
+ * fills: `route`, `https`, `mailto` or `tel` — or null for anything else
+ * (another scheme, a protocol-relative `//host`, a stray character). The
+ * chat word groups its templates by the same rule.
+ */
+export function linkKind(to: string): 'route' | 'https' | 'mailto' | 'tel' | null {
+  if (to.length === 0 || to.length > 2048 || UNSAFE.test(to)) return null;
+  if (to.startsWith('/')) return to.startsWith('//') ? null : 'route';
+  const colon = to.indexOf(':');
+  const scheme = colon > 0 ? to.slice(0, colon) : '';
+  if (scheme === 'https') return to.startsWith('https://') && to.length > 'https://'.length ? 'https' : null;
+  if (scheme === 'mailto' || scheme === 'tel') return to.length > colon + 1 ? scheme : null;
+  return null;
+}
+
+/** Whether an answer may point at `to`: exactly one of the shell's own destinations, of a kind the page can follow. */
+export const allowedDestination = (config: Pick<ChatConfig, 'to'>, to: string): boolean => linkKind(to) !== null && config.to.includes(to);
+
+/** The shell's config, or null when it is not one the chat word wrote. */
+export function parseChatConfig(raw: string | null): ChatConfig | null {
+  if (raw === null) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== 'object') return null;
+  const c = v as Record<string, unknown>;
+  if (!isRoute(c.page)) return null;
+  if (c.allow !== 'signedin' && c.allow !== 'anyone') return null;
+  if (typeof c.limit !== 'number' || !Number.isInteger(c.limit) || c.limit < 1 || c.limit > 50) return null;
+  if (c.signin !== null && !isRoute(c.signin)) return null;
+  // A prose-only chat writes neither; a listed one writes both.
+  const show = c.show ?? [];
+  const to = c.to ?? [];
+  if (!Array.isArray(show) || !show.every((w) => (CHAT_WORDS as readonly unknown[]).includes(w)) || new Set(show).size !== show.length) return null;
+  if (!Array.isArray(to) || !to.every((d) => typeof d === 'string' && linkKind(d) !== null)) return null;
+  if (c.shared !== undefined && c.shared !== true) return null;
+  if (c.narrow !== undefined && !(typeof c.narrow === 'number' && Number.isInteger(c.narrow) && c.narrow > 0 && c.narrow <= 10_000)) return null;
+  return {
+    page: c.page, allow: c.allow, limit: c.limit, signin: c.signin, show: show as ChatWord[], to: to as string[], shared: c.shared === true,
+    narrow: typeof c.narrow === 'number' ? c.narrow : null,
+  };
+}
+
+/** A string within `max` characters (and at least one when required). */
+const text = (v: unknown, max: number, required = true): v is string =>
+  typeof v === 'string' && v.length <= max && (!required || v.trim().length > 0);
+
+/** An object with exactly these keys — a key the server never sends drops the component. */
+const exactly = (v: unknown, keys: readonly string[]): boolean =>
+  !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v as object, k));
+
+/** A list of 1–BLOCK_LIMITS.items objects of exactly `keys`. */
+const items = (v: unknown, keys: readonly string[]): v is Record<string, unknown>[] =>
+  Array.isArray(v) && v.length >= 1 && v.length <= BLOCK_LIMITS.items && v.every((x) => exactly(x, keys));
+
+/** A `block` event's data, checked against the closed shapes of chat-block-spec §4.2; anything else is null. */
+function toBlock(d: Record<string, unknown>): ChatBlock | null {
+  const L = BLOCK_LIMITS;
+  if (exactly(d, ['quote', 'route', 'n'])) {
+    const ok = d.quote === 'pricing' && isRoute(d.route) && typeof d.n === 'number' && Number.isInteger(d.n) && d.n >= 0 && d.n < 1000;
+    return ok ? { kind: 'quote', route: d.route as string, n: d.n as number } : null;
+  }
+  if (exactly(d, ['faq'])) {
+    const list = d.faq;
+    if (!items(list, ['q', 'a']) || !list.every((i) => text(i.q, L.question) && text(i.a, L.answer))) return null;
+    return { kind: 'faq', items: list.map((i) => ({ q: i.q as string, a: i.a as string })) };
+  }
+  if (exactly(d, ['cta'])) {
+    const c = d.cta as Record<string, unknown>;
+    if (!exactly(c, ['label', 'to']) || !text(c.label, L.label) || typeof c.to !== 'string' || linkKind(c.to) === null) return null;
+    return { kind: 'cta', label: c.label, to: c.to };
+  }
+  if (exactly(d, ['ask'])) {
+    const q = d.ask;
+    return text(q, L.ask) && !q.includes('\n') ? { kind: 'ask', q } : null;
+  }
+  if (exactly(d, ['feature'])) {
+    const list = d.feature;
+    if (!items(list, ['title', 'text']) || !list.every((i) => text(i.title, L.title) && text(i.text, L.text, false))) return null;
+    return { kind: 'feature', items: list.map((i) => ({ title: i.title as string, text: i.text as string })) };
+  }
+  // A rich component: one known key; its value is checked whole where it is drawn (chat-chart.ts, chat-figures.ts).
+  const keys = Object.keys(d);
+  if (keys.length === 1 && RICH_BLOCKS.includes(keys[0])) return { kind: 'rich', word: keys[0], data: d[keys[0]] };
+  return null;
+}
+
+/** A shared answer's block as stored: the same closed shapes as a stream's (§20.7). */
+export const blockOf = (d: Record<string, unknown>): ChatBlock | null => toBlock(d);
+
+/**
+ * An answer's events as the share tag covers them (server chat-share.ts
+ * mergeText): consecutive text joined, the rest as received, in order.
+ */
+export function mergeText(events: readonly Record<string, unknown>[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const e of events) {
+    const last = out[out.length - 1];
+    if (e.type === 'text' && last?.type === 'text' && typeof e.s === 'string' && typeof last.s === 'string') out[out.length - 1] = { type: 'text', s: last.s + e.s };
+    else out.push(e);
+  }
+  return out;
+}
+
+/** What the status region says for a component: once, as a summary (§9). */
+export function blockCopy(block: ChatBlock, plans = 0): string {
+  switch (block.kind) {
+    case 'quote': return plans > 0 ? `Pricing table, ${plans === 1 ? '1 plan' : `${plans} plans`}.` : 'Pricing table.';
+    case 'faq': return block.items.length === 1 ? '1 question and answer.' : `${block.items.length} questions and answers.`;
+    case 'cta': return `Link: ${block.label}.`;
+    case 'feature': return block.items.length === 1 ? 'A list of 1 item.' : `A list of ${block.items.length} items.`;
+    case 'ask': return '';
+    case 'rich': return '';
+  }
+}
+
+/** Control characters a visitor's text may not carry (a newline it may). */
+const CONTROL = /[\u0000-\u0009\u000B-\u001F\u007F]/g;
+
+/** A visitor's question as it is sent: trimmed, without control characters, or null when empty or too long. */
+export function visitorText(raw: string): string | null {
+  const text = raw.replace(/\r\n?/g, '\n').replace(CONTROL, '').trim();
+  if (text === '' || text.length > VISITOR_MAX) return null;
+  return text;
+}
+
+/** One event from its name and data, checked against its closed shape. */
+function toEvent(name: string, data: string): ChatEvent | null {
+  let v: unknown;
+  try {
+    v = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const d = v as Record<string, unknown>;
+  if (name === 'text') return typeof d.s === 'string' ? { type: 'text', s: d.s } : null;
+  if (name === 'block') {
+    const block = toBlock(d);
+    return block ? { type: 'block', block, raw: d } : null;
+  }
+  if (name === 'done') {
+    const ok = typeof d.tag === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(d.tag)
+      && typeof d.conversation === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(d.conversation)
+      && typeof d.left === 'number' && Number.isInteger(d.left) && d.left >= 0
+      // The answer as it is sent back as history: the server's record, tagged.
+      && typeof d.text === 'string' && d.text.length <= BLOCK_LIMITS.record;
+    const s = d.share as Record<string, unknown> | undefined;
+    const tag = (v: unknown) => typeof v === 'string' && /^[A-Za-z0-9_-]{43}$/.test(v);
+    const share = s && typeof s === 'object' && Number.isSafeInteger(s.at) && tag(s.tag) && tag(s.tagq)
+      ? { at: s.at as number, tag: s.tag as string, tagq: s.tagq as string } : null;
+    const by = d.by === 'suggested' || d.by === 'match' ? d.by : null;
+    return ok ? { type: 'done', tag: d.tag as string, left: d.left as number, conversation: d.conversation as string, text: d.text as string, share, by } : null;
+  }
+  if (name === 'error') return typeof d.code === 'string' && /^[a-z_]{1,40}$/.test(d.code) ? { type: 'error', code: d.code } : null;
+  if (name === 'hold') return typeof d.word === 'string' && HELD.includes(d.word) && Object.keys(d).length === 1 ? { type: 'hold', word: d.word } : null;
+  return null;
+}
+
+/** The kinds a hold may name: the rich components the server resolves (backend chat-rich.ts RICH_WORDS) — not its `unavailable` note. */
+const HELD: readonly string[] = RICH_BLOCKS.filter((w) => w !== 'unavailable');
+
+/* ---- issue #28: the answer's working signs (chat-busy.ts draws them) ---- */
+
+/** The motion tokens the chat word writes on its extras box: enter and pulse in ms, the rise in px, the enter curve. */
+export interface Motion {
+  readonly enter: number;
+  readonly pulse: number;
+  readonly slide: number;
+  readonly ease: string;
+}
+
+/** A timing function the stylesheet would accept: a keyword, or cubic-bezier of four numbers. */
+const EASE = /^(?:ease|ease-in|ease-out|ease-in-out|linear|cubic-bezier\(\s*-?\d*\.?\d+\s*,\s*-?\d*\.?\d+\s*,\s*-?\d*\.?\d+\s*,\s*-?\d*\.?\d+\s*\))$/;
+/** The longest any one of these motions may take, and the furthest a message may rise, so a bad value cannot stall the panel. */
+const MOTION_MAX_MS = 2_000;
+const SLIDE_MAX_PX = 64;
+
+const inRange = (v: unknown, max: number): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max;
+
+/** The motion tokens, checked; null when they are missing or not what the chat word writes — then nothing moves. */
+export function motionOf(raw: string | null): Motion | null {
+  if (raw === null) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const m = v as Record<string, unknown>;
+  if (!inRange(m.enter, MOTION_MAX_MS) || !inRange(m.pulse, MOTION_MAX_MS) || !inRange(m.slide, SLIDE_MAX_PX)) return null;
+  if (typeof m.ease !== 'string' || !EASE.test(m.ease)) return null;
+  return { enter: m.enter, pulse: m.pulse, slide: m.slide, ease: m.ease };
+}
+
+/** Which placeholder a held kind stands on (issue #28): a figure's frame, a map's, a table's rows, or two cards. */
+export const SKELETON_OF: Readonly<Record<string, string>> = {
+  chart: 'skeleton-figure', explore: 'skeleton-figure', dashboard: 'skeleton-figure',
+  map: 'skeleton-map', table: 'skeleton-table', stats: 'skeleton-tiles', cards: 'skeleton-tiles',
+};
+
+/** What caretHost reads of an element: its tag, its last child, the sibling before it. */
+export interface TreeNode<T> {
+  readonly tagName: string;
+  readonly lastElementChild: T | null;
+  readonly previousElementSibling: T | null;
+}
+
+/** The elements a caret may sit at the end of: a paragraph, or a list's last item. */
+const PROSE_ENDS = new Set(['P', 'LI']);
+
+/**
+ * Where the caret goes in an answer as drawn so far: the end of its last
+ * paragraph, or of its last list's last item — or nowhere, when the answer
+ * ends in a code block or a component (a caret there would read as content).
+ * `skip` is what is the runtime's own and not the answer's (the caret itself).
+ */
+export function caretHost<T extends TreeNode<T>>(item: T, skip: (el: T) => boolean): T | null {
+  let last: T | null = item.lastElementChild;
+  while (last && skip(last)) last = last.previousElementSibling;
+  if (!last) return null;
+  if (last.tagName === 'UL' || last.tagName === 'OL') last = last.lastElementChild;
+  return last && PROSE_ENDS.has(last.tagName) ? last : null;
+}
+
+/**
+ * The event-stream reader: text in as it arrives, events out as they
+ * complete. A line is complete at CR, LF or CRLF; an event at a blank line.
+ * `data:` lines join with a newline; comments (`:`) and unknown fields are
+ * skipped. `broken` is set, and nothing more is read, when a line passes
+ * EVENT_LINE_MAX — a stream the server would never write.
+ */
+export function createEventReader(): { push(text: string): ChatEvent[]; end(): ChatEvent[]; readonly broken: boolean } {
+  let pending = '';
+  let name = '';
+  let data: string[] = [];
+  let broken = false;
+  let lastCR = false;
+
+  const line = (l: string, out: ChatEvent[]) => {
+    if (l === '') {
+      if (data.length > 0) {
+        const e = toEvent(name || 'message', data.join('\n'));
+        if (e) out.push(e);
+      }
+      name = '';
+      data = [];
+      return;
+    }
+    if (l.startsWith(':')) return;
+    const colon = l.indexOf(':');
+    const field = colon < 0 ? l : l.slice(0, colon);
+    let value = colon < 0 ? '' : l.slice(colon + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+    if (field === 'event') name = value;
+    else if (field === 'data') data.push(value);
+  };
+
+  return {
+    get broken() { return broken; },
+    push(text: string): ChatEvent[] {
+      const out: ChatEvent[] = [];
+      if (broken) return out;
+      let start = 0;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        // The LF of a CRLF, even when the CR ended the previous chunk.
+        if (ch === '\n' && lastCR) { lastCR = false; start = i + 1; continue; }
+        lastCR = false;
+        if (ch !== '\n' && ch !== '\r') continue;
+        const whole = pending + text.slice(start, i);
+        pending = '';
+        start = i + 1;
+        lastCR = ch === '\r';
+        if (whole.length > EVENT_LINE_MAX) { broken = true; return out; }
+        line(whole, out);
+      }
+      pending += text.slice(start);
+      if (pending.length > EVENT_LINE_MAX) {
+        broken = true;
+        pending = '';
+      }
+      return out;
+    },
+    end(): ChatEvent[] {
+      const out: ChatEvent[] = [];
+      if (!broken && pending !== '') line(pending, out);
+      pending = '';
+      line('', out);
+      return out;
+    },
+  };
+}
+
+/**
+ * The sentences of `text` finished since `from`: up to and including the
+ * last sentence end (. ! ? or a paragraph break, followed by space or the
+ * end of a paragraph) — what the status region is given, so a screen reader
+ * hears whole sentences, never tokens (§9). `next` is where the unread part
+ * starts. `all` takes the rest too, at the end of an answer.
+ */
+export function finishedSentences(text: string, from: number, all = false): { readonly said: string; readonly next: number } {
+  if (all) return { said: text.slice(from).trim(), next: text.length };
+  let end = -1;
+  for (let i = from; i < text.length - 1; i++) {
+    const ch = text[i];
+    if ((ch === '.' || ch === '!' || ch === '?' || ch === '\n') && /\s/.test(text[i + 1])) end = i + 1;
+  }
+  if (end < 0) return { said: '', next: from };
+  return { said: text.slice(from, end).trim(), next: end };
+}
+
+/* ---- share links (chat-block-spec §20.7) ---- */
+
+/** The build's shared-answer page (core chat.ts SHARED_ROUTE). */
+export const SHARED_PATH = '/chat/shared';
+
+export const SHARE_TEXT = {
+  made: (until: string) => `This link works until ${until}. Anyone with it can see this answer.`,
+  working: 'Making the link…',
+  expired: 'This link has expired or was deleted.',
+  deleted: 'This shared answer is deleted.',
+  loading: 'Loading the shared answer…',
+  until: (date: string) => `This link works until ${date}.`,
+} as const;
+
+const SHARE_PROBLEMS: Readonly<Record<string, string>> = {
+  rate_limited: 'You have shared a lot — try again later.',
+  shares_full: 'Sharing is full right now — try again later.',
+  disabled: 'Sharing is off on this site.',
+  signin_required: 'Sign in to share.',
+  tampered: 'This answer can no longer be shared — ask again to share a new one.',
+  /** §19.11: a tag makes one link while that link lives — the visitor already has it. */
+  already_shared: 'This answer is already shared — use the link made for it, or delete that link to make a new one.',
+  too_large: 'This answer is too large to share.',
+};
+/** One fixed line per refusal; never server text. */
+export const shareProblem = (code: string): string => (Object.hasOwn(SHARE_PROBLEMS, code) ? SHARE_PROBLEMS[code] : 'The link could not be made — try again.');
+
+/** A share link's id, and the delete token when it is the delete link — or null when the fragment is neither. */
+export function readShareLink(hash: string): { id: string; token: string | null } | null {
+  const m = /^#([A-Za-z0-9_-]{22})(?:&([A-Za-z0-9_-]{43}))?$/.exec(hash);
+  return m ? { id: m[1], token: m[2] ?? null } : null;
+}

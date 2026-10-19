@@ -246,9 +246,10 @@ export function azMd(m: MapInput): string {
     out.push('- `show pricing faq cta feature` lists what an answer may hold besides text. `pricing` is quoted — the site\'s own block,');
     out.push('  as its page renders it, never prices the model wrote; `faq`, `feature` and `cta` are filled with the model\'s text. A call');
     out.push('  to action may point only at a destination this file declares. Anything else the model writes is text, or dropped.');
-    out.push(`- \`${m.dirs.runtime}/chat.ts\` — sends the question, reads the event stream, fills the templates; \`${m.dirs.runtime}/chat-logic.ts\` —`);
-    out.push('  the closed event shapes and the destination check; `src/chat/runtime.tsx` hands it the backend URL and the session');
-    out.push(`- \`${m.dirs.runtime}/chat-markdown.ts\` and \`chat-prose.ts\` — an answer's formatting (bold, italic, code, lists, code blocks) read`);
+    out.push(`- \`${m.dirs.runtime}/chat.ts\` — sends the question, reads the event stream, fills the templates; \`${m.dirs.runtime}/chat-render/\` —`);
+    out.push('  the chat renderer it draws with: `chat-logic.ts`, the closed event shapes and the destination check; `src/chat/runtime.tsx`');
+    out.push('  hands the panel the backend URL and the session');
+    out.push(`- \`${m.dirs.runtime}/chat-render/chat-markdown.ts\` and \`chat-prose.ts\` — an answer's formatting (bold, italic, code, lists, code blocks) read`);
     out.push('  into fixed elements and its follow-up questions as buttons; `chat-history.ts` — the conversation kept in the visitor\'s');
     out.push('  own browser for 7 days, with Clear history (nothing more is stored on the server)');
     out.push('- `server/chat/prompt-<n>.txt` — what each chat\'s model is told (generated, readable); `server/chat/context.json` — the public page');

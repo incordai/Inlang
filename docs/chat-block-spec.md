@@ -527,7 +527,8 @@ format:
 | what the model is told: the fixed rules and the per-question assembly (§22.2) | `packages/chat-instructions/src/`, called by the build and copied into `server/src/chat-instructions/` |
 | route, limits, queue, adapters, usage table | `packages/backend/src/server/chat*.ts`, copied verbatim like the rest |
 | the answer parser and checker (§22.1) | `packages/chat-answer/src/`, copied verbatim into `server/src/chat-answer/` and imported as `#chat-answer/…` |
-| the page runtime (send, stream read, validate, fill) | `packages/overlay/src/runtime/chat.ts`, `chat-logic.ts`, beside `rows.ts` |
+| the page runtime: the panel (send, stream read, float, shares) | `packages/overlay/src/runtime/chat.ts`, `chat-shared.ts`, beside `rows.ts` |
+| the renderer it draws with: validate, fill, the answer view (§22.3) | `packages/chat-render/src/`, copied into a site's `src/az/chat-render/`, imported as `#chat-render/…` |
 | env keys | `packages/backend/src/server/env.ts` `KEYS`, `when: (s) => s.chat === true` |
 
 ---
@@ -1367,7 +1368,7 @@ Against §20 (the rows of §20.10 and the tests of §20.9):
 | the answer format | built on C2's parser (`chat-answer/chat-answer.ts`): the five words are keywords that hold a line; a line with a rich head's shape (`chart <kind> "…"`, `table "…"`, `stats`, `cards`, `dashboard "…"`) is held with its child lines (depth 1–2, at most 160) and read whole by `chat-answer/chat-rich.ts` — any other line starting with the word is prose (`table of contents` stays text). The answer's caps (240 points, 6 `from` requests) are the parser's; the 48 KB events cap is the route's |
 | `src` | set only by the server: `model` for numbers the model wrote, `site` (with `asOf`, the UTC day) for figures from `from`. Nothing a model writes can set it (`chat-rich.test.ts`: `src site` on a head or a line is a shape, not a source) |
 | server figures | built: `server/chat-query.ts` — the tables `grant(read, null)` lists and not owner-only; their non-private fields; `count`/`sum`/`avg`/`min`/`max`, `by` a choice, flag, date or datetime (`day`/`month`/`year`, UTC with no time zone on any engine), one `where`; rows and cards through `parseQuery` → `selectList(…, null, false)` → `outRow(…, null, …)`, the anonymous list's own code. Every read is `allWithin(…, LIST_DEADLINE_MS)`; a cancelled read, or a total past 2⁵³, is the `unavailable` note. 60 s cache, 500 entries. The module ships only with chat **and** tables (`az build` copies it then only); `figuresRun` is injected into the route, so a chat without data never loads it |
-| rendering | built: `overlay/runtime/chat-chart.ts` (pure: validation, nice ticks, band and linear scales, bar/line/area/pie/donut paths, label thinning, coordinates to 0.01, the summary and the table equivalent), `chat-figures.ts` (pure checks of table, stats, cards, dashboard), `chat-draw.ts` (the DOM: clones of the word's templates, SVG by `createElementNS` with allow-listed geometry attributes and a class per part). The word's templates are `words/chat/figures.ts` |
+| rendering | built: `chat-render/chat-chart.ts` (pure: validation, nice ticks, band and linear scales, bar/line/area/pie/donut paths, label thinning, coordinates to 0.01, the summary and the table equivalent), `chat-figures.ts` (pure checks of table, stats, cards, dashboard), `chat-draw.ts` (the DOM: clones of the word's templates, SVG by `createElementNS` with allow-listed geometry attributes and a class per part). The word's templates are `words/chat/figures.ts` |
 | colours | built: `theme/src/series.ts` and theme-spec §15 — six `color.series-*` tokens, on chart sites only; every series 3:1 on `bg`, `surface` and `surface-alt` and ≥ 0.06 OKLab apart, re-proven on every theme × accent × offered pair × scheme (`series.test.ts`) |
 | images | built: a card's image is a gallery image on a public page with its author's alt (keys `i1`, `i2`… in page order; the build's own `<img>`, srcset and size, cloned) or a public row's image from `cards from …` (the backend's exact path for that row, checked twice; written in one function, `rowImage`, held by a unit test). Anything else is no image; the card keeps its text |
 | accessibility | built: a summary sentence and a real table behind a disclosure for every chart; `<caption>` and `<th scope="col">`; sortable headers as buttons with `aria-sort`; a scrolling table region the keyboard reaches; deltas in a sign, a glyph and words; patterns, markers, dashes and a legend for every series past the first; each component announced once, with "AI-generated figures" when it holds the model's |
@@ -1565,9 +1566,9 @@ Against §21.1 (its tests, §21.1.7):
 |---|---|
 | follow-up questions (`ask "…"`) | built: `chat-answer/chat-answer.ts` — `ask` holds a line; `ask STRING` alone is the form (any other line starting with the word is prose: `ask me anything` stays text); 1–80 characters, no line break, at most 3 (the 4th and later `too_many`, the answer goes on), not counted as components, a child line `shape`; each is a `block { ask }` and its canonical line in the record. The page (`chat-logic.ts` `{ kind: 'ask' }`, `chat-prose.ts` `followUps`) collects them while the answer streams and draws them once it is `done`, as the answer's last part, a list "Follow-up questions" of the button primitive's secondary buttons; a tap is `ask()` — the same path as typing; announced once, "2 follow-up questions." Share accepts the key (`chat-share.ts` `BLOCK_KEYS`, events per answer `2 × (4 + 3) + 1`); the shared page draws none |
 | fences on the server | built: a line at the margin starting ```` ``` ```` opens a code block; inside it every line is prose (no keyword is read, no child line is taken); only the backticks alone, trailing spaces allowed, close it — the page's rule, to the character |
-| the prose subset | built: `overlay/runtime/chat-markdown.ts` (pure: `proseBlocks`, `proseInlines`, `spokenText`), one pass with a stack of depth 2, code-span closers found by a per-length index so nothing is rescanned; `chat-prose.ts` draws it from the word's templates (`[data-az-chat-prose]`: `strong`, `em`, inline `code`, `ul > li`, `ol`, the code block with its bar and `pre[tabindex=0]`, the follow-up list) by `cloneNode` and `textContent` only — no `createElement`; a numbered list's start is the `start` property; the code block's `aria-label` is "Code" or "Code, <lang>" |
+| the prose subset | built: `chat-render/chat-markdown.ts` (pure: `proseBlocks`, `proseInlines`, `spokenText`), one pass with a stack of depth 2, code-span closers found by a per-length index so nothing is rescanned; `chat-prose.ts` draws it from the word's templates (`[data-az-chat-prose]`: `strong`, `em`, inline `code`, `ul > li`, `ol`, the code block with its bar and `pre[tabindex=0]`, the follow-up list) by `cloneNode` and `textContent` only — no `createElement`; a numbered list's start is the `start` property; the code block's `aria-label` is "Code" or "Code, <lang>" |
 | Copy code | built: `navigator.clipboard.writeText` of the code element's `textContent`; "Code copied." or "Copy did not work — select the code to copy it." in the status region; on the shared page too |
-| the conversation in the browser | built: `overlay/runtime/chat-history.ts` — the key `az-chat:v1`, 256 K UTF-16 units, 8 conversations, 7 days, a float's under `float` and a panel's under `panel:<route>`; read once when the panel first lets the visitor ask, each turn re-checked (`visitorText`, the record cap, the tag's shape, every event through `blockOf`), a conversation that fails any check dropped whole and the key rewritten without it; saved after every tagged answer with its events, consecutive text joined as a share holds them (a model streaming word by word would otherwise pass the 15 events an answer may keep); every storage call through one `access` wrapper inside `try`, the property read in `browserStorage` inside `try` (`chat.test.ts` holds both) |
+| the conversation in the browser | built: `chat-render/chat-history.ts` — the key `az-chat:v1`, 256 K UTF-16 units, 8 conversations, 7 days, a float's under `float` and a panel's under `panel:<route>`; read once when the panel first lets the visitor ask, each turn re-checked (`visitorText`, the record cap, the tag's shape, every event through `blockOf`), a conversation that fails any check dropped whole and the key rewritten without it; saved after every tagged answer with its events, consecutive text joined as a share holds them (a model streaming word by word would otherwise pass the 15 events an answer may keep); every storage call through one `access` wrapper inside `try`, the property read in `browserStorage` inside `try` (`chat.test.ts` holds both) |
 | Clear history and the note | built: `div.az-chat-history` under the form — the note and a secondary button; shown only when a probe write succeeds |
 | sign-out, tampered | built: on a `signedin` chat, a session read that says signed out removes the key; `400 tampered` removes this chat's kept conversation, starts the panel over and shows the fixed line of §21.1.4 |
 | the prompt | built (`chat-context.ts`): "no links, no URLs, no HTML, no images, no headings and no tables", the formatting rule, and a "Follow-up questions" section on every chat — prose-only ones too, whose per-request line now says "write no component (follow-up questions are still allowed)" |
@@ -1731,8 +1732,8 @@ it changes only what the page holds (O11).
 | controls | built: ≤ 4 inputs (`slider`, `date`, `toggle`, `field`), names `[a-z][a-z0-9]{0,15}`, unique; a slider's min < max, 0 < step ≤ max − min, ≤ 1 000 steps, its value (default its min) on the step grid; a date's bounds and value (default its min) within 1900-01-01–2100-12-31; a toggle's 2–4 options of ≤ 24, unique; a `field … number min max` (starts at its min) or `field … choice` of 2–8 options (starts at its first); a `form "legend" apply` or `form "legend" send "question"` owns the fields written since the form before it — a field with no form after it, or a form with none, is no explore |
 | views | built: 1–4 — `view table [where …]`, `view stat "label" <aggregate> [where …] [unit …]`, `view chart <kind> "title" <aggregate> by <column> [where …] [unit …]`; `where <column> <op> <operand>`, `op` one of the six, the operand one `$variable`, string, number or day; the aggregate `count` or `sum`/`avg`/`min`/`max` of a number column. Each view is bound on the server to column indexes and typed operands; one that names a column, a variable or a type that does not fit — or holds a second operator, a parenthesis, a function, an unknown aggregate — is dropped by itself (`view`, a new `DropReason`), the rest of the explore standing; none left drops it. The model's own rows bind as the answer is read, so its record holds only the views that stand; a server's or a tool's bind when the rows come, and a view lost then is counted the same |
 | the event | built: `{ explore: { title, src, asOf?, source?, columns, rows, controls, views } }` — `src` `model`, `site` with the day, or `tool` with the operator's label and minute, set by the server only; a send form's question is a list of literal parts and `{ var }` holes. One that would pass 40 KB (inside the answer's 48 KB) is the "could not be loaded" note for a server's or tool's rows, and dropped for the model's — never cut, which would change its figures. The share store and the kept conversation take the key (`BLOCK_KEYS`, `RICH_BLOCKS`) and re-check it with the page's validator |
-| the computation | built: `overlay/runtime/chat-explore.ts`, pure — `validExplore` (every cap, every index, every type, again), `computeView(data, view, vars)`: the rows the one `where` keeps, then the closed aggregate, by a `switch` over the closed names on numbers and days already parsed; figures held to 15 significant digits and 10¹⁵ (past it, "These figures are too large to show."); `controlValue` (a slider's number snapped to its step and bounds, a day or a number within its bounds, an option). No eval, no `Function`, no expression: the sink scan (overlay `chat.test.ts`) covers both new files |
-| rendering | built: `overlay/runtime/chat-explore-draw.ts` clones the word's `explore` template (`words/chat/figures.ts`): an `input[type=range]` with its `<label for>` and an `<output for>`; an `input[type=date]` with `min`/`max`; a toggle as a fieldset of real radios; a form as a fieldset with its legend, labelled number and choice fields and one submit. Values through properties only (`.value`, `.min`, `.max`, `.step`, `.checked`), words through `textContent`, ids made by the page. On `input` the views are recomputed at most once a frame and drawn again with `chat-draw.ts` (a table's first 20 rows and how many match, a stat card, a chart with its summary and table equivalent); a redrawn chart's width watcher replaces the old one's. No style, no inline handler, the CSP unchanged |
+| the computation | built: `chat-render/chat-explore.ts`, pure — `validExplore` (every cap, every index, every type, again), `computeView(data, view, vars)`: the rows the one `where` keeps, then the closed aggregate, by a `switch` over the closed names on numbers and days already parsed; figures held to 15 significant digits and 10¹⁵ (past it, "These figures are too large to show."); `controlValue` (a slider's number snapped to its step and bounds, a day or a number within its bounds, an option). No eval, no `Function`, no expression: the sink scan (overlay `chat.test.ts`) covers both new files |
+| rendering | built: `chat-render/chat-explore-draw.ts` clones the word's `explore` template (`words/chat/figures.ts`): an `input[type=range]` with its `<label for>` and an `<output for>`; an `input[type=date]` with `min`/`max`; a toggle as a fieldset of real radios; a form as a fieldset with its legend, labelled number and choice fields and one submit. Values through properties only (`.value`, `.min`, `.max`, `.step`, `.checked`), words through `textContent`, ids made by the page. On `input` the views are recomputed at most once a frame and drawn again with `chat-draw.ts` (a table's first 20 rows and how many match, a stat card, a chart with its summary and table equivalent); a redrawn chart's width watcher replaces the old one's. No style, no inline handler, the CSP unchanged |
 | the send form | built: its button reads "Ask: <the question>", the template filled with its own fields' values (a number as the page writes numbers) and checked by `visitorText`, updated as the fields change; Enter or a click submits it, and the words shown are exactly what `ask()` sends — the same path as typing them. Nothing else in an explore reaches the network |
 | accessibility | built: the explore a labelled section (the title, `aria-labelledby`); every control labelled; the toggle's arrow keys move between options; the date and number inputs keep the browser's own keyboard; on a change the first view's summary is said at most once in 1.5 s (the latest one); the explore itself is said once when drawn ("Explore: Plan cost, 1 control and 3 views, AI-generated figures."); focus alone changes nothing |
 | provenance | built: the model's rows carry the "AI-generated figures" label on every view computed from them; a site table's views the site's line, a tool's the operator's label and minute |
@@ -1820,11 +1821,11 @@ third-party tile host by default (O12), geocoding optional and server-side
 | `show map` | built: a value of `show`, never a word (core `CHAT_RICH_WORDS`; the manifest's `show` takes eleven values; `map …` on a page is an unknown word). A dashboard cannot hold one (AZ1270 counts chart, table, stats and cards only); AZ1272 applies, since it takes `from`. A site whose chat shows it gets the series colours (`usesSeries`), the map and popup templates, the map runtime files and the three map packages — and no other site does |
 | the libraries (Q19a) | built: `maplibre-gl` **6.14.0** (6.13.0 when built, below), `pmtiles` 4.5.0, `@protomaps/basemaps` 5.7.2, pinned exactly in a map site's `package.json` (target-web `PINS`, `pins.test.ts` against stack-evaluation §13's VERIFIED rows and the repository's own development dependencies); vetted again in stack-evaluation §19 — licences, `npm audit` 0, `pnpm audit` clean |
 | the answer format | built: `chat-answer/chat-map.ts`, read with `chat-rich.ts`'s reader. `map "title"` with `pin`, `place` and `route` lines (`point`s one level under a route), or `map "title" from <table> label f lat f lon f [where f v]`. 1–24 pins and places, 0–2 routes of 2–50 points, labels clamped to 40 code points, a title to 80; a coordinate is the answer grammar's number within ±90/±180 with at most six decimals, or its pin — or its route — goes alone (`number`); a map with no pin left is dropped. A `place` without `AZ_GEOCODER_URL` drops alone (`not_shown`), an address past 120 code points too (`too_long`); three places an answer. Pins and route points count toward the answer's 240 points. The record holds the canonical lines; nothing the model writes is a zoom, a centre or a URL |
-| the event | built: `{ map: { title, src, asOf?, pins: [{ label, lat, lon, src }], routes } }` — `src` `model` (pins `model` or `geocoded`, no day) or `site` (pins `site`, the day, no route), set by the server only; re-checked whole by the page (`overlay/runtime/chat-map.ts validMap`), the share store and the kept conversation (`RICH_BLOCKS`, `BLOCK_KEYS`) |
+| the event | built: `{ map: { title, src, asOf?, pins: [{ label, lat, lon, src }], routes } }` — `src` `model` (pins `model` or `geocoded`, no day) or `site` (pins `site`, the day, no route), set by the server only; re-checked whole by the page (`chat-render/chat-map.ts validMap`), the share store and the kept conversation (`RICH_BLOCKS`, `BLOCK_KEYS`) |
 | from a table | built: `chat-query.ts parsePins` — the label a text or choice field, the coordinates `number` fields, never money, never private; `where` a choice or a flag, sent as the list route's own equality parameter; up to 24 rows of the anonymous list, newest first; a row without both coordinates in range is no pin; no row is the unavailable note |
 | geocoding (Q19g) | built: `server/chat-geocode.ts` — `GET <AZ_GEOCODER_URL>?q=<address>` (the operator's own query kept, a `q` of its own refused at start), https or loopback, `redirect: 'error'`, 2 s for the request and the body, ≤ 16 KB, a 200 JSON reply only: a list or `{ results }`, the first result's `lat` and `lon` (or `lng`) as numbers or decimal strings, in range — nothing else read; a day's cache per normalised address (found and not found alike, 1 000 entries); `AZ_GEOCODER_PER_ADDRESS` (default 60/hour) in the database windows every instance shares, a cached address not a call; the log `chat: geocode <found|none|why> <ms>` — never the address. A place found nowhere is dropped (`place`, a new `DropReason`); a map whose places all failed is the note. The browser never calls it; the model never reads what it found |
 | tiles, glyphs, sprites (Q19e) | built: `server/chat-tiles.ts`, mounted by `app.ts` at `/tiles/` only when a chat shows maps. `map.json` (the archives by name and zoom range, whether glyphs and sprites are served, the attribution; `no-cache`); `world.pmtiles` and `region.pmtiles` (`AZ_MAP_WORLD`, `AZ_MAP_REGION`, each opened at start and refused by its key unless a PMTiles v3 file); `glyphs/<font>[,<font>…]/<a>-<a+255>.pbf` (the first font of the stack the folder has); `sprites/<name>[@2x].(json|png)`. One byte range (`bytes=a-b`, `a-`, `-n`; a last byte past the end is the end) answered 206 with `Content-Range`; a first byte past the end, several ranges, another unit or a malformed header is 416 with the size alone; a strong ETag (size and modification time, read at each request), `Last-Modified`, `Cache-Control: public, max-age=86400`; `If-Match` naming another version 412, `If-None-Match` naming this one 304. An allowed origin only (403 otherwise); CORS `GET, HEAD`, `range` and `if-match` allowed, `etag` and `content-range` exposed, no credentials. Paths matched against closed shapes, joined under the operator's folders only |
-| the worker (Q19b) | built: `overlay/runtime/chat-map-gl.ts` makes the runtime's one object URL — a blob of one line importing the site's own worker file (`maplibre-gl/dist/maplibre-gl-worker.mjs?url`, a hashed build file) — and hands it to `setWorkerUrl`; kept for the page's life, since the library starts its workers again after its last map. Held by a sink test (`overlay chat.test.ts`) like `setDestination` |
+| the worker (Q19b) | built: `chat-render/chat-map-gl.ts` makes the runtime's one object URL — a blob of one line importing the site's own worker file (`maplibre-gl/dist/maplibre-gl-worker.mjs?url`, a hashed build file) — and hands it to `setWorkerUrl`; kept for the page's life, since the library starts its workers again after its last map. Held by a sink test (`overlay chat.test.ts`) like `setDestination` |
 | loading (Q19f) | built: the generated chat module hands the panel `drawMap` (`chat-map-draw.ts`) on a map site only; the drawer imports `chat-map-gl.ts` — the library, its stylesheet and the archive reader, one chunk — when the first map event arrives. Measured on 6.14.0: 293 KB + the worker 144 KB + the stylesheet 10 KB gzipped (447 KB); a chat page that shows no maps, and a map page before a map arrives, request none of it (`test:chat` reads the network log) |
 | rendering | built: the view fitted to every pin and route point, capped at the region's deepest zoom or 6; az's own Zoom in, Zoom out, Reset view — each zoom button `aria-disabled` at its limit — never the library's controls (Q19c); the arrow keys pan and + − zoom on the stage (the library's keyboard, scroll zoom and rotation off); pins a circle layer in `series-1` ringed in `bg` (the open one ringed in `focus`), routes `series-2` and a dashed `series-3`; the basemap's layers for each archive, its own details in the light or dark set the page's `bg` calls for, earth, water, labels and borders from the tokens — every colour read with `getComputedStyle` at draw time and again on a scheme change (`setStyle`, diffed), set as paint (Q19h); labels only with glyphs, icons only with sprites |
 | popups (Q19d) | built: a pin's click, or its list entry's "Show on the map", opens a popup whose content is the word's `map-popup` part — the label and its source's label by `textContent` — given by `setDOMContent`; no close button (the library writes its × as markup); the box and tip in the theme by `mapCss`, two classes deep in the site's stylesheet. A sink test forbids `setHTML`/`setText` in the runtime and `az audit` reads the map runtime for `setHTML` |
@@ -3287,7 +3288,7 @@ the C2 commit first).
 
 **Unit — `pnpm test`**
 
-- **Chart renderer** (`packages/overlay/test/chat-chart.test.ts`): nice
+- **Chart renderer** (`packages/chat-render/test/chat-chart.test.ts`): nice
   ticks over a table of domains (0–1, 0–7, 3–41, −5–12, 0.001–0.009,
   1–10¹⁵); bars start at zero; band positions; line, area, pie and donut
   paths for fixed inputs, byte-compared; the 100 % slice; label thinning;
@@ -4075,6 +4076,8 @@ and the generated server and site use the package.
 |---|---|---|
 | the answer checker | `packages/chat-answer` (`@az/chat-answer`) | #33 |
 | the instruction builder | `packages/chat-instructions` (`@az/chat-instructions`) | #35 |
+| the renderer core | `packages/chat-render` (`@az/chat-render`) | #36 |
+| `<AzAnswer>` for React apps | `packages/chat-react` (`@az/chat-react`) | #36 |
 
 **How a package is used without a second copy.** A package imports only its
 own files and the chat packages it builds on, by an alias —
@@ -4192,3 +4195,83 @@ rules), no Node-only API (a test scans the sources); `test:chat-lib` builds
 an app's instructions in Chromium, Firefox and WebKit and gets Node's text.
 The generated server copies it into `server/src/chat-instructions/` with a
 chat.
+
+### 22.3 The renderer core and `<AzAnswer>` — `@az/chat-render`, `@az/chat-react` (#36)
+
+**What moved.** The chat's page runtime — every file but the panel's
+controller and its share control: `chat-logic`, `chat-chart`,
+`chat-chart-ui`, `chat-figures`, `chat-draw`, `chat-busy`, `chat-bar`,
+`chat-markdown`, `chat-prose`, `chat-history`, `chat-explore`,
+`chat-explore-draw` and the three map files — from
+`packages/overlay/src/runtime/` to `packages/chat-render/src/`, with their
+tests; a row image's srcset and URL rule from the rows runtime
+(`row-image.ts`, which `rows-logic.ts` now imports); and from the panel's
+controller (overlay `chat.ts`) the drawing of one answer —
+`answerDrawer`, `drawBlock`, the filled-copy helpers, the resize watcher —
+into `chat-answer-view.ts`, with `liveAnswer`, the dots, caret, placeholder
+and components as events arrive, which the panel now calls. The panel keeps
+the request, the stream, the float, the history and the shares.
+
+**The site.** `az build` copies the renderer into a chat site's
+`src/az/chat-render/` (its map files only for a chat that shows maps;
+`row-image.ts` alone for a site with a `from` block and no chat) and maps
+`#chat-render/*` there in the site's `package.json`; the generated chat
+module imports the map drawer from there. The pages are unchanged: their
+shell and templates are the chat word's, as before. `verify:build` holds
+the copies to the package byte for byte; `test:chat` runs every chat check
+of §12 through them.
+
+**The templates at runtime.** A site's page carries the chat word's shell;
+an app has none. `scripts/gen-chat-themes.mjs` makes it, per theme, with the
+target's own pipeline (target-web `chat-library.ts`: the chat word, the
+emitters it embeds, the stylesheet compiler) for a fixture chat that shows
+every component and links of every kind: `themes/<name>.ts` holds the shell
+as data — tags, attributes, text, every style a class — and
+`themes/<name>.css` its stylesheet, with the page-level rules a site's
+`theme.css` gives it (reset, `hidden`, the reduced-motion net, the colour
+schemes, the map popup), scoped to `[data-az-chat-root][data-az-theme]`
+inside `:where()` so a class still outweighs them. `chat-templates.ts`
+builds the shell element by element (never markup; an event handler or a
+style attribute is refused even from a theme); the app's own images join it
+as parts by key. `scripts/lib/chat-themes.test.mjs` fails while the
+committed themes differ from what the chat word makes.
+
+**The core.** `mountAnswer(container, { theme, components, destinations,
+images, scheme, backend, tiles, onAsk, onAnnounce, onCopy })` draws one
+answer from `push(event)`: each event checked again by shape, each component
+by the drawing (the page is the second check, as on a site); `reset()` for
+another answer; `destroy()` stops its charts and maps and removes it. A
+map's library loads only when an answer holds a map.
+
+**`<AzAnswer>`** (`@az/chat-react`) wraps it:
+`createElement(AzAnswer, { events, theme: 'midnight', components, destinations })`.
+Each render pushes only the events not drawn yet; a shorter list or another
+first event starts again; a change to what it is drawn under redraws it;
+unmounting stops everything. `theme` is a theme module or its name, loaded
+on first use. Written with `createElement`, so it runs with no build step.
+React 19.2.8 is its peer dependency (and a development dependency here).
+
+**Safety.** Every model string is text; the one URL the answer writes is a
+destination on the allow-list (`setDestination`), the one image address a
+row image at the backend's own path or the app's own image by key; nothing
+is inline — the page's policy can be `script-src 'self'; style-src 'self'`
+(the theme's stylesheet is a file the app loads). The sink scan
+(overlay `chat.test.ts`) reads every file of the renderer.
+
+**Tested** (`test:chat-lib`, Chromium, Firefox and WebKit): the checker's
+events for an answer with prose, an FAQ, two calls to action (one off the
+list), an injection, a chart, a sortable table and a follow-up, streamed in
+three renders — the dots replaced by words, a placeholder while the chart
+is read, then the whole answer with only the listed link, the follow-up
+asking its question, the status lines once each; the injection text with no
+element, style or handler (with a CONTROL that counts a planted one); the
+theme's colours applied; no map module requested until a map arrives;
+nothing after unmount; the core with no framework drawing the same; the
+README examples drawing.
+
+**Limits.** An FAQ's items are drawn open: their disclosure is the site's
+behaviour runtime's (`@az/overlay`). A pricing quote needs the site's own
+pricing block, which an app does not have. WebGL maps are checked here only
+up to the library's load; their drawing is `test:chat`'s, on a site. An app
+webview's own engines (§22, epic #32) are those three engines' families;
+the app itself is #39's.

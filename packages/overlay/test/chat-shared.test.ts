@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeText, readShareLink, shareProblem, SHARED_PATH } from '../src/runtime/chat-logic.ts';
+import { mergeText, readShareLink, shareProblem, SHARED_PATH } from '#chat-render/chat-logic.ts';
 import { mergeText as serverMerge } from '../../backend/src/server/chat-share.ts';
 import { SHARED_ROUTE } from '../../core/src/chat.ts';
 

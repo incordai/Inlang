@@ -2,7 +2,7 @@
  * @az module target-web
  * Purpose: Spec → project files: App, runtime, per-route HTML, pre-render, stylesheet, theme.
  * Spec: docs/ARCHITECTURE.md §4.2
- * Exports: emitProject, emit, PINS, safeAssetPath, escapeHtml, routeOf
+ * Exports: emitProject, emit, PINS, safeAssetPath, escapeHtml, routeOf, namedTheme, themeFor
  * Edit guide: generated files open with generated() (generated.ts); keep output deterministic (sorted, no timestamps); pins must match stack-evaluation.md.
  * Tests: packages/target-web/test/emit.test.ts, packages/target-web/test/prerender.test.ts, packages/target-web/test/pins.test.ts
  */
@@ -45,7 +45,7 @@ import type { PageNeeds } from './csp.ts';
 import { DATA_DIR, dataClient } from './data-client.ts';
 import { ADMIN_FILE, ADMIN_VALUES_FILE, adminCss, adminRoutes, adminTsx, adminValuesTs } from './data-admin.ts';
 import { ROWS_FILE, fromTables, rowsTsx } from './data-rows.ts';
-import { CHAT_FILE, MAP_TILES_ENV, SHARED_ROUTE, chatTsx, mapCss, showsCards, showsMap, usesChat, usesMap, usesSeries, withSharedPage } from './chat.ts';
+import { CHAT_FILE, CHAT_RENDER_DIR, MAP_TILES_ENV, SHARED_ROUTE, chatTsx, mapCss, showsCards, showsMap, usesChat, usesMap, usesSeries, withSharedPage } from './chat.ts';
 import { seedViews, THREE_DIR, threeCss, threeMain } from './three.ts';
 import { imageSizes, sizeImages } from './image-dims.ts';
 import { bytesSource, type ByteSource } from './image-size.ts';
@@ -659,7 +659,7 @@ const hueOf = (hue: string | null | undefined): AccentName | null =>
  * refused an unknown hue (AZ1418) and a refused pair (AZ1423); the theme
  * package throws rather than ship a step or a gradient under its floor.
  */
-function namedTheme(spec: Spec, override?: Theme): Theme {
+export function namedTheme(spec: Spec, override?: Theme): Theme {
   const base = override ?? (THEMES as Record<string, Theme>)[spec.site.theme] ?? THEMES.midnight;
   const named = withAccentPair(base, hueOf(spec.site.accent), hueOf(spec.site.accent2));
   // A chat gets the visitor's tint (chat-block-spec §9, theme-spec §16), and one that draws charts the
@@ -700,7 +700,7 @@ function fontOverrides(fonts: Readonly<Record<string, string>>): Record<string, 
  * by the browser per scheme (theme-spec §3.3); every other group is the same
  * in both schemes, so either resolution gives it.
  */
-function themeFor(named: Theme, fonts: Readonly<Record<string, string>> = {}, patterned = false): ThemeLike {
+export function themeFor(named: Theme, fonts: Readonly<Record<string, string>> = {}, patterned = false): ThemeLike {
   const t = resolve(named, named.defaultScheme ?? 'light');
   const schemed = schemeReferences(named);
   return {
@@ -1229,6 +1229,8 @@ ${frameCss(theme)}${schemeCss(named)}${gradientCss(isPaired(named))}${patternCss
         type: 'module',
         // `build` pre-renders every page (az-vite/build.mjs); `dev` serves from Vite.
         scripts: { dev: 'vite', build: 'node az-vite/build.mjs', preview: 'vite preview' },
+        // The chat renderer's alias (chat-block-spec §22.3), only for a site that copies it: a chat, or a `from` block's row images.
+        ...(chat || rowTables.length > 0 ? { imports: { '#chat-render/*': `./${RUNTIME_DIR}/${CHAT_RENDER_DIR}/*` } } : {}),
         dependencies: {
           react: PINS.react,
           // react-dom ships in lockstep with react and must match it exactly.

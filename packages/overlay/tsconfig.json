@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": { "lib": ["ES2022", "DOM", "DOM.Iterable"], "types": [] },
-  "include": ["src/runtime", "src/bundler.d.ts"],
+  "include": ["src/runtime"],
   "exclude": []
 }

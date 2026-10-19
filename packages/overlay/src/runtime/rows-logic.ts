@@ -2,7 +2,7 @@
  * @az runtime rows-logic
  * Purpose: the decisions of a `from` block's runtime as pure functions: its config, values, links, copy.
  * Spec: docs/data-spec.md §10.3, §13 (stored XSS, dangerous links)
- * Exports: parseRowsConfig, rowText, rowImage, rowSrcset, safeUrl, attributeValue, emptyWithout, paragraphs, problemCopy, markerProp, RowsConfig, RowImage, RowVariant
+ * Exports: parseRowsConfig, rowText, rowImage, attributeValue, emptyWithout, paragraphs, problemCopy, markerProp, RowsConfig
  * Edit guide: keep pure (no DOM); every decision here has a unit test; never turn a value into markup.
  * Tests: packages/overlay/test/rows.test.ts
  */
@@ -10,8 +10,12 @@
 /**
  * What a `from` block's runtime (rows.ts) decides, without a DOM, so each
  * rule is tested in Node. Copied into every generated project beside it.
- * Imports nothing.
+ * A row image's address and srcset rules are the chat renderer's
+ * (chat-render row-image.ts), which a chat's image cards use too: one rule.
+ * Imports only that file (#chat-render).
  */
+
+import { safeUrl, type RowImage, type RowVariant } from '#chat-render/row-image.ts';
 
 /** A block's `data-az-from` attribute, as the emitter wrote it (core fromShell). */
 export interface RowsConfig {
@@ -88,17 +92,6 @@ export function rowText(row: unknown, field: string): string | null {
   return null;
 }
 
-/** A row image's narrower copy (data-spec §8). */
-export interface RowVariant { readonly url: string; readonly width: number }
-
-/** A row's image, as rowImage reads it. */
-export interface RowImage {
-  readonly url: string;
-  readonly width: number;
-  readonly height: number;
-  readonly variants: readonly RowVariant[];
-}
-
 const size = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n > 0 ? n : 0);
 
 /**
@@ -116,49 +109,6 @@ export function rowImage(row: unknown, field: string): RowImage | null {
       .map((x) => ({ url: x.url, width: x.width }))
     : [];
   return { url: v.url, width: size(v.width), height: size(v.height), variants };
-}
-
-/**
- * A row image's `srcset` (gallery-spec §7 rule 3, data-spec §8): each copy,
- * then the image itself at its width — or null, and the <img> keeps its
- * `src` alone, when it has no copy (an image stored before copies), its
- * width is unknown, or any copy is not a safe URL narrower than the one
- * before it would allow. Never part of one: a set the server did not send
- * whole is no set.
- */
-export function rowSrcset(image: RowImage, base: string): string | null {
-  if (image.variants.length === 0 || image.width === 0) return null;
-  const own = safeUrl(image.url, base);
-  if (own === null) return null;
-  const candidates: string[] = [];
-  let last = 0;
-  for (const v of image.variants) {
-    const url = safeUrl(v.url, base);
-    if (url === null || v.width <= last || v.width >= image.width) return null;
-    candidates.push(`${url} ${v.width}w`);
-    last = v.width;
-  }
-  return [...candidates, `${own} ${image.width}w`].join(', ');
-}
-
-/**
- * A URL from a row, allowed only as http(s) — data-spec §13 "dangerous
- * links", the GRAMMAR §4.3 rule applied at runtime. The URL parser does the
- * browser's own normalisation first (case, tabs and newlines, leading
- * spaces), so `JaVa\tscript:` is seen as what the browser would follow. A
- * relative value resolves against the page, so it stays on the site. An
- * empty value is no URL: resolved, it would be the page itself, and an image
- * of the page is a request for the page's HTML.
- */
-export function safeUrl(value: string, base: string): string | null {
-  if (value.trim() === '') return null;
-  let url: URL;
-  try {
-    url = new URL(value, base);
-  } catch {
-    return null;
-  }
-  return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
 }
 
 /**

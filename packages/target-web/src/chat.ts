@@ -2,7 +2,7 @@
  * @az module chat
  * Purpose: src/chat/runtime.tsx — connects every chat panel to the backend and the auth session, after the page renders.
  * Spec: docs/chat-block-spec.md §4.4, §7, §21.4.3
- * Exports: CHAT_FILE, CHAT_RUNTIME_FILES, MAP_RUNTIME_FILES, MAP_TILES_ENV, usesChat, usesMap, showsMap, chatTsx, mapCss, withSharedPage, usesSeries, showsCards,
+ * Exports: CHAT_FILE, CHAT_RUNTIME_FILES, CHAT_RENDER_DIR, CHAT_RENDER_FILES, MAP_RUNTIME_FILES, MAP_TILES_ENV, usesChat, usesMap, showsMap, chatTsx, mapCss, withSharedPage, usesSeries, showsCards,
  *   SHARED_ROUTE
  * Edit guide: generated only for a site with a chat block; the DOM work is the overlay runtime's chat.ts, not this file.
  * Tests: packages/target-web/test/chat.test.ts
@@ -36,10 +36,20 @@ export { SHARED_ROUTE };
 
 export const CHAT_FILE = 'src/chat/runtime.tsx';
 
-/** The behaviour runtime's files that only a site with a chat block ships. */
-export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-chart-ui.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-busy.ts', 'chat-bar.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts', 'rows-logic.ts'];
+/** The behaviour runtime's files that only a site with a chat block ships: the panel and its share control. */
+export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-shared.ts'];
 
-/** The map runtime (§21.4.3): copied only into a site whose chat shows maps — its pure checks, its drawing, and the library's. */
+/**
+ * The chat renderer (packages/chat-render, chat-block-spec §22.3) goes into
+ * this folder of the runtime directory, the panel imports it as
+ * `#chat-render/<file>.ts`, and the site's package.json maps the alias there.
+ */
+export const CHAT_RENDER_DIR = 'chat-render';
+
+/** The renderer's files a site with a chat block ships (row-image.ts with a `from` block too, data-rows.ts ROWS_RENDER_FILES). */
+export const CHAT_RENDER_FILES: readonly string[] = ['chat-logic.ts', 'chat-chart.ts', 'chat-chart-ui.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-busy.ts', 'chat-bar.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts', 'chat-answer-view.ts', 'row-image.ts'];
+
+/** The map runtime (§21.4.3), renderer files copied only into a site whose chat shows maps — its pure checks, its drawing, and the library's. */
 export const MAP_RUNTIME_FILES: readonly string[] = ['chat-map.ts', 'chat-map-draw.ts', 'chat-map-gl.ts'];
 
 /**
@@ -123,7 +133,7 @@ export function chatTsx(runtimeDir: string, map = false, accounts = true): strin
   const str = (v: string) => JSON.stringify(v);
   // All three directories sit under src/, so each is one level up from here.
   const runtime = `../${runtimeDir.replace(/^src\//, '')}/chat.ts`;
-  const drawer = `../${runtimeDir.replace(/^src\//, '')}/chat-map-draw.ts`;
+  const drawer = `../${runtimeDir.replace(/^src\//, '')}/${CHAT_RENDER_DIR}/chat-map-draw.ts`;
   const auth = `../${AUTH_DIR.replace(/^src\//, '')}/config.ts`;
   return `${generated('connects every chat panel to the backend and the auth session (chat-block-spec §7)')}import { useLayoutEffect } from "react";
 import { attachChat } from ${str(runtime)};

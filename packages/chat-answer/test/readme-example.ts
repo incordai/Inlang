@@ -31,3 +31,17 @@ export function exampleChecks(readme: URL, example: URL): void {
     assert.equal(r.stdout, fenced(md, 'text')[0]);
   });
 }
+
+/**
+ * A browser example: the README shows the file exactly; scripts/chat-lib-e2e.mjs opens it in three browsers (it serves it at
+ * /example/<package>/<name>, as `--serve` does for a person) and checks it draws.
+ */
+export function browserExampleShown(readme: URL, example: URL): void {
+  const md = readFileSync(readme, 'utf8');
+  test('the README shows the example file exactly, and how to run it', () => {
+    const code = readFileSync(fileURLToPath(example), 'utf8');
+    assert.equal(fenced(md, 'ts')[0], code);
+    assert.match(code, /^\/\/ Run: node scripts\/chat-lib-e2e\.mjs --serve/);
+  });
+}
+

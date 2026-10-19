@@ -56,7 +56,7 @@ that only exists in CI config will drift.**
 | `pnpm test:3d` | the 3D runtime in real browsers | browsers |
 | `pnpm test:data` | data tables end to end: API, rules, admin, images, `from` blocks | browsers |
 | `pnpm test:chat` | the chat block end to end against the generated server with the scripted `fake` model, in three engines (chat-block-spec §12); then `test:chat-lib` | browsers |
-| `pnpm test:chat-lib` | the chat library's packages as an app's page loads them, in three engines (chat-block-spec §22): the injection corpus through the answer checker, Web Crypto history tags equal to the server's, the instruction builder's text equal to Node's, no policy violation | browsers |
+| `pnpm test:chat-lib` | the chat library's packages as an app's page loads them, in three engines (chat-block-spec §22): the injection corpus through the answer checker, Web Crypto history tags equal to the server's, the instruction builder's text equal to Node's, `<AzAnswer>` and the renderer core streaming an answer (placeholder, components, an inert injection, the theme, a map's module only when one arrives, nothing after unmount), the README examples, no policy violation | browsers |
 | `pnpm test:backend-db` | the backend on real PostgreSQL and MySQL | Docker |
 | `pnpm test:cloud-auth` | the hosted adapter's token-endpoint profile against the real server software | Docker, browsers |
 | `pnpm test:lighthouse` | Lighthouse on the previews and fixture sites | browsers |
