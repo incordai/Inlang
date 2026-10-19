@@ -18,7 +18,12 @@
  *   - #4: the map draws the default world basemap `az build` copied into the
  *     server — read by HTTP Range (206) from the backend, its credit under
  *     the map — and its picture is not a blank box: two colours, land and
- *     water, each cover a real share of the stage.
+ *     water, each cover a real share of the stage;
+ *   - #22, #23, #24 (chat-block-spec §19.17): a suggested question with an
+ *     answer of its own (`use pricing`, a preset `show all` made) is drawn
+ *     from the site with no model call; a typed question that clearly asks
+ *     for an faq item is answered with it, under "Ask the AI instead",
+ *     which asks the model.
  */
 
 import { spawn } from 'node:child_process';
@@ -67,6 +72,17 @@ page /
     greeting "Ask about our lamps."
     show     all
     allow    anyone
+    ask      "What does it cost?" use pricing
+
+page /help
+  faq
+    title "Questions"
+    item "Do you ship abroad?"
+      text "Yes, to most countries."
+    item "Is there a warranty?"
+      text "Two years on every lamp."
+    item "Can I return a lamp?"
+      text "Yes, within 30 days."
 
 page /pricing
   pricing cards
@@ -139,7 +155,7 @@ if (!site.dist) {
 const serverDir = join(site.proj, 'server');
 {
   const pages = readdirSync(site.dist, { recursive: true }).filter((f) => String(f).endsWith('.html')).map(String).sort();
-  check('#3: the build has no sign-in page — only the site\'s own pages and the shared-answer page', JSON.stringify(pages) === JSON.stringify(['chat/shared/index.html', 'index.html', 'pricing/index.html']), pages.join(' '));
+  check('#3: the build has no sign-in page — only the site\'s own pages and the shared-answer page', JSON.stringify(pages) === JSON.stringify(['chat/shared/index.html', 'help/index.html', 'index.html', 'pricing/index.html']), pages.join(' '));
   check('#3: the project has no auth config or session module — only the backend address check the build guard imports',
     JSON.stringify(readdirSync(join(site.proj, 'src/az-auth')).sort()) === JSON.stringify(['azbackend.ts', 'contract.ts', 'session.ts']));
   const config = JSON.parse(readFileSync(join(serverDir, 'az.config.json'), 'utf8'));
@@ -198,6 +214,7 @@ try {
         check('CONTROL: the policy watch reports a page that breaks its own policy', seen.length > 0);
       }
       await engineFlow(b, name);
+      await siteAnswerFlow(b, name);
       await pixelFlow(b, name);
     }
   }
@@ -268,6 +285,61 @@ async function engineFlow(b, name) {
     check(`${name}: the flow completed`, false, e.message.split('\n')[0]);
   } finally {
     closed = (await closeWithin(ctx, CLOSE_MS, `${name} context close`)) && closed;
+  }
+}
+
+/** The answer after the `before`-th, once it is no longer busy: whether it quotes pricing or an faq item, its prose, its buttons. */
+async function settledAnswer(page, before) {
+  await page.waitForFunction((n) => {
+    const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
+    return items.length > n && items[items.length - 1].getAttribute('aria-busy') === 'false';
+  }, before, { timeout: STATE_MS });
+  return page.evaluate(() => {
+    const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
+    const last = items[items.length - 1];
+    return {
+      quote: Boolean(last.querySelector('.az-chat-part .az-pricing')),
+      faq: [...last.querySelectorAll('.az-chat-part .az-faq-item')].map((i) => i.textContent.trim().split('\n')[0]),
+      prose: [...last.querySelectorAll(':scope > p')].map((p) => p.textContent).join(''),
+      buttons: [...last.querySelectorAll('.az-chat-follows button')].map((x) => x.textContent),
+    };
+  });
+}
+
+/** §19.17: answers without the model — a suggested question's own, and a clear match with "Ask the AI instead". */
+async function siteAnswerFlow(b, name) {
+  const ctx = await watchedContext(b, csp, {});
+  try {
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(STATE_MS);
+    await page.goto(`${host.url}/`);
+    await page.waitForFunction(() => document.querySelector('[data-az-chat]')?.getAttribute('data-az-chat-state') === 'idle'
+      && document.documentElement.hasAttribute('data-az-ready'), null, { timeout: STATE_MS });
+    const count = () => page.evaluate(() => document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site').length);
+    const logBefore = serverLog.length;
+    let before = await count();
+    await page.locator('[data-az-chat] [data-az-chat-asks]').getByRole('button', { name: 'What does it cost?' }).click();
+    const suggested = await settledAnswer(page, before);
+    check(`${name}: #22 a suggested question with its own answer draws the site's pricing, and no model answer`,
+      suggested.quote && suggested.prose === '' && suggested.buttons.length === 0, JSON.stringify(suggested));
+    before = await count();
+    const input = page.locator('[data-az-chat] [data-az-chat-input]');
+    await input.fill('do you ship abroad');
+    await input.press('Enter');
+    const matched = await settledAnswer(page, before);
+    check(`${name}: #24 a typed question that clearly asks for an faq item is answered with it, under Ask the AI instead`,
+      matched.faq.length === 1 && matched.faq[0].includes('Do you ship abroad?') && JSON.stringify(matched.buttons) === JSON.stringify(['Ask the AI instead']), JSON.stringify(matched));
+    before = await count();
+    await page.locator('[data-az-chat-transcript] > .az-chat-message--site').last().getByRole('button', { name: 'Ask the AI instead' }).click();
+    const instead = await settledAnswer(page, before);
+    check(`${name}: #24 Ask the AI instead asks the model the same question`, instead.prose === 'A plain answer.' && instead.buttons.length === 0, JSON.stringify(instead));
+    const said = serverLog.slice(logBefore);
+    check(`${name}: the server logged the two answers it gave without the model, with no token spent`,
+      /tokens 0\/0 site suggested/.test(said) && /tokens 0\/0 site match/.test(said) && !said.includes('ship abroad'), said.trim().split('\n').filter((l) => l.includes('chat:')).join(' / '));
+  } catch (e) {
+    check(`${name}: the site-answer flow completed`, false, e.message.split('\n')[0]);
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} site-answer context close`)) && closed;
   }
 }
 

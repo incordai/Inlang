@@ -505,7 +505,7 @@ value           = STRING | PAIR | BARE ;
 | `backend` + indented settings | `site` | 1 | backend-spec §2 — optional; site-level, one per site; not a block |
 | `database sqlite\|postgres\|mysql` · `email smtp\|api` | `backend` | 1 | backend-spec §2 — closed choices; addresses and keys live in the backend's `.env`, never here. `email` only when something needs accounts (a `signedin` chat, data tables, the site's own sign-in); a site whose every chat is `allow anyone` needs none (chat-block-spec §19.15) |
 | `model default` | `backend` | 1 | chat-block-spec §3.1 — optional; the server talks to a model the operator picks in `.env` (`AZ_CHAT_API`, `AZ_CHAT_MODEL`); any other value is AZ1412 |
-| `chat panel` · `chat float` · `chat none` | `page`; `chat float` also `site` | 1 | chat-block-spec §3 — `panel` a section, `float` a corner launcher that opens the panel; at most one chat per page (AZ2220). A float under `site` is inherited by every page (§5.2): a page's own `chat panel` replaces it there, `chat none` leaves it out, and a page's own `chat float` beside it is AZ2229. `knows <table>…` grounds answers on up to three public tables only the site fills (AZ1252, AZ1253, AZ1258, AZ1271). `answer <name>` (up to eight) holds one component in the answer forms, indented under it and kept as written, never linked as words — the model shows it with `use <name>` (chat-block-spec §19.16; AZ1273–AZ1277) |
+| `chat panel` · `chat float` · `chat none` | `page`; `chat float` also `site` | 1 | chat-block-spec §3 — `panel` a section, `float` a corner launcher that opens the panel; at most one chat per page (AZ2220). A float under `site` is inherited by every page (§5.2): a page's own `chat panel` replaces it there, `chat none` leaves it out, and a page's own `chat float` beside it is AZ2229. `knows <table>…` grounds answers on up to three public tables only the site fills (AZ1252, AZ1253, AZ1258, AZ1271). `answer <name>` (up to eight) holds one component in the answer forms, indented under it and kept as written, never linked as words — the model shows it with `use <name>` (chat-block-spec §19.16; AZ1273–AZ1278); `show auto` (or `show all`) has the build make more from the site (§19.17); `ask "…" use <name>` or `ask "…" show faq /help #2` is a suggested question the server answers without the model (AZ1279, AZ1280) |
 | `data <table>` + indented lines | `site` | 1 | data-spec §4 — needs `backend`; a table and its `/data/<table>` API; not a block |
 | `<field> <type> [type-arg…] [modifier…]` | `data` | 1 | data-spec §4.2–§4.5 — types `text longtext number money flag date datetime email url choice image ref`; modifiers `required unique index search private locked default <v>` |
 | `allow <who> <action…>` | `data` | 1 | data-spec §4.7 — who `anyone signedin owner`, action `read create edit delete`; the matrix is closed |
@@ -583,15 +583,39 @@ An answer preset, `answer <name>` under a chat (chat-block-spec §19.16), is
 a fill whose indented lines are its body as written (`"verbatim": true` in
 the slot's manifest): one component in the answer forms, never resolved as
 words, the strings re-quoted with §1.5's escapes. AZ1273 — no name, or one
-that is not lowercase letters and digits (at most 32) · AZ1274 — a name
-twice in one chat · AZ1275 — a body that is not exactly one component ·
-AZ1276 — a component the chat's `show` does not list, or a line that is no
-component (`ask`, `text`, `use`) · AZ1277 — a body the chat server's own
-answer parser would drop (its reason code named; `az check` and `az build`
-give the compiler that parser), or whose `from` names no table a signed-out
-visitor can read, or that asks the operator's tools. The body counts in
-§2's nesting depth like any line: under a `chat panel` on a page, a
-dashboard's tiles are one line each.
+that is not lowercase letters and digits, words joined by one `-` (at most
+32) · AZ1274 — a name twice in one chat · AZ1275 — a body that is not
+exactly one component · AZ1276 — a component the chat's `show` does not
+list, or a line that is no component (`ask`, `text`, `use`) · AZ1277 — a
+body the chat server's own answer parser would drop (its reason code named;
+`az check` and `az build` give the compiler that parser), or whose `from`
+names no table a signed-out visitor can read, or that asks the operator's
+tools. The body counts in §2's nesting depth like any line: under a `chat
+panel` on a page, a dashboard's tiles are one line each.
+A preset's body may hold one `keywords` line at its margin, beside the
+component — `keywords "orders" "revenue"`, one to twelve quoted words of at
+most 40 characters — that the server's topic matcher reads and the answer
+parser never sees (chat-block-spec §19.17): AZ1278 — a keywords line whose
+values are not quoted, none or past twelve, too long, written twice, or
+with lines indented under it.
+`show auto` has the build make presets from the site — a public table's
+overview, its count by month, its map; each public pricing block, faq and
+feature list as a quote — for the components `show` lists, named
+`<table>-overview`, `<table>-by-month`, `<table>-map`, `<route>-<word>`
+(chat-block-spec §19.17, core `chat.ts autoPresets`); `show all` brings
+`auto` with every component, so `show` takes up to twelve values. An
+author's `answer` of the same name replaces the build's; eight presets a
+chat in all, the author's first. Each is judged like an author's (AZ1277,
+`(made by show auto)`). AZ1281 (warning) — `show auto` with no component to
+make presets of.
+A suggested question may name its answer after its text: `ask "Show me
+the orders" use orders-overview`, `ask "Is there a warranty?" show faq
+/help #2` (chat-block-spec §19.17). Pressed as its button, the server
+answers it with that, without the model. AZ1279 — an answer that is
+neither `use <name>` nor `show <word> <route>[#n] [#item]` · AZ1280 — `use`
+of a name the chat has no preset of, its own or the build's · AZ1276 and
+AZ1277, as for a preset, for a quote of a word the chat does not show or
+one the parser would drop.
 `from <table>` in a block is AZ1260–AZ1269 (data-spec §10, §12): a gallery's
 `alt` maps only to a `required` field (AZ1262), and a site with data owns
 `/admin`, so a page there is AZ1268 (§5.5).
@@ -885,8 +909,11 @@ Every other part of a key's line is accounted for the same way:
 its `word.json`: a slot's definition carries `"line"`, and a `children` word
 (nav's `link`, `group`, `cta`) carries it in `"childLines"`, with `"holds"`
 naming the children words that may be indented under it (§3.3). A line is
-the values in order, each a role — `label`, `destination`, `value`, `file` —
-or a flag of the fill written bare, `{ "flag": "lead" }`:
+the values in order, each a role — `label`, `destination`, `value`, `file`,
+`answer` — or a flag of the fill written bare, `{ "flag": "lead" }`. An
+`answer` is last and takes the rest of the line, which no emitter reads: a
+file-wide rule checks it whole (chat's `ask "…" use monthly`, chat-block-spec
+§19.17, core `chat.ts askAnswer`):
 
 ```jsonc
 "slots":      { "item": { "line": ["label", { "flag": "lead" }] } },   // item "Sewn" lead

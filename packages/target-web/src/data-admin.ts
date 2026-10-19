@@ -285,14 +285,14 @@ function ChatUsageView() {
                   <tr>
                     <th scope="col">Day</th><th scope="col">Messages</th><th scope="col">Input tokens</th>
                     <th scope="col">Cached input tokens</th><th scope="col">Output tokens</th><th scope="col">Dropped components</th><th scope="col">Blocked by moderation</th>
-                    <th scope="col">Shares made</th>
+                    <th scope="col">Answered without the model</th><th scope="col">Shares made</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usage.days.map((d) => (
                     <tr key={d.day}>
                       <th scope="row">{d.day}</th><td>{n(d.messages)}</td><td>{n(d.input)}</td>
-                      <td>{n(d.cached)}</td><td>{n(d.output)}</td><td>{n(d.dropped)}</td><td>{n(d.blocked)}</td><td>{n(d.shares)}</td>
+                      <td>{n(d.cached)}</td><td>{n(d.output)}</td><td>{n(d.dropped)}</td><td>{n(d.blocked)}</td><td>{n(d.site)}</td><td>{n(d.shares)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -84,9 +84,12 @@ export interface PropSpec {
  * names it, where it goes, a value beside the label, a project file, or a
  * flag of the fill written bare (`item "Sewn" lead`). The roles name what
  * the word's emitter reads at that position; only the count, and a flag's
- * spelling, are enforced — a value past the last is AZ1406.
+ * spelling, are enforced — a value past the last is AZ1406. `answer`, last
+ * on a line, is the rest of it: what the chat server answers a suggested
+ * question with (`ask "…" use monthly`, chat-block-spec §19.17), which no
+ * emitter reads and core chat.ts checks whole.
  */
-export type LineValue = 'label' | 'destination' | 'value' | 'file' | { readonly flag: string };
+export type LineValue = 'label' | 'destination' | 'value' | 'file' | 'answer' | { readonly flag: string };
 
 /** A fill's `line` in word.json: the values its line takes, in order. */
 export type FillLine = readonly LineValue[];
@@ -321,7 +324,7 @@ function slotLine(def: unknown): FillLine | undefined {
 
 /** What a fill's line takes, in words: "a label and a destination". */
 function describeLine(line: FillLine): string {
-  const parts = line.map((v) => typeof v === 'string' ? `a ${v}` : `'${v.flag}'`);
+  const parts = line.map((v) => typeof v === 'string' ? `${/^[aeiou]/.test(v) ? 'an' : 'a'} ${v}` : `'${v.flag}'`);
   return parts.length <= 1 ? parts[0] ?? 'no value' : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
 }
 
@@ -612,7 +615,10 @@ export function link(file: AzFile, manifests: Map<string, Manifest>, options: Li
     // The label first: unquoted copy splits into words, so its fix (the
     // quotes) also accounts for the values it spilled past the line.
     if (!checkLabel(s, line)) return;
+    // An `answer` takes the rest of the line, checked whole by the word's file-wide rules (core chat.ts).
+    const tail = line.indexOf('answer');
     const extra = s.args.find((a, i) => {
+      if (tail >= 0 && i >= tail) return false;
       const at = line[i];
       return at === undefined || (typeof at !== 'string' && !(a.kind === 'word' && a.value === at.flag));
     });

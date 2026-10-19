@@ -184,7 +184,7 @@ test('route: a blocked question is 400 blocked; the model is never asked; the lo
     assert.ok(s.log.includes('chat: blocked by moderation'), s.log.join(' | '));
     // The block is counted in today's row: one blocked question, no message, no tokens.
     const today = utcDay(Date.now());
-    assert.deepEqual(await createUsage(s.db).row(today), { input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 1 });
+    assert.deepEqual(await createUsage(s.db).row(today), { input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 1, site: 0 });
     // CONTROL: an allowed question streams from the model, and is counted as a message, not a block.
     const ok = await client(s.url).post('/chat', { page: '/', messages: [say('Which plan?')] });
     assert.equal(ok.status, 200);

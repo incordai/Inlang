@@ -1,0 +1,101 @@
+az 1
+
+# The topic matcher's corpus site (chat-block-spec §19.17): a small shop whose
+# chat shows every component and makes presets of its tables and lists
+# (show all), with one preset of the author's own, keywords and all.
+
+site bench
+  auth
+    adapter azbackend
+    protect /members
+  backend
+    database sqlite
+    email    smtp
+    model    default
+  data orders
+    item     text     required
+    status   choice   paid open cancelled required
+    total    money    usd required
+    placed   datetime required
+    allow anyone read
+  data stores
+    name      text   required
+    latitude  number required
+    longitude number required
+    allow anyone read
+
+page /
+  hero center
+    title "Bench lamps"
+    sub   "Small lamps, built by hand."
+    cta   "See the plans" /pricing
+  chat panel
+    title    "Ask about Bench"
+    greeting "Ask me about the lamps."
+    show     all
+    allow    anyone
+    ask "Show me the orders" use orders-overview
+    ask "Is there a warranty?" show faq /help #2
+    answer contact
+      keywords "contact" "talk" "email" "phone" "human" "person"
+      cta "Talk to us" /contact
+
+page /pricing
+  pricing cards
+    title    "Plans"
+    currency usd
+    plan "Home"
+      monthly 9
+      annual  90
+      cta     "Start" /signup
+    plan "Studio"
+      monthly 29
+      annual  290
+      cta     "Start" /signup
+
+page /help
+  faq
+    title "Questions"
+    item "Do you ship abroad?"
+      text "Yes, to most countries, in five to ten working days."
+    item "Is there a warranty?"
+      text "Every lamp has a two-year warranty."
+    item "Can I cancel any time?"
+      text "Yes, from your account page."
+    item "How long does delivery take?"
+      text "Two to four working days at home, five to ten abroad."
+    item "Which bulbs fit the lamps?"
+      text "Any E27 bulb up to 40 watts."
+    item "Can I return a lamp?"
+      text "Yes, within 30 days, unused."
+  feature
+    title "Why Bench"
+    item "Bright"
+      text "800 lumens from a lamp the size of a mug."
+    item "Quiet"
+      text "No fan and no hum."
+
+page /contact
+  hero center
+    title "Write to us"
+    sub   "We answer within a working day."
+    cta   "Email us" mailto:hello@bench.example
+
+page /signup
+  text
+    title "Sign up"
+    body  "Pick a plan, then make an account."
+
+page /login
+  auth login
+    redirect /
+
+page /members
+  faq
+    title "Members"
+    item "What is the members' discount code?"
+      text "MEMBERS-ONLY-4417, at checkout."
+    item "When is the members' sale?"
+      text "The first week of December."
+    item "Can I bring a friend?"
+      text "Yes, one."

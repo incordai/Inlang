@@ -2,9 +2,9 @@
  * @az server chat-match
  * Purpose: deterministic keyword scoring of a visitor's question: which pages a large site sends in full, and which author's answer a clear question gets without the model.
  * Spec: docs/chat-block-spec.md §19.17
- * Exports: terms, scoreCandidates, bestMatch, choosePages, MATCH_LIMITS, MatchCandidate, Scored
+ * Exports: terms, scoreCandidates, bestMatch, choosePages, matchCandidates, MATCH_LIMITS, MatchCandidate, Scored
  * Edit guide: no regular expression that can backtrack; a pure function of its inputs (no clock, no randomness); the visitor's words choose among the candidates and are never returned.
- * Tests: packages/backend/test/chat-match.test.ts
+ * Tests: packages/backend/test/chat-match.test.ts, packages/backend/test/chat-match-corpus.test.ts, packages/backend/test/chat-site-answers.test.ts
  */
 
 /**
@@ -32,15 +32,17 @@
  * choose among what the author or the build wrote; nothing here returns,
  * echoes or stores them.
  *
- * Copied into a generated server with chat; imports nothing.
+ * Copied into a generated server with chat; imports chat-answer.ts's types.
  */
+
+import type { AnswerPreset, AnswerQuote, AnswerWord } from './chat-answer.ts';
 
 /** The bars a match must clear, and the bounds of the work one question costs. */
 export const MATCH_LIMITS = {
   /** The least score that answers without the model, from 0 to 1. */
-  score: 0.75,
+  score: 0.7,
   /** How far ahead of the second candidate the first must be. */
-  lead: 0.2,
+  lead: 0.1,
   /** Characters of a question that are read; the visitor's message is at most 1 000 (chat-text.ts VISITOR_MAX). */
   chars: 1_000,
   /** The terms of a question that are kept, the first ones. */
@@ -107,6 +109,9 @@ export interface MatchCandidate<T> {
 
 export interface Scored<T> { readonly value: T; readonly score: number }
 
+/** How much of a score is the question saying the candidate's title: what tells "Orders" from "Orders by month". */
+const TITLE_WEIGHT = 0.25;
+
 /**
  * Every candidate's score for `question`, highest first (ties in the
  * candidates' order): the share of the question's weight that is the
@@ -124,18 +129,18 @@ export function scoreCandidates<T>(question: readonly string[], candidates: read
     if (total === 0) return { value: c.value, score: 0, i };
     const own = question.filter((t) => sets[i].has(t)).reduce((sum, t) => sum + weight(t), 0);
     const title = c.title.length === 0 ? 0 : c.title.filter((t) => question.includes(t)).length / c.title.length;
-    return { value: c.value, score: (own / total) * (0.5 + 0.5 * title), i };
+    return { value: c.value, score: (own / total) * (1 - TITLE_WEIGHT + TITLE_WEIGHT * title), i };
   });
   return scored.sort((a, b) => b.score - a.score || a.i - b.i).map(({ value, score }) => ({ value, score }));
 }
 
-/** The one candidate `question` clearly asks for, or null: a strong score, well ahead of the second. */
-export function bestMatch<T>(question: string, candidates: readonly MatchCandidate<T>[]): T | null {
+/** The one candidate `question` clearly asks for, or null: a strong score, well ahead of the second. `bars` are MATCH_LIMITS'. */
+export function bestMatch<T>(question: string, candidates: readonly MatchCandidate<T>[], bars: { readonly score: number; readonly lead: number } = MATCH_LIMITS): T | null {
   const q = terms(question);
   if (q.length === 0 || candidates.length === 0) return null;
   const [first, second] = scoreCandidates(q, candidates);
-  if (first.score < MATCH_LIMITS.score) return null;
-  if (second !== undefined && first.score - second.score < MATCH_LIMITS.lead) return null;
+  if (first.score < bars.score) return null;
+  if (second !== undefined && first.score - second.score < bars.lead) return null;
   return first.value;
 }
 
@@ -175,6 +180,52 @@ export function choosePages<P extends { readonly route: string; readonly full: s
     if (out.length >= most || out.includes(p) || size + p.full.length > chars) continue;
     out.push(p);
     size += p.full.length;
+  }
+  return out;
+}
+
+/** The first quoted string on a component's first line — its title: `dashboard "This month"` → `This month`. */
+function titleOf(text: string): string {
+  const line = text.split('\n')[0];
+  const at = line.indexOf('"');
+  if (at < 0) return '';
+  let out = '';
+  for (let i = at + 1; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') return out;
+    if (c === '\\') { out += line[i + 1] ?? ''; i++; continue; }
+    out += c;
+  }
+  return '';
+}
+
+/**
+ * What a question on one chat page may be matched to (chat-block-spec
+ * §19.17), each with the answer the server then reads as if the model had
+ * written it: every preset that has keywords — the author's `keywords`, or
+ * the build's — answering with its own body; and, when the page shows faq,
+ * every item of the site's quotable faq lists, matched by its question and
+ * answering with the quote of that one item. Nothing else: a candidate is
+ * always the author's or the build's.
+ */
+export function matchCandidates(presets: readonly AnswerPreset[], quotes: readonly AnswerQuote[], show: readonly AnswerWord[]): MatchCandidate<string>[] {
+  const out: MatchCandidate<string>[] = [];
+  for (const p of presets) {
+    if (!p.keywords || p.keywords.length === 0) continue;
+    // A quote's title is its block's; a component's is its first string.
+    const [verb, word, at] = p.text.trim().split(' ');
+    const quote = verb === 'show' ? quotes.find((q) => q.word === word && `${q.route}${q.n > 0 ? `#${q.n + 1}` : ''}` === at) : undefined;
+    const title = quote ? quote.label ?? '' : titleOf(p.text);
+    out.push({ terms: terms(p.keywords.join(' ')), title: terms(title), value: p.text });
+  }
+  if (show.includes('faq')) {
+    for (const q of quotes) {
+      if (q.word !== 'faq' || !q.items) continue;
+      q.items.forEach((item, k) => {
+        const question = terms(item.title);
+        out.push({ terms: question, title: question, value: `show faq ${q.route}${q.n > 0 ? `#${q.n + 1}` : ''} #${k + 1}\n` });
+      });
+    }
   }
   return out;
 }

@@ -49,7 +49,7 @@
     },
     "show": {
       "type": "list",
-      "max": 11,
+      "max": 12,
       "description": "Components an answer may hold besides text",
       "valueDescriptions": {
         "pricing": "The site's own pricing block, quoted as its page shows it",
@@ -63,7 +63,8 @@
         "dashboard": "Stats, charts, tables and cards under one title",
         "explore": "A data set with sliders, dates, toggles or a form that recompute its tables, stats and charts in the page",
         "map": "A map of pins and routes from public table rows, or labelled AI-placed, with its places listed as text",
-        "all": "Every component above; pricing only when a public page has a pricing block",
+        "auto": "Presets the build makes from public tables and lists",
+        "all": "Every component above and auto; pricing only with a public pricing block",
         "figures": "chart table stats cards dashboard",
         "sections": "pricing faq cta feature; pricing only with a public pricing block"
       }
@@ -75,9 +76,10 @@
   },
   "slots": {
     "ask": {
-      "description": "A suggested question, shown as a button",
+      "description": "A suggested question; use or show answers it without AI",
       "line": [
-        "label"
+        "label",
+        "answer"
       ]
     },
     "answer": {

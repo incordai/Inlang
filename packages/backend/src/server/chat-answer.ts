@@ -131,8 +131,12 @@ export interface AnswerRules {
   readonly presets?: readonly AnswerPreset[];
 }
 
-/** An author's answer preset (`answer <name>` in the .az file, §19.16): its name and its one component, as written. */
-export interface AnswerPreset { readonly name: string; readonly text: string }
+/**
+ * An answer preset (`answer <name>` in the .az file, §19.16, or one the build
+ * made, §19.17): its name and its one component, as written; and the words
+ * a question is matched by, which the parser never reads.
+ */
+export interface AnswerPreset { readonly name: string; readonly text: string; readonly keywords?: readonly string[] }
 
 /** One component, validated: exactly what the page's templates are filled with. */
 export type AnswerBlock =

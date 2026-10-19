@@ -46,8 +46,8 @@ test('show all is every component; without a public pricing block, every compone
   assert.deepEqual(answerShow(site('all', PRICING)), CHAT_ANSWER_WORDS);
 });
 
-test('the Spec of show all is the Spec of the full list it stands for', () => {
-  const full = CHAT_ANSWER_WORDS.join(' ');
+test('the Spec of show all is the Spec of the full list it stands for, and auto (§19.17)', () => {
+  const full = `${CHAT_ANSWER_WORDS.join(' ')} auto`;
   assert.equal(serialiseSpec(compile(site('all', PRICING), { manifests }).spec!), serialiseSpec(compile(site(full, PRICING), { manifests }).spec!));
 });
 

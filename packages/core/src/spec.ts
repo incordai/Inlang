@@ -544,12 +544,14 @@ export function buildSpec(
         props: w.props, pos: w.pos,
         // Its answer presets (chat-block-spec §19.16), each body as link.ts kept it.
         presets: w.children.filter((c) => c.word === PRESET_WORD).map((c) => ({ name: c.args[0], body: c.props.body?.value ?? '', pos: c.pos })),
+        // Its suggested questions, each with the answer written after it (§19.17).
+        asks: w.children.filter((c) => c.word === 'ask').map((c) => ({ text: c.args[0]?.value ?? '', answer: c.args.slice(1), pos: c.pos })),
       })),
     ],
     declared?.props.model,
     answers.quotes.length,
     tables,
-    checkAnswer ? { check: checkAnswer, answers } : undefined,
+    { ...(checkAnswer ? { check: checkAnswer } : {}), answers },
   ));
 
   const accentWord = themeWord?.children.find((w) => w.word === 'accent');

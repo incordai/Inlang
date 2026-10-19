@@ -32,7 +32,7 @@
 
 import { generatedJson } from '../../core/src/generated.ts';
 import { blocksFor, type Spec, type SpecBlock } from '../../core/src/spec.ts';
-import { PRESET_WORD, type AnswerCheck } from '../../core/src/chat.ts';
+import type { AnswerCheck } from '../../core/src/chat.ts';
 import { ANSWER_FORMS, ANSWER_LIMITS, ANSWER_WORDS, ASK_FORM, createAnswerParser, type AnswerPreset, type AnswerRules, type AnswerWord } from './server/chat-answer.ts';
 
 /** The site context's largest size, in characters of its pages (§8.1). */
@@ -121,9 +121,20 @@ export const checkPreset: AnswerCheck = (rules, text) => {
   return why;
 };
 
-/** A chat block's answer presets as the server reads them: each name and its body (core link.ts verbatimText). */
-const presetsOf = (chat: SpecBlock): AnswerPreset[] =>
-  chat.children.filter((c) => c.word === PRESET_WORD && c.args[0] && c.props.body).map((c) => ({ name: c.args[0].value, text: c.props.body }));
+/**
+ * A chat block's answer presets as the server reads them (core chat.ts
+ * chatPresets): the author's and the build's, each name, body and keywords.
+ */
+const presetsOf = (chat: SpecBlock): (AnswerPreset & { readonly auto?: string })[] =>
+  (chat.chat?.presets ?? []).map((p) => ({ name: p.name, text: p.text, ...(p.keywords.length > 0 ? { keywords: [...p.keywords] } : {}), ...(p.auto ? { auto: p.auto } : {}) }));
+
+/**
+ * The presets the prompt lists: all but the quotes the build made, which
+ * the list of the site's own blocks already teaches (§19.17) — they are
+ * there for suggested questions and the matcher.
+ */
+const listed = (presets: readonly (AnswerPreset & { readonly auto?: string })[]): AnswerPreset[] =>
+  presets.filter((p) => !(p.auto && p.text.startsWith('show ')));
 
 /**
  * The prose formatting the page reads (chat-block-spec §21.1.2) — and only
@@ -287,13 +298,16 @@ export function chatBackend(spec: Spec, o: ChatBackendOptions = {}): BackendChat
       knows.set(t.name, { name: t.name, fields: t.fields.map((f) => given({ ...f, choices: f.choices ? [...f.choices] : undefined })) });
     }
     const presets = presetsOf(chat);
-    const text = CHAT_PROMPT(spec.site.name, ANSWER_WORDS.filter((w) => show.includes(w)), known.length > 0, presets);
+    const text = CHAT_PROMPT(spec.site.name, ANSWER_WORDS.filter((w) => show.includes(w)), known.length > 0, listed(presets));
+    // The suggested questions that answer without the model (§19.17), each as the page sends it and its one answer line.
+    const asks = chat.chat?.asks ?? [];
     if (!prompts.has(text)) prompts.set(text, promptFileName(prompts.size + 1));
     chats[page.route] = {
       allow: chat.props.allow ?? 'signedin', limit: Number(chat.props.limit ?? '20'),
       ...(show.length > 0 ? { show } : {}),
       ...(known.length > 0 ? { knows: known.map((t) => t.name) } : {}),
-      ...(presets.length > 0 ? { presets: presets.map((p) => ({ name: p.name, text: p.text })) } : {}),
+      ...(presets.length > 0 ? { presets: presets.map((p) => ({ name: p.name, text: p.text, ...(p.keywords ? { keywords: [...p.keywords] } : {}) })) } : {}),
+      ...(asks.length > 0 ? { asks: asks.map((a) => ({ text: a.text, answer: a.answer })) } : {}),
       prompt: prompts.get(text)!,
     };
   }

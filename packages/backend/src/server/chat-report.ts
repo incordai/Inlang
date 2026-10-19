@@ -38,8 +38,8 @@ export function usageText(r: UsageReport): string {
   if (r.days.length === 0) {
     lines.push('  nothing counted in the last 30 days');
   } else {
-    const head = ['day', 'messages', 'input tokens', 'cached input', 'output tokens', 'dropped', 'blocked', 'shares'];
-    const rows = r.days.map((d) => [d.day, n(d.messages), n(d.input), n(d.cached), n(d.output), n(d.dropped), n(d.blocked), n(d.shares)]);
+    const head = ['day', 'messages', 'input tokens', 'cached input', 'output tokens', 'dropped', 'blocked', 'no model', 'shares'];
+    const rows = r.days.map((d) => [d.day, n(d.messages), n(d.input), n(d.cached), n(d.output), n(d.dropped), n(d.blocked), n(d.site), n(d.shares)]);
     const width = head.map((h, i) => Math.max(h.length, ...rows.map((row) => row[i].length)));
     const line = (cells: readonly string[]) => `  ${cells.map((c, i) => (i === 0 ? c.padEnd(width[i]) : c.padStart(width[i]))).join('  ')}`;
     lines.push(line(head), ...rows.map(line));

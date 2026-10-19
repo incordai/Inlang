@@ -191,6 +191,17 @@ test('AZ.md describes a site\'s chats: each page\'s panel, what its answers show
   assert.ok(!map(PLAIN).includes('## Chat'));
 });
 
+test('AZ.md lists each chat\'s answer presets — the author\'s and those show auto made, how to replace them — and the suggested questions that answer without the model (§19.17)', () => {
+  const source = CHAT_SITE.replace(/    show (.*)\n/, '    show $1 auto\n    ask "Plans?" use pricing\n    answer talk\n      keywords "contact" "talk"\n      cta "Talk to us" /\n');
+  const section = map(source).slice(map(source).indexOf('## Chat'));
+  assert.match(section, /Answer presets on `\/`/);
+  assert.match(section, /- `talk` `cta "Talk to us" \/` — matched by "contact" "talk"/);
+  assert.match(section, /- `pricing` `show pricing \/pricing` \(made by `show auto`: the pricing block[^)]*; write `answer pricing` to replace it\) — matched by /);
+  assert.match(section, /- suggested "Plans\?" answers with `use pricing`, without the model/);
+  // CONTROL: a chat with neither lists none.
+  assert.ok(!map(CHAT_SITE).includes('Answer presets on'));
+});
+
 test('AZ.md for a site without a theme line names the default and the line to add', () => {
   const c = colourSection(map(PLAIN));
   assert.ok(c.includes(`Now: theme \`${DEFAULT_THEME_NAME}\`.`), c);

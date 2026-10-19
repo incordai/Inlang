@@ -86,13 +86,13 @@ None in this release.
 | `greeting` | string |  |  | 1–200 characters | the first message, shown before anyone asks; never sent to the model |
 | `allow` | enum | `signedin` / `anyone` | `signedin` |  | who may send a message; a signed-out visitor sees **Sign in to ask** |
 | `limit` | int | 1–50 | `20` |  | questions per conversation before the panel says to start a new chat |
-| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` `explore` `map`, or a group: `all`, `figures` (`chart table stats cards dashboard`), `sections` (`pricing faq cta feature`) |  | at most 11 | what an answer may hold besides text (below); a group stands for its components (`az explain show all` lists them), and never brings `pricing` without a public pricing block to quote; a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270; a public table named `tool` beside a component that takes `from` is AZ1272 (`from tool` is the server's data tools) |
+| `show` | list | `pricing` `faq` `cta` `feature` `chart` `table` `stats` `cards` `dashboard` `explore` `map`, or a group: `all`, `figures` (`chart table stats cards dashboard`), `sections` (`pricing faq cta feature`); and `auto`, presets the build makes (below) |  | at most 12 | what an answer may hold besides text (below); a group stands for its components (`az explain show all` lists them), and never brings `pricing` without a public pricing block to quote; a word outside that list is AZ1254 with its reason; `pricing` with no pricing block a signed-out visitor can see is AZ1255; `dashboard` with nothing to hold is AZ1270; a public table named `tool` beside a component that takes `from` is AZ1272 (`from tool` is the server's data tools) |
 | `knows` | list | table names |  | at most 3 | tables whose rows the answers draw on (below): each must be `allow anyone read` (AZ1252) and filled only by the site's admins (AZ1253); named twice or a fourth is AZ1258, not a table AZ1271 |
 
 ## Children
 
-- `ask "question"`: a suggested question (0–4, each 1–80 characters), shown as a button that asks it
-- `answer <name>`: an answer you write once (0–8), one component in the answer forms indented under it; the model shows it whole by writing `use <name>`, and its `from` figures are the server's (below)
+- `ask "question"`: a suggested question (0–4, each 1–80 characters), shown as a button that asks it; `ask "question" use <name>` or `ask "question" show faq /help #2` answers it with that preset or quote when the button is pressed, without the model (below)
+- `answer <name>`: an answer you write once (0–8), one component in the answer forms indented under it, and an optional `keywords "…" "…"` line; the model shows it whole by writing `use <name>`, and its `from` figures are the server's (below)
 
 ## What the operator sets
 
@@ -175,6 +175,39 @@ signed-out visitor can read, and a preset cannot ask the operator's tools
 (AZ1277). The body is never drawn on the page. Its lines count toward the
 file's nesting depth, so under a `chat panel` a dashboard's tiles are one
 line each.
+
+### Without the model (chat-block-spec §19.17)
+
+```
+chat panel
+  show all
+  ask "Show me the orders" use orders-overview
+  ask "Is there a warranty?" show faq /help #2
+  answer contact
+    keywords "contact" "talk" "email"
+    cta "Talk to us" /contact
+```
+
+- **Suggested questions with an answer.** A suggested question pressed as
+  its button is answered with its preset or quote by the server — no model
+  call, no token — drawn as any answer is and kept in the conversation, so
+  a later question to the model knows what was shown. `az check` holds the
+  answer to the preset rules: its shape (AZ1279), a preset the chat has
+  (AZ1280), a word it shows (AZ1276), a block the site has (AZ1277).
+- **Presets the build makes.** `show auto` (and `show all`) makes presets of
+  what the site already has, for the components `show` lists: a public
+  table's `<table>-overview` (with a money and a choice field), its
+  `<table>-by-month` (with a date), its `<table>-map` (with latitude and
+  longitude fields), and a quote of each public pricing block, faq and
+  feature list (`help-faq`). Each has keywords from the table's and fields'
+  names, or the block's title and page. An `answer` of the same name
+  replaces one; eight a chat in all. AZ.md lists them; AZ1281 warns of
+  `show auto` with nothing to make them of.
+- **Clear matches.** A typed question that clearly asks for one preset with
+  keywords, or one faq item, is answered with it by the server, under an
+  **Ask the AI instead** button that sends the same question to the model.
+  Only a strong, unambiguous match answers; anything else is the model's.
+  The operator turns this off with `AZ_CHAT_MATCH=off`.
 
 ## Answers from the site's tables (`knows`)
 

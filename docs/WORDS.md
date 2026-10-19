@@ -163,7 +163,7 @@ A panel or a launcher where visitors ask the site's AI
 | `limit` | int |  | `20` | Messages per conversation before a new chat |
 | `show` | list |  |  | Components an answer may hold besides text |
 | `knows` | list |  |  | Public tables whose rows ground the answers, up to 3 |
-| `ask` | child |  |  | A suggested question, shown as a button |
+| `ask` | child |  |  | A suggested question; use or show answers it without AI |
 | `answer` | child (max 8) |  |  | An answer written once; the model shows it by name |
 
 ### Where to edit

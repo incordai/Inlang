@@ -458,6 +458,14 @@ page that answers it) and prints the average system text per question:
 and the page that answers sent in full for 14 of 16. The unit test holds
 the choice under 60% of the whole and at most two misses.
 
+Answers without the model (chat-block-spec §19.17, issues 22–24) are
+counted too: the bench asks the topic matcher's labelled corpus
+(`packages/backend/test/fixtures/chat-match/`, 66 questions) and prints the
+share it answers from the site's own presets and faq items — 33 (50%), all
+33 rightly, none wrongly — which costs 0 model tokens each; the same
+questions to the model would each pay the system text and the answer. A
+suggested question with an answer of its own is the same: 0 tokens.
+
 Answers in the taught forms, and what each later question pays again for
 them as history (`o200k_base`, the parser's own history):
 

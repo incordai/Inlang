@@ -29,7 +29,7 @@ import type { EmitContext } from '../../core/src/emit-contract.ts';
 import { actionsFor } from '../../target-web/src/actions.ts';
 
 const WORDS = join(fileURLToPath(new URL('../../../', import.meta.url)), 'packages/words');
-const ROLES: readonly string[] = ['label', 'destination', 'value', 'file'];
+const ROLES: readonly string[] = ['label', 'destination', 'value', 'file', 'answer'];
 
 const dirs = readdirSync(WORDS).filter((d) =>
   statSync(join(WORDS, d)).isDirectory() && existsSync(join(WORDS, d, 'word.json')));
@@ -79,6 +79,8 @@ test('every fill declares its line: roles in order, a flag naming a flag prop of
     for (const f of fills(m)) {
       if (!Array.isArray(f.line) || f.line.length === 0) problems.push(`${m.name}.${f.path}: no line`);
       else if (!f.line.every((v) => validValue(v, f.props))) problems.push(`${m.name}.${f.path}: ${JSON.stringify(f.line)}`);
+      // An `answer` is the rest of the line (chat's `ask`, chat-block-spec §19.17): last, or nothing after it could be read.
+      else if (f.line.includes('answer') && f.line.at(-1) !== 'answer') problems.push(`${m.name}.${f.path}: answer is not last`);
       // A verbatim fill is named, not labelled: its line is its name alone (`answer monthly`).
       else if (f.verbatim ? JSON.stringify(f.line) !== '["value"]' : f.line[0] !== 'label' && f.line[0] !== 'file') problems.push(`${m.name}.${f.path}: starts with ${JSON.stringify(f.line[0])}`);
     }

@@ -389,11 +389,37 @@ test('§19.16 presets: each chat\'s presets reach context.json and its own promp
     [[{ name: 'talk', text: 'cta "x" /\n' }, { name: 'talk', text: 'cta "y" /\n' }], 'a name twice'],
     [Array.from({ length: 9 }, (_, i) => ({ name: `p${i}`, text: 'cta "x" /\n' })), 'nine'],
     [[{ name: 'talk', text: 'x'.repeat(12_001) }], 'past the record cap'],
+    [[{ name: 'talk-', text: 'cta "x" /\n' }], 'a name ending in a hyphen'],
+    [[{ name: `t${'-x'.repeat(16)}`, text: 'cta "x" /\n' }], 'a name past 32'],
+    [[{ name: 'talk', text: 'cta "x" /\n', keywords: 'talk' }], 'keywords not a list'],
+    [[{ name: 'talk', text: 'cta "x" /\n', keywords: ['a\nb'] }], 'a keyword over two lines'],
+    [[{ name: 'talk', text: 'cta "x" /\n', keywords: ['x'.repeat(41)] }], 'a keyword past 40'],
+    [[{ name: 'talk', text: 'cta "x" /\n', keywords: Array.from({ length: 13 }, (_, i) => `k${i}`) }], 'thirteen keywords'],
   ] as const) {
     const forged = JSON.parse(a.context);
     forged.chats['/'].presets = bad;
-    assert.equal(parseChatContext(JSON.stringify(forged)), "chats['/'].presets is not a list of { name, text }", why);
+    assert.equal(parseChatContext(JSON.stringify(forged)), "chats['/'].presets is not a list of { name, text, keywords? }", why);
   }
+  // §19.17: a suggested question's answer names a preset of this chat, or quotes one of the words a quote may be.
+  for (const [asks, why] of [
+    [[{ text: 'Talk?', answer: 'use nothing' }], 'a preset the chat lacks'],
+    [[{ text: 'Talk?', answer: 'use talk extra' }], 'a use with more'],
+    [[{ text: 'Talk?', answer: 'show cta /' }], 'a word no quote is'],
+    [[{ text: 'Talk?', answer: 'show faq nowhere' }], 'no route'],
+    [[{ text: 'x'.repeat(81), answer: 'use talk' }], 'a question past the ask cap'],
+    [[{ text: 'Talk?\nmore', answer: 'use talk' }], 'a question over two lines'],
+    [[{ text: 'Talk?', answer: 'use talk' }, { text: 'Talk?', answer: 'use numbers' }], 'one question twice'],
+    [Array.from({ length: 5 }, (_, i) => ({ text: `Q${i}?`, answer: 'use talk' })), 'five'],
+  ] as const) {
+    const forged = JSON.parse(a.context);
+    forged.chats['/'].asks = asks;
+    assert.equal(parseChatContext(JSON.stringify(forged)), "chats['/'].asks is not a list of { text, answer }", why);
+  }
+  const fine = JSON.parse(a.context);
+  fine.chats['/'].asks = [{ text: 'Talk?', answer: 'use talk' }, { text: 'Plans?', answer: 'show pricing /plans' }];
+  const read = parseChatContext(JSON.stringify(fine));
+  assert.ok(typeof read === 'object', String(read));
+  assert.deepEqual(read.chats['/'].asks, fine.chats['/'].asks, 'CONTROL');
 });
 
 test('§19.16 checkPreset: the chat server\'s parser on a preset — one component, no prose, a from that names a public table, no tool', () => {

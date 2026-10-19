@@ -1,11 +1,11 @@
 /**
  * @az server chat
  * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer parsed into typed events and streamed to the page.
- * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §8.2, §8.3, §20.5, §20.7, §21.2, §21.4)
- * Exports: createChat, parseChatContext, rulesFor, systemText, ROWS_HEADING, PAGES_HEADING, CONTENT_LIMITS, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, CHARS_PER_TOKEN
+ * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §8.2, §8.3, §19.17, §20.5, §20.7, §21.2, §21.4)
+ * Exports: createChat, parseChatContext, rulesFor, systemText, ROWS_HEADING, PAGES_HEADING, CONTENT_LIMITS, ChatContext, ContextAsk, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, CHARS_PER_TOKEN
  * Edit guide: every limit is the server's, never the request's; nothing the model wrote reaches the page but chat-answer.ts's events; abort upstream whenever the answer stops; logs carry codes and counts, never text.
  * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts, packages/backend/test/chat-knows.test.ts, packages/backend/test/chat-moderation.test.ts,
- *   packages/backend/test/chat-tools-route.test.ts
+ *   packages/backend/test/chat-tools-route.test.ts, packages/backend/test/chat-site-answers.test.ts, packages/backend/test/chat-match.test.ts
  */
 
 /**
@@ -13,8 +13,14 @@
  * is app.ts's, as for /data. From there:
  *
  *   kill switch → body → who may chat → conversation length → address and
- *   account limits → the moderation hook, when one is set → the day's
- *   budget → a slot in the queue → the stream.
+ *   account limits → [an answer of the site's own] → the moderation hook,
+ *   when one is set → the day's budget → a slot in the queue → the stream.
+ *
+ * An answer of the site's own (§19.17) is a suggested question's own answer
+ * when the page says its button was pressed, or the one preset or faq item
+ * a typed question clearly asks for (chat-match.ts, AZ_CHAT_MATCH); it is
+ * streamed through the same parser, resolution, caps, tag and count as a
+ * model's, from the author's text instead of the model, and spends nothing.
  *
  * Refusals before the stream are JSON `{ error }`. Once the stream starts
  * every event is one of `text`, `block`, `done`, `error`: the model's text
@@ -64,7 +70,7 @@ import { ANSWER_LIMITS, ANSWER_WORDS, createAnswerParser, QUOTE_WORDS, type Answ
 import { clampText, RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
 import { toolsText, type Tools } from './chat-tools.ts';
 import { siteOutline, type SiteOutline } from './chat-outline.ts';
-import { choosePages } from './chat-match.ts';
+import { bestMatch, choosePages, matchCandidates, type MatchCandidate } from './chat-match.ts';
 import type { Geocoder } from './chat-geocode.ts';
 import { createShareRoutes, createShareStore, mergeText, shareKey, shareTag, SHARE_LIMITS } from './chat-share.ts';
 import { createQueue, createRateLimits, createWindows, type Windows } from './chat-limits.ts';
@@ -94,8 +100,10 @@ export interface ChatContext {
   /** Each page with a chat: who may send, how many messages a conversation holds, what an answer may show, and its chat's prompt file. */
   readonly chats: Readonly<Record<string, {
     readonly allow: 'signedin' | 'anyone'; readonly limit: number; readonly show: readonly AnswerWord[]; readonly knows: readonly string[]; readonly prompt: string;
-    /** The chat's answer presets (§19.16), each name and body as the author wrote them; none when absent. */
+    /** The chat's answer presets (§19.16), the author's and the build's (§19.17), each name, body and keywords; none when absent. */
     readonly presets: readonly AnswerPreset[];
+    /** The suggested questions that answer without the model (§19.17): each as the page sends it, and its one answer line. */
+    readonly asks: readonly ContextAsk[];
   }>>;
   /** The blocks answers may quote, and every destination a cta may point at (chat-block-spec §5.3, §6.2). */
   readonly quotes: readonly AnswerQuote[];
@@ -121,20 +129,59 @@ export interface ContextTable {
 const NAME = /^[a-z][a-z0-9]*$/;
 /** A chat's prompt file in server/chat/, as the build names it (chat-context.ts promptFileName). */
 const PROMPT_FILE = /^prompt-[1-9][0-9]{0,3}\.txt$/;
-/** A preset's name (core chat.ts PRESET_NAME), and the most one chat holds (the `answer` slot's max). */
-const PRESET_NAME = /^[a-z][a-z0-9]{0,31}$/;
+/** A preset's name (core chat.ts PRESET_NAME: words joined by one hyphen, at most 32), and the most one chat holds (the `answer` slot's max). */
+const PRESET_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const PRESET_NAME_MAX = 32;
 const PRESETS_MAX = 8;
+/** A preset's keywords (core chat.ts KEYWORDS_MAX): at most twelve, each one line of at most 40 characters. */
+const KEYWORDS_MAX = 12;
+const KEYWORD_LENGTH = 40;
+/** The most suggested questions a chat has (the chat word's AZ2224). */
+const ASKS_MAX = 4;
+/** A suggested question's answer line at its longest: `show`, a word, a route of at most 2 048 characters and an item. */
+const ASK_ANSWER_MAX = 2_100;
 
-/** context.json's `chats[…].presets`, or null when malformed: names unique, each body one answer's record at most. */
+/** A suggested question that answers without the model: its text exactly as the page sends it, and its answer line. */
+export interface ContextAsk { readonly text: string; readonly answer: string }
+
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** context.json's `chats[…].presets`, or null when malformed: names unique, each body one answer's record at most, keywords one line each. */
 function contextPresets(v: unknown): AnswerPreset[] | null {
   if (v === undefined) return [];
   if (!Array.isArray(v) || v.length > PRESETS_MAX) return null;
   const out: AnswerPreset[] = [];
   for (const p of v) {
-    const x = p as { name?: unknown; text?: unknown } | null;
-    if (!x || typeof x.name !== 'string' || !PRESET_NAME.test(x.name) || out.some((o) => o.name === x.name)) return null;
+    const x = p as { name?: unknown; text?: unknown; keywords?: unknown } | null;
+    if (!x || typeof x.name !== 'string' || x.name.length > PRESET_NAME_MAX || !PRESET_NAME.test(x.name) || out.some((o) => o.name === x.name)) return null;
     if (typeof x.text !== 'string' || x.text === '' || x.text.length > ANSWER_LIMITS.record) return null;
-    out.push({ name: x.name, text: x.text });
+    const keywords = x.keywords ?? [];
+    if (!Array.isArray(keywords) || keywords.length > KEYWORDS_MAX
+      || !keywords.every((k) => typeof k === 'string' && k.trim() !== '' && k.length <= KEYWORD_LENGTH && !CONTROL.test(k))) return null;
+    out.push({ name: x.name, text: x.text, ...(keywords.length > 0 ? { keywords: keywords as string[] } : {}) });
+  }
+  return out;
+}
+
+/**
+ * context.json's `chats[…].asks`, or null when malformed: at most four, each
+ * question one line within the `ask` key's cap, each answer `use <a preset
+ * of this chat>` or one `show` line. The answer is read by the answer
+ * parser under the page's rules when it is asked, like a model's.
+ */
+function contextAsks(v: unknown, presets: readonly AnswerPreset[]): ContextAsk[] | null {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length > ASKS_MAX) return null;
+  const out: ContextAsk[] = [];
+  for (const a of v) {
+    const x = a as { text?: unknown; answer?: unknown } | null;
+    if (!x || typeof x.text !== 'string' || x.text.trim() === '' || x.text.length > ANSWER_LIMITS.ask || CONTROL.test(x.text)) return null;
+    if (typeof x.answer !== 'string' || x.answer.length > ASK_ANSWER_MAX || CONTROL.test(x.answer)) return null;
+    const words = x.answer.split(' ');
+    const ok = words[0] === 'use' ? words.length === 2 && presets.some((p) => p.name === words[1])
+      : words[0] === 'show' && (words.length === 3 || words.length === 4) && QUOTE_WORDS.includes(words[1] as AnswerWord) && isRoute(words[2]);
+    if (!ok || out.some((o) => o.text === x.text)) return null;
+    out.push({ text: x.text, answer: x.answer });
   }
   return out;
 }
@@ -222,9 +269,9 @@ export function parseChatContext(text: string): ChatContext | string {
   if (!r || typeof r.chats !== 'object' || r.chats === null) return 'has no chats';
   const knows = contextTables(r.knows);
   if (knows === null) return 'knows is not a list of { name, fields }';
-  const chats: Record<string, { allow: 'signedin' | 'anyone'; limit: number; show: AnswerWord[]; knows: string[]; prompt: string; presets: AnswerPreset[] }> = {};
+  const chats: Record<string, { allow: 'signedin' | 'anyone'; limit: number; show: AnswerWord[]; knows: string[]; prompt: string; presets: AnswerPreset[]; asks: ContextAsk[] }> = {};
   for (const [route, c] of Object.entries(r.chats as Record<string, unknown>)) {
-    const x = c as { allow?: unknown; limit?: unknown; show?: unknown; knows?: unknown; prompt?: unknown; presets?: unknown } | null;
+    const x = c as { allow?: unknown; limit?: unknown; show?: unknown; knows?: unknown; prompt?: unknown; presets?: unknown; asks?: unknown } | null;
     if (!x || (x.allow !== 'signedin' && x.allow !== 'anyone') || !Number.isInteger(x.limit) || (x.limit as number) < 1 || (x.limit as number) > 50) {
       return `chats['${route}'] is not { allow, limit }`;
     }
@@ -238,8 +285,10 @@ export function parseChatContext(text: string): ChatContext | string {
     }
     if (typeof x.prompt !== 'string' || !PROMPT_FILE.test(x.prompt)) return `chats['${route}'].prompt is not a prompt file (prompt-<n>.txt)`;
     const presets = contextPresets(x.presets);
-    if (presets === null) return `chats['${route}'].presets is not a list of { name, text }`;
-    chats[route] = { allow: x.allow, limit: x.limit as number, show: show as AnswerWord[], knows: known as string[], prompt: x.prompt, presets };
+    if (presets === null) return `chats['${route}'].presets is not a list of { name, text, keywords? }`;
+    const asks = contextAsks(x.asks, presets);
+    if (asks === null) return `chats['${route}'].asks is not a list of { text, answer }`;
+    chats[route] = { allow: x.allow, limit: x.limit as number, show: show as AnswerWord[], knows: known as string[], prompt: x.prompt, presets, asks };
   }
   // Present when a chat may show components; without it answers are prose only.
   const answer = (r.answer ?? { quotes: [], destinations: [] }) as { quotes?: unknown; destinations?: unknown; tables?: unknown; images?: unknown };
@@ -409,6 +458,14 @@ export interface ChatOptions {
 /** A whole-number token estimate for `chars` characters. */
 const estimate = (chars: number) => Math.ceil(chars / CHARS_PER_TOKEN);
 
+/** An answer of the site's own (§19.17): the text the parser reads, and why it was given — a suggested question's, or a match. */
+interface SiteAnswer { readonly text: string; readonly by: 'suggested' | 'match' }
+
+/** The site's own answer as the one chunk a model's stream would carry. */
+async function* siteChunks(text: string): AsyncGenerator<{ readonly text: string; readonly usage?: undefined }> {
+  yield { text };
+}
+
 /** One event as the page receives it: prose, or a component ready to fill. */
 type Sent = { readonly type: 'text'; readonly s: string } | { readonly type: 'block'; readonly block: Record<string, unknown> };
 const wire = (e: Sent): string => (e.type === 'text' ? sseEvent('text', { s: e.s }) : sseEvent('block', e.block));
@@ -437,8 +494,53 @@ export function createChat(o: ChatOptions): ChatRoutes {
   const toolShapes = o.tools?.shapes ?? [];
   /** The day the budget last ran out, so it is logged once per day. */
   let exhaustedOn = '';
+  /** Each chat page's match candidates (chat-match.ts), made once: the context is fixed while the server runs. */
+  const candidates = new Map<string, MatchCandidate<string>[]>();
+  const candidatesOf = (page: string): MatchCandidate<string>[] => {
+    let c = candidates.get(page);
+    if (!c) {
+      const chat = o.context.chats[page];
+      c = matchCandidates(chat.presets, o.context.quotes, chat.show);
+      candidates.set(page, c);
+    }
+    return c;
+  };
 
-  async function stream(req: ChatRequest, res: ServerResponse, page: string, conversation: string, turns: Parameters<typeof trimHistory>[0], index: number, left: number, system: string): Promise<void> {
+  /**
+   * The answer of the site's own this question gets (§19.17), or null for
+   * the model's: a suggested question's own answer when the page says the
+   * question was its button and the text is that question exactly; else,
+   * unless the visitor asked for the model, the one preset or faq item the
+   * question clearly asks for (AZ_CHAT_MATCH). A preset is its body, read
+   * as an answer; a quote is its line. The visitor's words only ever pick.
+   */
+  function siteAnswer(page: string, ask: { readonly turns: readonly { readonly text: string }[]; readonly via: 'suggested' | 'model' | null }): SiteAnswer | null {
+    const chat = o.context.chats[page];
+    const question = ask.turns.at(-1)?.text ?? '';
+    if (ask.via === 'suggested') {
+      const suggested = chat.asks.find((a) => a.text.trim() === question);
+      if (suggested) {
+        const [verb, name] = suggested.answer.split(' ');
+        const text = verb === 'use' ? chat.presets.find((p) => p.name === name)?.text : `${suggested.answer}\n`;
+        if (text !== undefined) return { text, by: 'suggested' };
+      }
+      return null;
+    }
+    if (ask.via === 'model' || !o.config.match) return null;
+    const text = bestMatch(question, candidatesOf(page));
+    return text === null ? null : { text, by: 'match' };
+  }
+
+  /**
+   * One answer streamed: the model's, from `system` and the turns; or, with
+   * `site`, the author's own (§19.17) — its text read by the same parser,
+   * resolved, capped, tagged and shared exactly as a model's, with no model
+   * call and no token spent.
+   */
+  async function stream(
+    req: ChatRequest, res: ServerResponse, page: string, conversation: string, turns: Parameters<typeof trimHistory>[0], index: number, left: number, system: string,
+    site: SiteAnswer | null = null,
+  ): Promise<void> {
     const started = now();
     const sent = trimHistory(turns);
     const ac = new AbortController();
@@ -488,7 +590,8 @@ export function createChat(o: ChatOptions): ChatRoutes {
     let reported: { input: number; output: number; cached?: number } | null = null;
     let outcome: 'done' | 'capped' | 'unavailable' | 'gone' | 'empty' = 'done';
     try {
-      for await (const chunk of o.adapter.stream({ system, turns: sent, maxOutputTokens: o.config.maxOutputTokens, signal: ac.signal })) {
+      const chunks = site ? siteChunks(site.text) : o.adapter.stream({ system, turns: sent, maxOutputTokens: o.config.maxOutputTokens, signal: ac.signal });
+      for await (const chunk of chunks) {
         clearTimeout(idle);
         idle = setTimeout(stop, timing.betweenMs);
         if (chunk.usage) reported = chunk.usage;
@@ -526,20 +629,22 @@ export function createChat(o: ChatOptions): ChatRoutes {
       const share = o.config.shares.enabled && events.length > 0
         ? { share: { at, tag: shareTag(shareTagKey, conversation, index, at, events, null), tagq: shareTag(shareTagKey, conversation, index, at, events, question) } }
         : {};
+      // An answer of the site's own says so (§19.17): a matched one, so the page can offer to ask the model instead.
+      const by = site ? { by: site.by } : {};
       const last = outcome === 'done' || outcome === 'capped'
-        ? sseEvent('done', { tag: tagTurn(key, conversation, index, history), left, conversation, text: history, ...share })
+        ? sseEvent('done', { tag: tagTurn(key, conversation, index, history), left, conversation, text: history, ...share, ...by })
         : outcome === 'gone' ? '' : sseEvent('error', { code: 'unavailable' });
       res.end(last);
     }
-    // Spent whatever happened: the provider's count when it gave one, else an estimate.
-    const input = reported?.input ?? estimate(system.length + sent.reduce((n, t) => n + t.text.length, 0));
-    const output = reported?.output ?? estimate(record.length);
+    // Spent whatever happened: the provider's count when it gave one, else an estimate; an answer of the site's own spent none.
+    const input = site ? 0 : reported?.input ?? estimate(system.length + sent.reduce((n, t) => n + t.text.length, 0));
+    const output = site ? 0 : reported?.output ?? estimate(record.length);
     const dropped = [...parser.dropped, ...resolvedDrops];
     // The part of the input the provider read from its prompt cache, only as it reported it (§19.16).
     const cached = reported?.cached ?? 0;
-    await usage.add(utcDay(started), input, output, dropped.length, cached);
+    await usage.add(utcDay(started), input, output, dropped.length, cached, site !== null);
     // Codes and counts only: why components were dropped, never what they said.
-    log(`chat: ${outcome} ${now() - started}ms tokens ${input}/${output}${cached > 0 ? ` cached ${cached}` : ''}${dropped.length > 0 ? ` dropped ${dropped.length} (${[...new Set(dropped)].sort().join(',')})` : ''}`);
+    log(`chat: ${outcome} ${now() - started}ms tokens ${input}/${output}${cached > 0 ? ` cached ${cached}` : ''}${site ? ` site ${site.by}` : ''}${dropped.length > 0 ? ` dropped ${dropped.length} (${[...new Set(dropped)].sort().join(',')})` : ''}`);
   }
 
   async function handle(req: ChatRequest, res: ServerResponse): Promise<void> {
@@ -563,6 +668,14 @@ export function createChat(o: ChatOptions): ChatRoutes {
       return;
     }
     if (!(await limits.take(req.ip, user))) return refuse(429, 'rate_limited');
+    // The author's own answer, when the question is a suggested one that has it or a clear match (§19.17): the model is
+    // not asked, so neither moderation, the budget nor the queue applies — it spends nothing and sends nobody's words anywhere.
+    const site = siteAnswer(ask.page, ask);
+    if (site) {
+      if (req.closed.aborted) return;
+      await stream(req, res, ask.page, ask.conversation ?? randomToken(), ask.turns, ask.from + ask.turns.length, chat.limit - ask.visitorTurns, '', site);
+      return;
+    }
     // Before anything is read or sent for it, the visitor's words are judged; only an allow goes on (§6.8).
     if (moderation) {
       const words = trimHistory(ask.turns).filter((t) => t.role === 'user').map((t) => t.text).join('\n\n');

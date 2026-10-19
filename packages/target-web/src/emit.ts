@@ -1317,6 +1317,8 @@ export default defineConfig({
         chats: chat ? spec.pages.flatMap((p) => blocksFor(spec, p).flatMap((b) => (b.word === 'chat' && b.chat ? [{
           route: p.route, allow: b.props.allow ?? 'signedin', limit: b.props.limit ?? '20',
           show: b.chat.answer?.show ?? [], quotes: (b.chat.answer?.quotes ?? []).map((q) => `${q.route}#${q.n}`),
+          presets: (b.chat.presets ?? []).map((p) => ({ name: p.name, line: p.text.split('\n')[0], keywords: p.keywords, ...(p.auto ? { auto: p.auto } : {}) })),
+          asks: b.chat.asks ?? [],
         }] : []))) : [],
       }),
     },

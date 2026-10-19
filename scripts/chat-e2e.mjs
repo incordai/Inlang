@@ -2680,14 +2680,15 @@ async function adminFlow(b, name, origins) {
     const todayRow = view.rows.find((r) => r[0] === today);
     check(`${name}: /admin shows the chat's usage to its admin — today's messages and tokens, the budget left`,
       Boolean(todayRow) && Number(todayRow[1].replace(/\D/g, '')) > 0 && /tokens spent, [\d,.\s  ]+ left\./.test(view.text)
-      && JSON.stringify(view.heads) === JSON.stringify(['Day', 'Messages', 'Input tokens', 'Cached input tokens', 'Output tokens', 'Dropped components', 'Blocked by moderation', 'Shares made']),
+      && JSON.stringify(view.heads) === JSON.stringify(['Day', 'Messages', 'Input tokens', 'Cached input tokens', 'Output tokens', 'Dropped components', 'Blocked by moderation', 'Answered without the model', 'Shares made']),
       JSON.stringify(view).slice(0, 300));
     const whole = await page.evaluate(() => document.body.textContent ?? '');
     check(`${name}: the usage view holds no visitor's or model's words`, !whole.includes(VISITOR_MARK) && !whole.includes(ANSWER_MARK) && !whole.includes(MODERATE_BLOCK) && !whole.includes('lumens'));
     const browserGroups = await page.evaluate(() => (100_000_000).toLocaleString());
     check(`${name}: under an en-IN locale (the browser groups ${browserGroups}) the usage view groups counts one fixed way, 100,000,000`,
       view.text.includes('of 100,000,000 tokens spent') && !/\d,\d\d,\d\d,\d{3}/.test(view.text), view.text.slice(0, 120));
-    const blocked = view.rows.find((r) => r[0] === today)?.[5];
+    // The row's cells: the day, then each column in the heads' order — Blocked by moderation is the seventh.
+    const blocked = view.rows.find((r) => r[0] === today)?.[6];
     check(`${name}: today's row counts the questions the moderation hook blocked`, Number(blocked) >= 1, JSON.stringify(view.rows[0]));
     await axe(page, `${name} admin chat usage`);
 

@@ -347,7 +347,7 @@ test('SECURITY chat usage: GET /admin/chat answers admins only — signed out 40
       usage: {
         today,
         budget: { daily: 300_000, spent: 1600, left: 298_400 },
-        days: [{ day: today, input: 1500, cached: 0, output: 100, messages: 2, dropped: 1, blocked: 1, shares: 1 }],
+        days: [{ day: today, input: 1500, cached: 0, output: 100, messages: 2, dropped: 1, blocked: 1, site: 0, shares: 1 }],
         shares: { enabled: true, kept: 1 },
       },
     });

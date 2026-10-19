@@ -29,6 +29,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from '../../packages/cli/src/az.ts';
 import { parseChatContext, systemText } from '../../packages/backend/src/server/chat.ts';
+import { corpusContext, judgeCorpus } from '../../packages/backend/test/chat-match-corpus.ts';
+import { manifests } from '../../packages/backend/test/data-fixture.ts';
 import { ROOT, WORDS } from './token-bench.mjs';
 
 const CLI = join(ROOT, 'packages/cli/bin/az.js');
@@ -141,6 +143,17 @@ export function measureSelection(counters) {
     average.whole[enc] = Math.round(whole / CHAT_LARGE_QUESTIONS.length);
   }
   return { questions: CHAT_LARGE_QUESTIONS.length, average, missed };
+}
+
+/**
+ * The topic matcher's corpus (packages/backend/test/fixtures/chat-match/,
+ * §19.17): how many of its questions the server answers without the model,
+ * how many of those rightly, and how many of the ones the site can answer.
+ */
+export function measureMatch() {
+  const { context, page } = corpusContext(manifests);
+  const r = judgeCorpus(context, page);
+  return { questions: r.cases.length, answered: r.answered, right: r.right, site: r.site, found: r.found, wrong: r.wrong.map((w) => w.ask) };
 }
 
 /** The budget file, read. */

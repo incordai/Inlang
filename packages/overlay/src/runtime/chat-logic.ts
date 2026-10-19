@@ -118,7 +118,11 @@ export interface ShareTags { readonly at: number; readonly tag: string; readonly
 export type ChatEvent =
   | { readonly type: 'text'; readonly s: string }
   | { readonly type: 'block'; readonly block: ChatBlock; readonly raw: Record<string, unknown> }
-  | { readonly type: 'done'; readonly tag: string; readonly left: number; readonly conversation: string; readonly text: string; readonly share: ShareTags | null }
+  | {
+    readonly type: 'done'; readonly tag: string; readonly left: number; readonly conversation: string; readonly text: string; readonly share: ShareTags | null;
+    /** An answer of the site's own, given without the model (§19.17): a suggested question's, or a match; null for the model's. */
+    readonly by: 'suggested' | 'match' | null;
+  }
   | { readonly type: 'error'; readonly code: string };
 
 /**
@@ -165,6 +169,8 @@ export const CHAT_TEXT = {
   clearedElsewhere: 'This chat was cleared in another tab.',
   /** §19.11: a long chat sends only its latest exchanges, to fit what one request may carry. */
   trimmed: 'Earlier messages in this chat are no longer sent with new questions.',
+  /** §19.17: under an answer the site gave from its own content because the question matched it — the same question, to the model. */
+  askModel: 'Ask the AI instead',
 } as const;
 
 /**
@@ -182,14 +188,16 @@ export const SHARE_TAG_MAX_MS = 7 * 24 * 60 * 60 * 1000;
  * REQUEST_MAX, else the latest whole exchanges that do — `from` the position
  * of the first message sent (even: a visitor's), every earlier one left out.
  * The question alone always fits (it is at most VISITOR_MAX characters).
+ * `via` says how it was asked (§19.17): by a suggested question's button,
+ * or by "Ask the AI instead"; typed, it is left out.
  */
 export function requestBody(
-  page: string, conversation: string | null, history: readonly ChatTurn[], question: string,
+  page: string, conversation: string | null, history: readonly ChatTurn[], question: string, via: 'suggested' | 'model' | null = null,
 ): { readonly body: string; readonly from: number } {
   const size = (s: string) => new TextEncoder().encode(s).length;
   for (let from = 0; ; from += 2) {
     const messages = [...history.slice(from), { role: 'visitor', text: question }];
-    const body = JSON.stringify({ page, ...(conversation ? { conversation } : {}), ...(from > 0 ? { from } : {}), messages });
+    const body = JSON.stringify({ page, ...(conversation ? { conversation } : {}), ...(from > 0 ? { from } : {}), messages, ...(via ? { via } : {}) });
     if (size(body) <= REQUEST_MAX || from >= history.length) return { body, from };
   }
 }
@@ -383,7 +391,8 @@ function toEvent(name: string, data: string): ChatEvent | null {
     const tag = (v: unknown) => typeof v === 'string' && /^[A-Za-z0-9_-]{43}$/.test(v);
     const share = s && typeof s === 'object' && Number.isSafeInteger(s.at) && tag(s.tag) && tag(s.tagq)
       ? { at: s.at as number, tag: s.tag as string, tagq: s.tagq as string } : null;
-    return ok ? { type: 'done', tag: d.tag as string, left: d.left as number, conversation: d.conversation as string, text: d.text as string, share } : null;
+    const by = d.by === 'suggested' || d.by === 'match' ? d.by : null;
+    return ok ? { type: 'done', tag: d.tag as string, left: d.left as number, conversation: d.conversation as string, text: d.text as string, share, by } : null;
   }
   if (name === 'error') return typeof d.code === 'string' && /^[a-z_]{1,40}$/.test(d.code) ? { type: 'error', code: d.code } : null;
   return null;

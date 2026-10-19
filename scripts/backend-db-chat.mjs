@@ -232,10 +232,10 @@ export async function usageReportChecks(engine, db, check) {
     today: '2031-01-20',
     budget: { daily: 1_500, spent: 1_100, left: 400 },
     days: [
-      { day: '2031-01-20', input: 1000, cached: 0, output: 100, messages: 2, dropped: 1, blocked: 1, shares: 1 },
-      { day: '2031-01-19', input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
-      { day: '2031-01-18', input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 0, shares: 1 },
-      { day: '2030-12-22', input: 5, cached: 0, output: 5, messages: 1, dropped: 0, blocked: 0, shares: 0 },
+      { day: '2031-01-20', input: 1000, cached: 0, output: 100, messages: 2, dropped: 1, blocked: 1, site: 0, shares: 1 },
+      { day: '2031-01-19', input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 0, site: 0, shares: 1 },
+      { day: '2031-01-18', input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 0, site: 0, shares: 1 },
+      { day: '2030-12-22', input: 5, cached: 0, output: 5, messages: 1, dropped: 0, blocked: 0, site: 0, shares: 0 },
     ],
   };
   const { shares, ...rest } = r;
@@ -377,20 +377,21 @@ export async function twoInstanceChecks(engine, db, other, check, url) {
 }
 
 export async function chatSuite(engine, db, openAgain, check, url) {
-  check(`${engine} chat: the usage, share, blocked, limits, share-proof and cached-input migrations apply`, (await migrateChat(db)).join() === '1,2,3,4,5,6');
+  check(`${engine} chat: the usage, share, blocked, limits, share-proof, cached-input and site-answer migrations apply`, (await migrateChat(db)).join() === '1,2,3,4,5,6,7');
   check(`${engine} chat: …and is a no-op the second time`, (await migrateChat(db)).length === 0);
 
   const usage = createUsage(db);
   const day = utcDay(Date.UTC(2026, 9, 15, 23, 59, 59));
   await usage.add(day, 100, 20, 0, 0);
   await usage.add(day, 50, 5, 1, 30);
+  await usage.add(day, 0, 0, 0, 0, true);
   const row = await usage.row(day);
-  check(`${engine} chat: one row per day, added to by one statement — the cached input too`, JSON.stringify(row) === JSON.stringify({ input: 150, cached: 30, output: 25, messages: 2, dropped: 1, blocked: 0 }), JSON.stringify(row));
+  check(`${engine} chat: one row per day, added to by one statement — the cached input and the answers without the model too`, JSON.stringify(row) === JSON.stringify({ input: 150, cached: 30, output: 25, messages: 3, dropped: 1, blocked: 0, site: 1 }), JSON.stringify(row));
   await usage.block(day);
   await usage.block(utcDay(Date.UTC(2026, 9, 13)));
   check(`${engine} chat: a blocked question adds to the day's blocked count, spending nothing; a day that starts with one has its own row`,
-    JSON.stringify(await usage.row(day)) === JSON.stringify({ input: 150, cached: 30, output: 25, messages: 2, dropped: 1, blocked: 1 })
-      && JSON.stringify(await usage.row(utcDay(Date.UTC(2026, 9, 13)))) === JSON.stringify({ input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 1 }));
+    JSON.stringify(await usage.row(day)) === JSON.stringify({ input: 150, cached: 30, output: 25, messages: 3, dropped: 1, blocked: 1, site: 1 })
+      && JSON.stringify(await usage.row(utcDay(Date.UTC(2026, 9, 13)))) === JSON.stringify({ input: 0, cached: 0, output: 0, messages: 0, dropped: 0, blocked: 1, site: 0 }));
 
   // Two answers finishing at once, from two connections: both counted.
   const other = await openAgain();

@@ -434,6 +434,8 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
   let conversation: string | null = null;
   /** The question being answered, until a tagged answer joins it to the history. */
   let pending: string | null = null;
+  /** How the pending question was asked (§19.17): by a suggested question's button, by "Ask the AI instead", or typed. */
+  let pendingVia: 'suggested' | 'model' | null = null;
   let streaming: AbortController | null = null;
   let stopping = false;
   let announceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -621,7 +623,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     let said = 0;
     let finished = false;
     // §19.11: a long conversation sends only its latest whole exchanges that fit the request cap; the visitor is told once.
-    const req = requestBody(config.page, conversation, history, question);
+    const req = requestBody(config.page, conversation, history, question, pendingVia);
     if (req.from > 0 && !trimmed) {
       trimmed = true;
       announce(CHAT_TEXT.trimmed, true);
@@ -696,6 +698,11 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
             // §19.11: another tab went on with this chat (or cleared it): its turns stand, and this answer is said not to be kept.
             const lost = !keptAs.kept && (keptAs.why === 'conflict' || keptAs.why === 'cleared');
             const follows = drawn.finish();
+            // §19.17: an answer the site matched to the question may not be the one wanted — the same question, to the model.
+            if (e.by === 'match') {
+              const instead = followUps(p.prose, [CHAT_TEXT.askModel], () => ask(question, 'model'), signal);
+              if (instead) answer.append(instead);
+            }
             // §20.7: the server makes share links — this answer may be kept under one if the visitor asks.
             if (e.share && received.length > 0) offerShare(answer, e.conversation, index, e.share, received, question);
             pending = null;
@@ -736,7 +743,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     }
   };
 
-  const ask = (raw: string) => {
+  const ask = (raw: string, via: 'suggested' | 'model' | null = null) => {
     if (mode !== 'ready' || streaming) return;
     const text = visitorText(raw);
     if (text === null) {
@@ -746,6 +753,7 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     // A new question instead of Try again: the failed one stays on screen, unsent.
     if (pending !== null) showError('');
     pending = text;
+    pendingVia = via;
     addMessage('visitor', text);
     p.input.value = '';
     grow();
@@ -1002,7 +1010,8 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     });
   }
   for (const b of p.asks?.querySelectorAll<HTMLButtonElement>('[data-az-chat-ask]') ?? []) {
-    on(b, 'click', () => ask(b.textContent ?? ''));
+    // A suggested question says it was its button: the server may answer it with the author's own answer (§19.17).
+    on(b, 'click', () => ask(b.textContent ?? '', 'suggested'));
   }
 
   /**

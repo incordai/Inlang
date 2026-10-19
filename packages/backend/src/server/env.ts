@@ -100,6 +100,7 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_CHAT_CONCURRENCY', about: 'Answers streamed at once (default 4, 1–64); four times as many wait up to 10 s, then are told busy.', when: (s) => s.chat === true, required: false, example: '4' },
   { name: 'AZ_CHAT_TIMEOUT_SECONDS', about: 'The longest one answer may take, in seconds (default 60, 10–300). The first token must come within 15 s, and each next within 20 s.', when: (s) => s.chat === true, required: false, example: '60' },
   { name: 'AZ_CHAT_ENABLED', about: '`off` switches chat off at once (every message answers disabled); `on` is the default.', when: (s) => s.chat === true, required: false, example: 'on' },
+  { name: 'AZ_CHAT_MATCH', about: '`off` asks the model every question; `on`, the default, answers a question that clearly asks for one of the site\'s own answers — a preset with keywords, or an faq item — with it, without the model, offering the visitor "Ask the AI instead" (chat-block-spec §19.17).', when: (s) => s.chat === true, required: false, example: 'on' },
   { name: 'AZ_CHAT_SHARES', about: '`off` stops new share links (chat-block-spec §20.7): the Share button is not offered and a share is refused; links already made keep working until they expire. `on` is the default.', when: (s) => s.chat === true, required: false, example: 'on' },
   { name: 'AZ_CHAT_SHARE_DAYS', about: 'Days a shared answer stays readable before it is deleted (default 30, 1–365).', when: (s) => s.chat === true, required: false, example: '30' },
   { name: 'AZ_CHAT_SHARE_MAX', about: 'Shared answers kept at once, all visitors together; past it a share is refused until older ones expire (default 10000, 1–1000000).', when: (s) => s.chat === true, required: false, example: '10000' },
@@ -475,6 +476,8 @@ export interface ChatConfig {
   readonly concurrency: number;
   readonly timeoutMs: number;
   readonly enabled: boolean;
+  /** AZ_CHAT_MATCH: a clear match for one of the site's own answers is answered with it, without the model (§19.17). */
+  readonly match: boolean;
   readonly fakeFile: string;
   /** The input-moderation hook (chat-block-spec §6.8): null when AZ_CHAT_MODERATION_URL is unset. */
   readonly moderation: { readonly url: string; readonly key: string } | null;
@@ -840,6 +843,8 @@ function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: 
   };
   const enabled = (get('AZ_CHAT_ENABLED') || 'on').toLowerCase();
   if (enabled !== 'on' && enabled !== 'off') problems.push('AZ_CHAT_ENABLED must be on or off');
+  const match = (get('AZ_CHAT_MATCH') || 'on').toLowerCase();
+  if (match !== 'on' && match !== 'off') problems.push('AZ_CHAT_MATCH must be on or off');
   const shares = (get('AZ_CHAT_SHARES') || 'on').toLowerCase();
   if (shares !== 'on' && shares !== 'off') problems.push('AZ_CHAT_SHARES must be on or off');
   const moderationUrl = get('AZ_CHAT_MODERATION_URL');
@@ -862,6 +867,7 @@ function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: 
     concurrency: bounded(get, 'AZ_CHAT_CONCURRENCY', CHAT_LIMITS.concurrency, problems),
     timeoutMs: bounded(get, 'AZ_CHAT_TIMEOUT_SECONDS', CHAT_LIMITS.timeoutSeconds, problems) * 1000,
     enabled: enabled !== 'off',
+    match: match !== 'off',
     fakeFile,
     moderation: moderationUrl ? { url: moderationUrl, key: moderationKey } : null,
     tools: chatTools(env, get, problems),

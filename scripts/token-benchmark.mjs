@@ -26,7 +26,7 @@ import {
   CHARS_PER_TOKEN, ENCODINGS, PRIMARY_ENCODING, REPRESENTATIONS, corpus, loadCounters, measure, summarise,
 } from './lib/token-bench.mjs';
 import { ANSWER_FORMS, measureAnswers, measureChatInput } from './lib/answer-bench.mjs';
-import { BUDGET_PATH, CHAT_PROMPT_TEXTS, measureChatPrompts, measureSelection, overBudget, readBudget, underBudget } from './lib/chat-prompt-bench.mjs';
+import { BUDGET_PATH, CHAT_PROMPT_TEXTS, measureChatPrompts, measureMatch, measureSelection, overBudget, readBudget, underBudget } from './lib/chat-prompt-bench.mjs';
 
 /** The JSON's name when --json names no file: in a fresh private folder (mkdtemp), never at a name in the shared temp folder another account could guess and link elsewhere. */
 const DEFAULT_JSON_NAME = 'az-token-benchmark.json';
@@ -100,6 +100,14 @@ function selectionLines(s, encoding) {
   ].join('\n');
 }
 
+/** The matcher's corpus (chat-block-spec §19.17): the share answered without the model, and whether any wrongly. */
+function matchLines(m) {
+  return [
+    `\nthe topic matcher's corpus (${m.questions} questions): answered without the model ${m.answered} (${Math.round((m.answered / m.questions) * 100)}%), rightly ${m.right}`,
+    `  of the ${m.site} the site's own answers can answer: ${m.found}${m.wrong.length > 0 ? ` — WRONG: ${m.wrong.join(' · ')}` : ''}`,
+  ].join('\n');
+}
+
 /** The chat-prompt table: each fixture's texts in every encoding, then what is over or under the budget. */
 function chatPromptLines(measured, over, under) {
   const lines = ['\nchat prompt budget — what a chat model is sent besides the conversation (tokens per encoding · characters):'];
@@ -149,12 +157,14 @@ async function main(argv) {
   let chatInput;
   let chatPrompts;
   let selection;
+  let match;
   let budget;
   try {
     answers = measureAnswers(counters);
     chatInput = measureChatInput(counters);
     chatPrompts = measureChatPrompts(counters);
     selection = measureSelection(counters);
+    match = measureMatch();
     budget = readBudget();
   } catch (e) {
     console.error(`token-benchmark: ${e.message}`);
@@ -164,10 +174,11 @@ async function main(argv) {
   const over = overBudget(chatPrompts, budget);
   console.log(chatPromptLines(chatPrompts, over, underBudget(chatPrompts, budget)));
   console.log(selectionLines(selection, PRIMARY_ENCODING));
+  console.log(matchLines(match));
   jsonOut ??= join(mkdtempSync(join(tmpdir(), 'az-token-benchmark-')), DEFAULT_JSON_NAME);
   writeFileSync(jsonOut, `${JSON.stringify({
     tokenizer: provider, encodings: ENCODINGS, primary: PRIMARY_ENCODING, charsPerTokenApproximation: CHARS_PER_TOKEN,
-    representations: REPRESENTATIONS, summaries, sites: results, answerForms: ANSWER_FORMS, answers, chatInput, chatPrompts, selection,
+    representations: REPRESENTATIONS, summaries, sites: results, answerForms: ANSWER_FORMS, answers, chatInput, chatPrompts, selection, match,
   }, null, 2)}\n`);
   console.log(`\nwrote ${jsonOut}`);
   return over.length > 0 ? 1 : 0;

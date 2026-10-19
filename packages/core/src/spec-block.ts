@@ -2,7 +2,7 @@
  * @az module spec-block
  * Purpose: the SpecBlock type — what a word emitter receives.
  * Spec: docs/ARCHITECTURE.md §4.3
- * Exports: SpecBlock, SpecFrom, SpecChat
+ * Exports: SpecBlock, SpecFrom, SpecChat, SpecChatPreset
  * Edit guide: kept dependency-free so an ejected word can copy it.
  * Tests: packages/core/test/compile.test.ts
  */
@@ -73,6 +73,31 @@ export interface SpecChat {
    * Absent on every chat an author wrote.
    */
   readonly shared?: true;
+  /**
+   * The chat's answer presets (chat-block-spec §19.16, §19.17): the author's
+   * `answer <name>` fills, then those the build makes with `show auto` (or
+   * `show all`), at most eight. Absent when there are none, so such a block
+   * serialises as before.
+   */
+  readonly presets?: readonly SpecChatPreset[];
+  /**
+   * The suggested questions that answer without the model (§19.17): each
+   * question as written and the one answer line it shows — `use monthly`,
+   * `show faq /help #2`. Absent when none has one.
+   */
+  readonly asks?: readonly { readonly text: string; readonly answer: string }[];
+}
+
+/** One answer preset as the chat server reads it (core chat.ts chatPresets). */
+export interface SpecChatPreset {
+  /** What `use <name>` names: lowercase letters and digits, words joined by hyphens. */
+  readonly name: string;
+  /** Its one component, in the answer forms, as the server's parser reads it. */
+  readonly text: string;
+  /** The words a question is matched against (chat-block-spec §19.17): the author's `keywords`, or the build's. */
+  readonly keywords: readonly string[];
+  /** Made by the build from a table or a list (`show auto`): what it shows, in a few words. */
+  readonly auto?: string;
 }
 
 /** The components a chat's answers may hold, the blocks they may quote, where they may link (core/src/chat.ts). */

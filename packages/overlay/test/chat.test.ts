@@ -68,7 +68,7 @@ const STREAM = 'event: text\ndata: {"s":"Héllo — 🌍 "}\n\n'
 const EXPECTED: ChatEvent[] = [
   { type: 'text', s: 'Héllo — 🌍 ' },
   { type: 'text', s: 'world.\n\nNext' },
-  { type: 'done', tag: 'AbCdEfGhIjKlMnOpQrStUv', left: 19, conversation: 'c0nversation-id-01', text: 'Héllo — 🌍 world.\n\nNext', share: null },
+  { type: 'done', tag: 'AbCdEfGhIjKlMnOpQrStUv', left: 19, conversation: 'c0nversation-id-01', text: 'Héllo — 🌍 world.\n\nNext', share: null, by: null },
 ];
 
 const read = (pieces: readonly string[]) => {
@@ -341,4 +341,14 @@ test('a follow-up question is a block of one string within its cap; anything els
   assert.equal(CHAT_TEXT.follows(3), '3 follow-up questions.');
   // A kept chat the server refuses (its key rotated) is told so in fixed copy.
   assert.match(problemCopy('tampered'), /saved chat can’t be continued/);
+});
+
+test('§19.17: done says an answer was the site\'s own — by a suggested question or a match — and nothing else; the request says how it was asked', () => {
+  const done = (extra: string) => read([`event: done\ndata: {"tag":"AbCdEfGhIjKlMnOpQrStUv","left":1,"conversation":"c0nversation-id-01","text":"x"${extra}}\n\n`])[0];
+  assert.equal((done(',"by":"match"') as { by: unknown }).by, 'match');
+  assert.equal((done(',"by":"suggested"') as { by: unknown }).by, 'suggested');
+  for (const odd of [',"by":"model"', ',"by":1', ',"by":"<b>"', '']) assert.equal((done(odd) as { by: unknown }).by, null, odd);
+  assert.deepEqual(JSON.parse(requestBody('/', null, [], 'Is there a warranty?', 'suggested').body), { page: '/', messages: [{ role: 'visitor', text: 'Is there a warranty?' }], via: 'suggested' });
+  assert.deepEqual(JSON.parse(requestBody('/', null, [], 'Is there a warranty?', 'model').body).via, 'model');
+  assert.equal(JSON.parse(requestBody('/', null, [], 'Typed').body).via, undefined, 'a typed question says nothing of how');
 });

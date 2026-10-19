@@ -46,6 +46,10 @@ export interface MapInput {
   readonly chats?: readonly {
     readonly route: string; readonly allow: string; readonly limit: string;
     readonly show: readonly string[]; readonly quotes: readonly string[];
+    /** Its answer presets (chat-block-spec §19.16, §19.17): each name, its first line, its keywords, and what the build made it of. */
+    readonly presets?: readonly { readonly name: string; readonly line: string; readonly keywords: readonly string[]; readonly auto?: string }[];
+    /** Its suggested questions that answer without the model: each question and its answer line. */
+    readonly asks?: readonly { readonly text: string; readonly answer: string }[];
   }[];
 }
 
@@ -229,6 +233,16 @@ export function azMd(m: MapInput): string {
       out.push(`| \`${c.route}\` | ${c.allow === 'anyone' ? 'anyone' : 'signed-in visitors'} | ${c.limit} | ${c.show.length > 0 ? c.show.join(', ') : 'text only'} | ${c.quotes.length > 0 ? c.quotes.map((q) => `\`${q}\``).join(', ') : '—'} |`);
     }
     out.push('');
+    // §19.17: the presets each chat answers with — the author's and the build's — so they can be seen, and overridden by name.
+    for (const c of chats.filter((x) => (x.presets ?? []).length > 0 || (x.asks ?? []).length > 0)) {
+      out.push(`Answer presets on \`${c.route}\` (\`use <name>\`; a question that clearly asks for one is answered with it, without the model):`, '');
+      for (const p of c.presets ?? []) {
+        const words = p.keywords.length > 0 ? ` — matched by ${p.keywords.map((k) => `"${k}"`).join(' ')}` : ' — no keywords: shown only by name';
+        out.push(`- \`${p.name}\` \`${p.line}\`${p.auto ? ` (made by \`show auto\`: ${p.auto}; write \`answer ${p.name}\` to replace it)` : ''}${words}`);
+      }
+      for (const a of c.asks ?? []) out.push(`- suggested ${JSON.stringify(a.text)} answers with \`${a.answer}\`, without the model`);
+      out.push('');
+    }
     out.push('- `show pricing faq cta feature` lists what an answer may hold besides text. `pricing` is quoted — the site\'s own block,');
     out.push('  as its page renders it, never prices the model wrote; `faq`, `feature` and `cta` are filled with the model\'s text. A call');
     out.push('  to action may point only at a destination this file declares. Anything else the model writes is text, or dropped.');

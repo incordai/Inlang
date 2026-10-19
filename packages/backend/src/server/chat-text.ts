@@ -56,6 +56,14 @@ export interface ChatAsk {
   readonly from: number;
   readonly turns: readonly ChatTurn[];
   readonly visitorTurns: number;
+  /**
+   * How the latest question was asked (chat-block-spec §19.17): `suggested`,
+   * by a suggested-question button, whose answer the author may have
+   * written; `model`, by "Ask the AI instead", so no author's answer is
+   * matched to it; otherwise typed. Only ever a choice among the author's
+   * answers and the model — never anything else the server does.
+   */
+  readonly via: 'suggested' | 'model' | null;
 }
 
 type Refusal = { readonly error: 'bad_request' | 'too_long' | 'tampered' };
@@ -113,7 +121,9 @@ export function readChatRequest(
       turns.push({ role: 'assistant', text: m.text });
     }
   }
-  return { page, conversation: typeof conversation === 'string' ? conversation : null, from, turns, visitorTurns: (from + messages.length + 1) / 2 };
+  const via = body.via ?? null;
+  if (via !== null && via !== 'suggested' && via !== 'model') return { error: 'bad_request' };
+  return { page, conversation: typeof conversation === 'string' ? conversation : null, from, turns, visitorTurns: (from + messages.length + 1) / 2, via };
 }
 
 /**

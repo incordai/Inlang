@@ -215,6 +215,13 @@ hand-maintain a second copy.
 
 `deps` versions are **exact**. No `^`, no `~`, no `latest`. CI fails otherwise.
 
+A slot's `line` (GRAMMAR §4.5) names the role of each value written after
+the fill — `label`, `destination`, `value`, `file`, a bare flag — and the
+link stage holds the count. One role is read by no emitter: `answer`, last
+on a line, is the rest of it, checked whole by a file-wide rule in core
+(chat's `ask "…" use monthly`: `core/src/chat.ts askAnswer`, carried in the
+Spec as `chat.asks` for the server, chat-block-spec §19.17).
+
 ### 4.2 Target interface
 
 ```ts

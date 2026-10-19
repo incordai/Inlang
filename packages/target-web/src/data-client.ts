@@ -153,6 +153,8 @@ export interface ChatUsageDay {
   readonly dropped: number;
   /** Questions the moderation hook blocked: the model was never asked. */
   readonly blocked: number;
+  /** Of messages, those answered from the site's own presets and quotes, the model not asked (chat-block-spec §19.17). */
+  readonly site: number;
   readonly shares: number;
 }
 
