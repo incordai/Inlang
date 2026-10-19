@@ -16,7 +16,7 @@
  */
 
 import { generated } from './generated.ts';
-import { DATA_DIR } from './data-client.ts';
+import { DATA_DIR, stringLiteral as str } from './data-client.ts';
 import { typeName } from '../../core/src/data.ts';
 import type { Spec } from '../../core/src/spec.ts';
 
@@ -34,7 +34,6 @@ export function fromTables(spec: Spec): string[] {
 
 /** The module's text for these tables; `runtimeDir` is where the behaviour runtime is copied (src/az). */
 export function rowsTsx(tables: readonly string[], runtimeDir: string): string {
-  const str = (v: string) => JSON.stringify(v);
   // Both directories sit under src/, so the runtime is one level up from here.
   const runtime = `../${runtimeDir.replace(/^src\//, '')}/rows.ts`;
   const queries = tables.map((t) => `${typeName(t)}Query`);

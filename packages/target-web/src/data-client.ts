@@ -2,7 +2,7 @@
  * @az module data-client
  * Purpose: src/data/client.ts — the typed client for the data tables: list/get/create/update/remove/upload/clear per table, and the admin routes.
  * Spec: docs/data-spec.md §7
- * Exports: DATA_DIR, dataClient
+ * Exports: DATA_DIR, dataClient, stringLiteral
  * Edit guide: only the actions some rule grants; no dependency; results are { ok } unions with the closed error codes.
  * Tests: packages/target-web/test/data-client.test.ts
  */
@@ -29,7 +29,15 @@ const CODES = [
   'not_found', 'taken', 'in_use', 'too_large', 'unsupported_type', 'rate_limited',
 ] as const;
 
-const str = (v: string) => JSON.stringify(v);
+/**
+ * A string as a TypeScript string literal: JSON, with the characters that
+ * could end a surrounding script or break a literal spelled as escapes —
+ * the value is unchanged (the rule App.tsx's page data and admin-values.ts follow).
+ */
+export const stringLiteral = (v: string) => JSON.stringify(v)
+  .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
+  .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+const str = stringLiteral;
 
 /** A field's TypeScript type as the API returns it. */
 function valueType(f: SpecField): string {

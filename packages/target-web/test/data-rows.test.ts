@@ -69,6 +69,15 @@ test('rows.tsx: only the tables a block reads, each through its typed list', () 
   assert.match(app, /<RowsRuntime \/>/);
 });
 
+test('SECURITY: a table key in rows.tsx spells <, >, &, U+2028 and U+2029 as escapes — the value is unchanged', () => {
+  // Core admits only [a-z][a-z0-9]* names; the emitter still never writes a
+  // literal JSON.stringify alone would leave able to end a script.
+  const rows = rowsTsx(['x</script>&\u2028\u2029'], 'src/az');
+  const key = '"x\\u003c/script\\u003e\\u0026\\u2028\\u2029"';
+  assert.ok(rows.includes(`  ${key}: (query) => tables[${key}].list(`), 'the key and the lookup are escaped');
+  assert.equal(JSON.parse(key), 'x</script>&\u2028\u2029', 'CONTROL: the escaped key is the same value');
+});
+
 test('without a from block: no rows.tsx, App imports and renders no rows runtime', () => {
   const out = files('  feature grid\n    item "One"\n    item "Two"\n');
   assert.equal(out.has(ROWS_FILE), false);

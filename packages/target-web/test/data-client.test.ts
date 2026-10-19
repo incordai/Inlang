@@ -56,6 +56,18 @@ test('emitted only with tables; deterministic', () => {
   assert.ok(!emitProject(specOf(''), { emitters: {} }).files.some((f) => f.path.startsWith('src/data/')), 'CONTROL: none without tables');
 });
 
+test('SECURITY: a string literal in the client spells <, >, &, U+2028 and U+2029 as escapes — the value is unchanged', () => {
+  // Core admits only [a-z][a-z0-9]* names; the emitter still never writes a
+  // literal JSON.stringify alone would leave able to end a script.
+  const [table] = specOf(DATA).site.data!;
+  const name = 'x</script>&\u2028\u2029';
+  const src = dataClient([{ ...table, name }]);
+  const literal = '"/data/x\\u003c/script\\u003e\\u0026\\u2028\\u2029"';
+  assert.ok(src.includes(`rowPath(${literal}, id)`), 'the row path is escaped');
+  assert.ok(src.includes(`("POST", ${literal}, input)`), 'the create path is escaped');
+  assert.equal(JSON.parse(literal), `/data/${name}`, 'CONTROL: the escaped literal is the same value');
+});
+
 test('only granted operations; a table named like a keyword is a key, not a variable', () => {
   const src = dataClient(specOf(DATA).site.data!);
   const products = /products: \{([\s\S]*?)\n {2}\},/.exec(src)![1];
