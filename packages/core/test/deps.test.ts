@@ -56,7 +56,7 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp', 'chat-answer', 'chat-instructions', 'chat-render', 'chat-react'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp', 'chat-answer', 'chat-instructions', 'chat-render', 'chat-react', 'chat-runtime'];
 
 /**
  * The chat packages (ARCHITECTURE §2, chat-block-spec §22) are imported by an
@@ -69,6 +69,7 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   'chat-instructions': ['chat-answer'],
   overlay: ['chat-render'],
   'chat-react': ['chat-render'],
+  'chat-runtime': ['chat-answer', 'chat-instructions', 'chat-render', 'backend'],
 };
 
 /** What is wrong with `pkg`'s alias imports (`#name/…`), as messages: an alias it may not use, or one its package.json does not map to that package. */
@@ -148,6 +149,21 @@ test('the React components import only their siblings, the renderer and React �
     for (const spec of importsOf(file)) {
       assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec) || /^#chat-render\/(?:themes\/)?[a-z0-9-]+\.ts$/.test(spec) || spec === 'react',
         `chat-react/${file.split(/[\\/]/).pop()} imports '${spec}' — only its siblings, #chat-render/ and react`);
+    }
+  }
+});
+
+test('the chat runtime imports only its siblings and the chat packages; only its Node bridge reaches the server\'s model adapters (chat-block-spec §22.4)', () => {
+  const files = sources('packages/chat-runtime');
+  assert.ok(files.length >= 5, 'CONTROL: the runtime sources are found');
+  assert.ok(importsOf(join(ROOT, 'packages/chat-runtime/src/node-bridge.ts')).includes('#backend/chat-adapters.ts'), 'CONTROL: the bridge\'s import is read');
+  for (const file of files) {
+    const name = file.split(/[\\/]/).pop();
+    for (const spec of importsOf(file)) {
+      const allowed = /^\.\/[a-z0-9-]+\.ts$/.test(spec) || /^#chat-(?:answer|instructions|render)\/[a-z0-9-]+\.ts$/.test(spec);
+      // The bridge runs on a Node host: the one module that holds a key, and one no page imports.
+      const bridge = name === 'node-bridge.ts' && spec === '#backend/chat-adapters.ts';
+      assert.ok(allowed || bridge, `chat-runtime/${name} imports '${spec}' — only its siblings, #chat-answer/, #chat-instructions/ and #chat-render/ (its Node bridge, #backend/chat-adapters.ts)`);
     }
   }
 });
@@ -280,7 +296,7 @@ test('mcp imports only its siblings and node built-ins — the CLI injects every
 });
 
 test('nothing imports from cli — ARCHITECTURE §2', () => {
-  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'chat-answer', 'chat-instructions', 'chat-render', 'chat-react']) {
+  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'chat-answer', 'chat-instructions', 'chat-render', 'chat-react', 'chat-runtime']) {
     for (const file of sources(`packages/${pkg}`)) {
       for (const spec of importsOf(file)) {
         assert.ok(crossPackage(spec) !== 'cli', `${pkg} imports from cli (${spec})`);

@@ -1,0 +1,22 @@
+{
+  "name": "@az/chat-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./*.ts": "./src/*.ts"
+  },
+  "imports": {
+    "#chat-answer/*": "@az/chat-answer/*",
+    "#chat-instructions/*": "@az/chat-instructions/*",
+    "#chat-render/*": "@az/chat-render/*",
+    "#backend/*": "@az/backend/*"
+  },
+  "dependencies": {
+    "@az/backend": "workspace:*",
+    "@az/chat-answer": "workspace:*",
+    "@az/chat-instructions": "workspace:*",
+    "@az/chat-render": "workspace:*"
+  }
+}

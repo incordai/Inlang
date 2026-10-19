@@ -27,12 +27,11 @@ import { createHmac } from 'node:crypto';
 import { ANSWER_LIMITS } from '#chat-answer/chat-answer.ts';
 import { HISTORY_KEY_LABEL, tagMessage } from '#chat-answer/history-tag.ts';
 import { safeEqual } from './crypto.ts';
+import { HISTORY_CHARS, HISTORY_TURNS, trimHistory, VISITOR_MAX, type ModelTurn } from '#chat-instructions/turns.ts';
 
-/** A visitor message, after trimming (chat-block-spec §6.5). */
-export const VISITOR_MAX = 1_000;
-/** The history sent on to the model: the last turns, at most this many characters (§4.2). */
-export const HISTORY_TURNS = 8;
-export const HISTORY_CHARS = 12_000;
+/** The visitor's longest message and the history the model is sent (chat-instructions turns.ts, chat-block-spec §4.2, §6.5). */
+export { HISTORY_CHARS, HISTORY_TURNS, trimHistory, VISITOR_MAX };
+
 /** An answer as a `site` turn: its record, as the answer parser caps it — prose and its components' lines. */
 const SITE_MAX = ANSWER_LIMITS.record;
 /** A conversation id: what randomToken makes, or a page's own of the same shape. */
@@ -50,7 +49,7 @@ export function checkTag(key: Buffer, conversation: string, index: number, text:
   return typeof tag === 'string' && safeEqual(tagTurn(key, conversation, index, text), tag);
 }
 
-export interface ChatTurn { readonly role: 'user' | 'assistant'; readonly text: string }
+export type ChatTurn = ModelTurn;
 
 /** A checked request: where the visitor is, which conversation, every turn sent, and how many the visitor has sent in all. */
 export interface ChatAsk {
@@ -130,15 +129,3 @@ export function readChatRequest(
   return { page, conversation: typeof conversation === 'string' ? conversation : null, from, turns, visitorTurns: (from + messages.length + 1) / 2, via };
 }
 
-/**
- * The turns the model is sent: the last HISTORY_TURNS, then oldest first
- * dropped until they fit HISTORY_CHARS — never the latest visitor message,
- * which is at most VISITOR_MAX and always fits. Starts with a user turn.
- */
-export function trimHistory(turns: readonly ChatTurn[]): ChatTurn[] {
-  let kept = turns.slice(-HISTORY_TURNS);
-  const size = (t: readonly ChatTurn[]) => t.reduce((n, x) => n + x.text.length, 0);
-  while (kept.length > 1 && size(kept) > HISTORY_CHARS) kept = kept.slice(1);
-  while (kept.length > 1 && kept[0].role !== 'user') kept = kept.slice(1);
-  return kept;
-}

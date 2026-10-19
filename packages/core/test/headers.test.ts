@@ -24,7 +24,7 @@ const SCOPE: [string, boolean][] = [
   ['packages/overlay/src', true], ['packages/scene-runtime/src', true],
   ['packages/auth-runtime/src', true], ['packages/backend/src', true],
   // The chat library's packages (chat-block-spec §22).
-  ['packages/chat-answer/src', false], ['packages/chat-instructions/src', false], ['packages/chat-render/src', false], ['packages/chat-react/src', false],
+  ['packages/chat-answer/src', false], ['packages/chat-instructions/src', false], ['packages/chat-render/src', false], ['packages/chat-react/src', false], ['packages/chat-runtime/src', false],
   // The words folder's own modules (registry.ts); each word folder's modules are added below.
   ['packages/words', false],
 ];
@@ -102,7 +102,7 @@ function problems(file: string, src: string): string[] {
     const exports = h.fields.Exports ?? '';
     if (!exports.trim().startsWith('(')) {
       for (const name of exports.split(',').map((s) => s.trim()).filter(Boolean)) {
-        const declared = new RegExp(`export\\s+(?:default\\s+)?(?:async\\s+)?(?:function|const|class|interface|type|let)\\s+${name}\\b`).test(src);
+        const declared = new RegExp(`export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|const|class|interface|type|let)\\s*(?<=\\s|\\*)${name}\\b`).test(src);
         const listed = new RegExp(`export\\s*(?:type\\s*)?\\{[^}]*\\b${name}\\b[^}]*\\}`).test(src);
         if (!declared && !listed) out.push(`Exports names '${name}', which the file does not export`);
       }
@@ -118,6 +118,9 @@ test('CONTROL: the checker rejects a header that is missing, incomplete or false
   assert.ok(found.includes("missing field 'Spec'"));
   assert.ok(found.includes("Exports names 'ghost', which the file does not export"));
   assert.ok(!found.some((f) => f.includes("'a'")), 'a real export is accepted');
+  const generators = '/**\n * @az module x\n * Purpose: p\n * Spec: s\n * Exports: gen, agen, plain, ghost\n * Edit guide: e\n * Tests: t\n */\nexport function* gen() {}\nexport async function* agen() {}\nexport function plain() {}\nexport const ghostly = 1;\n';
+  const named = problems('packages/core/src/x.ts', generators).filter((f) => f.startsWith('Exports'));
+  assert.deepEqual(named, ["Exports names 'ghost', which the file does not export"], 'a generator is an export; a longer name is not the one listed');
   const badTest = '/**\n * @az module x\n * Purpose: p\n * Spec: docs/nope.md\n * Exports: a\n * Edit guide: e\n * Tests: packages/nope.test.ts\n */\nexport const a = 1;\n';
   assert.deepEqual(problems('packages/core/src/x.ts', badTest).sort(), [
     "Spec names 'docs/nope.md', which does not exist",
@@ -128,7 +131,7 @@ test('CONTROL: the checker rejects a header that is missing, incomplete or false
 test('CONTROL: the scope covers every package and every word', () => {
   const all = files();
   assert.ok(all.length >= 85, `only ${all.length} files in scope`);
-  for (const d of ['core', 'cli', 'mcp', 'theme', 'target-web', 'overlay', 'scene-runtime', 'auth-runtime', 'backend', 'words', 'chat-answer', 'chat-instructions', 'chat-render', 'chat-react']) {
+  for (const d of ['core', 'cli', 'mcp', 'theme', 'target-web', 'overlay', 'scene-runtime', 'auth-runtime', 'backend', 'words', 'chat-answer', 'chat-instructions', 'chat-render', 'chat-react', 'chat-runtime']) {
     assert.ok(all.some((f) => f.startsWith(`packages/${d}/`)), d);
   }
   assert.ok(all.includes('packages/words/registry.ts'), 'the emitter registry is in scope');

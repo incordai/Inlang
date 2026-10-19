@@ -49,6 +49,7 @@
 import { readFile } from 'node:fs/promises';
 import { createSseReader, SSE_LINE_MAX, SseLimitError, type SseEvent } from './chat-sse.ts';
 import { BodyTooLarge, cappedChunks } from './outbound.ts';
+import type { ModelBridge, ModelChunk, ModelRequest } from '#chat-answer/model-stream.ts';
 
 /** The most bytes read from one answer's response — far past a 2 000-token stream's framing. */
 export const RESPONSE_MAX = 2 * 1024 * 1024;
@@ -57,31 +58,12 @@ const FAKE_FILE_MAX = 1024 * 1024;
 /** A scripted pause between chunks, at most. */
 const FAKE_DELAY_MAX = 2_000;
 
-export interface ChatChunk {
-  readonly text?: string;
-  /** The provider's counts; `cached` is the part of `input` read from its prompt cache, when it says (never more than `input`). */
-  readonly usage?: { readonly input: number; readonly output: number; readonly cached?: number };
-}
+/** A chunk of the model's stream, and what it is asked: the streaming contract's (chat-answer model-stream.ts, chat-block-spec §22.4). */
+export type ChatChunk = ModelChunk;
+export type ChatStreamRequest = ModelRequest;
 
-export interface ChatStreamRequest {
-  /** The prompt and the site context (chat-block-spec §8.3). */
-  readonly system: string;
-  /**
-   * How many characters at the start of `system` are the same for every
-   * question on the page (chat.ts systemParts, §19.16, §19.19). A shape that caches
-   * only up to a marker puts its marker there; absent, the whole text is.
-   */
-  readonly fixed?: number;
-  readonly turns: readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
-  readonly maxOutputTokens: number;
-  /** Aborted when the visitor leaves, a timeout passes, or a cap is reached. */
-  readonly signal: AbortSignal;
-}
-
-export interface ChatAdapter {
-  /** Streams the answer's text. Throws on a non-2xx, an abort, an error the stream reports, or a malformed or oversized stream. */
-  stream(req: ChatStreamRequest): AsyncIterable<ChatChunk>;
-}
+/** Every adapter is a model bridge: it streams the answer's text, and throws on a non-2xx, an abort, an error the stream reports, or a malformed or oversized stream. */
+export type ChatAdapter = ModelBridge;
 
 /**
  * A model call that failed. Its message is fixed text this server wrote —

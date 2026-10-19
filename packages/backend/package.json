@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./chat-adapters.ts": "./src/server/chat-adapters.ts"
+  },
   "imports": {
     "#chat-answer/*": "@az/chat-answer/*",
     "#chat-instructions/*": "@az/chat-instructions/*"

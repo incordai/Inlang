@@ -97,6 +97,21 @@ importers:
 
   packages/chat-render: {}
 
+  packages/chat-runtime:
+    dependencies:
+      '@az/backend':
+        specifier: workspace:*
+        version: link:../backend
+      '@az/chat-answer':
+        specifier: workspace:*
+        version: link:../chat-answer
+      '@az/chat-instructions':
+        specifier: workspace:*
+        version: link:../chat-instructions
+      '@az/chat-render':
+        specifier: workspace:*
+        version: link:../chat-render
+
   packages/cli:
     dependencies:
       sharp:

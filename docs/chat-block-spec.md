@@ -4078,6 +4078,7 @@ and the generated server and site use the package.
 | the instruction builder | `packages/chat-instructions` (`@az/chat-instructions`) | #35 |
 | the renderer core | `packages/chat-render` (`@az/chat-render`) | #36 |
 | `<AzAnswer>` for React apps | `packages/chat-react` (`@az/chat-react`) | #36 |
+| the chat runtime | `packages/chat-runtime` (`@az/chat-runtime`) | #37 |
 
 **How a package is used without a second copy.** A package imports only its
 own files and the chat packages it builds on, by an alias —
@@ -4275,3 +4276,79 @@ pricing block, which an app does not have. WebGL maps are checked here only
 up to the library's load; their drawing is `test:chat`'s, on a site. An app
 webview's own engines (§22, epic #32) are those three engines' families;
 the app itself is #39's.
+
+### 22.4 The chat runtime — `@az/chat-runtime` (#37)
+
+**What moved.** The model's streaming contract — what a model is asked and
+streams back, its first-token (15 s) and idle (20 s) timers, the stop that
+ends a stream as a failure, the token estimate — from the server's
+`chat.ts` to `chat-answer/src/model-stream.ts` (`ModelBridge`,
+`timedChunks`, `MODEL_TIMING`, `StoppedError`, `estimateTokens`); the
+server's `ChatAdapter` is now that `ModelBridge`, and its route reads the
+model through `timedChunks`. A tool reply's row check and aggregates —
+`TOOL_RESULT`, `toolRows`, `aggregateTool`, `toolMinute` — from
+`chat-tools.ts` to `chat-answer/src/tool-rows.ts`. The visitor's longest
+message and the history trim — `VISITOR_MAX`, `HISTORY_TURNS`,
+`HISTORY_CHARS`, `trimHistory` — from `chat-text.ts` to
+`chat-instructions/src/turns.ts`. `chat-text.ts` and `chat.ts` re-export
+the names they had; a generated server receives the new files with the
+packages it already copies.
+
+**What is new.** `createChatRuntime(options)` →
+`{ ask(conversation, question, { signal, via, mode }), load, list, forget }`.
+`ask` streams `text`, `hold`, `block`, then `done`
+(`{ text, left, source, by }`) or `error` (`RUNTIME_ERRORS`, or a server's
+code), with `note` (`answered_locally`) and `offer` (`{ mode: 'hosted' }`)
+around them.
+
+- **Direct** (`model`): in the server's order — the request's checks
+  (`bad_request`, `too_long`), the conversation's length
+  (`conversation_full`, BUDGET_DEFAULTS.messagesPerConversation, a chat's
+  default `limit`), the moderation hook (`blocked`; a failure is
+  `unavailable`), the day's budget at the answer's largest cost
+  (`budget_exhausted`), the instructions (`instructionParts`, its `fixed`
+  prefix passed to the model), the model through `timedChunks` (stopped the
+  moment the checker reaches a cap), the checker with the app's data and
+  tools, then the history kept and the tokens spent — the provider's counts,
+  or the estimate. An answer with nothing in it is `unavailable`, as on the
+  server. The budget's defaults are the server's (AZ_CHAT_DAILY_TOKENS,
+  AZ_CHAT_MAX_OUTPUT_TOKENS), held equal by a test.
+- **Transport** (`transport: { local, hosted, prefer }`): `httpTransport`
+  posts the chat API's request to `<base>/chat` — https, or http on the
+  machine itself — with the token only in the Authorization header and no
+  cookie, and reads the stream with the panel's own reader. The operator's
+  `limit_reached` with a local server set: a `note`, then the local answer.
+  A local failure before any event with a hosted server set: an `offer`,
+  then the error; the hosted server is asked only when the app asks again
+  with `mode: 'hosted'`.
+- **Tagged history across servers.** A server checks only tags it made, so
+  each is sent only the exchanges it answered, with its own conversation id;
+  the app's history holds every answer with who answered it (`source`).
+  Re-tagging one server's answers for another needs the servers' support
+  (#40, #41).
+- **Stores and tags.** `HistoryStore` (`memoryHistory`,
+  `webStorageHistory`: capped, read back checked whole, a refusing storage
+  never throws), `BudgetStore`, and `HistoryTags` (`webCryptoTags`): with a
+  tagger, a kept conversation whose direct answers were edited is refused
+  (`tampered`).
+- **App tools.** `AppTool { shape, run(args, signal) }`: the checker calls
+  `run` with the checked values; its rows are checked by `toolRows` and
+  aggregated by `aggregateTool`, the server's own code; rows of another
+  shape show the "could not be loaded" note.
+- **Node bridge.** `nodeModelBridge({ url, key, model })` is the server's
+  completions adapter (`createCompletionsAdapter`), its one import from the
+  backend package (`@az/backend/chat-adapters.ts`, the backend's one export).
+  It runs on a Node host; the dependency rules let only it reach the
+  backend, so no page imports a module that holds a key.
+
+**Tested** (`packages/chat-runtime/test`, `packages/chat-answer/test/model-stream.test.ts`):
+the direct path end to end; each refusal with its CONTROL; the cap stopping
+the model; the timers and the asker's stop; tampering, with a CONTROL; tools
+good and bad; the injection corpus through `ask`; the fallback, the offer
+and each server's own history; the stores; the transport's header, cookie,
+codes and broken streams; the bridge's request and counts; the README
+example.
+
+**Not here.** The desktop app's Rust model bridge (#39) and the local-mode
+sidecar (#41): both are ModelBridge or ChatTransport implementations this
+runtime takes as they are.

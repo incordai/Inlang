@@ -88,19 +88,20 @@ import { randomToken } from './crypto.ts';
 import type { Db } from './db.ts';
 import type { ChatConfig } from './env.ts';
 import type { ChatToolShape } from '#chat-answer/tool-shape.ts';
+import { CHARS_PER_TOKEN, estimateTokens, MODEL_TIMING, timedChunks, type ModelTiming } from '#chat-answer/model-stream.ts';
 import { BodyError, send, SECURITY_HEADERS } from './http.ts';
 
-/** Characters per token when a provider reports no usage — a conservative estimate (§6.5, INFERENCE). */
-export const CHARS_PER_TOKEN = 3;
+/** Characters per token when a provider reports no usage (chat-answer model-stream.ts, §6.5). */
+export { CHARS_PER_TOKEN };
 
-/** The model's first token must arrive within this (§6.5). */
-export const CHAT_FIRST_TOKEN_MS = 15_000;
+/** The model's first token must arrive within this (§6.5)… */
+export const CHAT_FIRST_TOKEN_MS = MODEL_TIMING.firstMs;
 /** …and each next chunk within this of the one before. The whole answer's bound is AZ_CHAT_TIMEOUT_SECONDS. */
-export const CHAT_IDLE_MS = 20_000;
+export const CHAT_IDLE_MS = MODEL_TIMING.betweenMs;
 
-/** When the model must answer: its first token and each next one — the constants above, replaceable in tests. */
-export interface ChatTiming { readonly firstMs: number; readonly betweenMs: number }
-export const CHAT_TIMING: ChatTiming = { firstMs: CHAT_FIRST_TOKEN_MS, betweenMs: CHAT_IDLE_MS };
+/** When the model must answer: its first token and each next one — the streaming contract's (model-stream.ts), replaceable in tests. */
+export type ChatTiming = ModelTiming;
+export const CHAT_TIMING: ChatTiming = MODEL_TIMING;
 
 /** server/chat/context.json, as the route reads it. */
 export interface ChatContext {
@@ -443,9 +444,6 @@ export interface ChatOptions {
   readonly geocoder?: Geocoder;
 }
 
-/** A whole-number token estimate for `chars` characters. */
-const estimate = (chars: number) => Math.ceil(chars / CHARS_PER_TOKEN);
-
 /** An answer of the site's own (§19.17): the text the parser reads, and why it was given — a suggested question's, or a match. */
 interface SiteAnswer { readonly text: string; readonly by: 'suggested' | 'match' }
 
@@ -456,14 +454,6 @@ async function* siteChunks(text: string): AsyncGenerator<{ readonly text: string
 
 /** One event as the page receives it, on the wire: prose, or a component ready to fill. */
 const wire = (e: SentEvent): string => (e.type === 'text' ? sseEvent('text', { s: e.s }) : sseEvent('block', e.block));
-
-/** The model's stream ended because a timer or the visitor stopped it: a failed answer, never a finished one. */
-class StoppedError extends Error {
-  constructor() {
-    super('stopped');
-    this.name = 'StoppedError';
-  }
-}
 
 export function createChat(o: ChatOptions): ChatRoutes {
   for (const [page, c] of Object.entries(o.context.chats)) {
@@ -539,7 +529,6 @@ export function createChat(o: ChatOptions): ChatRoutes {
     const ac = new AbortController();
     const stop = () => ac.abort();
     req.closed.addEventListener('abort', stop, { once: true });
-    let idle = setTimeout(stop, timing.firstMs);
     const whole = setTimeout(stop, o.config.timeoutMs);
     res.writeHead(200, {
       ...SECURITY_HEADERS, ...req.cors,
@@ -566,19 +555,12 @@ export function createChat(o: ChatOptions): ChatRoutes {
     type Outcome = 'done' | 'capped' | 'unavailable' | 'gone' | 'empty';
     // `capped` is set by the checker's callback: typed as every outcome, so later reads are not narrowed past it.
     let outcome = 'done' as Outcome;
-    /** The model's text, each chunk restarting the idle timer. A stream the timers or the visitor stopped is a failure, not an end. */
-    async function* modelText(): AsyncGenerator<string, void, undefined> {
-      const chunks = site ? siteChunks(site.text) : o.adapter.stream({ system, fixed, turns: sent, maxOutputTokens: o.config.maxOutputTokens, signal: ac.signal });
-      for await (const chunk of chunks) {
-        clearTimeout(idle);
-        idle = setTimeout(stop, timing.betweenMs);
-        if (chunk.usage) reported = chunk.usage;
-        if (chunk.text) yield chunk.text;
-      }
-      if (ac.signal.aborted) throw new StoppedError();
-    }
+    // The model's text under the streaming contract's timers (model-stream.ts): a stream the timers or the visitor stopped is a failure, not an end.
+    const modelText = timedChunks((signal) => (site ? siteChunks(site.text) : o.adapter.stream({ system, fixed, turns: sent, maxOutputTokens: o.config.maxOutputTokens, signal })), {
+      timing, controller: ac, onUsage: (u) => { reported = u; },
+    });
     // A cap passed (prose, components): stop the model at once; the checker reads no more of it and fills what it sent.
-    const answer = checker.read(modelText(), { onCapped: () => { outcome = 'capped'; ac.abort(); } });
+    const answer = checker.read(modelText, { onCapped: () => { outcome = 'capped'; ac.abort(); } });
     let done: CheckerDone | null = null;
     try {
       for await (const e of answer) {
@@ -591,7 +573,6 @@ export function createChat(o: ChatOptions): ChatRoutes {
       if (!ac.signal.aborted) log(`chat: model failed: ${(e as Error)?.name === 'AdapterError' ? (e as Error).message : (e as Error)?.name ?? 'Error'}`);
       ac.abort();
     } finally {
-      clearTimeout(idle);
       clearTimeout(whole);
       req.closed.removeEventListener('abort', stop);
     }
@@ -616,8 +597,8 @@ export function createChat(o: ChatOptions): ChatRoutes {
       res.end(last);
     }
     // Spent whatever happened: the provider's count when it gave one, else an estimate; an answer of the site's own spent none.
-    const input = site ? 0 : reported?.input ?? estimate(system.length + sent.reduce((n, t) => n + t.text.length, 0));
-    const output = site ? 0 : reported?.output ?? estimate(record.length);
+    const input = site ? 0 : reported?.input ?? estimateTokens(system.length + sent.reduce((n, t) => n + t.text.length, 0));
+    const output = site ? 0 : reported?.output ?? estimateTokens(record.length);
     const dropped = done?.dropped ?? answer.dropped;
     // The part of the input the provider read from its prompt cache, only as it reported it (§19.16).
     const cached = reported?.cached ?? 0;
@@ -678,7 +659,7 @@ export function createChat(o: ChatOptions): ChatRoutes {
     // The visitor's latest turns, newest first: on a large site they choose the pages sent in full (§19.17).
     const asked = ask.turns.filter((t) => t.role === 'user').map((t) => t.text).reverse().slice(0, 2);
     const { text: system, fixed } = systemParts(o.prompts[chat.prompt], o.context, ask.page, rows, toolShapes, o.geocoder !== undefined, asked);
-    const most = estimate(system.length + trimHistory(ask.turns).reduce((n, t) => n + t.text.length, 0)) + o.config.maxOutputTokens;
+    const most = estimateTokens(system.length + trimHistory(ask.turns).reduce((n, t) => n + t.text.length, 0)) + o.config.maxOutputTokens;
     if ((await usage.spent(day)) + most > o.config.dailyTokens) {
       if (exhaustedOn !== day) {
         exhaustedOn = day;

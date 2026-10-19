@@ -35,6 +35,7 @@ az/
 │   ├── chat-render/   @az/chat-render — the chat's page renderer: answer view, figures, maps,
 │   │                  prose; per-theme shells for apps; copied into a site's src/az/chat-render/
 │   ├── chat-react/    @az/chat-react — <AzAnswer> for React apps, over chat-render
+│   ├── chat-runtime/  @az/chat-runtime — the chat for an app: a model or a chat server, history, budget
 │   ├── mcp/           @az/mcp — `az mcp`: MCP over stdio, the tool schemas, the root sandbox
 │   └── cli/           @az/cli — the `az` binary: build, dev, spec, check, lint, migrate,
 │                      eject, backend, mcp, explain, palette, prompt, doctor, audit
@@ -101,6 +102,7 @@ chat-answer → (nothing)                 (runs in Node, a browser, an app webvi
 chat-instructions → chat-answer (by alias)
 chat-render → (nothing; its map module: the three pinned map packages)
 chat-react → chat-render (by alias), react
+chat-runtime → chat-answer, chat-instructions, chat-render (by alias); its Node bridge → backend chat-adapters (by alias)
 ```
 
 The chat packages (chat-block-spec §22) are imported by an **alias**,
