@@ -18,8 +18,8 @@ updates:
       # a page with no style attribute; later releases are still offered.
       - dependency-name: playwright
         versions: ['1.64.0']
-      # The types follow the React the repository runs, held below 19.3
-      # (stack-evaluation); remove this when React itself moves.
+      # The types follow the React the repository runs (19.2.8); remove
+      # this in the change that moves React itself to 19.3.
       - dependency-name: '@types/react'
         versions: ['>=19.3.0']
       - dependency-name: '@types/react-dom'
