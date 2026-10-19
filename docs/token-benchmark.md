@@ -445,6 +445,10 @@ content as an outline, no taught caps the parser holds, each rule once):
 | `all` | 1 400 / 1 407 | 990 / 992 | 1 732 / 1 748 |
 | `faq` | 439 / 439 | 674 / 676 | 659 / 665 |
 
+Since then the explore form names three rules a real model's answers broke
+(chat-block-spec §19.17): `all` is 1 429 / 1 436 in the prompt and
+1 761 / 1 777 in the system text.
+
 The site content section alone is 284 → 206 tokens on both fixtures;
 `context.json` does not move (the outline is the server's rendering of it).
 
@@ -468,7 +472,7 @@ suggested question with an answer of its own is the same: 0 tokens.
 
 The bench also prints each fixture's system text — the prefix every
 question on its page shares — against the common prompt-cache minimum of
-1 024 tokens (chat-block-spec §19.17, issue 25): `all` 1 732 and `large`
+1 024 tokens (chat-block-spec §19.17, issue 25): `all` 1 761 and `large`
 1 822 at or past it, `faq` 659 under it, so a provider that caches only
 past the minimum never caches the `faq` chat. `az doctor` and `az backend
 probe` say the same of a built site, against `AZ_CHAT_CACHE_MIN_TOKENS`.

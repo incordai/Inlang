@@ -85,6 +85,33 @@ test('the spec\'s example: one explore event, its data typed, its views bound to
   assert.match(RICH_FORMS.explore.about, /never write a formula/);
 });
 
+test('the prompt names the control-name rule the reader holds: lowercase letters and digits, so a capital drops the explore', () => {
+  assert.match(RICH_FORMS.explore.about, /named in lowercase letters and digits only \(mintotal, never minTotal\)/);
+  const named = (name: string) => run(answer({ controls: [`  slider ${name} "Team size" 1 50`], views: [`  view table where Seats >= $${name}`] }));
+  assert.equal(exploreOf(named('mintotal'))?.controls.length, 1);
+  // CONTROL: the form the prompt forbids is what the reader refuses, the whole explore with it.
+  assert.deepEqual(named('minTotal').dropped, ['shape']);
+});
+
+test('the prompt says a table explore\'s one data line replaces the columns and rows, and a row before it is no explore', () => {
+  assert.match(RICH_FORMS.explore.about, /in place of the columns and rows, one line: from, a table's name, columns and its fields/);
+  const views = ['  view table'];
+  const kept = run(answer({ data: ['  from orders columns item total'], controls: [], views }));
+  assert.equal(exploreOf(kept)?.title, 'Plan cost');
+  // CONTROL: the line a real model wrote with `row` in front is refused, the whole explore with it.
+  assert.deepEqual(run(answer({ data: ['  row from orders columns item total'], controls: [], views })).dropped, ['shape']);
+});
+
+test('the prompt names the aggregate words the reader holds, and the spelled-out word a real model wrote drops that view', () => {
+  assert.match(RICH_FORMS.explore.about, /is count, or sum, avg, min or max of a number column/);
+  const stat = (fn: string) => run(answer({ controls: [], views: ['  view table', `  view stat "Average price" ${fn} Price unit usd`] }));
+  assert.equal(exploreOf(stat('avg'))?.views.length, 2);
+  // CONTROL: `average` is no aggregate: that view alone goes, counted `view`.
+  const spelled = stat('average');
+  assert.equal(exploreOf(spelled)?.views.length, 1);
+  assert.deepEqual(spelled.dropped, ['view']);
+});
+
 test('explore is a value of show: a page that does not show it drops it; a sentence starting with the word is prose', () => {
   assert.deepEqual(run(answer(), { ...RULES, show: ['chart', 'table'] }).dropped, ['not_shown']);
   const prose = run('explore the options with me\n');

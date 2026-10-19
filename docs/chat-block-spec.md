@@ -2484,9 +2484,27 @@ four characters a token (`PREFIX_CHARS_PER_TOKEN`: the fixtures measure
 minimum and their size, never a failure — and `az backend probe` a `NOTE
 cache:` line; the probe also reports each answer's `cached` tokens when the
 provider says them, which is how an operator measures what their provider
-caches. `pnpm bench:tokens` prints each fixture against 1 024: `all` 1 732
+caches. `pnpm bench:tokens` prints each fixture against 1 024: `all` 1 761
 and `large` 1 822 at or past it, `faq` 659 under it (it was 918 before the
 shorter text, under it too).
+
+**Measured with a real model (2026-10-19)** — `az backend probe` on builds of
+`chat-faq.az` and `chat-all.az`, through a local bridge to a command-line
+model client (whose own setup text is part of every count, so the totals are
+not a site's cost): the `faq` chat reported 0 cached tokens on every answer,
+as the minimum predicts; on `all`, every answer after the first reported a
+cached prefix. Every component's answer parsed with nothing dropped but
+`explore`, dropped whole as `shape`. The model's explores broke three rules
+the reader holds (§21.3) that the form described in words but never named:
+a control called `minTotal` (names are `[a-z][a-z0-9]{0,15}`), a data line
+written `row from orders columns …`, and a stat of `average` (the word is
+`avg`). The form now names all three (29 tokens on `all`). Wording was
+judged over three probe runs each: spelling the data line as a code
+template (`from <table> columns <field> …`) made the model stop writing
+explores at all (0 of 4 runs), so the form says it in words instead. With
+the final form, 36 of 36 answers over three runs parsed with nothing
+dropped, two of the three explore answers drew an explore, and the third
+answered in prose.
 
 Not done, and why: the issue's first step — running the fixtures against
 real providers to record `cached_tokens` — needs a provider account and
