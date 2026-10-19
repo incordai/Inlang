@@ -103,6 +103,29 @@ test('an answer carries its share tags; the share is stored, read signed out (no
   } finally { await s.close(); }
 });
 
+test('issue #28: a rich component is announced by a hold naming its kind alone, just before it; the hold is no part of the answer a share covers', async () => {
+  const s = await start();
+  try {
+    const r = await client(s.url).post('/chat', { page: '/', messages: [{ role: 'visitor', text: 'What do you expect?' }] });
+    assert.equal(r.status, 200);
+    const reader = createSseReader();
+    const all = [...reader.push(new Uint8Array(await r.arrayBuffer())), ...reader.end()].map((e) => ({ event: e.event, data: JSON.parse(e.data) as Record<string, unknown> }));
+    const names = all.map((e) => e.event);
+    const hold = names.indexOf('hold');
+    assert.ok(hold > 0, names.join(' '));
+    assert.deepEqual(all[hold].data, { word: 'chart' }, 'the kind only: no title, no figure');
+    assert.equal(names[hold + 1], 'block');
+    assert.ok('chart' in all[hold + 1].data);
+    assert.equal(names.filter((n) => n === 'hold').length, 1, 'one hold, for the one rich component (a call to action is not held)');
+    // The share is made of the text and block events alone (answer() keeps those): it is stored, so its tag covered no hold.
+    const a = await answer(s.url);
+    assert.equal((await share(s.url, bodyOf(a))).status, 201);
+    // CONTROL: the same events with the hold put in are not what the tag covers.
+    const held = [...a.events.slice(0, 1), { type: 'hold', word: 'chart' }, ...a.events.slice(1)];
+    assert.notEqual((await share(s.url, bodyOf(a, { events: held }))).status, 201);
+  } finally { await s.close(); }
+});
+
 test('the question is stored only when the sharer includes it, under the tag that covers it', async () => {
   const s = await start();
   try {

@@ -3,7 +3,8 @@
  * Purpose: a chart in a chat answer as pure geometry — validation, nice ticks, scales, paths and the text summary; no DOM, no library.
  * Spec: docs/chat-block-spec.md §20.2, §20.4, §20.8
  * Exports: ChartKind, ChartUnit, ChartSeries, ChartData, SvgNode, ChartBox, Ticks, CHART_LIMITS, VALUE_MAX, validChart,
- *   Format, SERIES_PATTERNS, niceTicks, chartBox, chartGeometry, chartSummary, chartRows, thinned, round2
+ *   Format, SERIES_PATTERNS, niceTicks, chartBox, chartGeometry, chartSummary, chartRows, thinned, round2,
+ *   CHART_MIN, CHART_MAX, ROUND_MAX, Measure, ChartMark, ChartLayout, MARK_ATTR, chartLayout, markText, nearestMark, tipPlace
  * Edit guide: no DOM here and nothing from the network is trusted: validChart is the only way in, and geometry only
  *   ever sees what it passed. Paint is a `part` name the DOM writer maps to a class — never a colour or a style.
  * Tests: packages/overlay/test/chat-chart.test.ts
@@ -181,9 +182,10 @@ const decimals = (step: number): number => Math.max(0, -Math.floor(Math.log10(st
  * Nice bounds and 3–6 ticks covering [lo, hi] (the classic nice-numbers
  * rule): a step of 1, 2 or 5 × 10ᵏ, bounds on whole steps. `zero` pulls
  * the domain to include 0 (bars and areas start at zero). A flat domain
- * opens to one step around its value.
+ * opens to one step around its value. `most` caps the ticks (3–6): a short
+ * plot gets fewer ticks, never smaller text (issue #29).
  */
-export function niceTicks(lo: number, hi: number, zero: boolean): Ticks {
+export function niceTicks(lo: number, hi: number, zero: boolean, most = 6): Ticks {
   let a = Math.min(lo, hi);
   let b = Math.max(lo, hi);
   if (zero) {
@@ -217,11 +219,16 @@ export function niceTicks(lo: number, hi: number, zero: boolean): Ticks {
     }
     return { min, max, step, values: values.length >= 2 ? values : [min, max] };
   };
-  // The most ticks that stay at six or fewer; three always do.
-  return [5, 4].map(forIntervals).find((t) => t.values.length <= 6) ?? forIntervals(3);
+  // The most ticks that stay within the cap, from the most intervals down; one interval (the bounds, and zero) as the last resort.
+  const cap = Math.max(3, Math.min(6, Math.floor(most)));
+  for (let intervals = cap - 1; intervals >= 1; intervals--) {
+    const t = forIntervals(intervals);
+    if (t.values.length <= cap) return t;
+  }
+  return forIntervals(1);
 }
 
-/** The drawing box for a measured width (§20.4): 280–960 px wide, 3∕5 as tall, at least 200. */
+/** The drawing box for a measured width (§20.4, issue #29): 200–960 px wide, 3∕5 as tall, at least 200; a pie or donut square. */
 export interface ChartBox {
   readonly width: number;
   readonly height: number;
@@ -229,23 +236,42 @@ export interface ChartBox {
   readonly font: number;
 }
 
-export function chartBox(measured: number, font: number): ChartBox {
-  const width = Math.round(Math.min(960, Math.max(280, Number.isFinite(measured) ? measured : 280)));
+/** The narrowest a chart is drawn, in px: a figure narrower than this is scaled down; at or above it, drawn at its own width. */
+export const CHART_MIN = 200;
+/** The widest a chart is drawn, in px. */
+export const CHART_MAX = 960;
+/** The widest a pie or donut is drawn across, in px (issue #29): its legend sits beside it when there is room. */
+export const ROUND_MAX = 200;
+
+export function chartBox(measured: number, font: number, round = false): ChartBox {
+  const m = Number.isFinite(measured) ? measured : CHART_MIN;
+  if (round) {
+    // The circle is ROUND_MAX across at most, with the text size's margin round it.
+    const side = Math.round(Math.min(ROUND_MAX + 2 * font, Math.max(CHART_MIN, m)));
+    return { width: side, height: side, font };
+  }
+  const width = Math.round(Math.min(CHART_MAX, Math.max(CHART_MIN, m)));
   return { width, height: Math.max(200, Math.round(width * 0.6)), font };
 }
 
-/** A label's width estimate: an average advance of 0.6 em per character. */
-const textWidth = (s: string, font: number): number => [...s].length * font * 0.6;
+/**
+ * A label's width in px at the chart's text size: the page measures it in
+ * its own font (chat-draw.ts); without one, an estimate of 0.6 em a
+ * character — wide for most text, so labels stay apart either way.
+ */
+export type Measure = (s: string) => number;
+const estimate = (font: number): Measure => (s) => [...s].length * font * 0.6;
 
 /**
  * Which of `n` category labels to draw so none overlaps: every k-th, the
  * first and the last always, and the one before the last dropped when it
- * would crowd it.
+ * would crowd it. Half an em keeps neighbours apart (issue #29: measured in
+ * the page's font, a tile's three-bar chart keeps its three labels).
  */
-export function thinned(labels: readonly string[], band: number, font: number): number[] {
+export function thinned(labels: readonly string[], band: number, font: number, measure: Measure = estimate(font)): number[] {
   const n = labels.length;
   if (n === 0) return [];
-  const widest = Math.max(...labels.map((l) => textWidth(l, font))) + font;
+  const widest = Math.max(...labels.map(measure)) + font / 2;
   const k = Math.max(1, Math.ceil(widest / Math.max(band, 1)));
   const out: number[] = [];
   for (let i = 0; i < n; i += k) out.push(i);
@@ -299,28 +325,66 @@ function patternDefs(count: number, id: string): SvgNode {
 export type Format = (n: number) => string;
 
 /**
+ * One mark a visitor can point at or reach by the arrow keys (issue #29): a
+ * bar, a line's point or a slice — its label, its series, its value, and
+ * where its tooltip is anchored (a bar's top, a point, a slice's middle). A
+ * slice also has its angles, clockwise from 12 o'clock, for hit testing.
+ */
+export interface ChartMark {
+  readonly label: string;
+  readonly series: number;
+  readonly value: number;
+  readonly x: number;
+  readonly y: number;
+  readonly from?: number;
+  readonly to?: number;
+}
+
+/** The attribute each mark's node carries: its index in the marks list, which is reading order. */
+export const MARK_ATTR = 'data-az-chat-mark';
+
+/** The chart as SVG nodes for one box and the marks in it, in reading order — by label, then by series. */
+export interface ChartLayout {
+  readonly svg: SvgNode;
+  readonly marks: readonly ChartMark[];
+}
+
+/**
  * The chart as SVG nodes for one box. `id` prefixes every pattern id (the
  * answer's own suffix, as rows.ts re-suffixes ids), `format` writes numbers.
  */
 export function chartGeometry(data: ChartData, box: ChartBox, id: string, format: Format): SvgNode {
+  return chartLayout(data, box, id, format).svg;
+}
+
+/** The text height a y tick needs around it: ticks closer than this are too many for the plot (issue #29). */
+const TICK_PITCH_EM = 2.5;
+
+/** The chart's nodes and its marks: each mark's node is tagged with its index (MARK_ATTR). */
+export function chartLayout(data: ChartData, box: ChartBox, id: string, format: Format, measure: Measure = estimate(box.font)): ChartLayout {
   const { width, height, font } = box;
   const root = (children: SvgNode[]): SvgNode => ({
     tag: 'svg',
     attrs: { viewBox: `0 0 ${width} ${height}`, width: String(width), height: String(height), focusable: 'false' },
     children,
   });
-  if (data.kind === 'pie' || data.kind === 'donut') return root(pie(data, box, id));
+  if (data.kind === 'pie' || data.kind === 'donut') {
+    const p = pie(data, box, id);
+    return { svg: root(p.nodes), marks: p.marks };
+  }
 
   const labels = data.series[0].points.map((p) => p[0]);
   const values = data.series.flatMap((s) => s.points.map((p) => p[1]));
-  const ticks = niceTicks(Math.min(...values), Math.max(...values), data.kind !== 'line');
-  const tickWidth = Math.max(...ticks.values.map((v) => textWidth(format(v), font)));
-  const left = Math.ceil(tickWidth + font);
-  const right = data.kind === 'bar' ? font : Math.ceil(Math.min(width / 4, Math.max(...data.series.map((s) => textWidth(s.name, font))) + font));
   const top = Math.ceil(font);
   const bottom = Math.ceil(font * 2.2);
-  const plotW = width - left - right;
   const plotH = height - top - bottom;
+  // A short plot holds fewer ticks: each keeps TICK_PITCH_EM of the text size around it.
+  const most = Math.floor(plotH / (font * TICK_PITCH_EM)) + 1;
+  const ticks = niceTicks(Math.min(...values), Math.max(...values), data.kind !== 'line', most);
+  const tickWidth = Math.max(...ticks.values.map((v) => measure(format(v))));
+  const left = Math.ceil(tickWidth + font);
+  const right = data.kind === 'bar' ? font : Math.ceil(Math.min(width / 4, Math.max(...data.series.map((s) => measure(s.name))) + font));
+  const plotW = width - left - right;
   const y = (v: number) => top + plotH - ((v - ticks.min) / (ticks.max - ticks.min)) * plotH;
   const n = labels.length;
 
@@ -335,26 +399,31 @@ export function chartGeometry(data: ChartData, box: ChartBox, id: string, format
   // Categories: bars sit in bands; lines and areas put a point at each band's centre.
   const band = plotW / n;
   const cx = (i: number) => left + band * (i + 0.5);
-  const xLabels: SvgNode[] = thinned(labels, band, font).map((i): SvgNode => ({
+  const xLabels: SvgNode[] = thinned(labels, band, font, measure).map((i): SvgNode => ({
     tag: 'text', attrs: { x: s2(cx(i)), y: s2(top + plotH + font * 1.5), 'text-anchor': 'middle' }, part: 'tick', text: labels[i],
   }));
 
   const marks: SvgNode[] = [];
+  /** Each mark's node and its mark, keyed by label then series (reading order), numbered once all are drawn. */
+  const reach: { key: number; node: SvgNode; mark: ChartMark }[] = [];
+  const order = (label: number, series: number) => label * data.series.length + series;
   if (data.kind === 'bar') {
     const inner = band * 0.8;
     const each = inner / data.series.length;
     const base = y(Math.max(ticks.min, Math.min(0, ticks.max)));
     data.series.forEach((s, si) => {
       const p = paint(si, id);
-      s.points.forEach(([, v], i) => {
+      s.points.forEach(([label, v], i) => {
         const x0 = left + band * i + band * 0.1 + each * si + (data.series.length > 1 ? each * 0.05 : 0);
         const w = data.series.length > 1 ? each * 0.9 : each;
         const yv = y(v);
-        marks.push({
+        const node: SvgNode = {
           tag: 'rect',
           attrs: { x: s2(x0), y: s2(Math.min(yv, base)), width: s2(w), height: s2(Math.abs(base - yv)), ...p.attrs },
           part: p.part,
-        });
+        };
+        marks.push(node);
+        reach.push({ key: order(i, si), node, mark: { label, series: si, value: v, x: round2(x0 + w / 2), y: round2(Math.min(yv, base)) } });
       });
     });
   } else {
@@ -372,7 +441,11 @@ export function chartGeometry(data: ChartData, box: ChartBox, id: string, format
       }
       marks.push({ tag: 'path', attrs: { d: line }, part: `line-${si + 1}` });
       const marker = MARKERS[si % MARKERS.length];
-      for (const [px, py] of pts) marks.push({ tag: 'path', attrs: { d: marker(px, py) }, part: `fill-${si + 1}` });
+      pts.forEach(([px, py], i) => {
+        const node: SvgNode = { tag: 'path', attrs: { d: marker(px, py) }, part: `fill-${si + 1}` };
+        marks.push(node);
+        reach.push({ key: order(i, si), node, mark: { label: s.points[i][0], series: si, value: s.points[i][1], x: round2(px), y: round2(py) } });
+      });
       // Each line is named at its end, so the legend is not the only key.
       const [lx, ly] = pts[pts.length - 1];
       marks.push({
@@ -382,11 +455,18 @@ export function chartGeometry(data: ChartData, box: ChartBox, id: string, format
     });
   }
   const defs = data.series.length > 1 ? [patternDefs(data.series.length, id)] : [];
-  return root([...defs, { tag: 'g', attrs: {}, children: grid }, { tag: 'g', attrs: {}, children: marks }, { tag: 'g', attrs: {}, children: xLabels }]);
+  const svg = root([...defs, { tag: 'g', attrs: {}, children: grid }, { tag: 'g', attrs: {}, children: tagged(marks, reach) }, { tag: 'g', attrs: {}, children: xLabels }]);
+  return { svg, marks: [...reach].sort((a, b) => a.key - b.key).map((r) => r.mark) };
+}
+
+/** The mark nodes with their index in reading order (MARK_ATTR); every other node as it was. */
+function tagged(nodes: readonly SvgNode[], reach: readonly { key: number; node: SvgNode }[]): SvgNode[] {
+  const index = new Map([...reach].sort((a, b) => a.key - b.key).map((r, i) => [r.node, i] as const));
+  return nodes.map((n) => (index.has(n) ? { ...n, attrs: { ...n.attrs, [MARK_ATTR]: String(index.get(n)) } } : n));
 }
 
 /** A pie or donut: slices clockwise from 12 o'clock; names, values and shares are in the legend and the table. */
-function pie(data: ChartData, box: ChartBox, id: string): SvgNode[] {
+function pie(data: ChartData, box: ChartBox, id: string): { nodes: SvgNode[]; marks: ChartMark[] } {
   const { width, height, font } = box;
   const points = data.series[0].points;
   const total = points.reduce((a, p) => a + p[1], 0);
@@ -396,15 +476,22 @@ function pie(data: ChartData, box: ChartBox, id: string): SvgNode[] {
   const inner = data.kind === 'donut' ? r * 0.6 : 0;
   const at = (angle: number, radius: number) => [cx + radius * Math.sin(angle), cy - radius * Math.cos(angle)] as const;
   const slices: SvgNode[] = [];
+  const marks: ChartMark[] = [];
+  /** A slice's mark: its tooltip anchored halfway out along its middle angle. */
+  const mark = (label: string, v: number, from: number, to: number) => {
+    const [mx, my] = at((from + to) / 2, (r + inner) / 2);
+    marks.push({ label, series: 0, value: v, x: round2(mx), y: round2(my), from: round2(from), to: round2(to) });
+    return { [MARK_ATTR]: String(marks.length - 1) };
+  };
   let start = 0;
-  points.forEach(([, v], i) => {
+  points.forEach(([label, v], i) => {
     if (v <= 0) return;
     const p = paint(i, id);
     const sweep = (v / total) * Math.PI * 2;
     if (sweep >= Math.PI * 2 - 1e-9) {
       // One slice of 100 %: a full ring, drawn as two half arcs (one arc cannot close on itself).
       const ring = (rad: number, dir: 0 | 1) => `M${s2(cx)} ${s2(cy - rad)}A${s2(rad)} ${s2(rad)} 0 1 ${dir} ${s2(cx)} ${s2(cy + rad)}A${s2(rad)} ${s2(rad)} 0 1 ${dir} ${s2(cx)} ${s2(cy - rad)}Z`;
-      slices.push({ tag: 'path', attrs: { d: inner > 0 ? `${ring(r, 1)}${ring(inner, 0)}` : ring(r, 1), 'fill-rule': 'evenodd', ...p.attrs }, part: p.part });
+      slices.push({ tag: 'path', attrs: { d: inner > 0 ? `${ring(r, 1)}${ring(inner, 0)}` : ring(r, 1), 'fill-rule': 'evenodd', ...p.attrs, ...mark(label, v, start, start + sweep) }, part: p.part });
       start += sweep;
       return;
     }
@@ -420,10 +507,58 @@ function pie(data: ChartData, box: ChartBox, id: string): SvgNode[] {
     } else {
       d += `L${s2(cx)} ${s2(cy)}Z`;
     }
-    slices.push({ tag: 'path', attrs: { d, ...p.attrs }, part: p.part });
+    slices.push({ tag: 'path', attrs: { d, ...p.attrs, ...mark(label, v, start, end) }, part: p.part });
     start = end;
   });
-  return [...(points.length > 1 ? [patternDefs(points.length, id)] : []), { tag: 'g', attrs: {}, children: slices }];
+  return { nodes: [...(points.length > 1 ? [patternDefs(points.length, id)] : []), { tag: 'g', attrs: {}, children: slices }], marks };
+}
+
+/**
+ * What a mark's tooltip says (issue #29): its label and value — and its
+ * series when the chart has more than one, its share of the whole for a
+ * slice. Fixed shape, the figures' own words.
+ */
+export function markText(data: ChartData, mark: ChartMark, format: Format): string {
+  if (data.kind === 'pie' || data.kind === 'donut') {
+    const total = data.series[0].points.reduce((a, p) => a + p[1], 0);
+    return `${mark.label}: ${format(mark.value)} (${Math.round((mark.value / total) * 1000) / 10}%)`;
+  }
+  return data.series.length > 1 ? `${mark.label}, ${data.series[mark.series].name}: ${format(mark.value)}` : `${mark.label}: ${format(mark.value)}`;
+}
+
+/**
+ * The mark at a point of the chart (in its own pixels), or -1: a slice by
+ * its angle, inside the ring; any other mark the nearest anchor, by its
+ * across distance first (a pointer anywhere over a bar's band finds it).
+ */
+export function nearestMark(data: ChartData, box: ChartBox, marks: readonly ChartMark[], x: number, y: number): number {
+  if (marks.length === 0) return -1;
+  if (data.kind === 'pie' || data.kind === 'donut') {
+    const cx = box.width / 2;
+    const cy = box.height / 2;
+    const dist = Math.hypot(x - cx, y - cy);
+    const r = Math.max(10, Math.min(box.width, box.height) / 2 - box.font);
+    if (dist > r || dist < (data.kind === 'donut' ? r * 0.6 : 0)) return -1;
+    let angle = Math.atan2(x - cx, cy - y);
+    if (angle < 0) angle += Math.PI * 2;
+    return marks.findIndex((m) => m.from !== undefined && m.to !== undefined && angle >= m.from && angle < m.to);
+  }
+  let best = -1;
+  let score = Infinity;
+  marks.forEach((m, i) => {
+    const s = Math.abs(m.x - x) * 4 + Math.abs(m.y - y);
+    if (s < score) { score = s; best = i; }
+  });
+  return best;
+}
+
+/** Where a tooltip of `w` × `h` sits for a mark: centred above its anchor, below it when there is no room above, inside the box. */
+export function tipPlace(mark: ChartMark, box: ChartBox, w: number, h: number): { x: number; y: number } {
+  const gap = box.font / 2;
+  const above = mark.y - gap - h;
+  const y = above >= 0 ? above : Math.min(box.height - h, mark.y + gap);
+  const x = Math.min(Math.max(0, mark.x - w / 2), Math.max(0, box.width - w));
+  return { x: round2(x), y: round2(Math.max(0, y)) };
 }
 
 const KIND_NAMES: Record<ChartKind, [string, string]> = {

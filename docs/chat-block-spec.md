@@ -365,12 +365,13 @@ As built in C1 (each with a case in `packages/core/test/chat-decl.test.ts`):
     "color.border-strong", "color.chat-visitor", "color.danger",
     "color.focus", "color.muted", "color.series-1", "color.series-2", "color.series-3", "color.series-4",
     "color.series-5", "color.series-6", "color.surface", "color.surface-alt", "color.text", "gradient.accent",
-    "gradient.accent-hover", "layer.dropdown", "layer.modal", "layer.raised", "motion.easeIn", "motion.easeOut",
-    "motion.fast", "motion.slow", "radius.full", "radius.lg",
+    "gradient.accent-hover", "layer.dropdown", "layer.modal", "layer.raised", "layer.tooltip", "motion.ease", "motion.easeIn",
+    "motion.easeOut", "motion.emphasis", "motion.fast", "motion.slide", "motion.slow", "radius.full", "radius.lg",
     "radius.md", "radius.sm", "shadow.lg", "shadow.md", "size.gutter-sm", "size.measure-body", "size.measure-display",
     "size.ring", "size.ring-offset", "size.tap", "space.4", "space.8", "space.12", "space.16", "space.24",
     "space.32", "space.48", "space.96", "space.128", "type.display", "type.body", "type.leading-body", "type.leading-tight",
-    "type.mono", "type.size.2xl", "type.size.base", "type.size.lg", "type.size.sm", "type.size.xl", "type.weight-bold", "type.weight-display"
+    "type.mono", "type.size.2xl", "type.size.base", "type.size.lg", "type.size.sm", "type.size.xl", "type.weight-body",
+    "type.weight-bold", "type.weight-display"
   ],
   "checks": ["AZ2220 … AZ2229, the table above"]
 }
@@ -919,7 +920,8 @@ in the panel, if ever.
 | No double reading | the status region's text is cleared after each update; the transcript item for the answer gets `aria-busy="true"` while streaming and `false` at `done` |
 | Keyboard | Tab order: transcript (each answer focusable as a region when it has components), suggestions, input, Send/Stop. Enter sends, Shift+Enter is a new line, Escape stops a stream, then closes a `float` panel |
 | Focus | sending keeps focus in the input; it is never moved to the answer. `float`: opening moves focus to the input; closing returns it to the launcher (overlay engine `return`, `policy.ts`); below `sm` the `sheet` preset traps focus as it does for nav |
-| Reduced motion | no typing caret, no smooth scrolling, no panel slide: under `prefers-reduced-motion` the panel appears and the transcript jumps (theme-spec §9.3 tokens) |
+| Reduced motion | no typing caret, no smooth scrolling, no panel slide: under `prefers-reduced-motion` the panel appears and the transcript jumps (theme-spec §9.3 tokens); the working dots and a held component's placeholder stand still, and messages appear without moving in (§19.18) |
+| Working | from Send to the first words the answer's place holds three dots (aria-hidden), the status region says once "Answering your question."; a caret ends the words while they arrive; a component the server is still reading stands as a placeholder of its shape (§19.18) |
 | Scrolling | the transcript follows new text only while the visitor is at its end; scrolling up stops following; a "Jump to latest" button appears, laid over the transcript's foot (it takes no height) — and, once an answer has arrived, not while the visitor reads it from its start (§19.14) |
 | Phone | the float's sheet is the preset's tallest (85 svh) and its controls compact, so the transcript has at least 60% of it at 390×844: a one-line input that grows with its text to 5 lines, Send beside it; the history note behind an info control and Clear history beside Close in the head, Clear shown only once there is history (§19.14) |
 | Names | the textarea has a visible label; Send/Stop/launcher have text names; the launcher's name is the `title` |
@@ -1369,7 +1371,9 @@ Where the build differs from §20:
 - **The Share control is an inline disclosure** under the answer (Share →
   "Include my question", unticked → Create link → the two links in
   read-only fields), not the overlay engine's modal preset: nothing traps
-  focus, and the panel follows the answer it shares.
+  focus, and the panel follows the answer it shares. *Since issue #30
+  (§19.18) Share is a small icon button in the answer's bar, beside Copy
+  answer, under the same name; its panel opens under the bar.*
 - ~~**No admin delete route.**~~ **Superseded (§19.11, item 6):**
   `DELETE /admin/chat/shares/<id>` for a listed admin, a delete form on
   /admin, and `az backend shares <server-dir> --delete <id>` for any chat
@@ -2516,6 +2520,126 @@ question that pays back only if the provider's cached price and the cache's
 hit rate make it so — neither of which the server can know. The doctor
 line gives the operator the numbers to decide.
 
+### 19.18 The chat's UI: issues #20, #21, #28, #29, #30, #31 (2026-10-19)
+
+Measured on the panel with a dashboard, a pie, a map and a quote answered,
+at 320, 360, 390, 600, 768, 900, 1024 and 1440 px, in Chromium, Firefox and
+WebKit (`scripts/chat-public-e2e.mjs`). The decisions the issues left open
+are marked **Decided**.
+
+**#20 — a stat's value cut off.** A stat card's track is 128 px; its value
+was `2xl` (32–44 px), so "$270.00" ran past the card. Now the card is a size
+container and its value is `clamp(lg, 20cqi, 2xl)`: a fifth of the card's
+width per em, so seven characters fit the narrowest card, and a longer value
+wraps (`overflow-wrap: anywhere`) before any digit is hidden. **Decided:** a
+dashboard's stats are its **headline row** — drawn together, in their order,
+above its other tiles — so a short card never sits beside a tall chart with
+a gap under it. The other tiles pack densely (`grid-auto-flow: row dense`) in
+columns at least two 128 steps wide (one on a phone, two in a panel); a
+table takes a whole row. A dashboard of stats alone has no grid under its
+row. `test:chat` checks every card's `scrollWidth ≤ clientWidth` and that no
+stat sits beside a chart more than a quarter taller, at every width.
+
+**#21 — pins in one city drawn as one dot.** The view was capped at the
+bundled world's zoom 6, about 2 km to a pixel. Now the cap is the deeper of
+zoom 14 and the deepest tiles (`chat-map.ts` `zoomCap`): the view is fitted
+past the tiles, the land, water and borders are drawn larger, and the pins
+and the route separate. While the view is deeper than any tile, a note
+under the map says "This map has no street detail at this zoom." (it is
+text in the figure, not said: the list of places is the equivalent).
+**Decided:** Reset view is `aria-disabled` while the view is the fitted
+one, as the zoom buttons are at their limits — it says there is nothing to
+reset, and it is how the buttons follow every move. `az doctor` says, when
+no regional extract is set, that a city-level map has no street detail and
+that `AZ_MAP_REGION` (with `AZ_MAP_WORLD`) adds it.
+
+**#28 — no sign the assistant is working.** The answer's place is made at
+Send, not at the first byte: it holds three dots — one line of the answer's
+text tall, so the first words take their place without a jump — until the
+first words or component. The status region says once, politely,
+"Answering your question.", then the answer's sentences as before; the dots
+are `aria-hidden`. While words arrive, a caret ends them (none under reduced
+motion, as §9 always said). **Decided:** the skeleton needs to know what is
+coming, so the server sends a `hold` event — `{ "word": "chart" }`, the kind
+only — just before it reads a rich component's figures (a query, a tool, a
+lookup; `server/chat.ts`). The page shows a placeholder of that kind's
+shape: a figure's frame (chart, explore, dashboard), a map's (4∶3), a
+table's rows, or two cards (stats, cards); the next event takes it away. A
+hold is not part of the answer: it is neither kept in the browser nor
+covered by a share tag (a share built with one is refused). A new message
+fades and rises in (`motion.emphasis` over `motion.slide`, the `motion.ease`
+curve); a component fades in; the dots and the placeholder pulse over
+`motion.slow`. The motion tokens reach the runtime on the extras box
+(`data-az-chat-motion`, checked by `chat-logic.ts` `motionOf`); the runtime
+animates with `element.animate`, so no style is ever written. Under reduced
+motion nothing moves: the dots and the placeholder stand still and messages
+appear at once — the snapshots stay deterministic. The transcript follows
+every line the runtime adds — the dots, the bar, a chart redrawn for its own
+width — and a placeholder swapped for a shorter or taller component is not
+read as the visitor scrolling away.
+
+**#29 — charts.** A chart in a dashboard tile was drawn at the whole
+answer's width and scaled down to the tile, its text about 7 px. Now it is
+drawn for its own plot row's width (200–960 px); a narrower one is scaled
+down, which no panel width reaches. Y ticks are capped by the plot's height
+(each keeps 2.5 em), and category labels are measured in the page's own font
+(a 2D context's `measureText`; the 0.6-em estimate stays as the fallback),
+so a tile keeps the labels it has room for. **Decided:** a pie or donut is
+at most 200 px across; its legend sits beside it when the row has room and
+under it when not, as one list (two columns under a wide chart). Every bar,
+point and slice is a mark: the chart is one stop in the Tab order — focused,
+it shows its first mark; ← → ↑ ↓ move between marks in reading order (by
+label, then series), Home and End go to the ends, Escape hides the tooltip —
+and each mark reached by the keyboard or a tap is said in the status region.
+A mouse over the chart shows the mark under it, quietly. The tooltip is
+drawn in the SVG itself — a box in `surface` edged in `border-strong`, the
+words in `text` at `sm` — so no style is written and nothing is clipped by
+the transcript. The mark shown, and every mark of a legend entry the pointer
+is over, is marked `data-state="open"`: the paint draws it with the focus
+colour's edge (a line heavier), its legend entry underlined. **Decided:** a
+legend entry is not a Tab stop of its own; the chart's arrow keys reach
+every mark, and the entry of the mark shown is marked with it.
+`test:chat` checks every chart text is drawn at 11 px or more at every
+width, and the keyboard path in three engines.
+
+**#30 — the answer's actions.** The full-size "Share this answer" button
+under every answer is now one compact bar of 32-px icon buttons, last in the
+answer (after its follow-ups, so never before it in Tab order), a group
+named "Answer actions": **Copy answer** — the answer's prose as written (a
+list's items marked, a code block fenced) and each component's text form (a
+chart's title, summary and figures as tab-separated rows, a table's rows, a
+stat's label and value, a map's places), never the page's controls; the
+status region says "Answer copied." or how to copy by hand — and **Share
+this answer** (the same name as before), which opens the share panel under
+the bar. Each button's name shows beside it on hover or keyboard focus
+(`aria-hidden`: it repeats the name), and Escape hides it with focus kept.
+The bar is drawn in `border-strong` (still 3∶1, the non-text minimum) and in
+`text` while its answer is pointed at or holds focus; where the pointer
+cannot hover (`(hover: none)`) always in `text`. A stopped answer that drew
+something gets the bar too (Copy only: it has no share tag). **Decided:**
+the optional helpful / not-helpful rating is **not built** — it needs a new
+`chat` prop, a server route with a signed, once-per-answer tag, new counters
+on all three database engines and the `/admin` view; it is left for its own
+issue.
+
+**#31 — the inline panel.** The panel is one card: its title is its head,
+at the float head's size, with the history controls beside it (they no
+longer take a line under the form); the privacy note under the head.
+**Decided:** the card grows to six 128 steps (768 px) and is centred in its
+section, so a dashboard has two columns; an answer runs the card's width
+while its prose (paragraphs and lists) keeps the reading measure. Suggested
+questions are small pill chips (the button primitive's `sm` size, fully
+rounded, body weight) that wrap on a wide panel and keep one row that
+scrolls sideways below `sm`. At 320 px the panel was 26–61 px wider than the
+screen — the input's own width (a textarea's columns) widened the card's
+column — and now shrinks instead. `test:chat` asserts, at 320–1440 px in
+three engines, no page overflow and no box whose text runs past it, the
+transcript at least 60% of the panel on a phone, and the panel at 1440
+centred, at least 700 px, its title inside; it snapshots, in Chromium and
+both schemes, the panel before a question, each answer and the answered
+panel at 360, 390, 768, 1024 and 1440 (`.visual-out/chat-panel/`, each drawn
+twice and byte-compared).
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links
@@ -2712,7 +2836,11 @@ beside `chat.ts` (`chat-chart.ts` for the pure geometry, the DOM writer in
   px) and drawn in CSS pixels (`viewBox = 0 0 w h`, height 3∕5 of the width,
   min 200), so text stays at the theme's size instead of shrinking with the
   box; a `ResizeObserver` redraws when the width changes by ≥ 32 px. Below
-  480 px a pie's legend moves under it.
+  480 px a pie's legend moves under it. *As built since issue #29 (§19.18):
+  the measure is the chart's own plot row — a dashboard tile's, not the
+  answer's — clamped 200–960; a pie or donut is at most 200 px across, its
+  legend beside it when the row has room; y ticks are capped by the plot's
+  height; labels are measured in the page's font.*
 - **Colour comes only from theme tokens, as classes.** Series *n* uses the
   class `az-series-n`, whose rules in the generated stylesheet read
   `var(--az-color-series-n)`; axes read `color.border-strong`, grid lines
@@ -2752,7 +2880,11 @@ beside `chat.ts` (`chat-chart.ts` for the pure geometry, the DOM writer in
   other id (`rows.ts:48-49`).
 - **Motion.** Marks fade in over `motion.fast` via a class; under
   `prefers-reduced-motion: reduce` there is no transition at all
-  (theme-spec §9.3). Nothing moves after the chart is drawn.
+  (theme-spec §9.3). Nothing moves after the chart is drawn. *As built
+  (§19.18): a component fades in as a whole when it arrives, with the
+  theme's motion tokens, and not at all under reduced motion; a chart's
+  marks answer the pointer and the arrow keys with a tooltip drawn in the
+  chart.*
 - **CSP stays strict and unchanged.** No inline style, no `style`
   attribute, no `unsafe-inline`; SVG geometry attributes (`d`, `x`, `y`,
   `width`, `height`, `viewBox`, `points`, `cx`, `r`) are not styles, and
@@ -2773,7 +2905,9 @@ beside `chat.ts` (`chat-chart.ts` for the pure geometry, the DOM writer in
   `<article>`s; a **dashboard** is a `<section>` labelled by its title,
   laid out by a class with `grid-template-columns: repeat(auto-fit,
   minmax(…))` from `size` tokens, charts and tables spanning two columns
-  above `sm`.
+  above `sm`. *As built since issues #20 and #31 (§19.18): its stats are one
+  headline row above the other tiles, which pack densely in columns at
+  least two 128 steps wide; a table takes a whole row.*
 
 ### 20.5 Server data queries
 
@@ -3711,7 +3845,11 @@ lon       = number ;   (* −180…180, ≤ 6 decimals *)
   (§6.3), so **with the default configuration the page's policy gains only
   `worker-src 'self' blob:`**.
 - **View.** Fitted to the pins' bounds; the model writes no zoom or centre;
-  zoom capped at the regional extract's maximum (or 6 without one).
+  zoom capped at the regional extract's maximum (or 6 without one). *As
+  built since issue #21 (§19.18): the cap is at least zoom 14 — the view goes
+  past the deepest tiles, so places in one city are told apart on the world
+  basemap alone — and a note under the map says when there is no street
+  detail; Reset view is aria-disabled at the fitted view.*
 - **Controls** are the chat word's own buttons — Zoom in, Zoom out, Reset
   view — calling the library's camera methods (Q19c).
 - **Pins and routes** are vector layers; **colours** are the series tokens

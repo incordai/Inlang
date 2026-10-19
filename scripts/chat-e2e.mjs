@@ -113,6 +113,13 @@
  * written values; a shared explore works signed out with no send form; axe
  * in every state; and neither the question nor its mark in the server's log.
  *
+ * The chat's UI (§19.18): a dashboard's figures the server reads stand as a
+ * placeholder of their shape until they come (the `hold` event, #28); its
+ * stats are its headline row (#20); an answer's bar is the page's own, left
+ * out of what the answer is judged on (#30); axe judges the page at rest, a
+ * fade-in's frames not being its colours. The rest of §19.18 is
+ * scripts/chat-public-e2e.mjs's.
+ *
  * C8 (§21.4.6): the server is started with this run's tile archive, glyphs
  * and sprites (scripts/lib/map-fixture.mjs, made here, a few kilobytes) and a
  * loopback geocoder. On /places, in Chromium (software WebGL), Firefox and
@@ -121,9 +128,11 @@
  * "Approximate, AI-placed", a pin with seven decimals and one off the globe
  * gone, a label of markup text in the list and in its popup; its list names
  * each place's coordinates in words and the route's stops; the stage is an
- * image named by its summary, said once; az's own buttons and the + − and
- * arrow keys move it, the zoom buttons saying when they are at a limit, and
- * at once under reduced motion; a table's map carries the site's source line
+ * image named by its summary, said once; fitted past the fixture's zoom-6
+ * tiles to tell two pins 2 km apart, with the no-street-detail note (#21);
+ * az's own buttons and the + − and arrow keys move it, Reset view saying
+ * when the view is already the fitted one, and at once under reduced
+ * motion; a table's map carries the site's source line
  * and only its matching rows; a place the geocoder found is "Approximate
  * location" and one it did not is gone; a shared map draws signed out on
  * the shared page; without WebGL2 the list is the whole
@@ -914,7 +923,8 @@ async function nextAnswer(page, before) {
     const last = items[items.length - 1];
     return {
       paragraphs: [...last.querySelectorAll(':scope > p')].map((p) => p.textContent),
-      elements: [...last.querySelectorAll('*')].filter((e) => !(e.tagName === 'P' && e.parentElement === last)).length,
+      // The answer's bar (issue #30) is the page's own controls, not the answer's words: it is left out of the count.
+      elements: [...last.querySelectorAll('*')].filter((e) => !e.closest('.az-chat-bar') && !(e.tagName === 'P' && e.parentElement === last)).length,
     };
   });
 }
@@ -928,6 +938,10 @@ async function ask(page, text) {
 }
 /** axe on the page as it is: zero violations. */
 async function axe(page, label) {
+  // The page at rest: a message fading in (issue #28) is not yet its colours. Every finite animation ends first; the
+  // working dots' endless pulse is aria-hidden and takes no part.
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity),
+    null, { timeout: STATE_MS });
   const r = await new AxeBuilder({ page }).analyze();
   check(`${label}: axe finds no violation`, r.violations.length === 0, r.violations.map((v) => `${v.id} (${v.nodes.length}: ${v.nodes.slice(0, 2).map((n) => `${n.target.join(' ')} ${n.any[0]?.message ?? ''}`.slice(0, 220)).join(' | ')})`).join(', '));
 }
@@ -1091,8 +1105,8 @@ const paragraphsOf = (text) => text.split(/\n{2,}/).map((p) => p.replace(/^\n+|\
 const lastAnswer = (page) => page.evaluate(() => {
   const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
   const last = items[items.length - 1];
-  // The Share control under a finished answer (§20.7) is the panel's, not the answer's: it is left out here.
-  const parts = [...last.children].filter((el) => !el.classList.contains('az-chat-share')).map((el) => {
+  // The bar under a finished answer (issue #30) — Copy and Share (§20.7) — is the panel's, not the answer's: it is left out here.
+  const parts = [...last.children].filter((el) => !el.classList.contains('az-chat-bar')).map((el) => {
     if (el.tagName === 'P') return { kind: 'p', text: el.textContent };
     if (!el.classList.contains('az-chat-part')) return { kind: `unexpected ${el.tagName}` };
     if (el.querySelector('.az-pricing')) return { kind: 'quote', prices: [...el.querySelectorAll('[data-monthly]')].map((p) => p.textContent) };
@@ -1213,8 +1227,10 @@ const richAnswer = (page) => page.evaluate(() => {
   return {
     text: [...last.querySelectorAll(':scope > p')].map((p) => p.textContent),
     figures: [...last.querySelectorAll('figure.az-chat-figure')].map(figure),
+    // Issues #20, #31: a dashboard's stats are its headline row; its other tiles are the grid's.
     dashboard: last.querySelector('.az-chat-dashboard') ? {
       title: last.querySelector('.az-chat-dashboard-title')?.textContent,
+      headline: last.querySelectorAll('.az-chat-dashboard-stats .az-chat-stat').length,
       tiles: last.querySelectorAll('.az-chat-tile').length,
     } : null,
     stats: [...last.querySelectorAll('.az-chat-stat')].map((s) => [...s.querySelectorAll('dt, dd')].map((x) => x.textContent?.trim())),
@@ -1239,9 +1255,20 @@ async function richFlow(b, name, origins) {
     await axe(page, `${name} figures idle`);
 
     // A dashboard: the server's figures and the model's, side by side, each labelled for what it is.
+    // Issue #28: each placeholder put in the transcript while the server reads a component's figures, by the kind it stands for.
+    await page.evaluate(() => {
+      globalThis.azHeld = [];
+      new MutationObserver((records) => {
+        for (const r of records) for (const n of r.addedNodes) if (n instanceof Element && n.matches('.az-chat-skeleton')) globalThis.azHeld.push(n.getAttribute('data-az-chat-held'));
+      }).observe(document.querySelector('[data-az-chat-transcript]'), { childList: true, subtree: true });
+    });
     const said = await announcements(page, () => ask(page, 'figures-dashboard'));
+    const held = await page.evaluate(() => ({ added: globalThis.azHeld, left: document.querySelectorAll('[data-az-chat-transcript] .az-chat-skeleton').length }));
     const dash = await richAnswer(page);
-    check(`${name}: a dashboard of a stat, a server chart and a model chart`, dash.dashboard?.title === 'This month' && dash.dashboard.tiles === 3, JSON.stringify(dash.dashboard));
+    check(`${name}: a dashboard of a stat — its headline row — over a server chart and a model chart`,
+      dash.dashboard?.title === 'This month' && dash.dashboard.headline === 1 && dash.dashboard.tiles === 2, JSON.stringify(dash.dashboard));
+    check(`${name}: #28 while the server read the dashboard's figures a placeholder of its shape stood in the answer, and went when they came`,
+      held.added.includes('dashboard') && held.left === 0, JSON.stringify(held));
     const server = dash.figures.find((f) => f.title === 'Orders by status');
     const model = dash.figures.find((f) => f.title === 'Expected next quarter');
     check(`${name}: the AI label is on the model's chart and not on the server's`, model?.ai === true && model.source === false && server?.ai === false && server.source === true,
@@ -1307,7 +1334,7 @@ async function richFlow(b, name, origins) {
       const sharedModel = shared.figures.find((f) => f.title === 'Expected next quarter');
       const sharedServer = shared.figures.find((f) => f.title === 'Orders by status');
       check(`${name}: signed out, the shared link shows the same dashboard, the AI label on the model's chart only`,
-        shared.dashboard?.tiles === 3 && sharedModel?.ai === true && sharedServer?.ai === false && JSON.stringify(shared.text) === JSON.stringify(dash.text),
+        shared.dashboard?.headline === 1 && shared.dashboard.tiles === 2 && sharedModel?.ai === true && sharedServer?.ai === false && JSON.stringify(shared.text) === JSON.stringify(dash.text),
         JSON.stringify(shared.dashboard));
       check(`${name}: the shared page is read-only and noindex`,
         await view.locator('textarea, [data-az-chat-form], [data-az-chat-transcript] .az-chat-share').count() === 0
@@ -1681,8 +1708,8 @@ const formattedAnswer = (page) => page.evaluate(() => {
     followsName: last.querySelector('.az-chat-follows')?.getAttribute('aria-label') ?? null,
     paragraphs: texts(':scope > p'),
     quoted: last.querySelector('.az-pricing') !== null,
-    // The Share control under a finished answer (§20.7) is the panel's, not the answer's.
-    order: [...last.children].filter((e) => !e.classList.contains('az-chat-share')).map((e) => e.tagName),
+    // The bar under a finished answer (issue #30) — Copy and Share (§20.7) — is the panel's, not the answer's.
+    order: [...last.children].filter((e) => !e.classList.contains('az-chat-bar')).map((e) => e.tagName),
   };
 });
 /** This site's kept chats (§21.1.4), as the page's storage holds them. */
@@ -1989,7 +2016,8 @@ async function limitsFlow(b, name, origins) {
       recordRequests(view, origins);
       await view.goto(link);
       await view.waitForFunction(() => document.querySelector('[data-az-chat-transcript] .az-chat-dashboard'), null, { timeout: STATE_MS });
-      check(`${name}: the restored answer's link opens, signed out, with the same dashboard`, (await richAnswer(view)).dashboard?.tiles === 3);
+      const restored = (await richAnswer(view)).dashboard;
+      check(`${name}: the restored answer's link opens, signed out, with the same dashboard`, restored?.headline === 1 && restored.tiles === 2, JSON.stringify(restored));
     } finally {
       closed = (await closeWithin(outside, CLOSE_MS, `${name} restored share context close`)) && closed;
     }
@@ -2483,34 +2511,61 @@ async function c8Flow(b, name, origins) {
       popped.popup?.text === `${C8_LABEL}\nApproximate, AI-placed` && JSON.stringify(popped.popup.els) === JSON.stringify(['strong', 'span']) && popped.injected === 0,
       JSON.stringify(popped.popup));
 
-    // az's own buttons and keys (§21.4.5): the view opens at its deepest zoom — Zoom in says so — and + − move it.
+    // az's own buttons and keys (§21.4.5). Issue #21: two pins 2 km apart on the fixture's zoom-6 tiles open fitted past
+    // them — Zoom in still free, the note under the map saying there is no street detail — and Reset view, which has
+    // nothing to do at the fitted view, says so (aria-disabled): that is how the buttons follow every move below.
     const stage = page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="stage"]').first();
-    const zoomIn = () => page.evaluate(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled'));
-    const zoomOut = () => page.evaluate(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-out"]')?.getAttribute('aria-disabled'));
-    check(`${name}: the map opens fitted to its places at its deepest zoom: Zoom in is at its limit, Zoom out is not`,
-      (await zoomIn()) === 'true' && (await zoomOut()) === 'false', JSON.stringify([await zoomIn(), await zoomOut()]));
+    const view = () => page.evaluate(() => {
+      const f = document.querySelector('[data-az-chat-transcript] figure.az-chat-map');
+      const s = (n) => f.querySelector(`[data-az-chat-slot="${n}"]`);
+      return {
+        zoomIn: s('zoom-in')?.getAttribute('aria-disabled'), zoomOut: s('zoom-out')?.getAttribute('aria-disabled'), reset: s('reset')?.getAttribute('aria-disabled'),
+        detail: s('detail') && !s('detail').hidden ? s('detail').textContent : null,
+      };
+    });
+    // A move is over when the stage is no longer busy (aria-busy while its view moves); then Reset view says whether it is fitted.
+    const resetIs = (want) => page.waitForFunction((w) => {
+      const f = document.querySelector('[data-az-chat-transcript] figure.az-chat-map');
+      return f?.querySelector('[data-az-chat-slot="stage"]')?.getAttribute('aria-busy') === null && f.querySelector('[data-az-chat-slot="reset"]')?.getAttribute('aria-disabled') === w;
+    }, want, { timeout: STATE_MS }).then(() => true, () => false);
+    // Reset view by keyboard: a transcript scrolled up lays Jump to latest over its foot, where a pointer could not reach the button.
+    const pressReset = async () => {
+      await page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="reset"]').first().focus();
+      await page.keyboard.press('Enter');
+    };
+    // A place's "Show on the map" was just used, so the view is centred on it: Reset view fits the places again.
+    await pressReset();
+    const fitted = await resetIs('true');
+    const opened = await view();
+    check(`${name}: #21 the map is fitted to its places past its tiles' zoom 6: Zoom in and Zoom out free, Reset view with nothing to do, the note saying there is no street detail`,
+      fitted && opened.zoomIn === 'false' && opened.zoomOut === 'false' && opened.detail === 'This map has no street detail at this zoom.', JSON.stringify(opened));
     // The map sits above the question input: from the input, Shift+Tab goes back to it (Firefox's Tab does not
     // wrap past the page's end). Focus is put back in the input first — the popup's button was just clicked, and
     // in one engine Shift+Tab from that button moves nowhere.
     await panel(page).locator('[data-az-chat-input]').focus();
     const reached = await tabTo(page, stage, 60, 'Shift+Tab');
     await page.keyboard.press('-');
-    const out = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'false', null, { timeout: STATE_MS }).then(() => true, () => false);
-    await page.keyboard.press('ArrowRight');
+    const out = await resetIs('false');
+    // − then + about the same centre is the fitted view again, exactly.
     await page.keyboard.press('+');
-    const back = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'true', null, { timeout: STATE_MS }).then(() => true, () => false);
-    check(`${name}: the keyboard reaches the map (Shift+Tab from the input above which it sits); − zooms out, the arrows pan and + zooms back in, the buttons following`, reached && out && back,
-      JSON.stringify({ reached, out, back, zoomIn: await zoomIn(), zoomOut: await zoomOut(), focused: await page.evaluate(() => `${document.activeElement?.tagName} ${document.activeElement?.className}`) }));
+    const back = await resetIs('true');
+    await page.keyboard.press('ArrowRight');
+    const panned = await resetIs('false');
+    check(`${name}: the keyboard reaches the map (Shift+Tab from the input above which it sits); − zooms out, + zooms back in and the arrows pan, the buttons following`, reached && out && back && panned,
+      JSON.stringify({ reached, out, back, panned, ...(await view()), focused: await page.evaluate(() => `${document.activeElement?.tagName} ${document.activeElement?.className}`) }));
+    await pressReset();
+    const refit = await resetIs('true');
     const zoomOutButton = page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-out"]').first();
     // WebKit's default keyboard setting leaves buttons out of Tab (the browser's choice): there the button must be a real one in the Tab order, focused directly.
+    // Elsewhere focus is on Reset view, just pressed, which comes after Zoom out: Shift+Tab goes back to it (Firefox's Tab does not wrap).
     const tabbed = name === 'webkit'
       ? await zoomOutButton.evaluate((el) => el.tagName === 'BUTTON' && el.tabIndex === 0) && (await zoomOutButton.focus(), true)
-      : await tabTo(page, zoomOutButton);
+      : await tabTo(page, zoomOutButton, 60, 'Shift+Tab');
     await page.keyboard.press('Enter');
-    const viaButton = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'false', null, { timeout: STATE_MS }).then(() => true, () => false);
-    await page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="reset"]').first().click();
-    const reset = await page.waitForFunction(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled') === 'true', null, { timeout: STATE_MS }).then(() => true, () => false);
-    check(`${name}: Zoom out by keyboard zooms out, and Reset view fits the places again`, tabbed && viaButton && reset, JSON.stringify({ tabbed, viaButton, reset }));
+    const viaButton = await resetIs('false');
+    await pressReset();
+    const reset = await resetIs('true');
+    check(`${name}: Zoom out by keyboard zooms out, and Reset view fits the places again`, refit && tabbed && viaButton && reset, JSON.stringify({ refit, tabbed, viaButton, reset }));
     await axe(page, `${name} map moved`);
 
     // A table's map: the site's own rows, the matching ones only, under the site's source line — no AI label.
@@ -2569,10 +2624,17 @@ async function c8Flow(b, name, origins) {
     await ask(page, 'c8-model please');
     await mapSettled(page, 0, `${name} reduced-motion map`);
     const stage = page.locator('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="stage"]').first();
+    // The view opens fitted (Reset view has nothing to do); − leaves it — read at once, with no frame waited for.
+    // Reset view's state, and whether the stage is still busy with a move (aria-busy while its view moves).
+    const resetState = () => page.evaluate(() => {
+      const f = document.querySelector('[data-az-chat-transcript] figure.az-chat-map');
+      return `${f.querySelector('[data-az-chat-slot="reset"]')?.getAttribute('aria-disabled')}${f.querySelector('[data-az-chat-slot="stage"]')?.getAttribute('aria-busy') === 'true' ? ' moving' : ''}`;
+    });
+    const before = await resetState();
     await stage.focus();
     await stage.press('-');
-    const at = await page.evaluate(() => document.querySelector('[data-az-chat-transcript] figure.az-chat-map [data-az-chat-slot="zoom-in"]')?.getAttribute('aria-disabled'));
-    check(`${name}: under reduced motion − zooms out at once: the move ended before the next look`, at === 'false', String(at));
+    const at = await resetState();
+    check(`${name}: under reduced motion − zooms out at once: the move ended before the next look`, before === 'true' && at === 'false', JSON.stringify({ before, at }));
   } finally {
     closed = (await closeWithin(still, CLOSE_MS, `${name} c8 reduced close`)) && closed;
   }

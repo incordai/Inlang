@@ -162,6 +162,7 @@ export function drawMap(d: MapDraw, data: unknown): { el: HTMLElement; said: str
     stage.remove();
     controls.remove();
     attribution.remove();
+    slot(root, 'detail')?.remove();
     for (const s of shows) s.button.remove();
     note.textContent = MAP_TEXT.fallback;
     note.hidden = false;
@@ -176,7 +177,8 @@ export function drawMap(d: MapDraw, data: unknown): { el: HTMLElement; said: str
   }
   track(doc, root, ac);
   // After the answer is in the page (the caller appends it): the library sizes the map to the stage it is given.
-  queueMicrotask(() => { void mount(d, m, root, stage, attribution, { zoomIn, zoomOut, reset, shows, buttons }, ac, () => {
+  const detail = slot(root, 'detail');
+  queueMicrotask(() => { void mount(d, m, root, stage, attribution, { detail, zoomIn, zoomOut, reset, shows, buttons }, ac, () => {
     if (ac.signal.aborted || listed) return;
     asList();
     // Said once, when the map the status region heard about turns out to be a list.
@@ -186,6 +188,8 @@ export function drawMap(d: MapDraw, data: unknown): { el: HTMLElement; said: str
 }
 
 interface MapButtons {
+  /** The note that the view has no street detail (issue #21); null in a shell from before it. */
+  readonly detail: HTMLElement | null;
   readonly zoomIn: HTMLButtonElement | null;
   readonly zoomOut: HTMLButtonElement | null;
   readonly reset: HTMLButtonElement | null;
@@ -210,9 +214,16 @@ async function mount(d: MapDraw, m: MapData, root: HTMLElement, stage: HTMLEleme
         return el;
       },
       // A zoom button at its limit says so and does nothing — aria-disabled, so a focused one keeps its focus.
-      view: (atMin, atMax) => {
-        b.zoomOut?.setAttribute('aria-disabled', String(atMin));
-        b.zoomIn?.setAttribute('aria-disabled', String(atMax));
+      // Deeper than the tiles go (issue #21), the note under the map says there is no street detail; it is text, not said aloud.
+      // Reset view at the fitted view has nothing to do, and says so the same way.
+      view: (v) => {
+        b.zoomOut?.setAttribute('aria-disabled', String(v.atMin));
+        b.zoomIn?.setAttribute('aria-disabled', String(v.atMax));
+        b.reset?.setAttribute('aria-disabled', String(v.fitted));
+        if (b.detail) {
+          b.detail.textContent = v.pastTiles ? MAP_TEXT.detail : '';
+          b.detail.hidden = !v.pastTiles;
+        }
       },
     });
     if (ac.signal.aborted) return;

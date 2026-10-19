@@ -37,7 +37,7 @@ export { SHARED_ROUTE };
 export const CHAT_FILE = 'src/chat/runtime.tsx';
 
 /** The behaviour runtime's files that only a site with a chat block ships. */
-export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts', 'rows-logic.ts'];
+export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-chart-ui.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-busy.ts', 'chat-bar.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts', 'rows-logic.ts'];
 
 /** The map runtime (§21.4.3): copied only into a site whose chat shows maps — its pure checks, its drawing, and the library's. */
 export const MAP_RUNTIME_FILES: readonly string[] = ['chat-map.ts', 'chat-map-draw.ts', 'chat-map-gl.ts'];

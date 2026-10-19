@@ -2,7 +2,7 @@
  * @az runtime chat-logic
  * Purpose: the chat runtime's pure rules: the shell's config, the event-stream reader, a visitor's text, finished sentences, fixed copy.
  * Spec: docs/chat-block-spec.md §4.2, §5.4, §7, §9
- * Exports: ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, REQUEST_MAX, SHARE_TAG_MAX_MS, requestBody, parseChatConfig, atEnd, mayFollow, offersLatest, INPUT_MAX_ROWS, inputRows, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
+ * Exports: Motion, motionOf, SKELETON_OF, TreeNode, caretHost, ChatConfig, ChatEvent, ChatBlock, ChatWord, ChatTurn, ShareTags, REQUEST_MAX, SHARE_TAG_MAX_MS, requestBody, parseChatConfig, atEnd, mayFollow, offersLatest, INPUT_MAX_ROWS, inputRows, floatPreset, END_SLACK_PX, createEventReader, linkKind, allowedDestination, blockCopy, visitorText, finishedSentences, problemCopy, leftCopy, mergeText, readShareLink, shareProblem, SHARED_PATH, SHARE_TEXT, RETRYABLE, CHAT_TEXT, CHAT_WORDS, RICH_BLOCKS, blockOf, BLOCK_LIMITS, EVENT_LINE_MAX, ANSWER_MAX
  * Edit guide: no DOM here; every event is checked against its closed shape and an unknown one is dropped, never guessed at.
  * Tests: packages/overlay/test/chat.test.ts
  */
@@ -118,6 +118,8 @@ export interface ShareTags { readonly at: number; readonly tag: string; readonly
 export type ChatEvent =
   | { readonly type: 'text'; readonly s: string }
   | { readonly type: 'block'; readonly block: ChatBlock; readonly raw: Record<string, unknown> }
+  /** Issue #28: the server is reading a rich component's figures — its kind only, for a placeholder of its shape; never kept or shared. */
+  | { readonly type: 'hold'; readonly word: string }
   | {
     readonly type: 'done'; readonly tag: string; readonly left: number; readonly conversation: string; readonly text: string; readonly share: ShareTags | null;
     /** An answer of the site's own, given without the model (§19.17): a suggested question's, or a match; null for the model's. */
@@ -171,6 +173,11 @@ export const CHAT_TEXT = {
   trimmed: 'Earlier messages in this chat are no longer sent with new questions.',
   /** §19.17: under an answer the site gave from its own content because the question matched it — the same question, to the model. */
   askModel: 'Ask the AI instead',
+  /** Issue #28: said once when a question is sent — the dots the page shows are not read out. */
+  working: 'Answering your question.',
+  /** Issue #30: the answer bar's Copy. */
+  answerCopied: 'Answer copied.',
+  answerCopyFailed: 'Copy did not work — select the answer to copy it.',
 } as const;
 
 /**
@@ -395,7 +402,75 @@ function toEvent(name: string, data: string): ChatEvent | null {
     return ok ? { type: 'done', tag: d.tag as string, left: d.left as number, conversation: d.conversation as string, text: d.text as string, share, by } : null;
   }
   if (name === 'error') return typeof d.code === 'string' && /^[a-z_]{1,40}$/.test(d.code) ? { type: 'error', code: d.code } : null;
+  if (name === 'hold') return typeof d.word === 'string' && HELD.includes(d.word) && Object.keys(d).length === 1 ? { type: 'hold', word: d.word } : null;
   return null;
+}
+
+/** The kinds a hold may name: the rich components the server resolves (backend chat-rich.ts RICH_WORDS) — not its `unavailable` note. */
+const HELD: readonly string[] = RICH_BLOCKS.filter((w) => w !== 'unavailable');
+
+/* ---- issue #28: the answer's working signs (chat-busy.ts draws them) ---- */
+
+/** The motion tokens the chat word writes on its extras box: enter and pulse in ms, the rise in px, the enter curve. */
+export interface Motion {
+  readonly enter: number;
+  readonly pulse: number;
+  readonly slide: number;
+  readonly ease: string;
+}
+
+/** A timing function the stylesheet would accept: a keyword, or cubic-bezier of four numbers. */
+const EASE = /^(?:ease|ease-in|ease-out|ease-in-out|linear|cubic-bezier\(\s*-?\d*\.?\d+\s*,\s*-?\d*\.?\d+\s*,\s*-?\d*\.?\d+\s*,\s*-?\d*\.?\d+\s*\))$/;
+/** The longest any one of these motions may take, and the furthest a message may rise, so a bad value cannot stall the panel. */
+const MOTION_MAX_MS = 2_000;
+const SLIDE_MAX_PX = 64;
+
+const inRange = (v: unknown, max: number): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max;
+
+/** The motion tokens, checked; null when they are missing or not what the chat word writes — then nothing moves. */
+export function motionOf(raw: string | null): Motion | null {
+  if (raw === null) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const m = v as Record<string, unknown>;
+  if (!inRange(m.enter, MOTION_MAX_MS) || !inRange(m.pulse, MOTION_MAX_MS) || !inRange(m.slide, SLIDE_MAX_PX)) return null;
+  if (typeof m.ease !== 'string' || !EASE.test(m.ease)) return null;
+  return { enter: m.enter, pulse: m.pulse, slide: m.slide, ease: m.ease };
+}
+
+/** Which placeholder a held kind stands on (issue #28): a figure's frame, a map's, a table's rows, or two cards. */
+export const SKELETON_OF: Readonly<Record<string, string>> = {
+  chart: 'skeleton-figure', explore: 'skeleton-figure', dashboard: 'skeleton-figure',
+  map: 'skeleton-map', table: 'skeleton-table', stats: 'skeleton-tiles', cards: 'skeleton-tiles',
+};
+
+/** What caretHost reads of an element: its tag, its last child, the sibling before it. */
+export interface TreeNode<T> {
+  readonly tagName: string;
+  readonly lastElementChild: T | null;
+  readonly previousElementSibling: T | null;
+}
+
+/** The elements a caret may sit at the end of: a paragraph, or a list's last item. */
+const PROSE_ENDS = new Set(['P', 'LI']);
+
+/**
+ * Where the caret goes in an answer as drawn so far: the end of its last
+ * paragraph, or of its last list's last item — or nowhere, when the answer
+ * ends in a code block or a component (a caret there would read as content).
+ * `skip` is what is the runtime's own and not the answer's (the caret itself).
+ */
+export function caretHost<T extends TreeNode<T>>(item: T, skip: (el: T) => boolean): T | null {
+  let last: T | null = item.lastElementChild;
+  while (last && skip(last)) last = last.previousElementSibling;
+  if (!last) return null;
+  if (last.tagName === 'UL' || last.tagName === 'OL') last = last.lastElementChild;
+  return last && PROSE_ENDS.has(last.tagName) ? last : null;
 }
 
 /**

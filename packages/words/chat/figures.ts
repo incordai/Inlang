@@ -1,8 +1,9 @@
 /**
  * @az module chat-figures
- * Purpose: the hidden templates an answer's charts, tables, stat cards, image cards, dashboards, explores, maps and share control are drawn from.
- * Spec: docs/chat-block-spec.md §20.4, §20.6, §20.7, §20.8, §21.3.4, §21.4.3, §21.4.5
- * Exports: FIGURE_COPY, MAP_COPY, SERIES_PARTS, richParts, assetParts, sharePart
+ * Purpose: the hidden templates an answer's charts, tables, stat cards, image cards, dashboards, explores, maps, share control,
+ *   bar buttons and held-component placeholders are drawn from.
+ * Spec: docs/chat-block-spec.md §20.4, §20.6, §20.7, §20.8, §21.3.4, §21.4.3, §21.4.5, §19.18
+ * Exports: FIGURE_COPY, MAP_COPY, SERIES_PARTS, BAR_ICONS, richParts, assetParts, sharePart, barButton, skeletonParts
  * Edit guide: every paint is a class from a theme token — the runtime copies a part's class, never writes a colour or a style;
  *   a slot the runtime fills is an element marked data-az-chat-slot, filled with textContent only.
  * Tests: packages/words/test/chat-shell.test.ts, scripts/chat-e2e.mjs
@@ -72,13 +73,18 @@ function paint(t: ThemeLike): EmittedNode {
   const tokens = [t.color['series-1'], t.color['series-2'], t.color['series-3'], t.color['series-4'], t.color['series-5'], t.color['series-6']];
   const series = (n: number) => tokens[n - 1];
   const children: EmittedNode[] = [];
+  // Issue #29: the mark under the pointer or the arrow keys — and every mark of a legend entry pointed at — is marked
+  // open by the runtime (data-state), and drawn with the focus colour's edge on top of its own paint.
+  const active = { stroke: t.color.focus, strokeWidth: px(t.size.ring) };
   for (const n of SERIES_PARTS) {
-    children.push({ tag: 'g', attrs: { 'data-az-chat-paint': `fill-${n}` }, style: { fill: series(n), stroke: 'none' } });
+    children.push({ tag: 'g', attrs: { 'data-az-chat-paint': `fill-${n}` }, style: { fill: series(n), stroke: 'none' }, states: { open: active } });
     // A patterned mark is filled by its pattern (a url() the SVG holds); its class only draws the edge.
-    children.push({ tag: 'g', attrs: { 'data-az-chat-paint': `patterned-${n}` }, style: { stroke: series(n), strokeWidth: '1px' } });
+    children.push({ tag: 'g', attrs: { 'data-az-chat-paint': `patterned-${n}` }, style: { stroke: series(n), strokeWidth: '1px' }, states: { open: active } });
     children.push({
       tag: 'g', attrs: { 'data-az-chat-paint': `line-${n}` },
       style: { fill: 'none', stroke: series(n), strokeWidth: px(t.size.ring), strokeLinejoin: 'round', strokeLinecap: 'round', ...(DASHES[n - 1] ? { strokeDasharray: DASHES[n - 1] } : {}) },
+      // A line pointed at by its legend entry is drawn twice as heavy, in its own colour: its dash stays readable.
+      states: { open: { strokeWidth: `calc(2 * ${px(t.size.ring)})` } },
     });
   }
   children.push(
@@ -87,8 +93,14 @@ function paint(t: ThemeLike): EmittedNode {
     { tag: 'g', attrs: { 'data-az-chat-paint': 'grid' }, style: { stroke: t.color.border, strokeWidth: '1px' } },
     { tag: 'g', attrs: { 'data-az-chat-paint': 'tick' }, style: { fill: t.color.muted, fontSize: t.typeSize.sm } },
     { tag: 'g', attrs: { 'data-az-chat-paint': 'label' }, style: { fill: t.color.text, fontSize: t.typeSize.sm } },
-    // The chart itself: drawn at its box's width, still — nothing moves, so reduced motion has nothing to stop (§20.4).
-    { tag: 'g', attrs: { 'data-az-chat-paint': 'svg' }, style: { display: 'block', maxWidth: '100%', height: 'auto', overflow: 'visible' } },
+    // Issue #29: a mark's tooltip, drawn in the chart itself — the surface and the text the rest of the answer uses.
+    { tag: 'g', attrs: { 'data-az-chat-paint': 'tip' }, style: { fill: t.color.surface, stroke: t.color['border-strong'], strokeWidth: '1px' } },
+    { tag: 'g', attrs: { 'data-az-chat-paint': 'tip-text' }, style: { fill: t.color.text, fontSize: t.typeSize.sm, fontWeight: t.type['weight-bold'] } },
+    // The chart itself: drawn at its box's width; a stop in the Tab order whose arrow keys walk its marks (issue #29).
+    {
+      tag: 'g', attrs: { 'data-az-chat-paint': 'svg' }, style: { display: 'block', maxWidth: '100%', height: 'auto', overflow: 'visible' },
+      states: { focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: px(t.size['ring-offset']) } },
+    },
   );
   return { tag: 'svg', attrs: { 'aria-hidden': 'true', focusable: 'false', width: '0', height: '0' }, style: { position: 'absolute', width: 0, height: 0 }, children };
 }
@@ -99,8 +111,9 @@ function figure(t: ThemeLike): EmittedNode {
   return {
     tag: 'figure',
     attrs: { class: 'az-chat-figure' },
+    // Its rows from the top: a figure stretched to a taller neighbour's height in a dashboard row keeps the room at its foot.
     style: {
-      display: 'grid', gap: px(t.space[8]), margin: 0, padding: px(t.space[12]),
+      display: 'grid', alignContent: 'start', gap: px(t.space[8]), margin: 0, padding: px(t.space[12]),
       background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0,
     },
     children: [
@@ -122,17 +135,30 @@ function figure(t: ThemeLike): EmittedNode {
           },
         ],
       },
-      slot('body', 'div', { minWidth: 0, maxWidth: '100%' }, { class: 'az-chat-figure-body' }),
-      slot('summary', 'p', { ...small, color: t.color.muted }, { class: 'az-chat-summary' }),
       {
-        tag: 'ul', attrs: { class: 'az-chat-legend', 'data-az-chat-slot': 'legend' },
-        style: { display: 'flex', flexWrap: 'wrap', gap: `${px(t.space[4])} ${px(t.space[16])}`, margin: 0, padding: 0, listStyle: 'none' },
-        children: [{
-          tag: 'li', attrs: { class: 'az-chat-legend-item', 'data-az-chat-slot': 'legend-item' },
-          style: { ...small, display: 'inline-flex', alignItems: 'center', gap: px(t.space[8]), color: t.color.text },
-          children: [slot('swatch', 'span', { display: 'inline-flex', width: px(t.space[16]), height: px(t.space[16]) }), slot('name', 'span', {})],
-        }],
+        // Issue #29: the chart and its legend in one row that wraps — a pie's legend beside it when there is room, under it when not.
+        tag: 'div', attrs: { class: 'az-chat-figure-plot', 'data-az-chat-slot': 'plot' },
+        style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: `${px(t.space[8])} ${px(t.space[16])}`, minWidth: 0 },
+        children: [
+          slot('body', 'div', { flex: '0 1 auto', minWidth: 0, maxWidth: '100%' }, { class: 'az-chat-figure-body' }),
+          {
+            tag: 'ul', attrs: { class: 'az-chat-legend', 'data-az-chat-slot': 'legend' },
+            // Columns two 128 steps wide: one list beside a pie or on a phone, two under a wide chart.
+            style: {
+              flex: `1 1 ${px(t.space[128])}`, display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, calc(2 * ${px(t.space[128])})), 1fr))`,
+              gap: `${px(t.space[4])} ${px(t.space[16])}`, margin: 0, padding: 0, listStyle: 'none', minWidth: 0,
+            },
+            children: [{
+              tag: 'li', attrs: { class: 'az-chat-legend-item', 'data-az-chat-slot': 'legend-item' },
+              style: { ...small, display: 'flex', alignItems: 'center', gap: px(t.space[8]), color: t.color.text, minWidth: 0, overflowWrap: 'anywhere' },
+              // The entry of the series or slice pointed at (issue #29): underlined, so colour is not the only sign.
+              states: { open: { textDecoration: 'underline', textUnderlineOffset: '0.2em' } },
+              children: [slot('swatch', 'span', { display: 'inline-flex', flex: 'none', width: px(t.space[16]), height: px(t.space[16]) }), slot('name', 'span', {})],
+            }],
+          },
+        ],
       },
+      slot('summary', 'p', { ...small, color: t.color.muted }, { class: 'az-chat-summary' }),
       {
         tag: 'details', attrs: { class: 'az-chat-figures-table', 'data-az-chat-slot': 'details' },
         style: { ...small },
@@ -194,6 +220,12 @@ function table(t: ThemeLike): EmittedNode {
   };
 }
 
+/**
+ * A stat value's size, in hundredths of its card's width (issue #20): seven characters ("$270.00") at about 0.6 em each
+ * fill 84% of the card at 20cqi, so the commonest values fit the narrowest card with room to spare.
+ */
+const STAT_VALUE_CQI = 20;
+
 /** Stat cards: a list of label, value and change — the change in a glyph and words, never colour (§20.2). */
 function stats(t: ThemeLike): EmittedNode {
   return {
@@ -201,10 +233,19 @@ function stats(t: ThemeLike): EmittedNode {
     style: { display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${px(t.space[128])}, 1fr))`, gap: px(t.space[12]), margin: 0 },
     children: [{
       tag: 'div', attrs: { class: 'az-chat-stat', 'data-az-chat-slot': 'stat' },
-      style: { display: 'grid', gap: px(t.space[4]), padding: px(t.space[12]), background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), minWidth: 0 },
+      // Issue #20: the card is the size container its value is set against.
+      style: {
+        display: 'grid', alignContent: 'start', gap: px(t.space[4]), padding: px(t.space[12]), background: t.color.surface, border: `1px solid ${t.color.border}`,
+        borderRadius: px(t.radius.md), minWidth: 0, containerType: 'inline-size',
+      },
       children: [
         slot('label', 'dt', { margin: 0, fontSize: t.typeSize.sm, color: t.color.muted }),
-        slot('value', 'dd', { margin: 0, fontSize: t.typeSize['2xl'], fontWeight: t.type['weight-bold'], lineHeight: t.type['leading-tight'], color: t.color.text, fontVariantNumeric: 'tabular-nums' }),
+        // Issue #20: the value is set against its card's width, between lg and 2xl — "$270.00" fits a 128-px card — and a
+        // longer one wraps before any digit is hidden: a cut-off number reads as another number.
+        slot('value', 'dd', {
+          margin: 0, fontSize: `clamp(${t.typeSize.lg}, ${STAT_VALUE_CQI}cqi, ${t.typeSize['2xl']})`, fontWeight: t.type['weight-bold'],
+          lineHeight: t.type['leading-tight'], color: t.color.text, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere', minWidth: 0,
+        }),
         {
           tag: 'dd', attrs: { 'data-az-chat-slot': 'delta' }, style: { margin: 0, fontSize: t.typeSize.sm, color: t.color.text },
           children: [slot('glyph', 'span', {}, { 'aria-hidden': 'true' }), ' ', slot('words', 'span', {})],
@@ -243,22 +284,31 @@ function cards(t: ThemeLike): EmittedNode {
 /** An image a card shows: as wide as the card, its shape kept. */
 const imageStyle = { display: 'block', width: '100%', height: 'auto', aspectRatio: '4 / 3', objectFit: 'cover' } as const;
 
-/** A dashboard: its title and a grid whose wide tiles span two columns above sm. */
+/**
+ * A dashboard (issues #20, #31): its title; its stats together as one
+ * headline row — short cards never sit beside a tall chart with a gap under
+ * them; then its other tiles in a dense grid whose columns are at least two
+ * 128 steps wide, so a chart is drawn at a size its text reads at (one
+ * column on a phone, two in a panel); a table takes a whole row.
+ */
 function dashboard(t: ThemeLike): EmittedNode {
   return {
     tag: 'section', attrs: { class: 'az-chat-dashboard' },
     style: { display: 'grid', gap: px(t.space[12]), minWidth: 0 },
     children: [
       slot('title', 'h3', { margin: 0, fontSize: t.typeSize.base, color: t.color.text }, { class: 'az-chat-dashboard-title' }),
+      slot('stats', 'div', { minWidth: 0 }, { class: 'az-chat-dashboard-stats' }),
       {
         tag: 'div', attrs: { class: 'az-chat-tiles', 'data-az-chat-slot': 'tiles' },
-        style: { display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${px(t.space[128])}, 1fr))`, gap: px(t.space[12]) },
+        style: {
+          display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, calc(2 * ${px(t.space[128])})), 1fr))`,
+          gridAutoFlow: 'row dense', gap: px(t.space[12]),
+        },
         children: [
-          { tag: 'div', attrs: { class: 'az-chat-tile', 'data-az-chat-slot': 'tile' }, style: { minWidth: 0 }, children: [] },
+          { tag: 'div', attrs: { class: 'az-chat-tile', 'data-az-chat-slot': 'tile' }, style: { display: 'grid', minWidth: 0 }, children: [] },
           {
             tag: 'div', attrs: { class: 'az-chat-tile az-chat-tile--wide', 'data-az-chat-slot': 'tile-wide' },
-            style: { minWidth: 0, gridColumn: 'span 2' },
-            below: { sm: { gridColumn: 'auto' } },
+            style: { display: 'grid', minWidth: 0, gridColumn: '1 / -1' },
             children: [],
           },
         ],
@@ -445,6 +495,8 @@ function map(t: ThemeLike, ctx: EmitContext): EmittedNode {
       },
       // §21.4.3: the map data's attribution, the operator's line from the server, always visible under the map.
       slot('attribution', 'p', { ...small, color: t.color.muted }, { class: 'az-chat-map-attribution' }),
+      // Issue #21: shown while the view is deeper than its tiles — there is no street detail to draw there.
+      slot('detail', 'p', { ...small, color: t.color.muted }, { class: 'az-chat-map-detail', hidden: 'hidden' }),
       slot('note', 'p', { ...small, color: t.color.text }, { class: 'az-chat-map-note', hidden: 'hidden' }),
       {
         tag: 'details', attrs: { class: 'az-chat-map-list', 'data-az-chat-slot': 'list' },
@@ -549,15 +601,94 @@ export function assetParts(answer: SpecChatAnswer, ctx: EmitContext): EmittedNod
   }, { 'data-az-chat-asset': i.key }))];
 }
 
+/** The answer bar's icons (issue #30), on a 24-unit grid, stroked in currentColor: two sheets; an arrow up out of a tray. */
+export const BAR_ICONS = {
+  copy: { viewBox: '0 0 24 24', d: 'M9 9h11v11H9zM5 15H4V4h11v1' },
+  share: { viewBox: '0 0 24 24', d: 'M12 15V3M7 8l5-5l5 5M5 12v8h14v-8' },
+} as const;
+
 /**
- * The share control under a finished answer (§20.7): Share, the choice to
- * include the question, then the two links once made — every one text the
- * runtime fills, nothing from the network as markup.
+ * One small icon button of an answer's bar (issue #30): named by its label,
+ * which its tooltip shows too — beside it, on hover or keyboard focus (the
+ * runtime shows and hides it; Escape hides it). The tooltip repeats the
+ * name, so it is hidden from assistive technology. Its colour is the bar's:
+ * faint until the answer is pointed at or focused.
+ */
+export function barButton(t: ThemeLike, label: string, icon: { readonly viewBox: string; readonly d: string }, attrs: Record<string, string>): EmittedNode {
+  return {
+    tag: 'span', attrs: { class: 'az-chat-bar-item' },
+    style: { position: 'relative', display: 'inline-flex' },
+    children: [
+      {
+        tag: 'button', attrs: { type: 'button', class: 'az-chat-bar-button', 'aria-label': label, ...attrs },
+        style: {
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: px(t.space[32]), height: px(t.space[32]),
+          margin: 0, padding: 0, border: 0, borderRadius: px(t.radius.sm), background: 'transparent', color: 'inherit', cursor: 'pointer',
+        },
+        states: {
+          hover: { background: t.color['surface-alt'], color: t.color.text },
+          focusVisible: { outline: `${px(t.size.ring)} solid ${t.color.focus}`, outlineOffset: 0, color: t.color.text },
+          expanded: { color: t.color.text },
+        },
+        children: [{
+          tag: 'svg',
+          attrs: { 'aria-hidden': 'true', focusable: 'false', viewBox: icon.viewBox, fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' },
+          style: { width: '1.25em', height: '1.25em' },
+          children: [{ tag: 'path', attrs: { d: icon.d } }],
+        }],
+      },
+      {
+        tag: 'span', attrs: { class: 'az-chat-tip', 'aria-hidden': 'true', hidden: 'hidden', 'data-az-chat-tip': '' },
+        style: {
+          position: 'absolute', insetInlineStart: `calc(100% + ${px(t.space[4])})`, insetBlockStart: '50%', transform: 'translateY(-50%)',
+          padding: `${px(t.space[4])} ${px(t.space[8])}`, fontSize: t.typeSize.sm, lineHeight: t.type['leading-tight'], whiteSpace: 'nowrap',
+          background: t.color.surface, color: t.color.text, border: `1px solid ${t.color['border-strong']}`, borderRadius: px(t.radius.sm),
+          boxShadow: t.shadow.md, zIndex: t.layer.tooltip, pointerEvents: 'none',
+        },
+        children: [label],
+      },
+    ],
+  };
+}
+
+/**
+ * The placeholders a held component stands on while the server reads its
+ * figures (issue #28): a frame of the shape the component will take — a
+ * figure's (a chart, an explore or a dashboard), a map's, a table's rows, or
+ * two cards (stats, image cards) — on the theme's quiet grounds. Hidden from
+ * assistive technology: the status region says what arrives.
+ */
+export function skeletonParts(t: ThemeLike): EmittedNode[] {
+  const shade = { display: 'block', background: t.color['surface-alt'], borderRadius: px(t.radius.sm) };
+  const bar = (width: string): EmittedNode => ({ tag: 'span', style: { ...shade, height: '1em', width } });
+  const block = (ratio: string): EmittedNode => ({ tag: 'span', style: { ...shade, aspectRatio: ratio } });
+  const box = { display: 'grid', gap: px(t.space[8]), padding: px(t.space[12]), border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.md), background: t.color.surface, minWidth: 0 };
+  const frame = (name: string, children: EmittedNode[]): EmittedNode =>
+    ({ tag: 'div', attrs: { class: 'az-chat-skeleton', 'data-az-chat-slot': name, 'aria-hidden': 'true' }, style: box, children });
+  const card = (): EmittedNode => ({ tag: 'span', style: { ...box, display: 'grid' }, children: [bar('50%'), { tag: 'span', style: { ...shade, height: '2em', width: '70%' } }] });
+  return [
+    frame('skeleton-figure', [bar('40%'), block('5 / 3')]),
+    frame('skeleton-map', [bar('40%'), block('4 / 3')]),
+    frame('skeleton-table', [bar('40%'), bar('100%'), bar('100%'), bar('100%')]),
+    {
+      tag: 'div', attrs: { class: 'az-chat-skeleton', 'data-az-chat-slot': 'skeleton-tiles', 'aria-hidden': 'true' },
+      style: { display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${px(t.space[128])}, 1fr))`, gap: px(t.space[12]), minWidth: 0 },
+      children: [card(), card()],
+    },
+  ];
+}
+
+/**
+ * The share control in a finished answer's bar (§20.7, issue #30): the
+ * Share icon button — named "Share this answer", as the text button it
+ * replaces was — then, under the bar, the choice to include the question and
+ * the two links once made: every one text the runtime fills, nothing from
+ * the network as markup. Its root lays out nothing of its own: its button
+ * joins the bar's row, its panel takes a row of its own.
  */
 export function sharePart(ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const small = { margin: 0, fontSize: t.typeSize.sm, lineHeight: t.type['leading-body'] };
-  const share = ctx.submit(FIGURE_COPY.share, { hierarchy: 'secondary' });
   const create = ctx.submit(FIGURE_COPY.shareCreate, { hierarchy: 'primary' });
   const field = (name: string, label: string): EmittedNode => ({
     tag: 'label', attrs: { class: 'az-chat-share-field', 'data-az-chat-slot': `${name}-field`, hidden: 'hidden' },
@@ -573,12 +704,12 @@ export function sharePart(ctx: EmitContext): EmittedNode {
   });
   return part('share', {
     tag: 'div', attrs: { class: 'az-chat-share' },
-    style: { display: 'grid', gap: px(t.space[8]), justifyItems: 'start' },
+    style: { display: 'contents' },
     children: [
-      { ...share, attrs: { ...share.attrs, type: 'button', 'data-az-chat-slot': 'open', 'aria-expanded': 'false' } },
+      barButton(t, FIGURE_COPY.share, BAR_ICONS.share, { 'data-az-chat-slot': 'open', 'aria-expanded': 'false' }),
       {
         tag: 'div', attrs: { class: 'az-chat-share-panel', 'data-az-chat-slot': 'panel', hidden: 'hidden' },
-        style: { display: 'grid', gap: px(t.space[8]), width: '100%' },
+        style: { display: 'grid', gap: px(t.space[8]), flex: '1 1 100%', color: t.color.text, paddingBlockStart: px(t.space[4]) },
         children: [
           {
             tag: 'label', attrs: { class: 'az-chat-share-include' }, style: { ...small, display: 'inline-flex', alignItems: 'center', gap: px(t.space[8]), color: t.color.text, minHeight: px(t.size.tap) },

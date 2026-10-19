@@ -481,7 +481,9 @@ const chatMap: Check = {
     const parts = [
       origin !== null ? 'the world archive from a third party'
         : state.bundled ? `the bundled world basemap to zoom ${state.world} (land, lakes, borders)` : `the world archive to zoom ${state.world}`,
-      ...(state.region !== null ? [`a regional extract to zoom ${state.region}`] : []),
+      // Issue #21: maps zoom on past the tiles to city level, but only a regional extract draws streets there.
+      ...(state.region !== null ? [`a regional extract to zoom ${state.region}`]
+        : ['no regional extract, so a city-level map has no street detail (AZ_MAP_REGION, with AZ_MAP_WORLD, adds it)']),
       state.glyphs ? 'labels' : 'no labels (AZ_MAP_GLYPHS unset)',
       state.sprites ? 'icons' : 'no icons (AZ_MAP_SPRITES unset)',
       'attribution set',

@@ -23,7 +23,7 @@
  * model's, from the author's text instead of the model, and spends nothing.
  *
  * Refusals before the stream are JSON `{ error }`. Once the stream starts
- * every event is one of `text`, `block`, `done`, `error`: the model's text
+ * every event is one of `text`, `block`, `hold`, `done`, `error`: the model's text
  * goes through the answer parser (chat-answer.ts), which sends prose as
  * `text` and each component that passes every rule as one `block` — the
  * page never receives a byte the parser did not produce. The finished
@@ -32,7 +32,10 @@
  * back: the tag covers exactly the text the model is sent next time, and
  * the page draws from the events it kept.
  *
- * A rich component (§20) is resolved before it is written: numbers the
+ * A rich component (§20) is resolved before it is written — announced first
+ * by a `hold` event that names only its kind (`{ word }`, issue #28), so the
+ * page shows a placeholder of its shape while a query, a tool or a lookup
+ * runs; a hold is not part of the answer (neither shared nor kept): numbers the
  * model wrote are marked `src: model`; each `from` request is answered by
  * the server's own read of a public table (`figures`, chat-query.ts) and
  * marked `src: site`; each `from tool` request by one of the operator's
@@ -619,6 +622,9 @@ export function createChat(o: ChatOptions): ChatRoutes {
         let out: Sent;
         if (e.type === 'text') out = e;
         else if (isRich(e.block)) {
+          // Issue #28: the page learns which kind of component is coming before its figures are read — its kind only.
+          const word = RICH_WORDS.find((w) => Object.hasOwn(e.block, w));
+          if (word && !res.destroyed) res.write(sseEvent('hold', { word }));
           const r = await resolveRich(e.block, o.figures ?? null, day, toolRun, o.context.images.map((i) => i.key), (why) => resolvedDrops.push(why), geocodeRun);
           if (r === null) { resolvedDrops.push('figures'); lost.set(e.block, 'figures'); continue; }
           out = { type: 'block', block: r };

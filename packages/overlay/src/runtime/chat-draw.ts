@@ -1,7 +1,7 @@
 /**
  * @az runtime chat-draw
  * Purpose: draws an answer's chart, table, stat cards, image cards, dashboard or unavailable note into copies of the chat word's templates.
- * Spec: docs/chat-block-spec.md §20.2, §20.4, §20.6, §20.8, §21.2.4
+ * Spec: docs/chat-block-spec.md §20.2, §20.4, §20.6, §20.8, §21.2.4, §19.18
  * Exports: drawRich, RichDraw, RICH_KEYS, DRAW_COPY, frame, tableOf, drawChart, formatter, provenance, clonePart, slot, fill, drop
  * Edit guide: text only through textContent; attributes only geometry, classes copied from the templates, ids, aria and
  *   checked URLs (a destination on the allow-list, a row image at the backend's own path); never a style or markup.
@@ -17,13 +17,16 @@
  * "From <the operator's label> · <minute>" for a tool's), the SVG, a one-sentence summary and the same figures
  * as a real table; a table with sortable headers; stat cards whose change is
  * a sign, a glyph and words; image cards whose image is a template's <img>
- * or the backend's own row image; a dashboard's grid of these.
+ * or the backend's own row image; a dashboard's headline row of stats and its
+ * grid of the rest.
  *
- * A chart is drawn for the width its answer has, and drawn again when that
- * width changes by 32 px or more, so its text stays the theme's size.
+ * A chart is drawn for the width its own plot row has — in a dashboard tile,
+ * the tile's — and drawn again when that width changes by 32 px or more, so
+ * its text stays the theme's size (issue #29).
  */
 
-import { SERIES_PATTERNS, chartBox, chartGeometry, chartRows, chartSummary, validChart, type ChartData, type FigureSource, type SvgNode } from './chat-chart.ts';
+import { SERIES_PATTERNS, chartBox, chartLayout, chartRows, chartSummary, validChart, type ChartData, type FigureSource, type Measure, type SvgNode } from './chat-chart.ts';
+import { wireChart, type ChartFocus } from './chat-chart-ui.ts';
 import {
   announceOf, deltaWords, sortedRows, validCards, validDashboard, validStats, validTable, writeSvg,
   type CardItem, type FigureContext, type StatItem, type TableData, type Tile,
@@ -60,6 +63,8 @@ export interface RichDraw {
   readonly suffix: string;
   /** Watches a drawn chart's width; returns the stop. */
   readonly observe?: (el: Element, redraw: () => void) => () => void;
+  /** Tells the status region at once — a chart's mark reached by the keyboard or a tap (issue #29); absent where there is none. */
+  readonly announce?: (text: string) => void;
 }
 
 const partEl = (components: HTMLElement, key: string, extra?: [string, string]): HTMLElement | null => {
@@ -179,6 +184,21 @@ function fontOf(d: RichDraw): number {
   return Number.isFinite(px) && px > 0 ? px : FALLBACK_FONT;
 }
 
+/**
+ * Label widths as the page draws them (issue #29): measured in the chart
+ * text's own font on a 2D context, so a narrow tile keeps every label it has
+ * room for; undefined where there is none (the geometry estimates instead).
+ */
+function measurerOf(d: RichDraw, font: number): Measure | undefined {
+  const tick = partEl(d.components, 'paint')?.querySelector('[data-az-chat-paint="tick"]');
+  const view = d.doc.defaultView;
+  const ctx = d.doc.createElement('canvas').getContext('2d');
+  if (!tick || !view || !ctx) return undefined;
+  const s = view.getComputedStyle(tick);
+  ctx.font = `${s.fontWeight} ${font}px ${s.fontFamily}`;
+  return (text) => ctx.measureText(text).width;
+}
+
 /** A table element from the table part: caption, headers (sortable when asked), rows. */
 export function tableOf(d: RichDraw, id: string, caption: string, head: readonly { label: string; type: 'text' | 'number'; unit: string | null }[],
   rows: readonly (readonly (string | number | null)[])[], sortable: boolean): HTMLElement | null {
@@ -234,12 +254,20 @@ export function tableOf(d: RichDraw, id: string, caption: string, head: readonly
   return wrap;
 }
 
-/** A chart in its frame: the SVG, its summary, its legend, its table equivalent; redrawn when its width changes. */
+/**
+ * A chart in its frame: the SVG, its summary, its legend, its table
+ * equivalent. Drawn for the width its own plot row has — a dashboard tile's,
+ * not the whole answer's, so its text is the theme's size (issue #29) — a pie
+ * or donut no wider than ROUND_MAX, its legend beside it when there is room;
+ * redrawn when that width changes. Its marks answer the pointer and the
+ * arrow keys (chat-chart-ui.ts).
+ */
 export function drawChart(d: RichDraw, c: ChartData): HTMLElement | null {
   const classOf = painter(d);
   const f = frame(d, c.title, c.src, c.asOf, c.source);
   const body = f && slot(f, 'body');
   if (!f || !body || !classOf) return null;
+  const plot = slot(f, 'plot');
   const fmt = formatter(d.doc, c.unit);
   const summaryId = `az-chat-sum-${d.suffix}`;
   const summary = slot(f, 'summary');
@@ -248,23 +276,32 @@ export function drawChart(d: RichDraw, c: ChartData): HTMLElement | null {
     summary.textContent = chartSummary(c, fmt);
   }
   const font = fontOf(d);
+  const measure = measurerOf(d, font);
+  const round = c.kind === 'pie' || c.kind === 'donut';
+  const legend = slot(f, 'legend');
+  const item = slot(f, 'legend-item');
+  const entries: HTMLElement[] = [];
+  const focus: ChartFocus = { active: -1 };
   let drawnWidth = -1;
   const render = () => {
-    const width = d.within.clientWidth || FALLBACK_WIDTH;
+    // Its own row once it is in the page; until then the answer's width, the nearest measure there is.
+    const width = (plot?.isConnected ? plot.clientWidth : 0) || d.within.clientWidth || FALLBACK_WIDTH;
     if (Math.abs(width - drawnWidth) < REDRAW_PX) return;
     drawnWidth = width;
-    const svg = writeSvg(d.doc, chartGeometry(c, chartBox(width, font), `az-chat-${d.suffix}`, fmt), classOf);
+    const box = chartBox(width, font, round);
+    const layout = chartLayout(c, box, `az-chat-${d.suffix}`, fmt, measure);
+    const svg = writeSvg(d.doc, layout.svg, classOf);
     const own = classOf('svg');
     if (own) svg.setAttribute('class', own);
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-labelledby', summaryId);
     body.replaceChildren(svg);
+    const Svg = d.doc.defaultView?.SVGSVGElement;
+    if (Svg && svg instanceof Svg) {
+      wireChart({ doc: d.doc, svg, data: c, box, marks: layout.marks, format: fmt, classOf, legend: entries, focus, ...(d.announce ? { announce: d.announce } : {}) });
+    }
   };
-  render();
   // The legend: every series by name with its paint, when there is more than one, and every slice of a pie.
-  const legend = slot(f, 'legend');
-  const item = slot(f, 'legend-item');
-  const round = c.kind === 'pie' || c.kind === 'donut';
   const keys = round ? c.series[0].points.map((p) => p[0]) : c.series.length > 1 ? c.series.map((s) => s.name) : [];
   if (legend && item && keys.length > 0) {
     const total = round ? c.series[0].points.reduce((a, p) => a + p[1], 0) : 0;
@@ -286,11 +323,13 @@ export function drawChart(d: RichDraw, c: ChartData): HTMLElement | null {
         ] };
         swatch.replaceChildren(writeSvg(d.doc, box, classOf));
       }
+      entries.push(li);
       return li;
     }));
   } else {
     legend?.remove();
   }
+  render();
   // §20.8: the same figures as a real table, behind a disclosure.
   const equivalent = slot(f, 'equivalent');
   const rows = chartRows(c, fmt);
@@ -408,11 +447,11 @@ function drawUnavailable(d: RichDraw, title: string): HTMLElement | null {
   return note;
 }
 
-/** One dashboard tile, drawn as its own kind; charts and tables span two columns. */
+/** One dashboard tile, drawn as its own kind; a table takes a whole row (issue #20: a chart is a column of its own). */
 function drawTile(d: RichDraw, tile: Tile, n: number): { el: HTMLElement; wide: boolean } | null {
   const sub: RichDraw = { ...d, suffix: `${d.suffix}-t${n}` };
   if (tile.kind === 'stat') { const el = drawStats(sub, [tile.stat]); return el ? { el, wide: false } : null; }
-  if (tile.kind === 'chart') { const el = drawChart(sub, tile.chart); return el ? { el, wide: true } : null; }
+  if (tile.kind === 'chart') { const el = drawChart(sub, tile.chart); return el ? { el, wide: false } : null; }
   if (tile.kind === 'table') { const el = drawTable(sub, tile.table); return el ? { el, wide: true } : null; }
   if (tile.kind === 'card') { const el = drawCards(sub, [tile.card]); return el ? { el, wide: false } : null; }
   const el = drawUnavailable(sub, tile.title);
@@ -460,13 +499,25 @@ export function drawRich(d: RichDraw, word: string, data: unknown): { el: HTMLEl
       fill(root, 'title', dash.title);
       slot(root, 'title')?.setAttribute('id', titleId);
       root.setAttribute('aria-labelledby', titleId);
-      grid.replaceChildren(...dash.tiles.map((t, n) => {
+      // Issues #20, #31: the stats together, in their order, as one headline row above the other tiles — never a short
+      // card beside a tall chart. A shell without the row (built before it) draws them as tiles, as it did.
+      const headline = slot(root, 'stats');
+      const stats = headline ? dash.tiles.flatMap((t) => (t.kind === 'stat' ? [t.stat] : [])) : [];
+      const list = stats.length > 0 ? drawStats({ ...d, suffix: `${d.suffix}-s` }, stats) : null;
+      if (headline && list) {
+        headline.replaceChildren(list);
+        headline.removeAttribute('data-az-chat-slot');
+      } else headline?.remove();
+      const rest = dash.tiles.map((t, n) => [t, n] as const).filter(([t]) => !(list && t.kind === 'stat'));
+      grid.replaceChildren(...rest.map(([t, n]) => {
         const drawn = drawTile(d, t, n);
         const holder = (drawn?.wide ? wideTile : tile).cloneNode(false) as HTMLElement;
         holder.removeAttribute('data-az-chat-slot');
         if (drawn) holder.append(drawn.el);
         return holder;
       }));
+      // A dashboard of stats alone has no grid under its row.
+      if (rest.length === 0) grid.remove();
       return { el: root, said: announceOf({ kind: 'dashboard', data: dash }) };
     }
     case 'unavailable': {

@@ -2,7 +2,8 @@
  * @az runtime chat-map
  * Purpose: an answer's map as the page checks it — its closed shape, every cap, every coordinate — and the words it is said and listed in.
  * Spec: docs/chat-block-spec.md §21.4.2, §21.4.4, §21.4.5
- * Exports: MAP_CAPS, MAP_TEXT, MapData, MapPin, MapRoute, PinSource, validMap, mapBounds, mapSummary, placeWords, pinLabel, mapLabels
+ * Exports: MAP_CAPS, MAP_TEXT, MAP_ZOOM, MapData, MapPin, MapRoute, PinSource, validMap, mapBounds, mapSummary, placeWords, pinLabel, mapLabels,
+ *   zoomCap, pastTiles
  * Edit guide: no DOM; an event that breaks any cap is refused whole, never repaired; every word the page adds is fixed copy here.
  * Tests: packages/overlay/test/chat-map.test.ts
  */
@@ -55,6 +56,8 @@ export const MAP_TEXT = {
   reset: 'Reset view',
   show: 'Show on the map',
   stop: (n: number) => `Stop ${n}`,
+  /** Issue #21: under the map while its view is deeper than its tiles — the places are drawn where they are, the ground behind them has no streets. */
+  detail: 'This map has no street detail at this zoom.',
   /** What the map's image is called, and what the status region hears when it is drawn. */
   summary: (title: string, pins: number, routes: number) =>
     `Map: ${title}, ${pins === 1 ? '1 place' : `${pins} places`}${routes > 0 ? `, ${routes === 1 ? '1 route' : `${routes} routes`}` : ''}.`,
@@ -107,6 +110,25 @@ export function validMap(v: unknown): MapData | null {
     routes.push({ label: r.label, points: r.points.map((p: [number, number]) => [p[0], p[1]] as const) });
   }
   return { title: v.title, src: site ? 'site' : 'model', asOf: site ? v.asOf as string : null, pins, routes };
+}
+
+/**
+ * How deep a map may zoom (issue #21): at least `overzoom`, past the tiles'
+ * deepest zoom, so places a few hundred metres apart are told apart even on
+ * the bundled world basemap (zoom 0–6, about 2 km to a pixel there) — the
+ * land, water and borders are drawn larger, and a note says there is no
+ * street detail. With a regional extract deeper than that, its own depth.
+ */
+export const MAP_ZOOM = { overzoom: 14, epsilon: 1e-6 } as const;
+
+/** The deepest zoom the view may reach, given the deepest zoom of the tiles it draws. */
+export function zoomCap(deepestTiles: number): number {
+  return Math.max(MAP_ZOOM.overzoom, deepestTiles);
+}
+
+/** The view is deeper than any tile it draws: the note on street detail shows. */
+export function pastTiles(zoom: number, deepestTiles: number): boolean {
+  return zoom > deepestTiles + MAP_ZOOM.epsilon;
 }
 
 /** The box around every pin and route point: `[west, south, east, north]` — the view the map opens at (the model writes no zoom or centre). */

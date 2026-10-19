@@ -341,8 +341,10 @@ export interface SvgDocument<E> {
 
 /** The SVG attributes the writer sets — geometry and structure only; a paint is a class. */
 export const SVG_ATTRIBUTES: ReadonlySet<string> = new Set([
-  'viewBox', 'width', 'height', 'x', 'y', 'x1', 'x2', 'y1', 'y2', 'cx', 'cy', 'r', 'd', 'points',
+  'viewBox', 'width', 'height', 'x', 'y', 'x1', 'x2', 'y1', 'y2', 'cx', 'cy', 'r', 'rx', 'd', 'points',
   'text-anchor', 'fill-rule', 'patternUnits', 'id', 'focusable', 'fill',
+  // A mark's index in reading order (chat-chart.ts MARK_ATTR): what the pointer and the arrow keys find (issue #29).
+  'data-az-chat-mark',
 ]);
 
 /**

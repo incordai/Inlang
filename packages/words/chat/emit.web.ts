@@ -2,7 +2,8 @@
  * @az word chat
  * Purpose: a panel — inline, or opened from a corner launcher — where a visitor asks the site's AI a question and reads the answer as it streams.
  * Spec: docs/chat-block-spec.md · terms: az explain chat
- * Renders: section.az-chat.az-chat--panel[data-az-chat=<config>][data-az-chat-state] > h2.az-chat-title#az-chat-title ·
+ * Renders: section.az-chat.az-chat--panel[data-az-chat=<config>][data-az-chat-state] > div.az-chat-panel (the card, centred, up to 768 px) >
+ *   div.az-chat-head (h2.az-chat-title#az-chat-title + the history controls) + p.az-chat-privacy + the panel's working parts ·
  *   (float: div.az-chat.az-chat--float[data-az-chat] > button.az-chat-launcher[data-az-chat-launcher][hidden] (the title) +
  *     dialog.az-chat-dialog#az-chat-dialog[data-az-overlay=sheet] > div.az-chat-sheet > div.az-chat-sheet-handle[data-az-drag] (below sm) + div.az-chat-head (the h2 +
  *     the history controls + Close [data-az-chat-close]) + p.az-chat-privacy + the same panel, without its history line) ·
@@ -17,12 +18,16 @@
  *     div.az-chat-prose[hidden][data-az-chat-prose] (C5) > the prose elements, each marked [data-az-chat-slot] — strong, em, code,
  *       ul > li, ol, div.az-chat-code > div.az-chat-code-bar (the language + Copy code [data-az-chat-copy]) + pre[tabindex=0] > code,
  *       ul.az-chat-follows > li.az-chat-follow-item > button ·
- *     div.az-chat-history[hidden][data-az-chat-history] > button.az-chat-about[data-az-chat-about][aria-expanded][aria-controls=az-chat-privacy]
+ *     div.az-chat-extras[hidden][data-az-chat-extras][data-az-chat-motion] > span.az-chat-thinking > span.az-chat-dot ×3 + span.az-chat-caret +
+ *       (with rich components) div.az-chat-skeleton ×4 (figure, map, table, tiles) + div.az-chat-bar[role=group] > Copy answer (an icon
+ *       button and its tooltip) — every one [data-az-chat-slot], the dots, caret and placeholders aria-hidden ·
+ *     div.az-chat-history[hidden][data-az-chat-history] (in the head) > button.az-chat-about[data-az-chat-about][aria-expanded][aria-controls=az-chat-privacy]
  *       (an info icon) + Clear history [data-az-chat-clear][hidden] (shown once there is a kept chat) ·
- *     p.az-chat-privacy#az-chat-privacy[hidden][data-az-chat-privacy] (the note the info control shows) ·
+ *     p.az-chat-privacy#az-chat-privacy[hidden][data-az-chat-privacy] (the note the info control shows, under the head) ·
  *     (the shared-answer page, chat.shared: the title an h1) p.az-chat-note + h2.az-chat-shared-heading + the transcript, templates and parts + p.az-chat-error +
  *       button.az-chat-delete[data-az-chat-delete] (hidden; shown for the delete link) — no form, no suggestions ·
- *     ul.az-chat-asks[hidden][data-az-chat-asks] > li.az-chat-ask-item > button.az-action[data-az-chat-ask] ·
+ *     ul.az-chat-asks[hidden][data-az-chat-asks] > li.az-chat-ask-item > button.az-action[data-az-chat-ask] (a small pill chip; one
+ *       row that scrolls sideways below sm) ·
  *     form.az-chat-form[hidden][data-az-chat-form] > label.az-chat-label + div.az-chat-compose > textarea.az-chat-input#az-chat-input[rows=1]
  *       (grows with its text, to a cap, by the runtime) + div.az-chat-controls > Send [data-az-chat-send] (submit, primary) +
  *       Stop [data-az-chat-stop] (button, secondary, hidden) ·
@@ -44,10 +49,13 @@
  *   focusVisible ring color.focus; errors color.danger; below sm the mobile gutter.
  * Behaviour: packages/overlay runtime chat.ts sends with fetch, reads the event stream and writes every answer as text
  *   (textContent) into copies of the hidden templates — a component into a copy of its part, a destination only from the
- *   config's allow-list; the status region hears finished sentences. Other words render the parts (ctx.embed). With JavaScript off
- *   the greeting and the noscript line show, and the form stays hidden.
+ *   config's allow-list; the status region hears finished sentences. While an answer is on its way the runtime shows the dots,
+ *   the caret and a held component's placeholder from extras(), animated with the theme's motion tokens (none under reduced
+ *   motion); a finished answer gets the bar. Other words render the parts (ctx.embed). With JavaScript off the greeting and
+ *   the noscript line show, and the form stays hidden.
  * Edit guide: one message → message(); the controls → form(); the hidden state lines → notes(); the config → config();
  *   the components' templates → parts() (ids and behaviour marks parked by asTemplate(); a quote drawn compact by quoted());
+ *   the working signs and the answer bar → extras(); the inline panel's head → panelHead();
  *   a pair's gradient kept to Send → solid(); the launcher and its dialog → floatShell().
  *   Keep: no inline handler, no markup from the network, every control a real button or link, the label visible.
  * Tests: packages/words/test/props.test.ts, packages/words/test/variants.test.ts, packages/words/test/structure.test.ts, packages/words/test/chat-shell.test.ts
@@ -69,7 +77,7 @@ import type { SpecBlock } from '../../core/src/spec.ts';
 import type { SpecFrom } from '../../core/src/spec-block.ts';
 import { framed, fromMark, px, visuallyHidden, type EmitContext, type EmittedNode, type StyleMap, type ThemeLike } from '../../core/src/emit-contract.ts';
 import { closeButton } from '../../overlay/src/index.ts';
-import { assetParts, richParts, sharePart } from './figures.ts';
+import { assetParts, BAR_ICONS, barButton, richParts, sharePart, skeletonParts } from './figures.ts';
 
 /** The shell's fixed copy; the runtime's copy lives in overlay chat-logic.ts. */
 export const CHAT_COPY = {
@@ -98,6 +106,9 @@ export const CHAT_COPY = {
   clear: 'Clear history',
   /** The info control that shows the history note (chat-block-spec §21.1.4): its accessible name. */
   about: 'How this chat is kept',
+  /** Issue #30: the bar under a finished answer, and its Copy. */
+  bar: 'Answer actions',
+  copyAnswer: 'Copy answer',
   /**
    * chat-block-spec §19.11: what is kept is bound to who reads it — a signed-in chat to the account (signing out
    * clears it, another account never sees it), a chat open to anyone to the browser until someone signs in.
@@ -341,7 +352,9 @@ const VISITOR_SHARE = '85%';
  * One message of the transcript: an item holding one paragraph of text.
  * chat-block-spec §9: the visitor's words in a bubble of the accent's quiet
  * tint (`chat-visitor`), at the inline end; the answer on the panel's plain
- * surface — no bubble, the full measure — so its parts sit on one ground.
+ * surface — no bubble — so its parts sit on one ground. The answer runs the
+ * panel's width, so a dashboard has room; its prose keeps the reading
+ * measure (issue #31).
  */
 function message(who: 'visitor' | 'site', text: string, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
@@ -363,14 +376,61 @@ function message(who: 'visitor' | 'site', text: string, ctx: EmitContext): Emitt
             borderRadius: px(t.radius.lg),
             background: t.color['chat-visitor'],
           }
-        : { justifySelf: 'stretch', maxWidth: `${t.size['measure-body']}ch` }),
+        : { justifySelf: 'stretch' }),
     },
     children: [{
       tag: 'p',
       attrs: { class: 'az-chat-text' },
-      style: { margin: 0, fontSize: t.typeSize.base, lineHeight: t.type['leading-body'], whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+      style: { margin: 0, maxWidth: `${t.size['measure-body']}ch`, fontSize: t.typeSize.base, lineHeight: t.type['leading-body'], whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
       children: text ? [text] : [],
     }],
+  };
+}
+
+/**
+ * What an answer gets beyond its words (issues #28, #30), as hidden
+ * templates the runtime copies: the dots that stand where the answer will be
+ * until its first words, the caret at the end of words still arriving, a
+ * placeholder of a held component's shape (only where answers hold rich
+ * ones), and the bar of small actions under a finished answer — Copy here,
+ * Share joining it from its part. All of it is hidden from assistive
+ * technology but the bar's named buttons: the status region says what
+ * happens. The motion the runtime animates them with is the theme's tokens,
+ * carried on the box; under reduced motion nothing moves.
+ */
+function extras(block: SpecBlock, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const dot: EmittedNode = {
+    tag: 'span', attrs: { class: 'az-chat-dot' },
+    style: { display: 'block', width: px(t.space[8]), height: px(t.space[8]), borderRadius: px(t.radius.full), background: t.color.muted },
+  };
+  const rich = block.chat?.answer ? richParts(block.chat.answer, ctx).length > 0 : false;
+  return {
+    tag: 'div',
+    attrs: {
+      class: 'az-chat-extras', hidden: 'hidden', 'data-az-chat-extras': '',
+      'data-az-chat-motion': JSON.stringify({ enter: t.motion.emphasis, pulse: t.motion.slow, slide: t.motion.slide, ease: t.motion.ease }),
+    },
+    children: [
+      {
+        // One line of the answer's text tall, so its first words take its place without a jump.
+        tag: 'span', attrs: { class: 'az-chat-thinking', 'aria-hidden': 'true', 'data-az-chat-slot': 'thinking' },
+        style: { display: 'inline-flex', alignItems: 'center', gap: px(t.space[4]), minHeight: `calc(${t.type['leading-body']} * 1em)`, fontSize: t.typeSize.base },
+        children: [dot, dot, dot],
+      },
+      {
+        tag: 'span', attrs: { class: 'az-chat-caret', 'aria-hidden': 'true', 'data-az-chat-slot': 'caret' },
+        style: { display: 'inline-block', width: '0.5em', height: '1em', marginInlineStart: '0.15em', verticalAlign: '-0.15em', borderRadius: px(t.radius.sm), background: t.color.muted },
+      },
+      ...(rich ? skeletonParts(t) : []),
+      {
+        tag: 'div', attrs: { class: 'az-chat-bar', role: 'group', 'aria-label': CHAT_COPY.bar, 'data-az-chat-slot': 'bar' },
+        // Faint — the non-text edge colour — until the answer is pointed at or focused (the runtime marks it open), then the text's.
+        style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: px(t.space[4]), minWidth: 0, color: t.color['border-strong'], transition: `color ${t.motion.fast}ms ${t.motion.easeOut}` },
+        states: { hover: { color: t.color.text }, focusWithin: { color: t.color.text }, open: { color: t.color.text } },
+        children: [barButton(t, CHAT_COPY.copyAnswer, BAR_ICONS.copy, { 'data-az-chat-slot': 'copy-answer' })],
+      },
+    ],
   };
 }
 
@@ -385,7 +445,8 @@ function proseParts(ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
   const slot = (name: string, tag: string, style: EmittedNode['style'], children: (EmittedNode | string)[] = [], attrs: Record<string, string> = {}): EmittedNode =>
     ({ tag, attrs: { 'data-az-chat-slot': name, ...attrs }, style, children });
-  const list = { margin: 0, paddingInlineStart: px(t.space[24]), display: 'grid', gap: px(t.space[4]), fontSize: t.typeSize.base, lineHeight: t.type['leading-body'] };
+  // A list keeps the reading measure, as a paragraph does (issue #31): the answer itself runs the panel's width.
+  const list = { margin: 0, maxWidth: `${t.size['measure-body']}ch`, paddingInlineStart: px(t.space[24]), display: 'grid', gap: px(t.space[4]), fontSize: t.typeSize.base, lineHeight: t.type['leading-body'] };
   const mono = { fontFamily: t.type.mono, fontSize: t.typeSize.sm };
   const copy = control(CHAT_COPY.copy, 'data-az-chat-copy', ctx, false);
   const follow = control('', 'data-az-chat-follow', ctx, false);
@@ -500,7 +561,13 @@ function latestControl(ctx: EmitContext): EmittedNode {
   };
 }
 
-/** The suggested questions: buttons that ask on the visitor's behalf. */
+/**
+ * The suggested questions (issue #31): small pill chips — the button
+ * primitive at its small size, fully rounded — that ask on the visitor's
+ * behalf. They wrap on a wide panel; below sm they keep one row that scrolls
+ * sideways, so they take one line from the transcript, never several (each
+ * chip is a real button, so the keyboard scrolls the row as it moves).
+ */
 function asks(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
   const t = ctx.theme;
   const questions = block.children.filter((c) => c.word === 'ask' && (c.args[0]?.value ?? '').trim() !== '');
@@ -509,12 +576,22 @@ function asks(block: SpecBlock, ctx: EmitContext): EmittedNode | null {
     tag: 'ul',
     attrs: { class: 'az-chat-asks', 'aria-label': CHAT_COPY.asks, hidden: 'hidden', 'data-az-chat-asks': '' },
     style: { display: 'flex', flexWrap: 'wrap', gap: px(t.space[8]), margin: 0, padding: 0 },
-    children: questions.map((q): EmittedNode => ({
-      tag: 'li',
-      attrs: { class: 'az-chat-ask-item' },
-      style: { listStyle: 'none' },
-      children: [control(q.args[0].value, 'data-az-chat-ask', ctx, false)],
-    })),
+    // The row's padding keeps a focused chip's ring inside the scroller, which would clip it.
+    below: { sm: { flexWrap: 'nowrap', overflowX: 'auto', overscrollBehaviorInline: 'contain', padding: px(t.space[4]), scrollbarWidth: 'thin' } },
+    children: questions.map((q): EmittedNode => {
+      const chip = control(q.args[0].value, 'data-az-chat-ask', ctx, false, 'sm');
+      return {
+        tag: 'li',
+        attrs: { class: 'az-chat-ask-item' },
+        style: { listStyle: 'none', minWidth: 0 },
+        below: { sm: { flex: 'none' } },
+        children: [{
+          ...chip,
+          style: { ...chip.style, borderRadius: px(t.radius.full), fontWeight: t.type['weight-body'], textAlign: 'start' },
+          below: { ...chip.below, sm: { ...chip.below?.sm, whiteSpace: 'nowrap' } },
+        }],
+      };
+    }),
   };
 }
 
@@ -531,7 +608,8 @@ function form(ctx: EmitContext): EmittedNode {
   return {
     tag: 'form',
     attrs: { class: 'az-chat-form', hidden: 'hidden', 'data-az-chat-form': '' },
-    style: { display: 'grid', gap: px(t.space[4]) },
+    // Issue #31: the input's own width (a textarea's columns) never widens the panel past a 320-px screen: it shrinks instead.
+    style: { display: 'grid', gap: px(t.space[4]), minWidth: 0 },
     children: [
       {
         tag: 'label',
@@ -542,7 +620,7 @@ function form(ctx: EmitContext): EmittedNode {
       {
         tag: 'div',
         attrs: { class: 'az-chat-compose' },
-        style: { display: 'flex', alignItems: 'flex-end', gap: px(t.space[8]) },
+        style: { display: 'flex', alignItems: 'flex-end', gap: px(t.space[8]), minWidth: 0 },
         children: [
           {
             tag: 'textarea',
@@ -677,7 +755,7 @@ function transcript(ctx: EmitContext, items: EmittedNode[], float: boolean): Emi
   };
 }
 
-/** The panel's working parts, the same inline and in a float — whose history controls are in its head instead. */
+/** The panel's working parts, the same inline and in a float — the head (title, history controls) is each one's own. */
 function panelBody(block: SpecBlock, ctx: EmitContext, float: boolean): EmittedNode[] {
   const greeting = block.props.greeting?.trim() ?? '';
   const suggested = asks(block, ctx);
@@ -693,31 +771,51 @@ function panelBody(block: SpecBlock, ctx: EmitContext, float: boolean): EmittedN
     },
     ...(components ? [components] : []),
     proseParts(ctx),
+    extras(block, ctx),
     ...(suggested ? [suggested] : []),
     form(ctx),
-    ...(float ? [] : [historyControls(ctx), privacyNote(block, ctx)]),
     ...notes(block, ctx),
   ];
 }
 
-/** The panel's heading: the launcher's name too, and the dialog's label. */
-function heading(block: SpecBlock, ctx: EmitContext, float: boolean): EmittedNode {
+/**
+ * The panel's heading: the launcher's name too, and the dialog's label. In
+ * a panel or a float it is the card's own head, at the body's size (issue
+ * #31); on the shared-answer page it is the page's heading.
+ */
+function heading(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const t = ctx.theme;
+  const page = block.chat?.shared === true;
   return {
     // The shared-answer page has nothing above it: its heading is the page's own (§20.7).
-    tag: block.chat?.shared ? 'h1' : 'h2',
+    tag: page ? 'h1' : 'h2',
     attrs: { id: 'az-chat-title', class: 'az-chat-title' },
     style: {
-      fontSize: float ? t.typeSize.base : t.typeSize['2xl'],
+      fontSize: page ? t.typeSize['2xl'] : t.typeSize.base,
       lineHeight: t.type['leading-tight'],
       fontFamily: t.type.display,
-      fontWeight: float ? t.type['weight-bold'] : t.type['weight-display'],
+      fontWeight: page ? t.type['weight-display'] : t.type['weight-bold'],
       maxWidth: `${t.size['measure-display']}ch`,
-      margin: float ? 0 : `0 0 ${px(t.space[24])}`,
+      margin: page ? `0 0 ${px(t.space[24])}` : 0,
     },
-    children: [block.chat?.shared ? CHAT_COPY.shared : block.props.title ?? 'Ask a question'],
+    children: [page ? CHAT_COPY.shared : block.props.title ?? 'Ask a question'],
   };
 }
+
+/** A panel's head (issue #31): its title, and beside it the history controls — as the float's head holds them beside Close. */
+function panelHead(block: SpecBlock, ctx: EmitContext): EmittedNode {
+  const t = ctx.theme;
+  const title = heading(block, ctx);
+  return {
+    tag: 'div',
+    attrs: { class: 'az-chat-head' },
+    style: { display: 'flex', alignItems: 'center', gap: px(t.space[4]), minWidth: 0, minHeight: px(t.size.tap) },
+    children: [{ ...title, style: { ...title.style, flex: '1 1 auto', minWidth: 0 } }, historyControls(ctx)],
+  };
+}
+
+/** How wide an inline panel grows (issue #31): six 128 steps, 768 px — room for a dashboard's two columns; prose keeps its measure. */
+const PANEL_STEPS = 6;
 
 /** A transition of `props` over a motion token's duration and curve: the open state's is the enter, the base style's the exit (overlays-spec §3). */
 const moving = (duration: string | number, easing: string | number, props: readonly string[]) =>
@@ -737,7 +835,7 @@ function floatShell(block: SpecBlock, ctx: EmitContext): EmittedNode {
   const x = closeButton(t, CHAT_COPY.close);
   // The launcher is a solid accent: a pair's gradient is Send's alone (§9).
   const launcher = solid(ctx.submit(block.props.title ?? 'Ask a question', { hierarchy: 'primary' }), t);
-  const title = heading(block, ctx, true);
+  const title = heading(block, ctx);
   return {
     tag: 'div',
     attrs: { class: 'az-chat az-chat--float', 'data-az-chat': config(block, ctx), 'data-az-chat-state': 'idle' },
@@ -853,19 +951,32 @@ export function emit(block: SpecBlock, ctx: EmitContext): EmittedNode {
     },
     // The container drops to the mobile gutter (theme-spec §1).
     below: { sm: { paddingInline: px(t.size['gutter-sm']), paddingBlock: px(t.space[48]) } },
-    children: [
-      heading(block, ctx, false),
-      {
-        // §9: the panel is a card on the theme's own surface, as the float is — answers sit on it with no bubble.
-        tag: 'div',
-        attrs: { class: 'az-chat-panel' },
-        style: {
-          display: 'grid', gap: px(t.space[12]), maxWidth: `${t.size['measure-body']}ch`, padding: px(t.space[16]),
-          background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.lg),
-        },
-        below: { sm: { padding: px(t.space[12]) } },
-        children: block.chat?.shared ? sharedShell(ctx, components) : panelBody(block, ctx, false),
-      },
-    ],
+    children: block.chat?.shared
+      ? [
+          heading(block, ctx),
+          {
+            // §20.7: the shared answer, read-only, on the page's own card.
+            tag: 'div',
+            attrs: { class: 'az-chat-panel' },
+            style: {
+              display: 'grid', gap: px(t.space[12]), maxWidth: `${t.size['measure-body']}ch`, padding: px(t.space[16]),
+              background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.lg),
+            },
+            below: { sm: { padding: px(t.space[12]) } },
+            children: sharedShell(ctx, components),
+          },
+        ]
+      : [{
+          // §9: the panel is a card on the theme's own surface, as the float is — answers sit on it with no bubble. Issue
+          // #31: its title is its own head, and it grows to a width a dashboard has room in, centred in the section.
+          tag: 'div',
+          attrs: { class: 'az-chat-panel' },
+          style: {
+            display: 'grid', gap: px(t.space[12]), width: '100%', maxWidth: `calc(${PANEL_STEPS} * ${px(t.space[128])})`, marginInline: 'auto',
+            padding: px(t.space[16]), background: t.color.surface, border: `1px solid ${t.color.border}`, borderRadius: px(t.radius.lg),
+          },
+          below: { sm: { padding: px(t.space[12]) } },
+          children: [panelHead(block, ctx), privacyNote(block, ctx), ...panelBody(block, ctx, false)],
+        }],
   };
 }

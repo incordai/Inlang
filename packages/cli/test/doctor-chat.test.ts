@@ -318,7 +318,8 @@ test('chat map (§21.4.3): the archive, folders and attribution as the server op
   // §19.15: the build copied the default world basemap, so with no AZ_MAP_WORLD the maps draw it.
   const bundled = await check('chat-map', p);
   assert.equal(bundled.status, 'pass', bundled.line);
-  assert.match(bundled.line, /^chat map: the bundled world basemap to zoom 6 \(land, lakes, borders\); no labels/);
+  assert.match(bundled.line, /^chat map: the bundled world basemap to zoom 6 \(land, lakes, borders\); no regional extract, so a city-level map has no street detail \(AZ_MAP_REGION, with AZ_MAP_WORLD, adds it\); no labels/,
+    'issue #21: without a region, doctor says a city-level map has no street detail and which keys add it');
   rmSync(join(p.server, 'tiles', 'world.pmtiles'));
   const r0 = await check('chat-map', p);
   assert.equal(r0.status, 'warn', r0.line);
@@ -331,7 +332,12 @@ test('chat map (§21.4.3): the archive, folders and attribution as the server op
   p.setEnv({ AZ_MAP_WORLD: './map/world.pmtiles', AZ_MAP_GLYPHS: './map/glyphs', AZ_MAP_SPRITES: './map/sprites', AZ_MAP_ATTRIBUTION: 'Map data: the fixture' });
   const ok = await check('chat-map', p);
   assert.equal(ok.status, 'pass', ok.line);
-  assert.equal(ok.line, 'chat map: the world archive to zoom 6; labels; icons; attribution set; no geocoder (optional); tiles, glyphs and sprites from this server only');
+  assert.equal(ok.line, 'chat map: the world archive to zoom 6; no regional extract, so a city-level map has no street detail (AZ_MAP_REGION, with AZ_MAP_WORLD, adds it); labels; icons; attribution set; no geocoder (optional); tiles, glyphs and sprites from this server only');
+  // With a regional extract the line names it, and no hint.
+  p.setEnv({ AZ_MAP_WORLD: './map/world.pmtiles', AZ_MAP_REGION: './map/world.pmtiles', AZ_MAP_GLYPHS: './map/glyphs', AZ_MAP_SPRITES: './map/sprites', AZ_MAP_ATTRIBUTION: 'Map data: the fixture' });
+  const region = await check('chat-map', p);
+  assert.equal(region.status, 'pass', region.line);
+  assert.equal(region.line, 'chat map: the world archive to zoom 6; a regional extract to zoom 6; labels; icons; attribution set; no geocoder (optional); tiles, glyphs and sprites from this server only');
   p.setEnv({ AZ_MAP_WORLD: './map/world.pmtiles', AZ_MAP_ATTRIBUTION: '' });
   const noLine = await check('chat-map', p);
   assert.equal(noLine.status, 'fail');

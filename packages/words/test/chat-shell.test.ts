@@ -534,3 +534,122 @@ test('§9: the float sheet below sm is the preset\'s tallest, one height while a
   const sheet = walk(floatOn()).find((n) => n.attrs?.class === 'az-chat-sheet')!;
   assert.deepEqual([sheet.below?.sm?.height, sheet.below?.sm?.maxHeight], ['85svh', '85svh']);
 });
+
+/* ---- issues #20, #21, #28, #29, #30, #31 (chat-block-spec §19.18) ---- */
+
+const slotOf = (root: EmittedNode, name: string) => walk(root).filter((n) => n.attrs?.['data-az-chat-slot'] === name);
+
+test('issue #31: the inline panel is one card — its title in its own head, beside the history controls — grown to 768 px and centred', () => {
+  const root = chat(['allow anyone']);
+  const card = walk(root).find((n) => n.attrs?.class === 'az-chat-panel')!;
+  const head = (card.children ?? []).find((n): n is EmittedNode => typeof n !== 'string' && n.attrs?.class === 'az-chat-head');
+  assert.ok(head, 'the card opens with its head');
+  const title = walk(head).find((n) => n.attrs?.id === 'az-chat-title')!;
+  assert.equal(title.tag, 'h2');
+  assert.deepEqual([title.style?.fontSize, title.style?.fontWeight], [T.typeSize.base, T.type['weight-bold']], 'the float head\'s size, not a page heading\'s');
+  assert.ok(walk(head).some((n) => n.attrs?.['data-az-chat-history'] !== undefined), 'the history controls take no line of their own');
+  assert.equal((root.children ?? []).length, 1, 'nothing of the chat sits outside its card');
+  assert.deepEqual([card.style?.maxWidth, card.style?.marginInline], [`calc(6 * ${T.space[128]}px)`, 'auto']);
+  // The answer runs the card's width; its words keep the reading measure.
+  const site = (one(root, 'data-az-chat-templates').children ?? [])[1] as EmittedNode;
+  assert.equal(site.style?.maxWidth, undefined);
+  assert.equal(((site.children ?? [])[0] as EmittedNode).style?.maxWidth, `${T.size['measure-body']}ch`);
+});
+
+test('issue #31: suggested questions are small pill chips that wrap, and below sm one row that scrolls sideways', () => {
+  const list = one(chat(['ask "How bright is it?"', 'ask "Does it ship abroad?"']), 'data-az-chat-asks');
+  assert.deepEqual([list.style?.flexWrap, list.below?.sm?.flexWrap, list.below?.sm?.overflowX], ['wrap', 'nowrap', 'auto']);
+  for (const item of (list.children ?? []) as EmittedNode[]) {
+    const chip = (item.children ?? [])[0] as EmittedNode;
+    assert.equal(chip.tag, 'button');
+    assert.deepEqual([chip.style?.borderRadius, chip.style?.fontSize], [`${T.radius.full}px`, T.typeSize.sm]);
+    assert.equal(chip.below?.sm?.whiteSpace, 'nowrap');
+    assert.equal(item.below?.sm?.flex, 'none');
+  }
+});
+
+test('issue #20: a stat\'s value is set against its own card\'s width, between lg and 2xl, and wraps before a digit is hidden', () => {
+  const [stats] = partOf(richChat(), 'stats');
+  const card = walk(stats).find((n) => n.attrs?.class === 'az-chat-stat')!;
+  assert.equal(card.style?.containerType, 'inline-size');
+  const value = slotOf(stats, 'value')[0];
+  assert.equal(value.style?.fontSize, `clamp(${SERIES_THEME.typeSize.lg}, 20cqi, ${SERIES_THEME.typeSize['2xl']})`);
+  assert.equal(value.style?.overflowWrap, 'anywhere');
+});
+
+test('issues #20, #31: a dashboard holds its stats as one headline row over a dense grid of tiles two 128 steps wide; a table spans the row', () => {
+  const [dash] = partOf(richChat(), 'dashboard');
+  const section = (dash.children ?? [])[0] as EmittedNode;
+  const [headline] = slotOf(section, 'stats');
+  assert.ok(headline, 'a row for the stats');
+  const [tiles] = slotOf(section, 'tiles');
+  assert.equal(tiles.style?.gridAutoFlow, 'row dense');
+  assert.equal(tiles.style?.gridTemplateColumns, `repeat(auto-fit, minmax(min(100%, calc(2 * ${SERIES_THEME.space[128]}px)), 1fr))`);
+  const wide = slotOf(section, 'tile-wide')[0];
+  assert.equal(wide.style?.gridColumn, '1 / -1');
+  assert.equal(wide.below, undefined, 'a whole row at every width');
+  const order = (section.children ?? []).map((n) => (typeof n === 'string' ? n : n.attrs?.['data-az-chat-slot']));
+  assert.deepEqual(order, ['title', 'stats', 'tiles'], 'the stats come before the other tiles');
+});
+
+test('issue #29: the paint marks a pointed-at mark with the focus colour and draws the tooltip on the surface; the chart is a keyboard stop; the plot row holds the chart and its legend', () => {
+  const root = richChat();
+  const [paint] = partOf(root, 'paint');
+  const p = (name: string) => marked(paint, 'data-az-chat-paint').find((n) => n.attrs?.['data-az-chat-paint'] === name)!;
+  for (let n = 1; n <= 6; n++) {
+    assert.equal(p(`fill-${n}`).states?.open?.stroke, SERIES_THEME.color.focus);
+    assert.equal(p(`patterned-${n}`).states?.open?.stroke, SERIES_THEME.color.focus);
+    assert.ok(p(`line-${n}`).states?.open?.strokeWidth);
+  }
+  assert.deepEqual([p('tip').style?.fill, p('tip').style?.stroke], [SERIES_THEME.color.surface, SERIES_THEME.color['border-strong']]);
+  assert.deepEqual([p('tip-text').style?.fill, p('tip-text').style?.fontSize], [SERIES_THEME.color.text, SERIES_THEME.typeSize.sm]);
+  assert.ok(p('svg').states?.focusVisible?.outline, 'a focused chart shows the ring');
+  const [figure] = partOf(root, 'figure');
+  const [plot] = slotOf(figure, 'plot');
+  assert.deepEqual((plot.children ?? []).map((n) => (n as EmittedNode).attrs?.['data-az-chat-slot']), ['body', 'legend']);
+  assert.equal(plot.style?.flexWrap, 'wrap', 'the legend sits beside a small chart when there is room, under it when not');
+  assert.equal(slotOf(figure, 'legend-item')[0].states?.open?.textDecoration, 'underline');
+});
+
+test('issue #28: the working signs ship hidden in extras — dots, a caret, a placeholder per held shape — aria-hidden, moved by the theme\'s motion tokens', () => {
+  const root = richChat();
+  const extras = one(root, 'data-az-chat-extras');
+  assert.equal(extras.attrs?.hidden, 'hidden');
+  assert.deepEqual(JSON.parse(extras.attrs!['data-az-chat-motion']), {
+    enter: SERIES_THEME.motion.emphasis, pulse: SERIES_THEME.motion.slow, slide: SERIES_THEME.motion.slide, ease: SERIES_THEME.motion.ease,
+  });
+  const [thinking] = slotOf(extras, 'thinking');
+  assert.equal(thinking.attrs?.['aria-hidden'], 'true');
+  assert.equal((thinking.children ?? []).length, 3);
+  assert.equal(slotOf(extras, 'caret')[0].attrs?.['aria-hidden'], 'true');
+  for (const name of ['skeleton-figure', 'skeleton-map', 'skeleton-table', 'skeleton-tiles']) assert.equal(slotOf(extras, name)[0]?.attrs?.['aria-hidden'], 'true', name);
+  // A prose-only chat has the dots, the caret and the bar, and no placeholders: it holds no rich component.
+  const plain = one(chat(['allow anyone']), 'data-az-chat-extras');
+  assert.equal(slotOf(plain, 'skeleton-figure').length, 0);
+  assert.equal(slotOf(plain, 'thinking').length, 1);
+});
+
+test('issue #30: the answer bar is a named group of small icon buttons — Copy here, Share from its part — each named, its tooltip aria-hidden; faint until open', () => {
+  const root = richChat();
+  const [bar] = slotOf(one(root, 'data-az-chat-extras'), 'bar');
+  assert.deepEqual([bar.attrs?.role, bar.attrs?.['aria-label']], ['group', 'Answer actions']);
+  assert.equal(bar.style?.color, SERIES_THEME.color['border-strong'], 'faint: the non-text edge colour, still 3:1');
+  assert.deepEqual([bar.states?.open?.color, bar.states?.focusWithin?.color, bar.states?.hover?.color], Array(3).fill(SERIES_THEME.color.text));
+  const copy = walk(bar).find((n) => n.tag === 'button')!;
+  assert.deepEqual([copy.attrs?.type, copy.attrs?.['aria-label']], ['button', 'Copy answer']);
+  const tip = walk(bar).find((n) => n.attrs?.['data-az-chat-tip'] !== undefined)!;
+  assert.deepEqual([tip.attrs?.['aria-hidden'], tip.attrs?.hidden, texts(tip).join('')], ['true', 'hidden', 'Copy answer']);
+  // Share is the same small button now, under the name it had: no full-size button under every answer.
+  const [share] = partOf(root, 'share');
+  const open = slotOf(share, 'open')[0];
+  assert.deepEqual([open.attrs?.['aria-label'], open.attrs?.class], ['Share this answer', 'az-chat-bar-button']);
+  assert.equal(texts(open).join(''), '', 'an icon, named by its label');
+  assert.equal(((share.children ?? [])[0] as EmittedNode).style?.display, 'contents', 'its button joins the bar\'s row');
+});
+
+test('issue #21: a map ships a hidden note for a view deeper than its tiles', () => {
+  const [map] = partOf(exploreChat('map'), 'map');
+  const [detail] = slotOf(map, 'detail');
+  assert.equal(detail.attrs?.hidden, 'hidden');
+  assert.equal(detail.style?.color, SERIES_THEME.color.muted);
+});

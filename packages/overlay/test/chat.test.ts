@@ -76,6 +76,19 @@ const read = (pieces: readonly string[]) => {
   return [...pieces.flatMap((p) => r.push(p)), ...r.end()];
 };
 
+test('issue #28: a hold names the rich component the server is reading — its kind, nothing else; any other hold is not an event', () => {
+  for (const word of ['chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map']) {
+    assert.deepEqual(read([`event: hold\ndata: ${JSON.stringify({ word })}\n\n`]), [{ type: 'hold', word }]);
+  }
+  for (const bad of [{ word: 'pricing' }, { word: 'unavailable' }, { word: 'faq' }, { word: 1 }, {}, { word: 'chart', title: 'x' }, { word: '__proto__' }]) {
+    assert.deepEqual(read([`event: hold\ndata: ${JSON.stringify(bad)}\n\n`]), [], JSON.stringify(bad));
+  }
+  // A hold between prose and its component: in order, the component unchanged.
+  const both = read([`event: text\ndata: {"s":"Here."}\n\nevent: hold\ndata: {"word":"stats"}\n\nevent: block\ndata: ${JSON.stringify({ stats: [] })}\n\n`]);
+  assert.deepEqual(both.map((e) => e.type), ['text', 'hold', 'block']);
+  assert.equal(CHAT_TEXT.working, 'Answering your question.');
+});
+
 test('the event reader gives the same events however the stream is split — at every offset, CRLF and CR included', () => {
   assert.deepEqual(read([STREAM]), EXPECTED);
   // Every split point, including between a CR and its LF and inside a surrogate pair.
@@ -236,7 +249,7 @@ test('every refusal reads as fixed copy — never the server\'s text', () => {
 
 /* ---- §5.4 rule 3: no way from a string to markup or code ---------------- */
 
-const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts',
+const SOURCES = ['chat.ts', 'chat-logic.ts', 'chat-chart.ts', 'chat-chart-ui.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-busy.ts', 'chat-bar.ts', 'chat-shared.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts',
   'chat-map.ts', 'chat-map-draw.ts', 'chat-map-gl.ts']
   .map((f) => [f, readFileSync(new URL(`../src/runtime/${f}`, import.meta.url), 'utf8')] as const);
 /** chat-map-gl.ts's one object URL (§21.4.3, Q19b): the worker's blob, one line importing the site's own worker file, handed to the library. */

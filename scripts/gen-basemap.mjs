@@ -27,7 +27,7 @@ import { EXTENT, clipLine, clipRing, layer, pmtiles, project, ringArea, rounded,
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const SOURCES = JSON.parse(readFileSync(join(ROOT, 'scripts/basemap/sources.json'), 'utf8'));
-/** The deepest zoom — the map runtime's own cap without a regional extract (chat-map-gl.ts MAP_GL.worldZoom). */
+/** The deepest zoom of the bundled tiles; the view zooms on past it to city level (chat-map.ts zoomCap, issue #21). */
 export const MAX_ZOOM = 6;
 /** Zooms up to this read the coarse data; deeper ones the finer. */
 const COARSE_UNTIL = 2;

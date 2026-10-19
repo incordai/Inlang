@@ -2,7 +2,7 @@
  * @az runtime chat-map-gl
  * Purpose: draws one checked map with the vector-map library — its worker started from a blob: that imports the site's own worker file, tiles from the backend's archive, paint from the theme's tokens, popups as elements of text.
  * Spec: docs/chat-block-spec.md §21.4.3, §21.4.4 (Q19b, Q19c, Q19d, Q19e, Q19h)
- * Exports: mountMap, MapMount, MapHandle, MAP_GL
+ * Exports: mountMap, MapMount, MapHandle, MapView, MAP_GL
  * Edit guide: shipped only with a site whose chat shows maps, imported only by chat-map-draw.ts when a map arrives; the one
  *   createObjectURL of the runtime is here; popups only by setDOMContent with an element whose text is textContent; no control of
  *   the library's (its CSS draws them from data: images); every colour read from a --az-color-* token at draw time, never written here.
@@ -27,22 +27,23 @@
  * file that is not there.
  *
  * The view is fitted to the pins and routes — the model writes no zoom and
- * no centre — and capped at the regional extract's deepest zoom, or 6. Every
+ * no centre — and may go past the tiles' deepest zoom to city level (issue
+ * #21, chat-map.ts zoomCap): places in one city are told apart on the world
+ * basemap alone, and the drawer's note says when there is no street detail. Every
  * colour is a theme token read with getComputedStyle when the map is drawn
  * and again when the scheme changes, set as the library's paint properties.
  * Under reduced motion every camera move is instant.
  */
 
-import { addProtocol, Map as GlMap, Popup, setWorkerUrl, type MapOptions } from 'maplibre-gl';
+import { addProtocol, LngLat, Map as GlMap, Popup, setWorkerUrl, type MapOptions } from 'maplibre-gl';
 import { PMTiles, Protocol } from 'pmtiles';
 import { layers, namedFlavor, type Flavor } from '@protomaps/basemaps';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { mapBounds, pinLabel, type MapData } from './chat-map.ts';
+import { mapBounds, pastTiles, pinLabel, zoomCap, type MapData } from './chat-map.ts';
 
-/** The map's fixed numbers: the zoom cap without a regional extract (Q19e), the view's margin, how long a draw may take. */
+/** The map's fixed numbers: the view's margin, how far a key pans, how long a draw may take. */
 export const MAP_GL = {
-  worldZoom: 6,
   paddingPx: 40,
   panPx: 100,
   loadMs: 20_000,
@@ -60,8 +61,20 @@ export interface MapMount {
   readonly signal: AbortSignal;
   /** A popup's element for a pin: its label and its source's label, filled by textContent (chat-map-draw.ts). */
   readonly popup: (label: string, src: string | null) => HTMLElement | null;
-  /** Told after every camera move ends, and once loaded: whether the view is at its widest and at its deepest zoom. */
-  readonly view: (atMin: boolean, atMax: boolean) => void;
+  /**
+   * Told when a camera move starts and when it ends, and once loaded: whether the view is at its widest and at its
+   * deepest zoom, whether it is deeper than any of its tiles (no street detail, issue #21), and whether it is the fitted
+   * view Reset view returns to (never while it moves).
+   */
+  readonly view: (state: MapView) => void;
+}
+
+/** Where the view is, as az's buttons and the note under the map need it. */
+export interface MapView {
+  readonly atMin: boolean;
+  readonly atMax: boolean;
+  readonly pastTiles: boolean;
+  readonly fitted: boolean;
 }
 
 /** What az's own buttons call, and the attribution line to show under the map. */
@@ -84,6 +97,8 @@ interface Served {
 
 /** How near a zoom limit counts as at it: the library's fitted zoom is a float. */
 const ZOOM_EPSILON = 1e-6;
+/** How near the fitted view counts as it, in zoom levels and degrees: a float's noise, far under one pixel at any zoom. */
+const FIT_EPSILON = 1e-6;
 
 const protocol = new Protocol();
 /** Once a page: the worker's blob and the archive protocol (Q19b). */
@@ -247,9 +262,9 @@ export async function mountMap(o: MapMount): Promise<MapHandle> {
   const has = await served(o.base, signal);
   start(doc);
   const archives = await archivesFor(o, has);
-  const region = archives.find((a) => a.name === 'region');
-  // §21.4.3: as deep as the regional extract goes, or the world's zoom 6 without one.
-  const cap = region ? region.maxZoom : MAP_GL.worldZoom;
+  // Issue #21: the tiles go as deep as the regional extract, or the world without one; the view goes on to city level.
+  const deepest = Math.max(...archives.map((a) => a.maxZoom));
+  const cap = zoomCap(deepest);
   const reduced = () => doc.defaultView?.matchMedia('(prefers-reduced-motion: reduce)').matches ?? false;
   const [w, s, e, n] = mapBounds(m);
   const bounds: [[number, number], [number, number]] = [[w, s], [e, n]];
@@ -283,9 +298,31 @@ export async function mountMap(o: MapMount): Promise<MapHandle> {
   map.on('error', () => undefined);
 
   // The zoom buttons follow the view when a move ends — at once under reduced motion, where every move is a jump.
-  const limits = () => { if (!signal.aborted) o.view(map.getZoom() <= map.getMinZoom() + ZOOM_EPSILON, map.getZoom() >= cap - ZOOM_EPSILON); };
-  map.on('moveend', limits);
-  limits();
+  // The fitted view, as the library worked it out for the bounds it opened at: Reset view returns to it.
+  const fit = map.cameraForBounds(bounds, { padding: MAP_GL.paddingPx, maxZoom: cap });
+  const fitted = () => {
+    if (!fit || fit.zoom === undefined || fit.center === undefined) return false;
+    const c = map.getCenter();
+    const f = LngLat.convert(fit.center);
+    return Math.abs(map.getZoom() - fit.zoom) <= FIT_EPSILON && Math.abs(c.lng - f.lng) <= FIT_EPSILON && Math.abs(c.lat - f.lat) <= FIT_EPSILON;
+  };
+  /** `moving`: a camera move has started, so the view is on its way somewhere — not the fitted one, whatever it was. */
+  const limits = (moving: boolean) => {
+    if (signal.aborted) return;
+    const zoom = map.getZoom();
+    o.view({ atMin: zoom <= map.getMinZoom() + ZOOM_EPSILON, atMax: zoom >= cap - ZOOM_EPSILON, pastTiles: pastTiles(zoom, deepest), fitted: !moving && fitted() });
+  };
+  // While its view moves the stage is busy — the picture is changing — and Reset view is offered from the move's first
+  // frame: a move "Show on the map" started can be reset before it ends, not only after.
+  map.on('movestart', () => {
+    stage.setAttribute('aria-busy', 'true');
+    limits(true);
+  });
+  map.on('moveend', () => {
+    stage.removeAttribute('aria-busy');
+    limits(false);
+  });
+  limits(false);
 
   // The canvas is not a second stop or a second name: the stage is the image, and takes the keys.
   const canvas = map.getCanvas();

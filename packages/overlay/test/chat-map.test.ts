@@ -9,7 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP_CAPS, MAP_TEXT, mapBounds, mapLabels, mapSummary, pinLabel, placeWords, validMap } from '../src/runtime/chat-map.ts';
+import { MAP_CAPS, MAP_TEXT, MAP_ZOOM, mapBounds, mapLabels, mapSummary, pastTiles, pinLabel, placeWords, validMap, zoomCap } from '../src/runtime/chat-map.ts';
 import { blockOf, RICH_BLOCKS } from '../src/runtime/chat-logic.ts';
 
 const MODEL = {
@@ -92,4 +92,19 @@ test('labels: the model\'s numbers are AI-placed, the geocoder\'s approximate, t
   assert.deepEqual(mapLabels(validMap({ ...MODEL, pins: [MODEL.pins[1]], routes: [] })!), ['Approximate location']);
   assert.deepEqual(mapLabels(validMap({ ...MODEL, pins: [MODEL.pins[1]] })!), ['Approximate, AI-placed', 'Approximate location'], 'a route is the model\'s numbers');
   assert.deepEqual(mapLabels(validMap(SITE)!), []);
+});
+
+test('issue #21: a map zooms past its tiles to city level — 14 on the world\'s zoom 0–6, deeper with a deeper region — and says so when it is past them', () => {
+  assert.equal(MAP_ZOOM.overzoom, 14);
+  assert.equal(zoomCap(6), 14, 'the bundled world basemap stops at 6; the view goes on to 14');
+  assert.equal(zoomCap(15), 15, 'a regional extract deeper than 14 keeps its own depth');
+  // Two pins 2 km apart in one city need about zoom 12 in a 400-px stage: within the cap now, past the world's tiles.
+  const [w, s, e, n] = mapBounds(validMap(MODEL)!);
+  const across = Math.max((e - w) / 360, (Math.log(Math.tan(Math.PI / 4 + (n * Math.PI) / 360)) - Math.log(Math.tan(Math.PI / 4 + (s * Math.PI) / 360))) / (2 * Math.PI));
+  const fitted = Math.log2((400 - 80) / (256 * across));
+  assert.ok(fitted > 6 && fitted <= zoomCap(6), `fitted at ${fitted.toFixed(1)}`);
+  assert.equal(pastTiles(fitted, 6), true);
+  assert.equal(pastTiles(6, 6), false, 'at the tiles\' own depth there is detail to show');
+  assert.equal(pastTiles(5.2, 6), false);
+  assert.equal(MAP_TEXT.detail, 'This map has no street detail at this zoom.');
 });

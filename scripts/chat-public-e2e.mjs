@@ -23,14 +23,32 @@
  *     answer of its own (`use pricing`, a preset `show all` made) is drawn
  *     from the site with no model call; a typed question that clearly asks
  *     for an faq item is answered with it, under "Ask the AI instead",
- *     which asks the model.
+ *     which asks the model;
+ *   - the chat's UI (spec §19.18): #31 the suggested questions are pill chips
+ *     in one sideways-scrolling row on a phone; with a dashboard, a pie and
+ *     everything answered, at 320–1440 px no page overflow and no box whose
+ *     text runs past it, the transcript at least 60% of the panel on a phone,
+ *     the panel at 1440 centred and its title inside; #20 every stat's value
+ *     whole and no stat beside a taller chart; #29 every chart's text 11 px
+ *     or more, a pie 200 px across at most with its legend beside it where
+ *     there is room, the tile chart's labels kept, a chart's values by
+ *     keyboard (focus, arrows, End, Escape) and by pointer, a legend entry
+ *     marking its slice; #28 the dots before the first words, the caret while
+ *     they arrive, both gone at the end, messages moving in — none of it under
+ *     reduced motion — the working state said once; #30 the answer's bar,
+ *     faint at rest and plain when pointed at or on a touch screen, Copy's
+ *     text, tooltips on focus; #21 a city's pins fitted past the basemap's
+ *     zoom 6 with the no-street-detail note; axe in each new state; and, in
+ *     Chromium, snapshots of the panel at five widths in both schemes, each
+ *     drawn twice and byte-compared, written to .visual-out/chat-panel/.
  */
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import AxeBuilder from '@axe-core/playwright';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
@@ -73,6 +91,9 @@ page /
     show     all
     allow    anyone
     ask      "What does it cost?" use pricing
+    ask      "How bright is the desk lamp at night?"
+    ask      "Does it ship abroad, and how long does it take?"
+    ask      "Which bulb fits the large linen shade?"
 
 page /help
   faq
@@ -107,12 +128,53 @@ const ANSWER = [
   '  pin "Lisbon" 38.722252 -9.139337',
   '  pin "Porto" 41.157944 -8.629105',
 ].join('\n');
-const FAKE = { answers: [{ when: 'everything', chunks: [ANSWER], delayMs: 5 }, { chunks: ['A plain answer.'], delayMs: 5 }] };
+/** Issues #20, #29, #31: a dashboard whose stats sit beside charts, a three-digit money value among them ("$270.00"). */
+const DASHBOARD = [
+  'Here is the month.',
+  'dashboard "This month"',
+  '  stat "Orders" 12',
+  '  stat "Revenue" 270 unit usd',
+  '  chart bar "Orders by status"',
+  '    point "paid" 7',
+  '    point "open" 3',
+  '    point "cancelled" 2',
+  '  chart pie "Revenue by status"',
+  '    point "paid" 190',
+  '    point "open" 50',
+  '    point "cancelled" 30',
+].join('\n');
+/** Issue #29: a pie on its own, in a single answer. */
+const PIE = ['Here is the split.', 'chart pie "Revenue by plan"', '  point "Solo" 120', '  point "Team" 90', '  point "Business" 60'].join('\n');
+/** Issue #21: two pins about 2 km apart in one city, and a walk between them. */
+const CITY = [
+  'Two places.',
+  'map "Where to find us"',
+  '  pin "Workshop" 52.520008 13.404954',
+  '  pin "Shop" 52.5163 13.3777',
+  '  route "Walk"',
+  '    point 52.520008 13.404954',
+  '    point 52.5163 13.3777',
+].join('\n');
+const FAKE = {
+  answers: [
+    { when: 'everything', chunks: [ANSWER], delayMs: 5 },
+    { when: 'dashboard please', chunks: [DASHBOARD], delayMs: 5 },
+    { when: 'a pie please', chunks: [PIE], delayMs: 5 },
+    { when: 'the city map', chunks: [CITY], delayMs: 5 },
+    // Issue #28: the first words come late, and the second later still — time to see the dots, then the caret.
+    { when: 'take your time', chunks: ['Here is a considered answer. ', 'It took a moment.'], delayMs: 1500 },
+    { chunks: ['A plain answer.'], delayMs: 5 },
+  ],
+};
 /** What the bundled basemap credits (its data's own line, from the generator's pinned sources). */
 const CREDIT = JSON.parse(readFileSync(join(ROOT, 'scripts/basemap/sources.json'), 'utf8')).attribution;
 /** Every component an answer may hold, in core chat.ts's order: `show all` with a public pricing block. */
 const ALL = ['pricing', 'faq', 'cta', 'feature', 'chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'];
 const ENGINES = { chromium, firefox, webkit };
+/** The panel widths the layout checks run at (issue #31), the narrowest chart text a visitor should read (#29), and where the panel's snapshots go. */
+const WIDTHS = [320, 360, 390, 600, 768, 900, 1024, 1440];
+const CHART_TEXT_MIN_PX = 11;
+const PANEL_OUT = join(ROOT, '.visual-out/chat-panel');
 
 const freePort = () => new Promise((done) => {
   const probe = createNetServer();
@@ -216,6 +278,16 @@ try {
       await engineFlow(b, name);
       await siteAnswerFlow(b, name);
       await pixelFlow(b, name);
+      await layoutFlow(b, name);
+      await workingFlow(b, name);
+      await barFlow(b, name);
+      await cityMapFlow(b, name);
+      if (name === 'chromium') {
+        // The snapshots' own Chromium, without partial raster (chat-e2e.mjs SNAP_ARGS says why: Send's corners came out two ways).
+        const snap = await chromium.launch({ args: ['--disable-partial-raster'] });
+        browsers.push(snap);
+        await panelSnapshots(snap);
+      }
     }
   }
 } catch (e) {
@@ -383,6 +455,481 @@ async function pixelFlow(b, name) {
   } finally {
     closed = (await closeWithin(ctx, CLOSE_MS, `${name} pixel context close`)) && closed;
   }
+}
+
+/* ---- the chat UI issues #20, #21, #28, #29, #30, #31 (chat-block-spec §19.18) ---- */
+
+/** The panel's runtime has decided who may ask, and the page is hydrated. */
+function idle(page) {
+  return page.waitForFunction(() => document.querySelector('[data-az-chat]')?.getAttribute('data-az-chat-state') === 'idle'
+    && document.documentElement.hasAttribute('data-az-ready'), null, { timeout: STATE_MS });
+}
+/** Two frames painted: what the last change asked of layout (and a chart's redraw on resize) is on screen. */
+function painted(page) {
+  return page.waitForFunction(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))), null, { timeout: STATE_MS });
+}
+/** Ask `text` from the input and wait for its answer to finish — and its map, if it holds one, to settle. */
+async function askFor(page, text) {
+  const before = await page.evaluate(() => document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site').length);
+  const input = page.locator('[data-az-chat] [data-az-chat-input]');
+  await input.fill(text);
+  await input.press('Enter');
+  await page.waitForFunction((n) => {
+    const items = document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site');
+    const last = items[items.length - 1];
+    if (items.length <= n || last.getAttribute('aria-busy') !== 'false') return false;
+    const map = last.querySelector('figure.az-chat-map')?.getAttribute('data-az-chat-map');
+    return map === undefined || map === 'ready' || map === 'list';
+  }, before, { timeout: STATE_MS * 2 });
+}
+/** What the status region hears from now on (read with `said(page)`). */
+function listen(page) {
+  return page.evaluate(() => {
+    const status = document.querySelector('[data-az-chat-status]');
+    globalThis.azSaid = [];
+    new MutationObserver(() => { if (status.textContent) globalThis.azSaid.push(status.textContent); }).observe(status, { childList: true, characterData: true, subtree: true });
+  });
+}
+function said(page) {
+  return page.evaluate(() => globalThis.azSaid ?? []);
+}
+
+/**
+ * The panel as laid out now (issues #20, #29, #31): page overflow; every box
+ * whose content runs past it (not a scroll container, not the map library's
+ * own stage); each stat's value and card; the smallest chart text as drawn;
+ * each pie's size and where its legend sits; any stat beside a taller chart;
+ * the transcript's share of the panel; where the panel and its title are.
+ */
+function layoutOf(page) {
+  return page.evaluate(layoutNow);
+}
+function layoutNow() {
+  const panel = document.querySelector('.az-chat-panel');
+  const box = (el) => el.getBoundingClientRect();
+  const shown = (el) => el.getClientRects().length > 0 && !el.closest('[hidden]');
+  const overflowing = [];
+  for (const el of panel.querySelectorAll('*')) {
+    if (el instanceof SVGElement || !shown(el) || el.closest('.az-chat-map-stage, .az-visually-hidden')) continue;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'inline' || cs.display === 'contents' || ['auto', 'scroll'].includes(cs.overflowX) || el.clientWidth <= 1) continue;
+    if (el.scrollWidth > el.clientWidth + 1) overflowing.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} "${(el.textContent ?? '').trim().slice(0, 24)}" ${el.scrollWidth}>${el.clientWidth}`);
+  }
+  // What sticks out of the page, deepest first: the cause of a page overflow, named.
+  const page = document.documentElement.clientWidth;
+  const name = (el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]}`;
+  const deepest = [...document.body.querySelectorAll('*')].filter((el) => !(el instanceof SVGElement) && shown(el) && box(el).right > page + 1
+    && ![...el.children].some((c) => box(c).right > page + 1));
+  const outside = deepest.slice(0, 3).map((el) => `${name(el)} right ${Math.round(box(el).right)}`);
+  // …and the first one's ancestors, each with its width: where the width came from.
+  for (let el = deepest[0]?.parentElement; el && el !== document.body && outside.length < 12; el = el.parentElement) outside.push(`${name(el)} ${Math.round(box(el).width)}`);
+  // The answers only: the hidden templates hold a card and a figure of each kind too.
+  const transcript = panel.querySelector('[data-az-chat-transcript]');
+  const stats = [...transcript.querySelectorAll('.az-chat-stat')].map((card) => {
+    const value = card.querySelector('[data-az-chat-slot="value"]');
+    return { text: value?.textContent ?? '', fits: card.scrollWidth <= card.clientWidth + 1 && (value ? value.scrollWidth <= value.clientWidth + 1 : true) };
+  });
+  const fonts = [...transcript.querySelectorAll('figure.az-chat-figure svg[role="img"]')].flatMap((svg) => {
+    const scale = box(svg).width / svg.viewBox.baseVal.width;
+    return [...svg.querySelectorAll('text')].map((t) => Number.parseFloat(getComputedStyle(t).fontSize) * scale);
+  });
+  const pies = [...transcript.querySelectorAll('figure.az-chat-figure')].filter((f) => /^Pie chart/.test(f.querySelector('[data-az-chat-slot="summary"]')?.textContent ?? '')).map((f) => {
+    const svg = f.querySelector('svg[role="img"]');
+    const slices = [...svg.querySelectorAll('path')].map(box).filter((r) => r.width > 0);
+    const left = Math.min(...slices.map((r) => r.left));
+    const right = Math.max(...slices.map((r) => r.right));
+    const legend = f.querySelector('.az-chat-legend');
+    const s = box(svg);
+    const l = legend ? box(legend) : null;
+    return { across: Math.round(right - left), beside: l !== null && l.left >= s.right - 1 && l.top < s.bottom, room: box(f).width };
+  });
+  // The dashboard's bar chart: how many of its three category labels are drawn.
+  const barChart = [...transcript.querySelectorAll('figure.az-chat-figure')].find((f) => f.textContent.includes('Orders by status'));
+  const categories = barChart ? [...barChart.querySelectorAll('svg[role="img"] text[text-anchor="middle"]')].map((t) => t.textContent) : [];
+  const beside = [];
+  for (const dash of panel.querySelectorAll('.az-chat-dashboard')) {
+    for (const stat of dash.querySelectorAll('.az-chat-stat')) {
+      for (const fig of dash.querySelectorAll('figure.az-chat-figure')) {
+        const a = box(stat);
+        const b = box(fig);
+        if (a.top < b.bottom - 1 && b.top < a.bottom - 1 && b.height > a.height * 1.25) beside.push(`${Math.round(a.height)} beside ${Math.round(b.height)}`);
+      }
+    }
+  }
+  const p = box(panel);
+  const section = box(panel.closest('section'));
+  const style = getComputedStyle(panel.closest('section'));
+  const inner = { left: section.left + Number.parseFloat(style.paddingLeft), right: section.right - Number.parseFloat(style.paddingRight) };
+  return {
+    pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, outside,
+    overflowing, stats, fonts, pies, beside, categories,
+    share: box(panel.querySelector('[data-az-chat-transcript]')).height / p.height,
+    panel: { width: Math.round(p.width), off: Math.round(Math.abs((p.left - inner.left) - (inner.right - p.right))), title: Boolean(panel.querySelector('#az-chat-title')) },
+  };
+}
+
+/** The suggested questions as laid out before a question: whether they share one row, scroll sideways, and stay in the panel. */
+function chipsOf(page) {
+  return page.evaluate(() => {
+    const list = document.querySelector('[data-az-chat-asks]');
+    const chips = [...list.querySelectorAll('button')];
+    const panel = document.querySelector('.az-chat-panel').getBoundingClientRect();
+    return {
+      count: chips.length, rows: new Set(chips.map((c) => Math.round(c.getBoundingClientRect().top))).size, scrolls: getComputedStyle(list).overflowX,
+      inside: chips.every((c) => c.getBoundingClientRect().right <= panel.right + 1) || getComputedStyle(list).overflowX === 'auto',
+      radius: getComputedStyle(chips[0]).borderTopLeftRadius,
+    };
+  });
+}
+
+async function layoutFlow(b, name) {
+  const ctx = await watchedContext(b, csp, { viewport: { width: 390, height: 844 } });
+  try {
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(STATE_MS);
+    await page.goto(`${host.url}/`);
+    await idle(page);
+    // #31: before a question the suggested questions are small pills — one row that scrolls on a phone, wrapping on a wide panel.
+    const phone = await chipsOf(page);
+    check(`${name}: #31 at 390 the suggested questions are pill chips in one row that scrolls sideways`,
+      phone.count === 4 && phone.rows === 1 && phone.scrolls === 'auto' && Number.parseFloat(phone.radius) >= 100, JSON.stringify(phone));
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await painted(page);
+    const wide = await chipsOf(page);
+    check(`${name}: #31 at 1024 the chips wrap inside the panel`, wide.inside && wide.scrolls !== 'auto', JSON.stringify(wide));
+    await page.setViewportSize({ width: 390, height: 844 });
+    // §9: the visitor stays at the end, so the transcript follows every line an answer adds — its bar and its charts redrawn
+    // at their own width too — and Jump to latest is not offered.
+    const ends = [];
+    for (const q of ['dashboard please', 'a pie please', 'Show me everything']) {
+      await askFor(page, q);
+      await painted(page);
+      ends.push(await page.evaluate((asked) => {
+        const t = document.querySelector('[data-az-chat-transcript]');
+        return { asked, gap: Math.round(t.scrollHeight - t.scrollTop - t.clientHeight), latest: document.querySelector('[data-az-chat-latest]').hidden };
+      }, q));
+    }
+    check(`${name}: #28 #30 after each answer the transcript is at its end and offers no Jump to latest`, ends.every((e) => e.gap <= 24 && e.latest), JSON.stringify(ends));
+    for (const width of WIDTHS) {
+      await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 });
+      await painted(page);
+      const l = await layoutOf(page);
+      check(`${name} ${width}: #31 nothing runs past its box — no page overflow, no clipped text`, l.pageOverflow <= 0 && l.overflowing.length === 0,
+        `page +${l.pageOverflow}px (${l.outside.join(', ')}); ${l.overflowing.slice(0, 4).join(' | ')}`);
+      check(`${name} ${width}: #20 every stat's value fits its card ("$270.00" whole)`, l.stats.length === 2 && l.stats.every((s) => s.fits) && l.stats.some((s) => s.text === '$270.00'),
+        JSON.stringify(l.stats));
+      check(`${name} ${width}: #20 a dashboard's stats never sit beside a taller chart`, l.beside.length === 0, l.beside.join(', '));
+      const smallest = Math.min(...l.fonts);
+      check(`${name} ${width}: #29 every chart's text is drawn at ${CHART_TEXT_MIN_PX}px or more`, l.fonts.length > 0 && smallest >= CHART_TEXT_MIN_PX, `${l.fonts.length} texts, smallest ${smallest.toFixed(1)}px`);
+      if (width >= 600) {
+        check(`${name} ${width}: #29 the dashboard's bar chart, drawn at its tile's width, keeps all three category labels`,
+          JSON.stringify(l.categories) === '["paid","open","cancelled"]', JSON.stringify(l.categories));
+      }
+      check(`${name} ${width}: #29 a pie is 200 px across at most, its legend beside it where there is room`,
+        l.pies.length === 2 && l.pies.every((p) => p.across <= 201 && (p.room < 420 || p.beside)), JSON.stringify(l.pies));
+      if (width <= 390) check(`${name} ${width}: #31 the transcript has at least 60% of the panel on a phone`, l.share >= 0.6, l.share.toFixed(2));
+      if (width === 1440) {
+        check(`${name} 1440: #31 the panel grows to a readable width, centred, its title inside it`, l.panel.width >= 700 && l.panel.off <= 2 && l.panel.title, JSON.stringify(l.panel));
+      }
+    }
+    // #29: a chart's values by keyboard — focus, the arrow keys, End, Escape — each said in the status region.
+    await page.setViewportSize({ width: 900, height: 900 });
+    await painted(page);
+    await listen(page);
+    const bars = page.locator('[data-az-chat-transcript] figure.az-chat-figure', { hasText: 'Orders by status' }).locator('svg[role="img"]');
+    await bars.focus();
+    // The tooltip is the chart's last child: a group of a box and a line of text (the axis labels' group has no box).
+    const tip = () => page.evaluate(() => {
+      const svg = document.activeElement;
+      const last = svg?.lastElementChild;
+      const text = last?.querySelector(':scope > rect') ? last.querySelector(':scope > text') : null;
+      const open = [...(svg?.querySelectorAll?.('[data-az-chat-mark][data-state="open"]') ?? [])].map((m) => m.getAttribute('data-az-chat-mark'));
+      return { focused: svg?.tagName?.toLowerCase(), text: text?.textContent ?? null, open };
+    });
+    const first = await tip();
+    await page.keyboard.press('ArrowRight');
+    const second = await tip();
+    await page.keyboard.press('End');
+    const end = await tip();
+    await page.keyboard.press('Escape');
+    const gone = await tip();
+    const heard = await said(page);
+    check(`${name}: #29 by keyboard a chart shows each mark's label and value — focus, →, End — the mark marked, the status region told; Escape hides it`,
+      first.focused === 'svg' && first.text === 'paid: 7' && JSON.stringify(first.open) === '["0"]' && second.text === 'open: 3' && JSON.stringify(second.open) === '["1"]'
+      && end.text === 'cancelled: 2' && gone.text === null && gone.focused === 'svg' && ['paid: 7', 'open: 3', 'cancelled: 2'].every((t) => heard.some((h) => h.includes(t))),
+      JSON.stringify({ first, second, end, gone, heard }));
+    // A pointer over a bar shows it quietly; over a pie's legend entry, its slice is marked with it.
+    // Hovered where it is: the transcript scrolls it into view first.
+    await bars.locator('[data-az-chat-mark="1"]').hover();
+    const hovered = await page.waitForFunction(() => [...document.querySelectorAll('figure.az-chat-figure svg[role="img"] g > text')].some((t) => t.textContent === 'open: 3'), null, { timeout: STATE_MS }).then(() => true, () => false);
+    const entry = page.locator('[data-az-chat-transcript] figure.az-chat-figure', { hasText: 'Revenue by plan' }).locator('.az-chat-legend-item').nth(1);
+    await entry.hover();
+    const pointed = await page.evaluate(() => {
+      const f = [...document.querySelectorAll('[data-az-chat-transcript] figure.az-chat-figure')].find((x) => x.textContent.includes('Revenue by plan'));
+      return { entry: f.querySelectorAll('.az-chat-legend-item')[1].getAttribute('data-state'), marks: [...f.querySelectorAll('[data-az-chat-mark][data-state="open"]')].map((m) => m.getAttribute('data-az-chat-mark')) };
+    });
+    check(`${name}: #29 a pointer over a bar shows its value; over a legend entry, that slice and its entry are marked`,
+      hovered && pointed.entry === 'open' && JSON.stringify(pointed.marks) === '["1"]', JSON.stringify({ hovered, pointed }));
+  } catch (e) {
+    check(`${name}: the layout flow completed`, false, e.message.split('\n')[0]);
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} layout context close`)) && closed;
+  }
+}
+
+/** Issue #28: the dots before the first words, the caret while words arrive, both gone at the end; messages move in — none of it under reduced motion. */
+async function workingFlow(b, name) {
+  for (const still of [false, true]) {
+    const ctx = await watchedContext(b, csp, still ? { reducedMotion: 'reduce' } : {});
+    const label = `${name}${still ? ' (reduced motion)' : ''}`;
+    try {
+      const page = await ctx.newPage();
+      page.setDefaultTimeout(STATE_MS);
+      await page.goto(`${host.url}/`);
+      await idle(page);
+      await listen(page);
+      // Each message as it is added: whether it was moving as it came in.
+      await page.evaluate(() => {
+        globalThis.azAdded = [];
+        new MutationObserver((records) => {
+          for (const r of records) for (const n of r.addedNodes) {
+            if (n instanceof Element && n.matches('.az-chat-message')) globalThis.azAdded.push({ site: n.matches('.az-chat-message--site'), moving: n.getAnimations().length > 0 });
+          }
+        }).observe(document.querySelector('[data-az-chat-transcript]'), { childList: true });
+      });
+      const input = page.locator('[data-az-chat] [data-az-chat-input]');
+      await input.fill('take your time');
+      await input.press('Enter');
+      const last = '[data-az-chat-transcript] > .az-chat-message--site:last-child';
+      await page.waitForFunction((sel) => {
+        const item = document.querySelector(sel);
+        return item !== null && item.querySelector('.az-chat-thinking') !== null;
+      }, last, { timeout: STATE_MS });
+      const waiting = await page.evaluate((sel) => {
+        const item = document.querySelector(sel);
+        const dots = item.querySelector('.az-chat-thinking');
+        return {
+          busy: item.getAttribute('aria-busy'), hidden: dots.getAttribute('aria-hidden'), seen: dots.getClientRects().length > 0, words: item.textContent.trim(),
+          moving: dots.getAnimations({ subtree: true }).length > 0, alone: item.children.length === 1,
+        };
+      }, last);
+      check(`${label}: #28 before the first words the answer's place holds the dots, alone — aria-hidden, ${still ? 'still' : 'pulsing'}`,
+        waiting.busy === 'true' && waiting.hidden === 'true' && waiting.seen && waiting.words === '' && waiting.alone && waiting.moving === !still, JSON.stringify(waiting));
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent.includes('considered'), last, { timeout: STATE_MS });
+      const streaming = await page.evaluate((sel) => {
+        const item = document.querySelector(sel);
+        return { dots: item.querySelector('.az-chat-thinking') !== null, caret: item.querySelector('p > .az-chat-caret:last-child') !== null, hidden: item.querySelector('.az-chat-caret')?.getAttribute('aria-hidden') ?? null };
+      }, last);
+      check(`${label}: #28 the first words take the dots' place; ${still ? 'no caret under reduced motion' : 'a caret ends the words while they arrive'}`,
+        !streaming.dots && streaming.caret === !still && (still || streaming.hidden === 'true'), JSON.stringify(streaming));
+      await page.waitForFunction((sel) => document.querySelector(sel)?.getAttribute('aria-busy') === 'false', last, { timeout: STATE_MS });
+      const done = await page.evaluate((sel) => ({ caret: document.querySelector(sel).querySelector('.az-chat-caret') !== null, dots: document.querySelector(sel).querySelector('.az-chat-thinking') !== null }), last);
+      check(`${label}: #28 the finished answer keeps neither the caret nor the dots`, !done.caret && !done.dots, JSON.stringify(done));
+      const added = await page.evaluate(() => globalThis.azAdded);
+      check(`${label}: #28 the question and its answer ${still ? 'appear at once' : 'move in as they are added'}`,
+        added.length === 2 && added.every((a) => a.moving === !still), JSON.stringify(added));
+      const heard = await said(page);
+      check(`${label}: #28 the status region says once that the question is being answered, then the answer's sentences`,
+        heard.filter((h) => h.includes('Answering your question.')).length === 1 && heard.some((h) => h.includes('It took a moment.')), JSON.stringify(heard));
+      const stopped = await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, { timeout: STATE_MS }).then(() => true, () => false);
+      check(`${label}: #28 nothing is left moving once the answer is in`, stopped);
+    } catch (e) {
+      check(`${label}: the working flow completed`, false, e.message.split('\n')[0]);
+    } finally {
+      closed = (await closeWithin(ctx, CLOSE_MS, `${label} working context close`)) && closed;
+    }
+  }
+}
+
+/** Issue #30: the bar under a finished answer — last in it, faint until pointed at, Copy and Share by name, tooltips on hover and focus. */
+async function barFlow(b, name) {
+  const ctx = await watchedContext(b, csp, name === 'chromium' ? { permissions: ['clipboard-read', 'clipboard-write'] } : {});
+  try {
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(STATE_MS);
+    await page.goto(`${host.url}/`);
+    await idle(page);
+    await askFor(page, 'a pie please');
+    await page.mouse.move(0, 0);
+    // The answer laid out and still (its chart redrawn for its width, the transcript at its end) before it is pointed at.
+    await painted(page);
+    const answer = page.locator('[data-az-chat-transcript] > .az-chat-message--site').last();
+    const state = () => answer.evaluate((item) => {
+      const bar = item.querySelector(':scope > .az-chat-bar');
+      return {
+        last: item.lastElementChild === bar, group: bar?.getAttribute('role'), name: bar?.getAttribute('aria-label'),
+        buttons: [...(bar?.querySelectorAll('.az-chat-bar-button') ?? [])].map((x) => x.getAttribute('aria-label')),
+        colour: bar ? getComputedStyle(bar).color : null, text: getComputedStyle(item.querySelector(':scope > p')).color,
+        open: bar?.getAttribute('data-state') ?? null, big: [...item.querySelectorAll('button')].some((x) => x.textContent.trim() === 'Share this answer'),
+      };
+    });
+    const resting = await state();
+    check(`${name}: #30 a finished answer ends with its bar — a named group of small buttons, Copy answer and Share this answer — and no full-size Share`,
+      resting.last && resting.group === 'group' && resting.name === 'Answer actions' && JSON.stringify(resting.buttons) === '["Copy answer","Share this answer"]' && !resting.big,
+      JSON.stringify(resting));
+    // Pointed at inside the answer but not on the bar (whose own hover turns it too) — near its end, in view: an answer taller
+    // than the transcript can have its middle scrolled out of sight.
+    await answer.locator('.az-chat-summary').hover();
+    // The colour eases over motion.fast: the settled colour is the one judged (bounded — a bar that never turns fails below).
+    await page.waitForFunction(() => {
+      const item = [...document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site')].at(-1);
+      const bar = item.querySelector(':scope > .az-chat-bar');
+      return bar.getAnimations().length === 0 && getComputedStyle(bar).color === getComputedStyle(item.querySelector(':scope > p')).color;
+    }, null, { timeout: STATE_MS }).catch(() => undefined);
+    const pointed = await state();
+    check(`${name}: #30 the bar is faint at rest and the text's colour while its answer is pointed at`,
+      resting.colour !== resting.text && pointed.open === 'open' && pointed.colour === pointed.text,
+      JSON.stringify({ resting: resting.colour, pointed: pointed.colour, open: pointed.open, text: pointed.text }));
+    // Focused without a pointer (WebKit's Tab skips buttons by default, so focus is put there): the tooltip shows; Escape hides it, focus kept.
+    const copy = answer.getByRole('button', { name: 'Copy answer' });
+    await copy.focus();
+    const tipShown = await copy.evaluate((x) => x.parentElement.querySelector('[data-az-chat-tip]')?.hidden === false && document.activeElement === x);
+    await page.keyboard.press('Escape');
+    const tipGone = await copy.evaluate((x) => x.parentElement.querySelector('[data-az-chat-tip]')?.hidden === true && document.activeElement === x);
+    check(`${name}: #30 a bar button's tooltip shows its name on keyboard focus; Escape hides it and focus stays`, tipShown && tipGone, JSON.stringify({ tipShown, tipGone }));
+    await listen(page);
+    await copy.click();
+    progress.last = `${name}: #30 Copy clicked, waiting for the status region`;
+    await page.waitForFunction(() => (globalThis.azSaid ?? []).some((s) => /Answer copied\.|Copy did not work/.test(s)), null, { timeout: STATE_MS });
+    if (name === 'chromium') {
+      const text = await page.evaluate(() => navigator.clipboard.readText());
+      check(`${name}: #30 Copy puts the answer's words and its chart's text form on the clipboard — never its controls`,
+        text.startsWith('Here is the split.') && text.includes('Revenue by plan') && /Solo\t\$?120/.test(text) && !text.includes('Show the figures as a table') && !text.includes('Copy answer'),
+        JSON.stringify(text.slice(0, 300)));
+    }
+    const heard = await said(page);
+    check(`${name}: #30 the status region says how Copy went`, heard.some((s) => /Answer copied\.|Copy did not work/.test(s)), JSON.stringify(heard));
+    // Share opens today's share flow, from its small button.
+    await answer.getByRole('button', { name: 'Share this answer' }).click();
+    const create = answer.getByRole('button', { name: 'Create link' });
+    check(`${name}: #30 Share opens the share flow under the bar`, await create.isVisible());
+    await axe(page, `${name} answer bar`);
+  } catch (e) {
+    check(`${name}: the bar flow completed`, false, `${e.message.split('\n')[0]} (after "${progress.last}")`);
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} bar context close`)) && closed;
+  }
+  // A touch screen has no hover: the bar is always plain there. (Firefox has no mobile emulation to ask for.)
+  if (name === 'firefox') return;
+  const touch = await watchedContext(b, csp, { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  try {
+    const page = await touch.newPage();
+    page.setDefaultTimeout(STATE_MS);
+    await page.goto(`${host.url}/`);
+    await idle(page);
+    await askFor(page, 'a pie please');
+    const t = await page.evaluate(() => {
+      const item = [...document.querySelectorAll('[data-az-chat-transcript] > .az-chat-message--site')].at(-1);
+      const bar = item.querySelector(':scope > .az-chat-bar');
+      return { open: bar?.getAttribute('data-state'), colour: getComputedStyle(bar).color, text: getComputedStyle(item.querySelector(':scope > p')).color, hover: matchMedia('(hover: none)').matches };
+    });
+    check(`${name}: #30 on a touch screen the bar is always fully visible`, t.hover && t.open === 'open' && t.colour === t.text, JSON.stringify(t));
+  } catch (e) {
+    check(`${name}: the touch bar flow completed`, false, e.message.split('\n')[0]);
+  } finally {
+    closed = (await closeWithin(touch, CLOSE_MS, `${name} touch context close`)) && closed;
+  }
+}
+
+/** axe on the page as it is: zero violations. */
+async function axe(page, label) {
+  // The page at rest: a message fading in (issue #28) is not yet its colours; the working dots' endless pulse is aria-hidden.
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity),
+    null, { timeout: STATE_MS });
+  const r = await new AxeBuilder({ page }).analyze();
+  check(`${label}: axe finds no violation`, r.violations.length === 0, r.violations.map((v) => `${v.id} (${v.nodes.length}: ${v.nodes.slice(0, 2).map((n) => n.target.join(' ')).join(' | ')})`).join(', '));
+}
+
+/** Issue #21: two pins 2 km apart in one city, on the bundled basemap alone — fitted past its tiles, told apart, said to have no street detail. */
+async function cityMapFlow(b, name) {
+  const ctx = await watchedContext(b, csp, {});
+  try {
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(STATE_MS);
+    page.on('pageerror', () => undefined);
+    await page.goto(`${host.url}/`);
+    await idle(page);
+    await askFor(page, 'the city map');
+    const m = await page.evaluate(() => {
+      const f = [...document.querySelectorAll('[data-az-chat-transcript] figure.az-chat-map')].at(-1);
+      const slot = (n) => f.querySelector(`[data-az-chat-slot="${n}"]`);
+      return {
+        state: f.getAttribute('data-az-chat-map'), zoomIn: slot('zoom-in')?.getAttribute('aria-disabled'), reset: slot('reset')?.getAttribute('aria-disabled'),
+        detail: slot('detail') && !slot('detail').hidden ? slot('detail').textContent : null,
+      };
+    });
+    check(`${name}: #21 a city's two pins on the bundled basemap open fitted past its zoom 6 — Zoom in still free, the fitted view Reset's — with the no-street-detail note`,
+      m.state === 'ready' && m.zoomIn === 'false' && m.reset === 'true' && m.detail === 'This map has no street detail at this zoom.', JSON.stringify(m));
+    await axe(page, `${name} city map`);
+  } catch (e) {
+    check(`${name}: the city map flow completed`, false, e.message.split('\n')[0]);
+  } finally {
+    closed = (await closeWithin(ctx, CLOSE_MS, `${name} city map context close`)) && closed;
+  }
+}
+
+/**
+ * Issue #31, in Chromium (gate item 3's engine): at 360, 390, 768, 1024 and
+ * 1440 wide, in both schemes, the panel before a question (its chips), then
+ * with a dashboard and a pie answered — the panel at the end, and each answer
+ * whole (a tall window, so the transcript holds it). Each picture drawn twice
+ * from a fresh page and byte-compared (the fake model makes it
+ * deterministic), light and dark told apart, the PNGs written to
+ * .visual-out/chat-panel/ for review.
+ */
+async function panelSnapshots(b) {
+  mkdirSync(PANEL_OUT, { recursive: true });
+  const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+  const still = async (page) => {
+    await page.evaluate(() => document.fonts.ready);
+    await page.mouse.move(0, 0);
+    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, { timeout: STATE_MS });
+    await painted(page);
+  };
+  const shots = async (width, scheme) => {
+    const ctx = await watchedContext(b, csp, { viewport: { width, height: 2000 }, colorScheme: scheme, reducedMotion: 'reduce' });
+    try {
+      const page = await ctx.newPage();
+      page.setDefaultTimeout(STATE_MS);
+      await page.goto(`${host.url}/`);
+      await idle(page);
+      await still(page);
+      const out = { chips: await page.locator('.az-chat-panel').screenshot({ animations: 'disabled', caret: 'hide' }) };
+      await askFor(page, 'dashboard please');
+      await askFor(page, 'a pie please');
+      await still(page);
+      const answers = page.locator('[data-az-chat-transcript] > .az-chat-message--site');
+      out.dashboard = await answers.nth(1).screenshot({ animations: 'disabled', caret: 'hide' });
+      out.pie = await answers.nth(2).screenshot({ animations: 'disabled', caret: 'hide' });
+      out.panel = await page.locator('.az-chat-panel').screenshot({ animations: 'disabled', caret: 'hide' });
+      return out;
+    } finally {
+      closed = (await closeWithin(ctx, CLOSE_MS, `panel snapshot ${width} ${scheme} close`)) && closed;
+    }
+  };
+  const unstable = [];
+  const alike = [];
+  let count = 0;
+  for (const width of [360, 390, 768, 1024, 1440]) {
+    const byScheme = {};
+    for (const scheme of ['light', 'dark']) {
+      const first = await shots(width, scheme);
+      const second = await shots(width, scheme);
+      for (const [state, png] of Object.entries(first)) {
+        if (sha(png) !== sha(second[state])) {
+          unstable.push(`${width} ${scheme} ${state}`);
+          writeFileSync(join(PANEL_OUT, `${state}-${width}-${scheme}.second.png`), second[state]);
+        }
+        writeFileSync(join(PANEL_OUT, `${state}-${width}-${scheme}.png`), png);
+        count++;
+      }
+      byScheme[scheme] = first;
+    }
+    for (const state of Object.keys(byScheme.light)) if (sha(byScheme.light[state]) === sha(byScheme.dark[state])) alike.push(`${state} ${width}`);
+  }
+  check('#31 panel snapshots: before a question, each answer and the answered panel, at 360, 390, 768, 1024 and 1440, render byte-identically twice in each scheme', unstable.length === 0, unstable.join(', '));
+  check('#31 panel snapshots: light and dark differ in every picture', alike.length === 0, alike.join(', '));
+  console.log(`panel snapshots: ${count} PNGs in ${PANEL_OUT}`);
 }
 
 const violations = cspResult(Object.values(csp).flat());

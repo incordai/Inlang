@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   CHART_LIMITS, VALUE_MAX, chartBox, chartGeometry, chartRows, chartSummary, niceTicks, round2, thinned, validChart,
+  CHART_MIN, ROUND_MAX, MARK_ATTR, chartLayout, markText, nearestMark, tipPlace,
   type ChartData, type SvgNode,
 } from '../src/runtime/chat-chart.ts';
 
@@ -213,12 +214,90 @@ test('thinned: labels never overlap, first and last always kept', () => {
   const step = shown[1] - shown[0];
   assert.ok(step * 12 >= 'Month 23'.length * 14 * 0.6, 'a gap wide enough for the widest label');
   assert.deepEqual(thinned(['a', 'b', 'c'], 100, 14), [0, 1, 2]);
+  // Issue #29: a dashboard tile's three-bar chart, about 88 px a band, keeps all three labels — the estimate runs wide already.
+  assert.deepEqual(thinned(['paid', 'open', 'cancelled'], 88, 14), [0, 1, 2]);
 });
 
-test('chartBox: 280 to 960 wide, three fifths as tall, at least 200', () => {
-  assert.deepEqual(chartBox(100, 14), { width: 280, height: 200, font: 14 });
+test('chartBox (issue #29): drawn at its own width from 200 to 960 px — a dashboard tile is not a scaled-down picture — three fifths as tall, at least 200', () => {
+  // A 240-px tile is drawn 240 wide, so its text is the theme's size; before, it was drawn 280 wide and shrunk to fit.
+  assert.deepEqual(chartBox(240, 14), { width: 240, height: 200, font: 14 });
+  assert.deepEqual(chartBox(100, 14), { width: CHART_MIN, height: 200, font: 14 });
   assert.deepEqual(chartBox(2000, 14), { width: 960, height: 576, font: 14 });
-  assert.deepEqual(chartBox(Number.NaN, 14), { width: 280, height: 200, font: 14 });
+  assert.deepEqual(chartBox(Number.NaN, 14), { width: CHART_MIN, height: 200, font: 14 });
+});
+
+test('chartBox (issue #29): a pie or donut is a square at most ROUND_MAX across plus its margin, whatever the width it is given', () => {
+  assert.equal(ROUND_MAX, 200);
+  assert.deepEqual(chartBox(640, 14, true), { width: ROUND_MAX + 28, height: ROUND_MAX + 28, font: 14 });
+  assert.deepEqual(chartBox(220, 14, true), { width: 220, height: 220, font: 14 });
+  assert.deepEqual(chartBox(Number.NaN, 14, true), { width: CHART_MIN, height: CHART_MIN, font: 14 });
+  const box = chartBox(900, 14, true);
+  const slices = walk(chartGeometry(chart({ kind: 'pie', series: [{ name: 's', points: [['a', 3], ['b', 1]] }] }), box, 'p', fmt))
+    .filter((n) => n.tag === 'path' && n.part !== 'pattern-ink');
+  const radius = Number(/A([\d.]+) /.exec(slices[0].attrs.d)?.[1]);
+  assert.ok(radius * 2 <= ROUND_MAX, `a ${radius * 2}-px pie`);
+});
+
+test('niceTicks (issue #29): `most` caps the ticks — a short plot gets fewer ticks, not smaller text — three or more from a cap of four', () => {
+  for (const most of [3, 4, 5, 6]) {
+    for (const [lo, hi, zero] of [[0, 100, true], [3, 41, true], [-5, 12, true], [120, 180, false], [1, 1e15, true], [0.001, 0.009, false]] as const) {
+      const t = niceTicks(lo, hi, zero, most);
+      // A cap of three cannot always be met by nice steps of three ticks (0..41 is 0, 50): there the bounds alone.
+      assert.ok(t.values.length >= (most >= 4 ? 3 : 2) && t.values.length <= most, `${lo}..${hi} at most ${most}: ${t.values.join(' ')}`);
+      assert.ok(t.min <= (zero ? Math.min(lo, 0) : lo) && t.max >= hi, `${lo}..${hi} covered`);
+    }
+  }
+  // The default is the six it always was.
+  assert.deepEqual(niceTicks(0, 1, true).values, niceTicks(0, 1, true, 6).values);
+  // A 200-px chart's plot holds five ticks at most; a 640-px one six.
+  const ys = (w: number) => walk(chartGeometry(chart({ series: [{ name: 's', points: [['a', 0], ['b', 1]] }] }), chartBox(w, 14), 'y', fmt))
+    .filter((n) => n.tag === 'text' && n.attrs['text-anchor'] === 'end').length;
+  assert.ok(ys(200) <= 5, `${ys(200)} ticks at 200 px`);
+  assert.equal(ys(640), 6);
+});
+
+test('chartLayout (issue #29): every bar, point and slice is a mark, in reading order — by label, then series — tagged on its node, anchored where its tooltip points', () => {
+  const box = chartBox(640, 14);
+  const one = chartLayout(chart(), box, 'm', fmt);
+  assert.deepEqual(one.marks.map((m) => [m.label, m.series, m.value]), [['Free', 0, 120], ['Team', 0, 45], ['Business', 0, 12]]);
+  const nodes = walk(one.svg).filter((n) => n.attrs[MARK_ATTR] !== undefined);
+  assert.deepEqual(nodes.map((n) => [n.tag, n.attrs[MARK_ATTR]]), [['rect', '0'], ['rect', '1'], ['rect', '2']]);
+  // A bar's tooltip points at the middle of its top.
+  const bar = nodes[0].attrs;
+  assert.deepEqual([one.marks[0].x, one.marks[0].y], [round2(Number(bar.x) + Number(bar.width) / 2), Number(bar.y)]);
+  assert.equal(JSON.stringify(one.svg), JSON.stringify(chartGeometry(chart(), box, 'm', fmt)), 'the same nodes as chartGeometry');
+  // Two series: label-major, so the arrow keys walk across a group before the next.
+  const two = chartLayout(chart({ kind: 'line', series: [{ name: 'A', points: [['x', 1], ['y', 2]] }, { name: 'B', points: [['x', 3], ['y', 4]] }] }), box, 'l', fmt);
+  assert.deepEqual(two.marks.map((m) => [m.label, m.series]), [['x', 0], ['x', 1], ['y', 0], ['y', 1]]);
+  const tagged = walk(two.svg).filter((n) => n.attrs[MARK_ATTR] !== undefined).map((n) => [n.part, n.attrs[MARK_ATTR]]);
+  assert.deepEqual(tagged, [['fill-1', '0'], ['fill-1', '2'], ['fill-2', '1'], ['fill-2', '3']], 'markers carry their reading-order index');
+  // A slice is a mark with its angles; a slice of nothing is none.
+  const pie = chartLayout(chart({ kind: 'pie', series: [{ name: 'Status', points: [['Paid', 3], ['None', 0], ['Open', 1]] }] }), chartBox(400, 10, true), 'p', fmt);
+  assert.deepEqual(pie.marks.map((m) => [m.label, m.from, m.to]), [['Paid', 0, round2(Math.PI * 1.5)], ['Open', round2(Math.PI * 1.5), round2(Math.PI * 2)]]);
+});
+
+test('markText, nearestMark and tipPlace (issue #29): what a tooltip says, which mark a pointer is over, and where the tooltip sits — inside the chart', () => {
+  const c = chart();
+  const box = chartBox(640, 14);
+  const { marks } = chartLayout(c, box, 'm', fmt);
+  assert.equal(markText(c, marks[1], fmt), 'Team: 45');
+  const two = chart({ series: [{ name: 'A', points: [['x', 1]] }, { name: 'B', points: [['x', 3]] }] });
+  assert.equal(markText(two, chartLayout(two, box, 't', fmt).marks[1], fmt), 'x, B: 3');
+  const pieData = chart({ kind: 'pie', series: [{ name: 'Status', points: [['Paid', 3], ['Open', 1]] }] });
+  const pieBox = chartBox(400, 10, true);
+  const pie = chartLayout(pieData, pieBox, 'p', fmt).marks;
+  assert.equal(markText(pieData, pie[0], fmt), 'Paid: 3 (75%)');
+  // A pointer anywhere over a bar's band finds that bar; over a slice, that slice; outside the ring, nothing.
+  assert.equal(nearestMark(c, box, marks, marks[2].x + 3, box.height - 20), 2);
+  assert.equal(nearestMark(pieData, pieBox, pie, pieBox.width / 2 + 30, pieBox.height / 2 - 10), 0, 'the upper right is Paid');
+  assert.equal(nearestMark(pieData, pieBox, pie, pieBox.width / 2 - 30, pieBox.height / 2 - 30), 1, 'the upper left is Open');
+  assert.equal(nearestMark(pieData, pieBox, pie, 0, 0), -1);
+  assert.equal(nearestMark(c, box, [], 10, 10), -1);
+  // Above its mark; below when there is no room above; never past an edge.
+  assert.deepEqual(tipPlace({ label: 'a', series: 0, value: 1, x: 300, y: 100 }, box, 80, 24), { x: 260, y: 69 });
+  assert.deepEqual(tipPlace({ label: 'a', series: 0, value: 1, x: 300, y: 10 }, box, 80, 24), { x: 260, y: 17 });
+  assert.deepEqual(tipPlace({ label: 'a', series: 0, value: 1, x: 5, y: 100 }, box, 80, 24), { x: 0, y: 69 });
+  assert.deepEqual(tipPlace({ label: 'a', series: 0, value: 1, x: 636, y: 100 }, box, 80, 24), { x: 560, y: 69 });
 });
 
 test('chartSummary and chartRows: the chart as a sentence and as a table', () => {

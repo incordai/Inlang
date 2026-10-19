@@ -348,7 +348,7 @@ function viewOf(d: RichDraw, x: ExploreData, v: ExploreView, r: ReturnType<typeo
 function noteOf(d: RichDraw, x: ExploreData, title: string, note: string): { el: HTMLElement; said: string } | null {
   const f = frame(d, title, x.src, x.asOf, x.source);
   if (!f) return null;
-  for (const name of ['body', 'legend', 'details']) drop(f, name);
+  for (const name of ['plot', 'details']) drop(f, name);
   fill(f, 'summary', note);
   return { el: f, said: `${title}: ${note}` };
 }
