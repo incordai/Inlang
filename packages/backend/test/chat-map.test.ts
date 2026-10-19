@@ -144,11 +144,10 @@ test('from: a table\'s rows by name — the shape checked here, `label`, `lat`, 
   assert.deepEqual(mapLines({ title: 'T', from: ['t', 'label', 'n', 'lat', 'a', 'lon', 'b'] }), ['map "T" from t label n lat a lon b']);
 });
 
-test('the prompt teaches the map from the reader\'s own caps — and never a zoom, a centre or an address of a page', () => {
+test('the prompt teaches the map\'s number form, not the reader\'s counts (§19.17) — and never a zoom, a centre or an address of a page', () => {
   const about = RICH_FORMS.map.about;
-  assert.match(about, /1 to 24 pins/);
   assert.match(about, /at most 6 decimals/);
-  assert.match(about, /up to 2 routes of 2 to 50 points/);
+  assert.doesNotMatch(about, /1 to 24 pins|up to 2 routes|2 to 50 points/, 'the counts are the parser\'s to hold');
   assert.match(about, /never write a zoom, a centre or an address of a web page/);
   assert.ok(RICH_FORMS.map.lines.includes('map "A title" from stores label name lat latitude lon longitude'));
   // Each taught line is one the reader takes.

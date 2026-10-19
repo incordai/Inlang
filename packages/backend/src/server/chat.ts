@@ -63,8 +63,8 @@ import type { KnowsRun } from './chat-knows.ts';
 import { ANSWER_LIMITS, ANSWER_WORDS, createAnswerParser, QUOTE_WORDS, type AnswerBlock, type AnswerEvent, type AnswerPreset, type AnswerQuote, type AnswerRules, type AnswerWord, type DropReason } from './chat-answer.ts';
 import { clampText, RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
 import { toolsText, type Tools } from './chat-tools.ts';
+import { siteOutline, type SiteOutline } from './chat-outline.ts';
 import type { Geocoder } from './chat-geocode.ts';
-import { MAP_LIMITS } from './chat-map.ts';
 import { createShareRoutes, createShareStore, mergeText, shareKey, shareTag, SHARE_LIMITS } from './chat-share.ts';
 import { createQueue, createRateLimits, createWindows, type Windows } from './chat-limits.ts';
 import { sseEvent } from './chat-sse.ts';
@@ -107,6 +107,8 @@ export interface ChatContext {
   readonly knows: readonly ContextTable[];
   /** Everything else in the file: the site's public content, sent to the model as data. */
   readonly content: unknown;
+  /** That content as the model reads it (chat-outline.ts): each page's summary and its full text. */
+  readonly outline: SiteOutline;
 }
 
 /** A queryable table as context.json lists it: each public field's name and type, its choices or currency, a money field's digits. */
@@ -258,7 +260,8 @@ export function parseChatContext(text: string): ChatContext | string {
     if (items === null) return `answer.quotes names ${q.word} ${q.route}#${q.n + 1}, which the pages do not hold`;
     resolved.push({ ...q, items });
   }
-  return { chats, quotes: resolved, destinations: destinations as string[], images, tables, knows, content: { site: r.site, pages: r.pages } };
+  const content = { site: r.site, pages: r.pages };
+  return { chats, quotes: resolved, destinations: destinations as string[], images, tables, knows, content, outline: siteOutline(content) };
 }
 
 /** The components a tool may fill (§21.2.8 O5; cards since §19.11; an explore's rows, §21.3): a chat whose `show` has one of them may use the tools. */
@@ -325,30 +328,31 @@ export function systemText(prompt: string, context: ChatContext, page: string, r
     // The site's own blocks first: a quote is a line, the author's words, where a composed list is many lines (§19.16).
     const quotable = rules.quotes.filter((q) => rules.show.includes(q.word));
     if (quotable.length > 0) {
-      lines.push(`The site's own blocks to quote; when one answers, quote it rather than write your own:\n${quotable.map(quoteLine).join('\n')}`);
-      if (quotable.some((q) => q.items)) lines.push('One item of a list, by its place in the site content: show faq /help #2.');
+      lines.push(`The site's own blocks; quote one that answers rather than write your own:\n${quotable.map(quoteLine).join('\n')}`);
+      if (quotable.some((q) => q.items)) lines.push('One item of a list by its number in the site content: show faq /help #2.');
     }
     if (rules.show.includes('pricing') && !quotable.some((q) => q.word === 'pricing')) lines.push('There is no pricing block to show.');
-    if (rules.show.includes('cta') || rules.show.includes('cards')) lines.push(`The destinations a cta or a card's link may use, written exactly so: ${rules.destinations.join(' ')}.`);
+    if (rules.show.includes('cta') || rules.show.includes('cards')) lines.push(`Listed destinations: ${rules.destinations.join(' ')}.`);
     const rich = rules.show.filter((w) => (RICH_WORDS as readonly string[]).includes(w));
     if (rich.length > 0) {
       lines.push(context.tables.length > 0
-        ? `The tables "from" may count, sum, average, or list (by field, a date by day, week, month or year; "where" a choice or flag field equals one value):\n${context.tables.map(tableLine).join('\n')}`
+        ? `Listed tables, which "from" may count, sum, average or list (by a field, a date by day, week, month or year; "where" a choice or flag field equals one value):\n${context.tables.map(tableLine).join('\n')}`
         : 'There are no tables to take figures "from": any figure is your own, and is shown labelled as AI-generated.');
     }
     if (rules.show.includes('cards')) {
       lines.push(context.images.length > 0
-        ? `The site images a card may show, by key: ${context.images.map((i) => `${i.key} (${JSON.stringify(i.alt)})`).join(' · ')}.`
+        ? `Listed site images a card may show, by key: ${context.images.map((i) => `${i.key} (${JSON.stringify(i.alt)})`).join(' · ')}.`
         : 'There are no site images: a card has no image.');
     }
     // The operator's notes: set at start, so still before the rows, the one part read per question.
     if (rules.tools) lines.push(toolsText(rules.tools));
     // A place is an address the site looks up; only with the operator's geocoder is it taught (§21.4.2).
-    if (rules.geocoder) lines.push(`A map may also place an address the site looks up for you — a line under it: place "A label" "A street address" (at most ${MAP_LIMITS.address} characters, at most ${MAP_LIMITS.placesPerAnswer} in an answer); it is shown labelled as an approximate location.`);
+    if (rules.geocoder) lines.push('A map may also place an address the site looks up for you — a line under it: place "A label" "A street address"; it is shown labelled as an approximate location.');
   }
   // A prompt file opens with the generated-file line, which is for the operator, not the model.
   const data = rows === '' ? '' : `\n${ROWS_HEADING}\n\n${rows}\n`;
-  return `${prompt.replace(/^# GENERATED BY AZ[^\n]*\n/, '').trimEnd()}\n\n<site-content>\n${JSON.stringify(context.content)}\n</site-content>\n\n${lines.join('\n')}\n${data}`;
+  const content = [context.outline.site, ...context.outline.pages.map((p) => p.full)].filter((l) => l !== '').join('\n');
+  return `${prompt.replace(/^# GENERATED BY AZ[^\n]*\n/, '').trimEnd()}\n\n<site-content>\n${content}\n</site-content>\n\n${lines.join('\n')}\n${data}`;
 }
 
 export interface ChatOptions {

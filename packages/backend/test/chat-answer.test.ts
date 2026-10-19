@@ -597,8 +597,12 @@ test('§19.16 one-line forms: item "title" "text" reads as the long form, under 
   assert.deepEqual(whole('faq\n  item "Q?" ""').dropped, ['empty']);
   assert.deepEqual(whole('faq\n  item "Q?" "<script>alert(1)</script>"').blocks, [{ faq: [{ q: 'Q?', a: '<script>alert(1)</script>' }] }], 'text, never markup');
   // The prompt's forms are the one-line ones.
-  assert.deepEqual(ANSWER_FORMS.faq.lines, ['faq', '  item "A question, at most 160 characters" "Its answer, at most 600 characters"']);
-  assert.deepEqual(ANSWER_FORMS.feature.lines, ['feature', '  item "A title, at most 80 characters" "One or two sentences, at most 300 characters"']);
+  // §19.17: without the caps the parser holds — a line past one is dropped, and its note teaches the model.
+  assert.deepEqual(ANSWER_FORMS.faq.lines, ['faq', '  item "A question" "Its answer"']);
+  assert.deepEqual(ANSWER_FORMS.feature.lines, ['feature', '  item "A title" "One or two sentences"']);
+  for (const w of Object.keys(ANSWER_FORMS) as (keyof typeof ANSWER_FORMS)[]) {
+    assert.doesNotMatch(`${ANSWER_FORMS[w].about} ${ANSWER_FORMS[w].lines.join(' ')}`, /at most \d+ (characters|rows|columns)|\d+ to \d+ (items|cards|figures|stats|pins|views|options|points)|up to \d+/, w);
+  }
   assert.ok(ANSWER_FORMS.chart.lines.some((l) => /^ {4}points "Nov" 140 "Dec" 180$/.test(l)) && !ANSWER_FORMS.chart.lines.some((l) => /^\s*point /.test(l)));
 });
 

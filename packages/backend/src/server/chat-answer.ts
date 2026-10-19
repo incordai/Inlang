@@ -164,26 +164,26 @@ export type DropReason =
 export const ANSWER_FORMS: Readonly<Record<AnswerWord, { readonly lines: readonly string[]; readonly about: string }>> = {
   pricing: {
     lines: ['show pricing /pricing'],
-    about: `the site's own pricing block of a page, exactly as the site shows it, #2 after the page for its second one; never write a price or a plan yourself — a pricing block you write is not shown`,
+    about: 'the site\'s own pricing block of a page, #2 after the page for its second; never write a price or a plan yourself',
   },
   faq: {
-    lines: ['faq', `  item "A question, at most ${ANSWER_LIMITS.question} characters" "Its answer, at most ${ANSWER_LIMITS.answer} characters"`],
-    about: `questions and answers, 1 to ${ANSWER_LIMITS.items} items, each a question and its answer`,
+    lines: ['faq', '  item "A question" "Its answer"'],
+    about: 'questions and answers',
   },
   cta: {
-    lines: [`cta "A label, at most ${ANSWER_LIMITS.label} characters" /contact`],
-    about: 'one button to a destination from the list at the end, written exactly as listed; any other destination is not shown',
+    lines: ['cta "A label" /contact'],
+    about: 'one button to a listed destination, written exactly as listed',
   },
   feature: {
-    lines: ['feature', `  item "A title, at most ${ANSWER_LIMITS.title} characters" "One or two sentences, at most ${ANSWER_LIMITS.text} characters"`],
-    about: `a short list, 1 to ${ANSWER_LIMITS.items} items; an item's sentences are optional`,
+    lines: ['feature', '  item "A title" "One or two sentences"'],
+    about: 'a short list; an item\'s sentences are optional',
   },
   ...RICH_FORMS,
 };
 
 /** A follow-up question as the model is taught it (§21.1.2): not a component, so outside ANSWER_FORMS. */
 export const ASK_FORM = {
-  lines: [`ask "A question the visitor may ask next, at most ${ANSWER_LIMITS.ask} characters"`],
+  lines: ['ask "A question the visitor may ask next"'],
 } as const;
 
 /** The line that opens and closes a code block, at the margin (§21.1.2). */

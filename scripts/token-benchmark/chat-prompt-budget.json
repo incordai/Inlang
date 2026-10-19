@@ -2,14 +2,14 @@
   "about": "The most tokens a chat model may be sent besides the conversation, per fixture (scripts/token-benchmark/chat-<name>.az), text and encoding. Checked by pnpm bench:tokens and scripts/lib/chat-prompt-bench.test.mjs; change it by hand, in the change that moves the prompt (docs/token-benchmark.md §8).",
   "fixtures": {
     "all": {
-      "prompt": { "o200k_base": 1721, "cl100k_base": 1727 },
+      "prompt": { "o200k_base": 1400, "cl100k_base": 1407 },
       "context": { "o200k_base": 990, "cl100k_base": 992 },
-      "system": { "o200k_base": 2148, "cl100k_base": 2141 }
+      "system": { "o200k_base": 1732, "cl100k_base": 1748 }
     },
     "faq": {
-      "prompt": { "o200k_base": 615, "cl100k_base": 615 },
+      "prompt": { "o200k_base": 439, "cl100k_base": 439 },
       "context": { "o200k_base": 674, "cl100k_base": 676 },
-      "system": { "o200k_base": 918, "cl100k_base": 904 }
+      "system": { "o200k_base": 659, "cl100k_base": 665 }
     }
   }
 }

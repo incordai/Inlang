@@ -117,23 +117,23 @@ export const RICH_FORMS: Readonly<Record<RichWord, { readonly lines: readonly st
       '  series "A series name"',
       '    points "Nov" 140 "Dec" 180',
     ],
-    about: `a chart: bar, line, area, pie or donut. Best with "from" — the site counts its own data exactly (the tables are listed at the end). Your own numbers are shown labelled as AI-generated; then write points (2 to ${RICH_LIMITS.points}, at most ${RICH_LIMITS.slices} for a pie), or up to ${RICH_LIMITS.series} series of the same labels; "unit" is optional (percent, or a currency code such as usd)`,
+    about: 'a chart: bar, line, area, pie or donut. Best "from" a listed table: the site counts its own data exactly. Your own numbers are shown labelled as AI-generated: points, or series of the same labels; "unit" is optional (percent, or a currency code such as usd)',
   },
   table: {
     lines: ['table "A title" from orders columns item total sort placed desc', 'table "A title" sortable', '  columns "A heading" "Another"', '  row "A cell" 10'],
-    about: `a table: "from" a table's columns (at most ${RICH_LIMITS.columns}, ${RICH_LIMITS.rows} rows), or your own columns and rows; "sortable" lets the visitor sort it`,
+    about: 'a table: "from" a table\'s columns, or your own columns and rows; "sortable" lets the visitor sort it',
   },
   stats: {
     lines: ['stats', '  stat "A label" from orders count by placed month', '  stat "A label" 3.2 unit percent delta 0.4'],
-    about: `1 to ${RICH_LIMITS.stats} figures with a label; "from" with a date grouping shows the latest period and its change`,
+    about: 'figures with a label; "from" with a date grouping shows the latest period and its change',
   },
   cards: {
     lines: ['cards', '  card "A title"', '    image i1', '    text "One or two sentences"', '    link "A label" /contact', 'cards from products title name text summary image photo'],
-    about: `1 to ${RICH_LIMITS.cards} cards; an image only by the key of a site image listed at the end, never an address; a link only to a listed destination`,
+    about: 'cards; an image only by a listed site image\'s key, never an address; a link only to a listed destination',
   },
   dashboard: {
     lines: ['dashboard "A title"', '  stat "A label" from orders count', '  chart bar "A title" from orders count by status', '  card "A title"', '    text "Its text"'],
-    about: `2 to ${RICH_LIMITS.tiles} stats, charts, tables or cards under one title; a chart inside one has one series`,
+    about: 'stats, charts, tables or cards under one title; a chart inside one has one series',
   },
   explore: {
     lines: [
@@ -149,7 +149,7 @@ export const RICH_FORMS: Readonly<Record<RichWord, { readonly lines: readonly st
       '  view stat "Cheapest that fits" min Price where Seats >= $seats unit usd',
       '  view chart bar "Price by plan" sum Price by Plan where Seats >= $seats',
     ],
-    about: `a data set the visitor explores with controls, every line one level in: first its rows — your own columns and up to ${EXPLORE_LIMITS.rows} rows (text in quotes, at most ${EXPLORE_LIMITS.cell} characters; numbers bare; dates bare as YYYY-MM-DD), or one line "from" a table's columns, or "from tool" a tool's columns; then up to ${EXPLORE_LIMITS.controls} controls — slider (min, max, optional step and value), date (from, to, optional value), toggle (${EXPLORE_LIMITS.toggleMin} to ${EXPLORE_LIMITS.toggleMax} options), and field lines (number min max, or choice and its options) each followed by a form that applies them or sends a question built from them ({name} for a field's value); then 1 to ${EXPLORE_LIMITS.views} views — a table, a stat or a chart — each optionally "where" one column, one of = != < <= > >=, and one value or a $control; a stat or chart counts, or sums, averages, or takes the min or max of a number column; nothing else is computed, so never write a formula`,
+    about: 'a data set the visitor explores with controls, every line one level in: first its rows — your own columns and rows (text in quotes, numbers bare, dates bare as YYYY-MM-DD), or one line "from" a table\'s columns, or "from tool" a tool\'s columns; then controls — slider (min, max, optional step and value), date (from, to, optional value), toggle (its options), and field lines (number min max, or choice and its options) each followed by a form that applies them or sends a question built from them ({name} for a field\'s value); then views — a table, a stat or a chart — each optionally "where" one column, one of = != < <= > >=, and one value or a $control; a stat or chart counts, or sums, averages, or takes the min or max of a number column; nothing else is computed, so never write a formula',
   },
   map: {
     lines: [
@@ -160,7 +160,7 @@ export const RICH_FORMS: Readonly<Record<RichWord, { readonly lines: readonly st
       '    point 52.5163 13.3777',
       'map "A title" from stores label name lat latitude lon longitude',
     ],
-    about: `a map of 1 to ${MAP_LIMITS.pins} pins, each a label and its latitude and longitude as plain numbers with at most ${MAP_LIMITS.decimals} decimals (your pins are shown labelled as AI-placed), and up to ${MAP_LIMITS.routes} routes of ${MAP_LIMITS.routePoints.min} to ${MAP_LIMITS.routePoints.max} points drawn as straight lines; or "from" a table: its label field and its number fields for latitude and longitude, optionally "where" a choice or flag field equals one value; never write a zoom, a centre or an address of a web page`,
+    about: `a map of pins, each a label and its latitude and longitude as plain numbers with at most ${MAP_LIMITS.decimals} decimals (your pins are shown labelled as AI-placed), and routes of points drawn as straight lines; or "from" a table: its label field and its number fields for latitude and longitude, optionally "where" a choice or flag field equals one value; never write a zoom, a centre or an address of a web page`,
   },
 };
 

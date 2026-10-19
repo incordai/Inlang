@@ -437,6 +437,17 @@ question pays before the cache is therefore larger than at the start
 (`all` +73 with the preset, `faq` +53); what each later question and each
 answer cost is smaller — the history and answer tables in §7.
 
+After the shorter fixed text (chat-block-spec §19.17, issue 26: the site
+content as an outline, no taught caps the parser holds, each rule once):
+
+| Fixture | prompt | context.json | system text |
+|---|---:|---:|---:|
+| `all` | 1 400 / 1 407 | 990 / 992 | 1 732 / 1 748 |
+| `faq` | 439 / 439 | 674 / 676 | 659 / 665 |
+
+The site content section alone is 284 → 206 tokens on both fixtures;
+`context.json` does not move (the outline is the server's rendering of it).
+
 Answers in the taught forms, and what each later question pays again for
 them as history (`o200k_base`, the parser's own history):
 
