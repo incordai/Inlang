@@ -315,7 +315,7 @@ quarter, so the counted tokens are the figures to use.
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm bench:tokens                       # every site; JSON to <tmp>/az-token-benchmark.json
+pnpm bench:tokens                       # every site; JSON to a new <tmp>/az-token-benchmark-*/ folder
 pnpm bench:tokens ledger harbour        # named sites only
 pnpm bench:tokens --json out.json       # the JSON somewhere else
 ```

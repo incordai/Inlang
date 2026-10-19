@@ -28,3 +28,11 @@ test('a modifier that is not a variant is not mistaken for one', () => {
 test('a preview without the word is an error, not a silent no-op', () => {
   assert.throws(() => withVariant(PREVIEW, 'faq', 'list', ['list']), /has no faq line/);
 });
+
+test('SECURITY: the word is matched as text, never as a pattern — a name from the command line cannot widen the match', () => {
+  for (const word of ['h.ro', 'h.*', '(?:hero|cta)', 'hero|cta']) {
+    assert.throws(() => withVariant(PREVIEW, word, 'stack', ['center', 'stack']), /has no .* line/, word);
+  }
+  assert.throws(() => withVariant(PREVIEW, '(', 'stack', ['stack']), /has no \( line/, 'an unbalanced pattern is a missing word, not a SyntaxError');
+  assert.match(withVariant(PREVIEW, 'hero', 'stack', ['center', 'stack']), /^ {2}hero stack$/m, 'CONTROL: the real word still matches');
+});

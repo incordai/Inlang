@@ -20,8 +20,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EXTENT, clipLine, clipRing, layer, pmtiles, project, ringArea, rounded, simplify } from './lib/vector-tiles.mjs';
@@ -42,21 +41,48 @@ const OUT = join(ROOT, 'packages/backend/assets/basemap/world.pmtiles');
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const checkOnly = args.includes('--check');
-const cache = flag('--cache') ?? join(tmpdir(), `az-basemap-${SOURCES.release}`);
+// The default cache is inside this checkout (node_modules/ is ignored), not the
+// machine's shared temp folder, where another account could put a file or a
+// link at a name it can guess.
+const cache = flag('--cache') ?? join(ROOT, 'node_modules', '.cache', `az-basemap-${SOURCES.release}`);
 const out = flag('--out') ?? OUT;
 
-/** A source file's bytes: from the cache, else downloaded once; refused unless its SHA-256 is the pinned one. */
+/** The cached bytes at `path`, or null when nothing is cached there yet. */
+function cached(path) {
+  try {
+    return readFileSync(path);
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+}
+
+/**
+ * A source file's bytes: from the cache, else downloaded once; refused unless
+ * its SHA-256 is the pinned one. A download is checked before it is kept, so
+ * the cache only ever holds the pinned bytes, and it is created exclusively
+ * (`wx`): a file or a link already at that name is never written through.
+ */
 async function source(name) {
   const { file, sha256 } = SOURCES.files[name];
   const path = join(cache, file);
-  if (!existsSync(path)) {
-    mkdirSync(cache, { recursive: true });
+  const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  let bytes = cached(path);
+  if (bytes === null) {
     const r = await fetch(`${SOURCES.base}${file}`, { signal: AbortSignal.timeout(DOWNLOAD_MS), redirect: 'error' });
     if (!r.ok) throw new Error(`${file}: download answered ${r.status}`);
-    writeFileSync(path, Buffer.from(await r.arrayBuffer()));
+    bytes = Buffer.from(await r.arrayBuffer());
+    const got = digest(bytes);
+    if (got !== sha256) throw new Error(`${file}: the download's SHA-256 is ${got}, not the pinned ${sha256} — nothing was cached; update sources.json knowingly`);
+    mkdirSync(cache, { recursive: true, mode: 0o700 });
+    const fd = openSync(path, 'wx', 0o644);
+    try {
+      writeFileSync(fd, bytes);
+    } finally {
+      closeSync(fd);
+    }
   }
-  const bytes = readFileSync(path);
-  const got = createHash('sha256').update(bytes).digest('hex');
+  const got = digest(bytes);
   if (got !== sha256) throw new Error(`${file}: SHA-256 is ${got}, not the pinned ${sha256} — delete ${path} and run again, or update sources.json knowingly`);
   return JSON.parse(bytes.toString('utf8'));
 }

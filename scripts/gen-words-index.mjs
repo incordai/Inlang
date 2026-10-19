@@ -69,8 +69,8 @@ export function headerFields(src) {
   return fields;
 }
 
-/** A value safe inside one markdown table cell. */
-const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
+/** A value safe inside one markdown table cell: a backslash escaped first, so a `\|` in the value stays text, not an escaped pipe. */
+const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 const code = (s) => `\`${s}\``;
 
 /** The variant the word's preview.az line uses: the one written, else the manifest's first. */

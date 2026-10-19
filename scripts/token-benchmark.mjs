@@ -28,7 +28,8 @@ import {
 import { ANSWER_FORMS, measureAnswers, measureChatInput } from './lib/answer-bench.mjs';
 import { BUDGET_PATH, CHAT_PROMPT_TEXTS, measureChatPrompts, overBudget, readBudget, underBudget } from './lib/chat-prompt-bench.mjs';
 
-const DEFAULT_JSON = join(tmpdir(), 'az-token-benchmark.json');
+/** The JSON's name when --json names no file: in a fresh private folder (mkdtemp), never at a name in the shared temp folder another account could guess and link elsewhere. */
+const DEFAULT_JSON_NAME = 'az-token-benchmark.json';
 
 /** Column headings, in REPRESENTATIONS order. */
 const HEADINGS = { az: '.az', specMin: 'spec min', specPretty: 'spec pretty', tree: 'tree', html: 'html body', htmlShared: 'html shared', appTsx: 'App.tsx' };
@@ -104,7 +105,7 @@ function chatPromptLines(measured, over, under) {
 
 async function main(argv) {
   const args = [...argv];
-  let jsonOut = DEFAULT_JSON;
+  let jsonOut = null;
   const j = args.indexOf('--json');
   if (j >= 0) {
     if (!args[j + 1]) { console.error('token-benchmark: --json needs a file'); return 2; }
@@ -149,6 +150,7 @@ async function main(argv) {
   console.log(answerLines(answers, chatInput, PRIMARY_ENCODING));
   const over = overBudget(chatPrompts, budget);
   console.log(chatPromptLines(chatPrompts, over, underBudget(chatPrompts, budget)));
+  jsonOut ??= join(mkdtempSync(join(tmpdir(), 'az-token-benchmark-')), DEFAULT_JSON_NAME);
   writeFileSync(jsonOut, `${JSON.stringify({
     tokenizer: provider, encodings: ENCODINGS, primary: PRIMARY_ENCODING, charsPerTokenApproximation: CHARS_PER_TOKEN,
     representations: REPRESENTATIONS, summaries, sites: results, answerForms: ANSWER_FORMS, answers, chatInput, chatPrompts,

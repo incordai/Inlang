@@ -31,7 +31,9 @@ const LATE = `<ul data-az-behaviour="faq" data-single="false" id="late-faq">
   <li><h3 id="late-b"><button type="button" aria-expanded="true" aria-controls="late-b-panel" data-az-disclosure>Another late one?</button></h3>
     <div id="late-b-panel"><p>Another late answer.</p></div></li>
 </ul>`;
-const LATER = `<script>setTimeout(() => document.querySelector('main').insertAdjacentHTML('beforeend', ${JSON.stringify(LATE)}), 300);</script>`;
+/** LATE as a script's string literal: `<` spelt as an escape, so no `</…>` in it can end the script. */
+const LATE_LITERAL = JSON.stringify(LATE).replace(/</g, '\\u003c');
+const LATER = `<script>setTimeout(() => document.querySelector('main').insertAdjacentHTML('beforeend', ${LATE_LITERAL}), 300);</script>`;
 
 /** The carousel track's layout: inline, or in a stylesheet that lands after the runtime. */
 const TRACK_CSS = `.track { display: flex; overflow-x: auto; width: 400px; margin: 0; padding: 0; list-style: none; }
@@ -154,23 +156,27 @@ function writeRuntime(dir, {
   withoutSlideWatch = false, withoutRestRead = false, withoutPlaceWatch = false,
 } = {}) {
   mkdirSync(join(dir, 'az'), { recursive: true });
+  // Each regression a self-test form asks for: the line it removes from the runtime.
+  const cuts = [
+    // The regression faqDeepLink guards against: the reveal handler gone.
+    withoutBeforematch && /^.*'beforematch'.*$/m,
+    // The regression revealReduced guards against: reveal ignoring reduced motion.
+    withoutReducedGuard && /^.*prefers-reduced-motion: reduce\)'\)\.matches\) return;.*$/m,
+    // The regression sheetDrag guards against: the sheet's drag unwired.
+    withoutDrag && /^.*wireSheetDrag\(ctx, dialog, close\);.*$/m,
+    // The regression the late-track carousel guards against: the ends read only on scroll and resize.
+    withoutSizeWatch && /^.*sizes\?\.observe\(el\);.*$/m,
+    // The regression the late-slides carousel guards against: only the slides there at attach watched.
+    withoutSlideWatch && /^.*slides\.observe\(track, \{ childList: true \}\);.*$/m,
+    // The regression the late-nav hide guards against: the bar's height read once, at attach.
+    withoutRestRead && /^.*if \(!shrunk\) barHeight = .*$/m,
+    // The regression the late-reveal guards against: a block's place read once, at attach.
+    withoutPlaceWatch && /^.*layout\?\.observe\(ctx\.doc\.documentElement\);.*$/m,
+  ].filter((cut) => cut !== false);
   for (const f of readdirSync(RUNTIME).filter((n) => n.endsWith('.ts'))) {
-    const js = stripTypeScriptTypes(readFileSync(join(RUNTIME, f), 'utf8'))
-      .replace(/from '\.\/([a-z-]+)\.ts'/g, "from './$1.js'")
-      // The regression faqDeepLink guards against: the reveal handler gone.
-      .replace(withoutBeforematch ? /^.*'beforematch'.*$/m : /(?!)/, '')
-      // The regression revealReduced guards against: reveal ignoring reduced motion.
-      .replace(withoutReducedGuard ? /^.*prefers-reduced-motion: reduce\)'\)\.matches\) return;.*$/m : /(?!)/, '')
-      // The regression sheetDrag guards against: the sheet's drag unwired.
-      .replace(withoutDrag ? /^.*wireSheetDrag\(ctx, dialog, close\);.*$/m : /(?!)/, '')
-      // The regression the late-track carousel guards against: the ends read only on scroll and resize.
-      .replace(withoutSizeWatch ? /^.*sizes\?\.observe\(el\);.*$/m : /(?!)/, '')
-      // The regression the late-slides carousel guards against: only the slides there at attach watched.
-      .replace(withoutSlideWatch ? /^.*slides\.observe\(track, \{ childList: true \}\);.*$/m : /(?!)/, '')
-      // The regression the late-nav hide guards against: the bar's height read once, at attach.
-      .replace(withoutRestRead ? /^.*if \(!shrunk\) barHeight = .*$/m : /(?!)/, '')
-      // The regression the late-reveal guards against: a block's place read once, at attach.
-      .replace(withoutPlaceWatch ? /^.*layout\?\.observe\(ctx\.doc\.documentElement\);.*$/m : /(?!)/, '');
+    let js = stripTypeScriptTypes(readFileSync(join(RUNTIME, f), 'utf8'))
+      .replace(/from '\.\/([a-z-]+)\.ts'/g, "from './$1.js'");
+    for (const cut of cuts) js = js.replace(cut, '');
     writeFileSync(join(dir, 'az', f.replace(/\.ts$/, '.js')), js);
   }
 }

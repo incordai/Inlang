@@ -41,7 +41,9 @@ const RENDERS_NOTHING = 'none';
  */
 export function withVariant(source, word, variant, variants) {
   const lines = source.split('\n');
-  const at = lines.findIndex((l) => new RegExp(`^\\s+${word}(\\s|$)`).test(l));
+  // The word's line is indented and starts with the word as a whole token; the
+  // word is compared as text, never compiled into a pattern.
+  const at = lines.findIndex((l) => /^\s/.test(l) && l.trim().split(/\s+/)[0] === word);
   if (at < 0) throw new Error(`${word}: the preview has no ${word} line`);
   const indent = /^\s*/.exec(lines[at])[0];
   const tokens = lines[at].trim().split(/\s+/);
