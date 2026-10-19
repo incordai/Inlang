@@ -97,7 +97,7 @@ export const PINS = {
    * reader and the basemap style set. Loaded only on its chat pages, by a
    * dynamic import when the first map arrives.
    */
-  maplibre: '6.13.0',
+  maplibre: '6.14.0',
   pmtiles: '4.5.0',
   basemaps: '5.7.2',
 } as const;

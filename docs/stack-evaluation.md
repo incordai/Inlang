@@ -676,7 +676,7 @@ before pinning if this document is more than a few weeks old.**
 | `react` | `19.2.8` | MIT | **VERIFIED** [↗](https://registry.npmjs.org/react/latest) |
 | `motion` | `13.1.1` | MIT | **VERIFIED** — current package name [↗](https://registry.npmjs.org/motion/latest) |
 | `framer-motion` | `13.1.1` | MIT | **VERIFIED** — same version line; upgrade guide says swap to `motion` [↗](https://registry.npmjs.org/framer-motion/latest) |
-| `maplibre-gl` | `6.13.0` | BSD-3-Clause | **VERIFIED** 2026-10-16 — only a site whose chat shows maps (§19); the newest release older than the 7-day `minimumReleaseAge` (published 2026-10-06; `6.14.0`, published 2026-10-11, was 5 days old) [↗](https://registry.npmjs.org/maplibre-gl/6.13.0) |
+| `maplibre-gl` | `6.14.0` | BSD-3-Clause | **VERIFIED** 2026-10-19 — only a site whose chat shows maps (§19); the newest release older than the 7-day `minimumReleaseAge` (published 2026-10-11; `6.15.0`, published 2026-10-18, is 1 day old); against `6.13.0` its worker file, dependencies and policy needs are unchanged (§19) [↗](https://registry.npmjs.org/maplibre-gl/6.14.0) |
 | `pmtiles` | `4.5.0` | BSD-3-Clause | **VERIFIED** 2026-10-16 — only beside `maplibre-gl` (§19); the latest, published 2026-08-10; one dependency, `fflate ^0.8.2` (MIT) [↗](https://registry.npmjs.org/pmtiles/4.5.0) |
 | `@protomaps/basemaps` | `5.7.2` | BSD-3-Clause | **VERIFIED** 2026-10-16 — only beside `maplibre-gl` (§19); the latest, published 2026-03-10; no dependencies [↗](https://registry.npmjs.org/@protomaps/basemaps/5.7.2) |
 
@@ -1039,7 +1039,7 @@ over HTTP and reads its streamed answer. Evaluated 2026-10-15 for C1:
 | an SSE parsing package | **REJECT** | the format is a few dozen lines (line framing, `data:`, blank-line dispatch); `chat-sse.ts` is tested against chunks split at every byte offset and a line cap |
 | Node built-ins (`fetch`, `AbortSignal`, `TextDecoder`, `crypto`) | **ADOPT** | already required (Node ≥ 22.18, backend-spec §8); the adapters (`chat-adapters.ts`) are named by wire shape — `completions`, `fake` — and every endpoint, key and model id comes from `.env` |
 
-## 19. Maps in chat answers — **ADOPT `maplibre-gl` 6.13.0, `pmtiles` 4.5.0, `@protomaps/basemaps` 5.7.2, only on a site whose chat shows maps**
+## 19. Maps in chat answers — **ADOPT `maplibre-gl` 6.14.0, `pmtiles` 4.5.0, `@protomaps/basemaps` 5.7.2, only on a site whose chat shows maps**
 
 Chat-block-spec §21.4 (phase C8, owner-decided 2026-10-16, §17 Q19a–Q19h)
 draws a map in a chat answer: pins and routes, from a public table's rows or
@@ -1049,22 +1049,37 @@ section is the vetting global rule 11 asks for, done again when C8 was built
 
 | Package | Role | Version pinned | Licence | Dependencies |
 |---|---|---|---|---|
-| `maplibre-gl` | the WebGL vector-map renderer; ESM, its own type declarations; draws in a module worker (`dist/maplibre-gl-worker.mjs`) | `6.13.0` | BSD-3-Clause | 18, all MIT, ISC, BSD-2/3 or (MIT OR Apache-2.0) |
+| `maplibre-gl` | the WebGL vector-map renderer; ESM, its own type declarations; draws in a module worker (`dist/maplibre-gl-worker.mjs`) | `6.14.0` | BSD-3-Clause | 18, all MIT, ISC, BSD-2/3 or (MIT OR Apache-2.0) |
 | `pmtiles` | reads a single-file tile archive over HTTP `Range` and hands the renderer its tiles (an `addProtocol` handler) | `4.5.0` | BSD-3-Clause | `fflate` (MIT) |
 | `@protomaps/basemaps` | the basemap's style layers for that archive's schema, in a light and a dark set the page re-colours from its tokens | `5.7.2` | BSD-3-Clause | none |
 
-**FACT** (registry, 2026-10-16): `maplibre-gl` `latest` is `6.14.0`,
+**FACT** (registry, 2026-10-16): `maplibre-gl` `latest` was `6.14.0`,
 published 2026-10-11 — five days old, inside the workspace's 7-day
 `minimumReleaseAge` (`pnpm-workspace.yaml`, 10 080 minutes). The newest
-release past it is **`6.13.0`** (2026-10-06), which is pinned; R11's `6.14.0`
-is the next bump once it is a week old. `pmtiles` `4.5.0` (2026-08-10) and
-`@protomaps/basemaps` `5.7.2` (2026-03-10) are each the latest.
+release past it was `6.13.0` (2026-10-06), pinned when C8 was built; R11's
+`6.14.0` was the next bump once it was a week old. `pmtiles` `4.5.0`
+(2026-08-10) and `@protomaps/basemaps` `5.7.2` (2026-03-10) are each the
+latest.
 `npm audit` on the three at these versions (28 packages, a clean install
 outside the repository): **0 vulnerabilities**; `pnpm audit` in the
 repository after adding them as development dependencies: no known
 vulnerabilities. Licences of the 28 packages in the tree: BSD-3-Clause (5),
 ISC (8), MIT (12, the type-only `@types/geojson` among them), BSD-2-Clause
 (2), (MIT OR Apache-2.0) (1).
+
+**The bump to `6.14.0`** (2026-10-19, eight days old; `6.15.0`, published
+2026-10-18, is inside the release age). Compared tarball to tarball against
+`6.13.0`: the worker file differs only in the version in its licence line
+(508 314 bytes both), so the `blob:` start, `setWorkerUrl` and
+`worker-src 'self' blob:` are as before; the dependencies are the same; the
+stylesheet only merges two popup-anchor rules; the renderer's bundle has the
+same `createObjectURL`, `innerHTML` and `new Worker` uses as before and no
+`eval` or `new Function`. What changes: the line, circle, collision and
+symbol shaders drop `flat` interpolation (a workaround for blank maps on
+some iPadOS 16 devices); a frame is skipped while the WebGL context is lost;
+a tile that fails triggers a repaint, so `load` and `idle` still fire; and
+a `globalState` option. None of it touches the frame `chat-map-gl.ts` draws
+after `load` for WebKit on Linux: `triggerRepaint` is unchanged.
 
 **Where they go.** They are runtime dependencies of a *generated* site,
 pinned exactly in its `package.json` (target-web `PINS.maplibre`,
@@ -1075,10 +1090,11 @@ repository has them as development dependencies, at the same versions, so
 the overlay runtime's map module type-checks and the generated-types test
 checks a map site against them.
 
-**Measured** (a built map site, 2026-10-16, gzip -9): the map module chunk
-(renderer, archive reader, styles) 292 KB, its worker 144 KB, its stylesheet
-10 KB — **446 KB**, loaded by a dynamic `import()` only when the first map
-event arrives on a chat page that shows maps (Q19f accepts ≈ 440 KB). The
+**Measured** (a built map site, 2026-10-19, `maplibre-gl` 6.14.0, gzip -9):
+the map module chunk (renderer, archive reader, styles) 293 KB, its worker
+144 KB, its stylesheet 10 KB — **447 KB** (446 KB on 6.13.0), loaded by a
+dynamic `import()` only when the first map event arrives on a chat page that
+shows maps (Q19f accepts ≈ 440 KB). The
 page's own bundle grows by the map's list and drawing code only.
 
 **What each brings to the page's policy, measured in Chromium, Firefox and
