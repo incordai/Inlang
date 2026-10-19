@@ -31,8 +31,10 @@
  * question needs in full (chat.ts systemText, §19.17). The words of each
  * page are kept for that choice (chat-match.ts).
  *
- * Copied into a generated server with chat; imports nothing.
+ * Copied into a generated server with chat; imports chat-match.ts.
  */
+
+import { MATCH_LIMITS, terms } from './chat-match.ts';
 
 /** One page of the outline: its route, its summary and full lines, and its words for choosing it. */
 export interface OutlinePage {
@@ -41,8 +43,10 @@ export interface OutlinePage {
   readonly summary: string;
   /** The page in full: its line, every block and every item. */
   readonly full: string;
-  /** Every string the page holds, for scoring it against a question (chat-match.ts). */
-  readonly text: string;
+  /** The terms of every string the page holds, for scoring it against a question (chat-match.ts). */
+  readonly terms: readonly string[];
+  /** …and of its route and its blocks' titles, which count twice. */
+  readonly title: readonly string[];
 }
 
 export interface SiteOutline {
@@ -140,7 +144,8 @@ export function siteOutline(content: unknown): SiteOutline {
       route,
       summary: [line, ...blocks.map((b) => b.summary)].join('\n'),
       full: [line, ...blocks.flatMap((b) => b.full)].join('\n'),
-      text: strings(p, []).join('\n'),
+      terms: terms(strings(p, []).join('\n'), MATCH_LIMITS.pageChars, MATCH_LIMITS.pageTerms),
+      title: terms([route, ...list(p.blocks).filter(isObj).map((b) => str(b.title) ?? '')].join('\n'), MATCH_LIMITS.pageChars, MATCH_LIMITS.pageTerms),
     });
   }
   return { site: str(site.description) === null ? '' : head('', 'site', quoted(site.name, site.description)), pages };

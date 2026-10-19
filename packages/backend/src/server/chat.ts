@@ -2,7 +2,7 @@
  * @az server chat
  * Purpose: POST /chat — checks, limits, budget and queue, then the model's answer parsed into typed events and streamed to the page.
  * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §4.2, §5.3, §6.5, §6.7, §8.2, §8.3, §20.5, §20.7, §21.2, §21.4)
- * Exports: createChat, parseChatContext, rulesFor, systemText, ROWS_HEADING, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, CHARS_PER_TOKEN
+ * Exports: createChat, parseChatContext, rulesFor, systemText, ROWS_HEADING, PAGES_HEADING, CONTENT_LIMITS, ChatContext, ChatOptions, ChatTiming, CHAT_TIMING, CHAT_FIRST_TOKEN_MS, CHAT_IDLE_MS, CHARS_PER_TOKEN
  * Edit guide: every limit is the server's, never the request's; nothing the model wrote reaches the page but chat-answer.ts's events; abort upstream whenever the answer stops; logs carry codes and counts, never text.
  * Tests: packages/backend/test/chat-route.test.ts, packages/backend/test/chat-main.test.ts, packages/backend/test/chat-attacks.test.ts, packages/backend/test/chat-knows.test.ts, packages/backend/test/chat-moderation.test.ts,
  *   packages/backend/test/chat-tools-route.test.ts
@@ -64,6 +64,7 @@ import { ANSWER_LIMITS, ANSWER_WORDS, createAnswerParser, QUOTE_WORDS, type Answ
 import { clampText, RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
 import { toolsText, type Tools } from './chat-tools.ts';
 import { siteOutline, type SiteOutline } from './chat-outline.ts';
+import { choosePages } from './chat-match.ts';
 import type { Geocoder } from './chat-geocode.ts';
 import { createShareRoutes, createShareStore, mergeText, shareKey, shareTag, SHARE_LIMITS } from './chat-share.ts';
 import { createQueue, createRateLimits, createWindows, type Windows } from './chat-limits.ts';
@@ -309,18 +310,37 @@ function quoteLine(q: AnswerQuote): string {
 }
 
 /**
+ * How much of the site content one question is sent (chat-block-spec
+ * §19.17). Up to `whole` characters of outline — about 1 500 tokens at the
+ * outline's four characters a token — every page goes in full, which keeps
+ * the whole text cacheable. Past it every page goes as its summary, and in
+ * full only the pages the question shares words with, or the visitor's own
+ * when none does (chat-match.ts choosePages): at most `pages` of them and
+ * `chars` characters, after the fixed part, beside the rows.
+ */
+export const CONTENT_LIMITS = { whole: 6_000, pages: 4, chars: 8_000 } as const;
+
+/** The line that opens the pages a question is sent in full, on a large site — site content as well (§19.17). */
+export const PAGES_HEADING = 'The pages this question needs, in full; site content too:';
+
+/**
  * What the model is told (chat-block-spec §8.3), ordered for the provider's
  * prompt cache (§19.16) — what changes least first, so the long prefix is
  * byte-identical from one question to the next: the chat's fixed prompt,
  * then the site's public content in a section marked as data, then the page
  * the visitor is on and what its components may use, then the operator's
  * tools and the geocoder's place line (generated from their declarations,
- * §21.2.2 — never their URLs, keys or anything one answered), and last the
- * rows of the tables the page's chat knows, read for this question
- * (chat-knows.ts, labelled data too). Nothing about the visitor — no cookie,
- * address or account.
+ * §21.2.2 — never their URLs, keys or anything one answered), then — on a
+ * site past CONTENT_LIMITS.whole — the pages `asked` (the visitor's latest
+ * turns, newest first) needs in full, and last the rows of the tables the
+ * page's chat knows, read for this question (chat-knows.ts, labelled data
+ * too). Nothing about the visitor — no cookie, address or account.
+ * `select` says whether pages are chosen; by default, past the size.
  */
-export function systemText(prompt: string, context: ChatContext, page: string, rows = '', tools: readonly ChatToolShape[] = [], geocoder = false): string {
+export function systemText(
+  prompt: string, context: ChatContext, page: string, rows = '', tools: readonly ChatToolShape[] = [], geocoder = false, asked: readonly string[] = [],
+  select = context.outline.pages.reduce((n, p) => n + p.full.length + 1, 0) > CONTENT_LIMITS.whole,
+): string {
   const rules = rulesFor(context, page, tools, geocoder);
   const lines = [`The visitor is on the page ${JSON.stringify(page)}.`];
   // The page's chat prompt teaches its components and no other (§19.16); what follows is what they may use.
@@ -351,8 +371,13 @@ export function systemText(prompt: string, context: ChatContext, page: string, r
   }
   // A prompt file opens with the generated-file line, which is for the operator, not the model.
   const data = rows === '' ? '' : `\n${ROWS_HEADING}\n\n${rows}\n`;
-  const content = [context.outline.site, ...context.outline.pages.map((p) => p.full)].filter((l) => l !== '').join('\n');
-  return `${prompt.replace(/^# GENERATED BY AZ[^\n]*\n/, '').trimEnd()}\n\n<site-content>\n${content}\n</site-content>\n\n${lines.join('\n')}\n${data}`;
+  const { site, pages } = context.outline;
+  // A small site is sent whole; a large one as summaries, then the pages this question needs (§19.17).
+  const whole = !select;
+  const content = [site, ...pages.map((p) => (whole ? p.full : p.summary))].filter((l) => l !== '').join('\n');
+  const chosen = whole ? [] : choosePages(pages, page, asked, CONTENT_LIMITS.pages, CONTENT_LIMITS.chars);
+  const full = chosen.length === 0 ? '' : `\n${PAGES_HEADING}\n<site-pages>\n${chosen.map((p) => p.full).join('\n')}\n</site-pages>\n`;
+  return `${prompt.replace(/^# GENERATED BY AZ[^\n]*\n/, '').trimEnd()}\n\n<site-content>\n${content}\n</site-content>\n\n${lines.join('\n')}\n${full}${data}`;
 }
 
 export interface ChatOptions {
@@ -558,7 +583,9 @@ export function createChat(o: ChatOptions): ChatRoutes {
     const day = utcDay(now());
     // The rows the page's chat knows, read for this question as a signed-out visitor reads them (§8.2).
     const rows = chat.knows.length > 0 && o.knows ? await o.knows(chat.knows, ask.turns.at(-1)?.text ?? '') : '';
-    const system = systemText(o.prompts[chat.prompt], o.context, ask.page, rows, toolShapes, o.geocoder !== undefined);
+    // The visitor's latest turns, newest first: on a large site they choose the pages sent in full (§19.17).
+    const asked = ask.turns.filter((t) => t.role === 'user').map((t) => t.text).reverse().slice(0, 2);
+    const system = systemText(o.prompts[chat.prompt], o.context, ask.page, rows, toolShapes, o.geocoder !== undefined, asked);
     const most = estimate(system.length + trimHistory(ask.turns).reduce((n, t) => n + t.text.length, 0)) + o.config.maxOutputTokens;
     if ((await usage.spent(day)) + most > o.config.dailyTokens) {
       if (exhaustedOn !== day) {

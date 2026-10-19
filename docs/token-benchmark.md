@@ -393,13 +393,13 @@ the provider's own counts and what the parser dropped.
 **Code** `scripts/lib/chat-prompt-bench.mjs`, tested by
 `scripts/lib/chat-prompt-bench.test.mjs` (part of `pnpm verify`); printed by
 `pnpm bench:tokens` after the answers and written to the JSON as
-`chatPrompts`. **Budget** `scripts/token-benchmark/chat-prompt-budget.json`.
+`chatPrompts` (and the large fixture's questions as `selection`). **Budget** `scripts/token-benchmark/chat-prompt-budget.json`.
 
 The chat prompt is generated from the components' tables, so every new
-component or rule makes every chat request dearer. Two fixture sites hold
+component or rule makes every chat request dearer. Three fixture sites hold
 it to a recorded budget: `scripts/token-benchmark/chat-all.az`, whose chat
-may show every component, and `chat-faq.az`, the same site whose chat shows
-`faq` only. Each is built (its data lock recorded first) and three texts
+may show every component, `chat-faq.az`, the same site whose chat shows
+`faq` only, and `chat-large.az`, forty pages (since issue 27, below). Each is built (its data lock recorded first) and three texts
 are counted in both encodings: the chat's prompt file, `context.json`, and
 the whole system text the server sends for one question on the chat's page
 (no `knows` rows). A count over its budget, or one the budget does not
@@ -447,6 +447,16 @@ content as an outline, no taught caps the parser holds, each rule once):
 
 The site content section alone is 284 → 206 tokens on both fixtures;
 `context.json` does not move (the outline is the server's rendering of it).
+
+A third fixture, `chat-large.az` (forty pages, a chat that shows `faq cta
+feature`), is past the size where every page is sent in full
+(chat-block-spec §19.17, issue 27); it is budgeted as `large` (prompt 483,
+context.json 9 275, system text 1 822 — the summaries alone). The bench
+then asks its sixteen questions (`CHAT_LARGE_QUESTIONS`, each with the
+page that answers it) and prints the average system text per question:
+2 150 tokens with the pages chosen, 4 163 with every page in full (−48%),
+and the page that answers sent in full for 14 of 16. The unit test holds
+the choice under 60% of the whole and at most two misses.
 
 Answers in the taught forms, and what each later question pays again for
 them as history (`o200k_base`, the parser's own history):

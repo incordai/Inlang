@@ -122,5 +122,5 @@ test('each page has a summary — its blocks by word, title and size — beside 
   const help = ctx.outline.pages.find((p) => p.route === '/help')!;
   assert.equal(help.summary, 'page /help\n  faq "Questions" (3 items)\n  pricing "Plans" (1 plan)');
   assert.ok(help.full.startsWith('page /help\n  faq "Questions"\n    1 '));
-  assert.match(help.text, /How long does a pair take\?/);
+  assert.ok(['pair', 'long', 'take', 'resole', 'plan', 'studio'].every((t) => help.terms.includes(t)), help.terms.join(' '));
 });

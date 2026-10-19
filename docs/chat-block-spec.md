@@ -2314,6 +2314,42 @@ model, so they hold the parser and the page to the same cases with the
 shorter text; how a real model follows the shorter rules is not measured
 here.
 
+**On a large site, only the pages a question needs (issue 27; §8.3
+changed).** The outline of every page is at most `CONTENT_LIMITS.whole`
+(6 000 characters, about 1 500 tokens at the outline's four characters a
+token): such a site is sent whole, as before, which keeps all of it
+cacheable. Past it, `<site-content>` holds every page's *summary* — its
+route, description and each block's word, title and size (`faq
+"Shipping" (5 items)`) — and the pages this question needs follow in full
+after the page line, the tools and the place line, in a `<site-pages>`
+section under the line "The pages this question needs, in full; site
+content too:", next to the `knows` rows. The fixed part (prompt,
+summaries, page line) is the same bytes for every question on the page.
+
+The choice is server `chat-match.ts choosePages`, with no index or
+embedding service: a page scores the weight of the question's terms it
+holds (lower-cased, NFC, English stop words out, plurals stemmed; a term's
+weight is how rare it is among the pages), a term in its route or a
+block's title counted twice; ties go to the visitor's own page. At most
+four pages and 8 000 characters of them. The question is the visitor's
+latest turn; one with no term any page holds ("and the second one?") is
+read with the turn before it; with neither, the visitor's own page is sent.
+The pages chosen from are context.json's, which hold only public pages
+(§8.1), so a question that names a protected page's words gets nothing of
+it — a test asks for one by its secret and its route.
+
+Measured on `scripts/token-benchmark/chat-large.az` (forty pages: twelve
+products, ten guides, eight help pages of five questions, pricing, about,
+contact and four more), sixteen questions, each with the page that answers
+it: the system text averages 2 150 tokens with the choice and 4 163 with
+every page in full (−48%); the answering page is sent in full for 14 of
+16. The two misses are recorded in the bench, not tuned away: "voltage"
+where the page says "volts" (no stemming joins them), and "Where can I see
+your lamps in person?", whose only topic word is "lamps". The summaries
+still name both pages, so the model can point the visitor to them. The
+fixture's system text without a question (the summaries alone) is 1 822,
+budgeted as `large`.
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links

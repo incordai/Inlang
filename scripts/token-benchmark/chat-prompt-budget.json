@@ -10,6 +10,11 @@
       "prompt": { "o200k_base": 439, "cl100k_base": 439 },
       "context": { "o200k_base": 674, "cl100k_base": 676 },
       "system": { "o200k_base": 659, "cl100k_base": 665 }
+    },
+    "large": {
+      "prompt": { "o200k_base": 483, "cl100k_base": 484 },
+      "context": { "o200k_base": 9275, "cl100k_base": 9312 },
+      "system": { "o200k_base": 1822, "cl100k_base": 1852 }
     }
   }
 }

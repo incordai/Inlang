@@ -1,0 +1,413 @@
+az 1
+
+# The chat prompt budget's large fixture (docs/token-benchmark.md §8, chat-block-spec §19.17): a shop
+# of 40 pages whose chat shows faq, cta and feature, past the size where every page is sent in full.
+
+site bench
+  description "Bench makes small lamps by hand."
+  backend
+    database sqlite
+    model    default
+  chat float
+    title    "Ask about Bench"
+    greeting "Ask me about the lamps."
+    show     faq cta feature
+    allow    anyone
+
+page /
+  hero center
+    title "Bench lamps"
+    sub   "Small lamps, built by hand."
+    cta   "See the lamps" /lamps
+
+page /lamps
+  feature
+    title "Every lamp"
+    item "Desk lamp"
+      text "A brass desk lamp with a weighted base and a hinged arm."
+    item "Floor lamp"
+      text "A tall floor lamp in walnut for reading corners."
+    item "Pendant lamp"
+      text "A ceramic pendant for kitchens and dining tables."
+    item "Wall lamp"
+      text "A swing-arm wall lamp for bedsides and hallways."
+    item "Clip lamp"
+      text "A small clip lamp for shelves, bunks and easels."
+    item "Table lamp"
+      text "A stoneware table lamp with a pleated shade."
+    item "Lantern"
+      text "A rechargeable lantern for gardens and camping."
+    item "Light strip"
+      text "A dimmable light strip for shelves and cabinets."
+    item "Filament bulb"
+      text "A warm filament bulb that fits every Bench lamp."
+    item "Spare shades"
+      text "Linen, paper and pleated shades sold on their own."
+    item "Night light"
+      text "A soft night light for children's rooms with a timer."
+    item "Studio light"
+      text "A bright studio light for drawing and craft work."
+
+page /lamps/desk
+  hero center
+    title "Desk lamp"
+    sub   "A brass desk lamp with a weighted base and a hinged arm."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the desk lamp"
+    item "Brass arm"
+    item "Weighted base"
+    item "Warm light"
+    item "Dimmer switch"
+
+page /lamps/floor
+  hero center
+    title "Floor lamp"
+    sub   "A tall floor lamp in walnut for reading corners."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the floor lamp"
+    item "Walnut stem"
+    item "Linen shade"
+    item "Foot switch"
+    item "Two heights"
+
+page /lamps/pendant
+  hero center
+    title "Pendant lamp"
+    sub   "A ceramic pendant for kitchens and dining tables."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the pendant lamp"
+    item "Glazed ceramic"
+    item "Fabric cord"
+    item "Ceiling rose"
+    item "Three glazes"
+
+page /lamps/wall
+  hero center
+    title "Wall lamp"
+    sub   "A swing-arm wall lamp for bedsides and hallways."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the wall lamp"
+    item "Swing arm"
+    item "Plug-in cable"
+    item "Hardwire kit"
+    item "Matte black"
+
+page /lamps/clip
+  hero center
+    title "Clip lamp"
+    sub   "A small clip lamp for shelves, bunks and easels."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the clip lamp"
+    item "Spring clip"
+    item "Rubber jaws"
+    item "USB power"
+    item "Tilting head"
+
+page /lamps/table
+  hero center
+    title "Table lamp"
+    sub   "A stoneware table lamp with a pleated shade."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the table lamp"
+    item "Stoneware base"
+    item "Pleated shade"
+    item "Inline switch"
+    item "Five colours"
+
+page /lamps/lantern
+  hero center
+    title "Lantern"
+    sub   "A rechargeable lantern for gardens and camping."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the lantern"
+    item "Rechargeable"
+    item "Twelve hours"
+    item "Rain proof"
+    item "Carry handle"
+
+page /lamps/strip
+  hero center
+    title "Light strip"
+    sub   "A dimmable light strip for shelves and cabinets."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the light strip"
+    item "Cut to length"
+    item "Dimmable"
+    item "Adhesive back"
+    item "Low voltage"
+
+page /lamps/bulb
+  hero center
+    title "Filament bulb"
+    sub   "A warm filament bulb that fits every Bench lamp."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the filament bulb"
+    item "E27 screw"
+    item "2200 kelvin"
+    item "Ten years"
+    item "Dimmable"
+
+page /lamps/shade
+  hero center
+    title "Spare shades"
+    sub   "Linen, paper and pleated shades sold on their own."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the spare shades"
+    item "Linen"
+    item "Paper"
+    item "Pleated"
+    item "Made to fit"
+
+page /lamps/kids
+  hero center
+    title "Night light"
+    sub   "A soft night light for children's rooms with a timer."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the night light"
+    item "Soft glow"
+    item "Sleep timer"
+    item "Cool to touch"
+    item "Silicone body"
+
+page /lamps/studio
+  hero center
+    title "Studio light"
+    sub   "A bright studio light for drawing and craft work."
+    cta   "Ask about it" /contact
+  feature
+    title "Why the studio light"
+    item "Daylight bulb"
+    item "Clamp mount"
+    item "Magnifier"
+    item "Long arm"
+
+page /guides
+  feature
+    title "Guides"
+    item "Caring for brass"
+    item "Choosing a bulb"
+    item "Rewiring an old lamp"
+    item "Placing lights in a room"
+    item "Using lamps outdoors"
+    item "Dimmers and switches"
+    item "Saving energy"
+    item "Packing lamps to move"
+    item "Lamps and children"
+    item "Repairs and spare parts"
+
+page /guides/brass-care
+  text
+    title "Caring for brass"
+    body  "Brass darkens with time. Wipe it with a soft dry cloth each month. To bring back the shine, use a little brass polish on a cloth, never on the lamp, and buff it off. Do not use water near the switch or the socket."
+
+page /guides/choosing-bulbs
+  text
+    title "Choosing a bulb"
+    body  "Every Bench lamp takes an E27 bulb. Warm bulbs of 2200 to 2700 kelvin suit living rooms; 4000 kelvin suits desks and studios. Use a dimmable bulb with a dimmer switch, and keep within the wattage printed under the shade."
+
+page /guides/rewiring
+  text
+    title "Rewiring an old lamp"
+    body  "Unplug the lamp first. Take off the shade and the bulb, then the socket cover. Note which wire goes where before you undo them. Use a new cord of the same rating, and ask an electrician if you are unsure."
+
+page /guides/placing-lights
+  text
+    title "Placing lights in a room"
+    body  "Light a room in three layers: a ceiling or pendant light for the whole room, floor and table lamps for corners, and a task light where you read or work. Keep bulbs below eye level when you sit."
+
+page /guides/outdoor-use
+  text
+    title "Using lamps outdoors"
+    body  "Only the lantern is made for outdoor use. Keep every other lamp indoors and dry. Charge the lantern fully before its first use, and bring it inside in frost."
+
+page /guides/dimmers
+  text
+    title "Dimmers and switches"
+    body  "The desk lamp has a dimmer in its base. Other lamps work with a plug-in dimmer between the plug and the socket. Wall dimmers need a dimmable bulb and a compatible dimmer rated for low loads."
+
+page /guides/energy
+  text
+    title "Saving energy"
+    body  "A filament LED bulb uses about a tenth of the power of an old bulb and lasts ten years. Turn lamps off at the switch when you leave, and use the sleep timer on the night light."
+
+page /guides/moving-house
+  text
+    title "Packing lamps to move"
+    body  "Take the bulb and shade off, wrap the base in a towel and pack the shade on its own. Never pack a shade under heavy boxes. Keep the screws of a wall lamp in a bag taped to its arm."
+
+page /guides/kids-safety
+  text
+    title "Lamps and children"
+    body  "Keep cords out of reach and use the cord clips we send with every lamp. The night light stays cool to the touch. Do not leave a clip lamp on a bunk while a child sleeps."
+
+page /guides/repairs
+  text
+    title "Repairs and spare parts"
+    body  "We sell every part of every lamp: sockets, switches, cords, shades and bases. Write to us with a photo and the lamp's name, and we send the part or take the lamp in for repair."
+
+page /help/shipping
+  faq
+    title "Shipping"
+    item "Do you ship abroad?"
+      text "Yes, to most countries, in five to ten working days."
+    item "How much is shipping?"
+      text "Shipping is free over 80 dollars, and 6 dollars below."
+    item "Can I track my parcel?"
+      text "Yes, the email we send when it leaves has a tracking link."
+    item "Do you ship to post office boxes?"
+      text "Yes, except for floor lamps, which need a street address."
+    item "Can I change my address after ordering?"
+      text "Yes, until the parcel leaves; write to us with your order number."
+
+page /help/returns
+  faq
+    title "Returns"
+    item "Can I return a lamp?"
+      text "Yes, within 30 days, unused and in its box."
+    item "Who pays for returns?"
+      text "We do, with the label in the box."
+    item "When do I get my money back?"
+      text "Within five working days of the lamp reaching us."
+    item "Can I exchange a lamp for another?"
+      text "Yes, tell us which one and we send it when yours arrives."
+    item "Can I return a spare shade?"
+      text "Yes, like any lamp, within 30 days."
+
+page /help/warranty
+  faq
+    title "Warranty"
+    item "Is there a warranty?"
+      text "Every lamp has a two-year warranty."
+    item "What does the warranty cover?"
+      text "Faults in parts and wiring, not wear or damage."
+    item "Are bulbs under warranty?"
+      text "Bulbs have their own one-year warranty."
+    item "How do I claim?"
+      text "Write to us with a photo and your order number."
+    item "Can I extend the warranty?"
+      text "Yes, to five years, for 15 dollars a lamp."
+
+page /help/payments
+  faq
+    title "Payments"
+    item "Which cards do you take?"
+      text "Every major credit and debit card."
+    item "Can I pay later?"
+      text "Yes, in three parts with no fee."
+    item "Do you send invoices?"
+      text "Yes, every order email has its invoice."
+    item "Can I pay by bank transfer?"
+      text "Yes, for orders over 500 dollars."
+    item "Is my payment safe?"
+      text "Yes, we never see or keep your card number."
+
+page /help/trade
+  faq
+    title "Trade and bulk orders"
+    item "Do you sell to shops?"
+      text "Yes, write to us for the trade price list."
+    item "Is there a discount for many lamps?"
+      text "Ten percent off ten lamps or more."
+    item "Can you make a custom colour?"
+      text "Yes, for fifty lamps or more."
+    item "How long do bulk orders take?"
+      text "Four to six weeks."
+    item "Do you supply hotels?"
+      text "Yes, with hardwired wall and pendant lamps."
+
+page /help/gifts
+  faq
+    title "Gifts"
+    item "Do you sell gift cards?"
+      text "Yes, from 25 to 500 dollars."
+    item "Can you wrap a gift?"
+      text "Yes, in recycled paper, for 3 dollars."
+    item "Can I hide the price?"
+      text "Yes, gift orders carry no price."
+    item "Can I send a note?"
+      text "Yes, we print it on a card in the box."
+    item "Do gift cards expire?"
+      text "No, never."
+
+page /help/account
+  faq
+    title "Your account"
+    item "Do I need an account to order?"
+      text "No, you can order as a guest."
+    item "How do I reset my password?"
+      text "Use the link on the sign-in page."
+    item "Can I see my old orders?"
+      text "Yes, on your account page."
+    item "How do I delete my account?"
+      text "Write to us and we delete it within a week."
+    item "Do you send newsletters?"
+      text "Only if you ask for them, once a month."
+
+page /help/electrics
+  faq
+    title "Plugs and electrics"
+    item "Which plug does my lamp have?"
+      text "The plug of the country you order from."
+    item "Can I use a lamp abroad?"
+      text "Yes, with a plug adapter; every lamp takes 100 to 240 volts."
+    item "Can a wall lamp be hardwired?"
+      text "Yes, with the hardwire kit, by an electrician."
+    item "What cable length do lamps have?"
+      text "Two metres, and three for the floor lamp."
+    item "Are your lamps certified?"
+      text "Yes, every lamp is tested and certified."
+
+page /pricing
+  pricing cards
+    title    "Care plans"
+    currency usd
+    plan "Basic"
+      monthly 3
+      annual  30
+      cta     "Start" /contact
+    plan "Plus"
+      monthly 6
+      annual  60
+      cta     "Start" /contact
+
+page /about
+  text
+    title "About Bench"
+    body  "Bench is a workshop of six people in an old mill. We have made lamps since 2014, by hand, from brass, walnut and stoneware."
+
+page /contact
+  hero center
+    title "Write to us"
+    sub   "We answer within a working day."
+    cta   "Email us" mailto:hello@bench.example
+
+page /stores
+  text
+    title "Where to see our lamps"
+    body  "Our lamps are on show in our workshop in the old mill, open Saturdays from ten to four, and in twelve shops we list on request."
+
+page /careers
+  text
+    title "Work with us"
+    body  "We hire a maker each spring. Write to us with photos of things you have made."
+
+page /press
+  text
+    title "Press"
+    body  "Photos and the story of the workshop are free to use with credit. Write to us for samples."
+
+page /sustainability
+  text
+    title "Materials and waste"
+    body  "Our brass is recycled, our walnut comes from fallen trees and our boxes are paper only. We repair rather than replace."

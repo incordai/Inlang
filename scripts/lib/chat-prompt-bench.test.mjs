@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAT_PROMPT_FIXTURES, CHAT_PROMPT_TEXTS, measureChatPrompts, overBudget, readBudget, underBudget } from './chat-prompt-bench.mjs';
+import { CHAT_LARGE_QUESTIONS, CHAT_PROMPT_FIXTURES, CHAT_PROMPT_TEXTS, measureChatPrompts, measureSelection, overBudget, readBudget, underBudget } from './chat-prompt-bench.mjs';
 import { ENCODINGS, loadCounters } from './token-bench.mjs';
 
 /** Both fixtures built and counted once, for every test below. */
@@ -37,4 +37,14 @@ test('a count past its budget, or one the budget does not name, is reported; one
 test('the faq-only chat is told less than the chat that shows every component', async () => {
   const m = await measure();
   for (const e of ENCODINGS) assert.ok(m.faq.prompt.tokens[e] < m.all.prompt.tokens[e], e);
+});
+
+test('the large fixture (chat-block-spec §19.17): a question is sent the pages it needs, at well under the whole site\'s cost', async () => {
+  const { counters } = await loadCounters();
+  const s = measureSelection(counters);
+  assert.equal(s.questions, CHAT_LARGE_QUESTIONS.length);
+  for (const e of ENCODINGS) assert.ok(s.average.chosen[e] < s.average.whole[e] * 0.6, `${e}: ${s.average.chosen[e]} against ${s.average.whole[e]}`);
+  // The recorded bar: the page that answers is sent in full for 14 of the 16 questions (the two misses are a word the
+  // page spells otherwise, "voltage" for "volts", and a question of stop words and "person").
+  assert.ok(s.missed.length <= 2, s.missed.join(' · '));
 });

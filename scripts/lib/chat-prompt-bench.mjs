@@ -1,10 +1,13 @@
 /**
  * The token benchmark's chat-prompt budget (docs/token-benchmark.md §8): what
- * a chat model is sent besides the conversation, for two fixture sites —
- * one chat that may show every component (`scripts/token-benchmark/chat-all.az`)
- * and the same site whose chat shows `faq` only (`chat-faq.az`) — counted
- * with the benchmark's own tokenizers and held to the budget recorded in
- * `scripts/token-benchmark/chat-prompt-budget.json`.
+ * a chat model is sent besides the conversation, for three fixture sites —
+ * one chat that may show every component (`scripts/token-benchmark/chat-all.az`),
+ * the same site whose chat shows `faq` only (`chat-faq.az`), and a site of
+ * forty pages past the size where every page is sent in full (`chat-large.az`,
+ * chat-block-spec §19.17) — counted with the benchmark's own tokenizers and
+ * held to the budget recorded in `scripts/token-benchmark/chat-prompt-budget.json`.
+ * For the large site, measureSelection also counts what its questions are
+ * sent with the pages chosen and with the site whole.
  *
  * Three texts per fixture:
  *
@@ -40,6 +43,29 @@ export const BUDGET_FILE = join(ROOT, BUDGET_PATH);
 export const CHAT_PROMPT_FIXTURES = [
   { name: 'all', file: 'scripts/token-benchmark/chat-all.az', page: '/' },
   { name: 'faq', file: 'scripts/token-benchmark/chat-faq.az', page: '/' },
+  // Forty pages, past the size where every page is sent in full (chat-block-spec §19.17): its system text is
+  // the summaries and the visitor's own page; the questions below measure what each question adds.
+  { name: 'large', file: 'scripts/token-benchmark/chat-large.az', page: '/' },
+];
+
+/** The large fixture's questions, each with the page whose content answers it (chat-block-spec §19.17). */
+export const CHAT_LARGE_QUESTIONS = [
+  { ask: 'How do I clean the brass on my desk lamp?', page: '/guides/brass-care' },
+  { ask: 'Which bulb should I buy for a reading lamp?', page: '/guides/choosing-bulbs' },
+  { ask: 'Can I rewire my grandmother\'s old lamp?', page: '/guides/rewiring' },
+  { ask: 'Can I leave the lantern outside in the garden?', page: '/guides/outdoor-use' },
+  { ask: 'Do you ship abroad?', page: '/help/shipping' },
+  { ask: 'How long do I have to return a lamp?', page: '/help/returns' },
+  { ask: 'Does the warranty cover the bulb?', page: '/help/warranty' },
+  { ask: 'Can I pay by bank transfer?', page: '/help/payments' },
+  { ask: 'Is there a discount if I buy twenty lamps for my hotel?', page: '/help/trade' },
+  { ask: 'Do gift cards expire?', page: '/help/gifts' },
+  { ask: 'How do I reset my password?', page: '/help/account' },
+  { ask: 'Will my lamp work with the voltage abroad?', page: '/help/electrics' },
+  { ask: 'Tell me about the pendant lamp for my kitchen', page: '/lamps/pendant' },
+  { ask: 'Is the night light safe for a child\'s room?', page: '/lamps/kids' },
+  { ask: 'How much is the care plan?', page: '/pricing' },
+  { ask: 'Where can I see your lamps in person?', page: '/stores' },
 ];
 
 /** The texts measured per fixture, in table order. */
@@ -53,7 +79,7 @@ export function promptFileOf(files, context, page) {
   return f.content;
 }
 
-/** One fixture built in a fresh directory (its data lock recorded first): its chat's three texts. */
+/** One fixture built in a fresh directory (its data lock recorded first): its chat's three texts, and the context the server reads. */
 export function chatPromptTexts(fixture) {
   const dir = mkdtempSync(join(tmpdir(), 'az-chat-prompt-bench-'));
   try {
@@ -69,7 +95,7 @@ export function chatPromptTexts(fixture) {
     const context = parseChatContext(contextFile.content);
     if (typeof context === 'string') throw new Error(`${fixture.file}: context.json ${context}`);
     const prompt = promptFileOf(outcome.files, context, fixture.page);
-    return { prompt, context: contextFile.content, system: systemText(prompt, context, fixture.page) };
+    return { prompt, context: contextFile.content, system: systemText(prompt, context, fixture.page), parsed: context };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -88,6 +114,33 @@ export function measureChatPrompts(counters) {
     }
   }
   return out;
+}
+
+/**
+ * The large fixture's questions (CHAT_LARGE_QUESTIONS): each one's system
+ * text with the pages it needs chosen, and with every page in full, counted
+ * per encoding, their averages, and the questions whose page was not among
+ * those chosen — an answer-quality check: the content that answers must be
+ * sent (chat-block-spec §19.17).
+ */
+export function measureSelection(counters) {
+  const fixture = CHAT_PROMPT_FIXTURES.find((f) => f.name === 'large');
+  const { prompt, parsed } = chatPromptTexts(fixture);
+  const average = { chosen: {}, whole: {} };
+  const missed = [];
+  for (const [enc, fn] of Object.entries(counters)) {
+    let chosen = 0;
+    let whole = 0;
+    for (const q of CHAT_LARGE_QUESTIONS) {
+      const text = systemText(prompt, parsed, fixture.page, '', [], false, [q.ask]);
+      chosen += fn(text);
+      whole += fn(systemText(prompt, parsed, fixture.page, '', [], false, [q.ask], false));
+      if (enc === Object.keys(counters)[0] && !text.includes(`\n${parsed.outline.pages.find((p) => p.route === q.page).full}\n`)) missed.push(q.ask);
+    }
+    average.chosen[enc] = Math.round(chosen / CHAT_LARGE_QUESTIONS.length);
+    average.whole[enc] = Math.round(whole / CHAT_LARGE_QUESTIONS.length);
+  }
+  return { questions: CHAT_LARGE_QUESTIONS.length, average, missed };
 }
 
 /** The budget file, read. */
