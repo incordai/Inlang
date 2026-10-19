@@ -63,7 +63,8 @@ function themeHolders(code: string): string[] {
   const names = new Set<string>();
   for (const m of code.matchAll(new RegExp(`\\b(?:const|let|var)\\s+(${IDENT})\\s*=\\s*ctx\\.theme\\b(?!\\s*\\.)`, 'g'))) names.add(m[1]);
   for (const m of code.matchAll(new RegExp(`(${IDENT})\\s*\\??\\s*:\\s*(?:Readonly<\\s*)?ThemeLike\\b`, 'g'))) names.add(m[1]);
-  return ['ctx\\.theme', ...[...names].map((n) => n.replace(/\$/g, '\\$'))];
+  // Every pattern character escaped, not only the `$` an identifier can hold.
+  return ['ctx\\.theme', ...[...names].map((n) => n.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&'))];
 }
 
 /** Every token path one source file reads, each with its first position, sorted by path. */

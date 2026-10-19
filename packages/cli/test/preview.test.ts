@@ -101,7 +101,7 @@ test('the banner escapes diagnostic text — it quotes the author', () => {
   assert.doesNotMatch(html, /<img/, 'no author markup reaches the page');
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   const banner = bannerHtml([{ code: 'AZ1', message: '</aside><script>x</script>', pos: { line: 1, col: 1 }, severity: 'error' }], 'a"b.az', 2);
-  assert.doesNotMatch(banner, /<script|<\/aside><|a"b/);
+  assert.doesNotMatch(banner, /<script|<\/aside><|a"b/i);
 });
 
 test('a complete file builds byte-identically with or without preview, and carries no banner', () => {

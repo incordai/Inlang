@@ -68,14 +68,14 @@ test('hero full: its actions draw in the scrim\'s ink — outline, text link and
   const [, secondary] = actionsOf('full');
   // Page ink on the scrim was the scrim's own colour: invisible (1:1).
   assert.equal(secondary.style?.color, T.color['on-scrim']);
-  assert.match(String(secondary.style?.border), new RegExp(T.color['on-scrim'].replace(/[()]/g, '\\$&')));
+  assert.ok(String(secondary.style?.border).includes(T.color['on-scrim']), String(secondary.style?.border));
   assert.equal(secondary.below?.xs?.color, T.color['on-scrim'], 'below xs it is a text link — on-scrim, not accent');
-  assert.match(String(secondary.states?.focusVisible?.outline), new RegExp(T.color['on-scrim'].replace(/[()]/g, '\\$&')));
+  assert.ok(String(secondary.states?.focusVisible?.outline).includes(T.color['on-scrim']), String(secondary.states?.focusVisible?.outline));
 });
 
 test('CONTROL: on the page the secondary keeps page ink, the link accent, the ring focus', () => {
   const [, secondary] = actionsOf('center');
   assert.equal(secondary.style?.color, T.color.text);
   assert.equal(secondary.below?.xs?.color, T.color.accent);
-  assert.match(String(secondary.states?.focusVisible?.outline), new RegExp(T.color.focus.replace(/[()]/g, '\\$&')));
+  assert.ok(String(secondary.states?.focusVisible?.outline).includes(T.color.focus), String(secondary.states?.focusVisible?.outline));
 });

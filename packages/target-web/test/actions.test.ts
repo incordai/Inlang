@@ -80,8 +80,8 @@ test('§1.5: all six states, a 44px target, and no transform anywhere', () => {
 test('§3 of cta: on the accent band the ring is drawn in accent-contrast', () => {
   const page = action(fill('cta', 'X', { kind: 'route', value: '/x' }));
   const band = action(fill('cta', 'X', { kind: 'route', value: '/x' }), { tone: 'inverted' });
-  assert.match(String(page.states?.focusVisible?.outline), new RegExp(T.color.focus.replace(/[()]/g, '\\$&')));
-  assert.match(String(band.states?.focusVisible?.outline), new RegExp(T.color['accent-contrast'].replace(/[()]/g, '\\$&')));
+  assert.ok(String(page.states?.focusVisible?.outline).includes(T.color.focus), String(page.states?.focusVisible?.outline));
+  assert.ok(String(band.states?.focusVisible?.outline).includes(T.color['accent-contrast']), String(band.states?.focusVisible?.outline));
   assert.equal(band.style?.background, T.color['accent-contrast']);
   assert.equal(band.style?.color, T.color.accent);
 });
@@ -171,7 +171,7 @@ test('a pair: the primary is the gradient over the solid accent, labelled on-gra
   assert.equal(a.style?.border, '1px solid transparent');
   assert.deepEqual(a.states?.hover, { backgroundColor: T.color['accent-hover'], backgroundImage: 'var(--gh)' });
   assert.deepEqual(a.states?.active, a.states?.hover);
-  assert.match(String(a.states?.focusVisible?.outline), new RegExp(T.color.focus.replace(/[()]/g, '\\$&')), 'the ring is the theme focus, offset onto the ground');
+  assert.ok(String(a.states?.focusVisible?.outline).includes(T.color.focus), 'the ring is the theme focus, offset onto the ground');
   assert.equal(a.states?.disabled?.background, T.color['surface-alt'], 'disabled resets the whole background — no gradient');
   assert.doesNotMatch(JSON.stringify(a), /transform|animation|transition/, 'nothing moves');
 });

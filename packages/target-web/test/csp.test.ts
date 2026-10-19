@@ -77,7 +77,7 @@ test('style attributes: allowed by hash only, with unsafe-hashes — decoded as 
   assert.match(pagePolicy(PLAIN, page('<p>no styles</p>'), {}), /style-src 'self'; /, 'CONTROL: no attribute, no unsafe-hashes');
   const sheet = page('<style>.a{color:red}</style>');
   assert.deepEqual(inlineStyles(sheet), ['.a{color:red}']);
-  assert.match(pagePolicy(PLAIN, sheet, {}), new RegExp(`style-src 'self' ${digest('.a{color:red}').replace(/[+/]/g, '\\$&')}; `),
+  assert.ok(pagePolicy(PLAIN, sheet, {}).includes(`style-src 'self' ${digest('.a{color:red}')}; `),
     'an inline sheet needs its hash, not unsafe-hashes');
 });
 
