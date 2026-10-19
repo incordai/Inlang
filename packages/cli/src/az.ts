@@ -1003,11 +1003,16 @@ function runEject(word: string, projectDir: string | undefined): number {
 
 /** `az migrate`: rewrites the file only when a migration step changed it. */
 function runMigrate(file: string): number {
-  if (!existsSync(file)) {
+  // Read, not checked first: a file that goes between a check and the read is missing, never a crash.
+  let source: string;
+  try {
+    source = readFileSync(file, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
     process.stderr.write(`az: ${file} does not exist — try: az migrate site.az\n`);
     return EXIT.missing;
   }
-  const result = migrate(readFileSync(file, 'utf8'));
+  const result = migrate(source);
   if (!result.ok) {
     process.stderr.write(`az: ${file}: ${result.message}\n`);
     return EXIT.missing;

@@ -19,7 +19,7 @@
 
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync, copyFileSync } from 'node:fs';
-import { writeProblem } from './output.ts';
+import { writeOnce, writeProblem } from './output.ts';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Manifest } from '../../core/src/index.ts';
@@ -200,14 +200,15 @@ export function eject(word: string, projectDir: string, bundledDir: string = BUN
   }
   // The contract copies are shared by every ejected word and never replaced:
   // after the first eject they are the project's, like the words.
+  // Created only where nothing is (writeOnce): one already there — or a link
+  // in its place — is left as it is, never replaced or written through.
   for (const f of CONTRACT_FILES) {
     const to = join(words, SHIM_DIR, f);
-    if (existsSync(to)) continue;
     mkdirSync(dirname(to), { recursive: true });
-    writeFileSync(to,
+    const created = writeOnce(to,
       `/* Copied from az's core by \`az eject\`: the contract ejected words build against.\n`
-      + `   Yours now — az does not update it. */\n` + readFileSync(join(CORE_SRC, f), 'utf8'), 'utf8');
-    written.push(relative(projectDir, to));
+      + `   Yours now — az does not update it. */\n` + readFileSync(join(CORE_SRC, f), 'utf8'));
+    if (created) written.push(relative(projectDir, to));
   }
   return { ok: true, target, files: written };
 }

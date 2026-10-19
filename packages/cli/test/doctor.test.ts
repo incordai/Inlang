@@ -300,7 +300,7 @@ test('assets: a file named twice keeps its tightest budget', async () => {
   assert.equal(r.fix!.length, 1);
 });
 
-test('SECURITY: a named pipe where a file is read is refused, never opened — the run still ends', async () => {
+test('SECURITY: a named pipe where a file is read is refused, never read — the run still ends', async () => {
   const p = project(BACKEND(), SERVER);
   const fifo = spawnSync('mkfifo', [join(p.out, '.env'), join(p.out, 'server/.env')]);
   assert.equal(fifo.status, 0, String(fifo.stderr));

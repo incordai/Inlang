@@ -30,8 +30,9 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fchmodSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { writeOnce } from './output.ts';
 import { randomBytes } from 'node:crypto';
 import { createApp, type ChatRoutes, type DataRoutes } from '../../backend/src/server/app.ts';
 import { createAdapter } from '../../backend/src/server/chat-adapters.ts';
@@ -69,17 +70,32 @@ export function assertLoopback(host: string): void {
 export function devDir(projectDir: string): string {
   const dir = join(projectDir, DEV_DIR);
   mkdirSync(dir, { recursive: true });
-  const ignore = join(dir, '.gitignore');
-  if (!existsSync(ignore)) writeFileSync(ignore, '# az dev state — never commit\n*\n', 'utf8');
+  writeOnce(join(dir, '.gitignore'), '# az dev state — never commit\n*\n');
   return dir;
 }
 
-/** The project's dev session secret: generated once, readable by its owner only. */
+/**
+ * The project's dev session secret: generated once, readable by its owner
+ * only. Created exclusively and read through a handle that refuses a link,
+ * so a link put where the secret goes is neither written through nor read.
+ */
 export function devSecret(dir: string): string {
   const file = join(dir, 'secret');
-  if (!existsSync(file)) writeFileSync(file, `${randomBytes(32).toString('base64url')}\n`, { encoding: 'utf8', mode: 0o600 });
-  chmodSync(file, 0o600);
-  return readFileSync(file, 'utf8').trim();
+  writeOnce(file, `${randomBytes(32).toString('base64url')}\n`, 0o600);
+  let fd: number;
+  try {
+    // O_NOFOLLOW is POSIX; where it is missing, so are the links it refuses.
+    fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ELOOP') throw new Error(`${file} is a symbolic link — remove it, and az dev writes a new secret`);
+    throw e;
+  }
+  try {
+    fchmodSync(fd, 0o600);
+    return readFileSync(fd, 'utf8').trim();
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** `KEY=value` lines of an optional env file; comments and blanks ignored. */
@@ -280,7 +296,7 @@ export const CHAT_DEMO = {
 /** `.az-dev/chat-demo.json`, written once, so a developer may edit the script. */
 export function chatDemoFile(dir: string): string {
   const file = join(dir, 'chat-demo.json');
-  if (!existsSync(file)) writeFileSync(file, `${JSON.stringify(CHAT_DEMO, null, 2)}\n`, 'utf8');
+  writeOnce(file, `${JSON.stringify(CHAT_DEMO, null, 2)}\n`);
   return file;
 }
 

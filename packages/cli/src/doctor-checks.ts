@@ -20,7 +20,8 @@
  * file installs or writes anything.
  */
 
-import { open, readFile, realpath, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
@@ -34,19 +35,11 @@ import { DISK_CHECK, PROXY_CHECK } from './doctor-system.ts';
 import { lockPath } from './data-schema.ts';
 import type { CompileJob } from './doctor-compile.ts';
 import { ENCODER, type ProbeJob } from './images.ts';
+import { readRegular } from './shipped.ts';
 import {
   CHILD_MS, report, runChecks, runWorker, shellQuote,
   type Check, type CheckResult, type Compiled, type DoctorContext, type DoctorReport, type Probe, type RunResult,
 } from './doctor.ts';
-
-/**
- * A file's text, or null when it is missing or not a regular file: a named
- * pipe would block the read with no end, so it is never opened.
- */
-async function readRegular(path: string): Promise<string | null> {
-  const s = await stat(path).catch(() => null);
-  return s?.isFile() ? readFile(path, 'utf8') : null;
-}
 
 const KB = 1024;
 const MB = 1024 * KB;
@@ -723,20 +716,37 @@ const backendEnv: Check = {
         : { status: 'skip', line: 'backend .env: the site has no backend' };
     }
     const file = join(server, '.env');
-    const s = await stat(file).catch(() => null);
-    if (!s) {
+    // One handle for the type, the mode and the text, opened without
+    // blocking: nothing put in the file's place after a check is read, and a
+    // named pipe never blocks the run. O_NONBLOCK is POSIX; Windows has no such pipes.
+    const notRegular = { status: 'fail', line: `backend .env: ${shown(ctx, file)} is not a regular file`, fix: [`replace it with a file: az backend init ${q(ctx, server)}`] } as const;
+    let fh;
+    try {
+      fh = await open(file, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      // Windows refuses to open a folder; POSIX opens it and the handle says what it is.
+      if (code === 'EISDIR') return notRegular;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw e;
       return { status: 'warn', line: `backend .env: ${shown(ctx, file)} is missing — the server won't start (az dev needs none)`, fix: [`run: az backend init ${q(ctx, server)}`] };
     }
-    if (!s.isFile()) return { status: 'fail', line: `backend .env: ${shown(ctx, file)} is not a regular file`, fix: [`replace it with a file: az backend init ${q(ctx, server)}`] };
-    // backend-spec §4: owner read/write only. Windows has no such mode bits.
-    if (ctx.probe.platform !== 'win32' && (s.mode & 0o077) !== 0) {
-      return {
-        status: 'fail',
-        line: `backend .env: ${shown(ctx, file)} is readable by others (mode ${(s.mode & 0o777).toString(8)}) — it holds the server's secrets`,
-        fix: [`run: chmod 600 ${q(ctx, file)}`],
-      };
+    let text: string;
+    try {
+      const s = await fh.stat();
+      if (!s.isFile()) return notRegular;
+      // backend-spec §4: owner read/write only. Windows has no such mode bits.
+      if (ctx.probe.platform !== 'win32' && (s.mode & 0o077) !== 0) {
+        return {
+          status: 'fail',
+          line: `backend .env: ${shown(ctx, file)} is readable by others (mode ${(s.mode & 0o777).toString(8)}) — it holds the server's secrets`,
+          fix: [`run: chmod 600 ${q(ctx, file)}`],
+        };
+      }
+      text = await fh.readFile('utf8');
+    } finally {
+      await fh.close();
     }
-    const refused = refusedKeys(setup, parseEnv(await readFile(file, 'utf8')) as Record<string, string>);
+    const refused = refusedKeys(setup, parseEnv(text) as Record<string, string>);
     if (refused.length > 0) {
       return {
         status: 'fail',

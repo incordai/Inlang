@@ -17,7 +17,7 @@
  * secret.
  */
 
-import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { closeSync, existsSync, fchmodSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { envFile } from '../../backend/src/emit.ts';
 
@@ -50,14 +50,25 @@ export function initBackendEnv(dir: string): BackendInitResult {
     return { ok: false, kind: 'missing', message: `no az.config.json in ${dir} — point at the server/ folder az build wrote` };
   }
   const target = join(dir, '.env');
-  if (existsSync(target)) {
-    return { ok: false, kind: 'exists', message: `${target} already exists — not overwritten (a new secret would sign everyone out)` };
-  }
   const setup = readSetup(configFile);
   if (!setup) {
     return { ok: false, kind: 'missing', message: `${configFile} is not a config az wrote — rebuild the site to regenerate server/` };
   }
-  writeFileSync(target, envFile(setup), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  chmodSync(target, 0o600);
+  // Created exclusively, in one step: an .env already there — or a link
+  // where it would go — is never replaced or written through, and nothing
+  // can appear between a check and the write.
+  let fd: number;
+  try {
+    fd = openSync(target, 'wx', 0o600);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    return { ok: false, kind: 'exists', message: `${target} already exists — not overwritten (a new secret would sign everyone out)` };
+  }
+  try {
+    fchmodSync(fd, 0o600);
+    writeFileSync(fd, envFile(setup), 'utf8');
+  } finally {
+    closeSync(fd);
+  }
   return { ok: true, path: target };
 }

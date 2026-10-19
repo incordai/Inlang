@@ -2,7 +2,7 @@
  * @az module output
  * Purpose: writes a build into its folder safely: generated-file manifest, stale removal, symlink refusal.
  * Spec: docs/ARCHITECTURE.md §7
- * Exports: writeOutput, writeProblem, MANIFEST
+ * Exports: writeOutput, writeProblem, writeOnce, MANIFEST
  * Edit guide: never overwrite or delete a file az did not generate.
  * Tests: packages/cli/test/hardening.test.ts
  */
@@ -24,7 +24,7 @@
  */
 
 import {
-  copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync,
+  closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmdirSync,
   unlinkSync, writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
@@ -88,6 +88,28 @@ export function writeProblem(root: string, rel: string): string | null {
   return null;
 }
 
+/**
+ * Create `file` with `text` only when nothing is at that path, in one step:
+ * the exclusive create (`wx`) is the check, so nothing can appear between a
+ * check and the write, and a link at the path — even one pointing nowhere —
+ * is never written through. False when something was already there.
+ */
+export function writeOnce(file: string, text: string, mode = 0o666): boolean {
+  let fd: number;
+  try {
+    fd = openSync(file, 'wx', mode);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw e;
+  }
+  try {
+    writeFileSync(fd, text, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+  return true;
+}
+
 function isSymlink(path: string): boolean {
   try {
     return lstatSync(path).isSymbolicLink();
@@ -96,8 +118,19 @@ function isSymlink(path: string): boolean {
   }
 }
 
-const sameBytes = (target: string, file: Planned): boolean => {
-  const now = readFileSync(target);
+/**
+ * Whether `target` already holds exactly `file`'s bytes; null when nothing
+ * is there. Read, not checked first: a file that goes between a check and
+ * the read is "nothing there", never a crash.
+ */
+const sameBytes = (target: string, file: Planned): boolean | null => {
+  let now: Buffer;
+  try {
+    now = readFileSync(target);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw e;
+  }
   return 'content' in file ? now.equals(Buffer.from(file.content, 'utf8')) : now.equals(readFileSync(file.copyFrom));
 };
 
@@ -125,7 +158,7 @@ export function writeOutput(outDir: string, files: readonly Planned[]): WriteRes
     const reason = writeProblem(root, file.path);
     if (reason) { problems.push(`output: ${reason}`); continue; }
     const target = join(root, file.path);
-    if (existsSync(target) && !owned(file.path) && !sameBytes(target, file)) {
+    if (!owned(file.path) && sameBytes(target, file) === false) {
       problems.push(`output: '${file.path}' exists and az did not generate it — build into an empty folder, or move it`);
     }
   }
@@ -134,7 +167,7 @@ export function writeOutput(outDir: string, files: readonly Planned[]): WriteRes
   let written = 0;
   for (const file of files) {
     const target = join(root, file.path);
-    if (existsSync(target) && sameBytes(target, file)) continue;
+    if (sameBytes(target, file) === true) continue;
     mkdirSync(dirname(target), { recursive: true });
     if ('content' in file) writeFileSync(target, file.content, 'utf8');
     else copyFileSync(file.copyFrom, target);

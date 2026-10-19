@@ -22,7 +22,8 @@
  * dense by nature.
  */
 
-import { lstat, readdir, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, readdir, realpath, rm } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, sep } from 'node:path';
 
 /** A shipped file larger than this is not read: it is reported as unscanned instead. */
@@ -68,10 +69,37 @@ export interface ShippedHit<F> {
 /** A real folder, not a link to one: a walk that starts through a link could read outside the build. */
 const isRealDir = (path: string) => lstat(path).then((s) => s.isDirectory(), () => false);
 
+/** Why an open finds no file to read: nothing there, a path through a non-folder, a folder, or a link it may not follow. */
+const NO_FILE = new Set(['ENOENT', 'ENOTDIR', 'EISDIR', 'ELOOP']);
+
+/**
+ * A regular file's text through one handle, or null when there is none at
+ * `path` or it is larger than `maxBytes`. Opened without blocking and judged
+ * on the handle itself, never by a check before the open: a named pipe would
+ * block the read with no end, and one put in the file's place after a check
+ * would still be read. `flags` adds open flags (O_NOFOLLOW for a walk).
+ * O_NONBLOCK and O_NOFOLLOW are POSIX; where they are missing, so are the
+ * pipes and links they guard against.
+ */
+async function readThroughHandle(path: string, flags: number, maxBytes: number): Promise<string | null> {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | flags);
+  } catch (e) {
+    if (NO_FILE.has((e as NodeJS.ErrnoException).code ?? '')) return null;
+    throw e;
+  }
+  try {
+    const s = await handle.stat();
+    return s.isFile() && s.size <= maxBytes ? await handle.readFile('utf8') : null;
+  } finally {
+    await handle.close();
+  }
+}
+
 /** A file's text, or null when it is missing or not a regular file (a named pipe would block the read). */
-export async function readRegular(path: string): Promise<string | null> {
-  const s = await stat(path).catch(() => null);
-  return s?.isFile() ? readFile(path, 'utf8') : null;
+export function readRegular(path: string): Promise<string | null> {
+  return readThroughHandle(path, 0, Number.POSITIVE_INFINITY);
 }
 
 /**
@@ -105,12 +133,14 @@ export async function walkShipped(dir: string, base: string = dir): Promise<Ship
       }
       names.push(rel);
       if (BINARY.has(extname(e.name).toLowerCase())) continue;
-      const s = await stat(path);
-      if (s.size > FILE_MAX_BYTES) {
+      // The entry was a file when listed; read through a handle that is one
+      // still — not a link or a pipe put in its place since — or it is unread.
+      const text = await readThroughHandle(path, constants.O_NOFOLLOW ?? 0, FILE_MAX_BYTES);
+      if (text === null) {
         unread.push(rel);
         continue;
       }
-      files.push({ path: rel, text: await readFile(path, 'utf8') });
+      files.push({ path: rel, text });
     }
   }
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));

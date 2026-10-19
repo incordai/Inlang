@@ -3,7 +3,7 @@
  * the input that broke it and a control that must keep working.
  */
 
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
@@ -19,6 +19,7 @@ import { serve } from '../src/serve.ts';
 import { initBackendEnv } from '../src/backend-init.ts';
 import { eject } from '../src/words.ts';
 import { MANIFEST, writeProblem } from '../src/output.ts';
+import { chatDemoFile, devDir, devSecret } from '../src/dev-backend.ts';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WORDS = join(ROOT, 'packages/words');
@@ -217,4 +218,70 @@ test('CLI commands on bad paths answer with a message, not a stack trace', () =>
     assert.notEqual(r.status, 0, args.join(' '));
     assert.doesNotMatch(r.stderr, /\n\s+at /, `${args.join(' ')} printed a stack trace:\n${r.stderr}`);
   }
+});
+
+/* ---- a file az creates once is created in one step, never through a link -- */
+
+/**
+ * A link at each of `at` to a path outside that does not exist yet — the
+ * shape a check-then-write follows, since the check sees no file there —
+ * or null where links need a privilege this account lacks.
+ */
+function danglingLinks(t: TestContext, at: readonly string[]): string[] | null {
+  const outside = mkdtempSync(join(tmpdir(), 'az-outside-'));
+  const targets: string[] = [];
+  for (const [i, link] of at.entries()) {
+    const target = join(outside, `planted-${i}`);
+    try {
+      symlinkSync(target, link);
+    } catch (e) {
+      // Creating symlinks needs a privilege some Windows accounts lack; without
+      // one the attack this test models cannot be set up either.
+      if ((e as NodeJS.ErrnoException).code === 'EPERM') { t.skip('symlinks not permitted here'); return null; }
+      throw e;
+    }
+    targets.push(target);
+  }
+  return targets;
+}
+
+test('SECURITY: az dev never writes its state through a link — .gitignore, the session secret, the chat script', (t) => {
+  const project = mkdtempSync(join(tmpdir(), 'az-devlink-'));
+  const dir = join(project, '.az-dev');
+  mkdirSync(dir);
+  const planted = danglingLinks(t, ['.gitignore', 'secret', 'chat-demo.json'].map((f) => join(dir, f)));
+  if (!planted) return;
+  devDir(project);
+  assert.throws(() => devSecret(dir), process.platform === 'win32' ? Error : /is a symbolic link/);
+  chatDemoFile(dir);
+  for (const target of planted) assert.ok(!existsSync(target), `${target} was written through a link`);
+  const fresh = devDir(mkdtempSync(join(tmpdir(), 'az-devlink-')));
+  assert.equal(devSecret(fresh), devSecret(fresh), 'CONTROL: without a link the secret is written once and read back');
+  assert.ok(existsSync(join(fresh, '.gitignore')) && existsSync(chatDemoFile(fresh)), 'CONTROL: and the other two are written');
+});
+
+test('SECURITY: backend init never writes .env through a link, and says it exists instead of throwing', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'az-server-'));
+  writeFileSync(join(dir, 'az.config.json'), JSON.stringify({ database: 'sqlite', email: 'smtp' }));
+  const planted = danglingLinks(t, [join(dir, '.env')]);
+  if (!planted) return;
+  const r = initBackendEnv(dir);
+  assert.equal(r.ok, false);
+  assert.equal(r.ok ? '' : r.kind, 'exists');
+  assert.ok(!existsSync(planted[0]), 'the secret was written through a link');
+  const fresh = mkdtempSync(join(tmpdir(), 'az-server-'));
+  writeFileSync(join(fresh, 'az.config.json'), JSON.stringify({ database: 'sqlite', email: 'smtp' }));
+  assert.equal(initBackendEnv(fresh).ok, true, 'CONTROL: without a link it is written');
+});
+
+test('SECURITY: eject never writes the contract copies through a link in words/_az', (t) => {
+  const p = project('az 1\nsite aurora\npage /\n  hero center\n    title "x"\n');
+  mkdirSync(join(p.dir, 'words/_az'), { recursive: true });
+  const planted = danglingLinks(t, [join(p.dir, 'words/_az/emit-contract.ts')]);
+  if (!planted) return;
+  const r = eject('hero', p.dir, WORDS);
+  assert.ok(r.ok, r.ok ? '' : r.message);
+  assert.ok(!existsSync(planted[0]), 'the contract was written through a link');
+  assert.ok(!r.files.includes(join('words', '_az', 'emit-contract.ts')), 'the link is not reported as written');
+  assert.ok(r.files.includes(join('words', '_az', 'spec-block.ts')), 'CONTROL: the other contract file is written');
 });
