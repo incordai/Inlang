@@ -29,7 +29,7 @@ which the owner may overrule.
 | 10 | **Spline** | **AUTHOR-SIDE TOOL, asset export only** | the runtime embed is a network call in the visitor's page; the GLB export is fine and the free tier exports geometry only |
 | 11 | **Blender** | **AUTHOR-SIDE TOOL — correct choice** | GLB + Draco is the right path; the official exporter is Khronos-maintained and bundled |
 | — | React major | **DECIDED** | React 19; R3F `9.8.0` widened its peer to `>=19 <19.4`, so the pinned `19.2.8` has room (§0) |
-| — | three ceiling | **DECIDED — a moving window, reviewed with each pin bump** | `postprocessing 6.39.5` widened its peer to `three < 0.187.0`; `0.186.0` is inside it (§0) |
+| — | three ceiling | **DECIDED — a moving window, reviewed with each pin bump** | `postprocessing 6.39.5` widened its peer to `three < 0.187.0`; `0.186.1` is inside it (§0) |
 
 ---
 
@@ -668,7 +668,7 @@ before pinning if this document is more than a few weeks old.**
 
 | Package | Version | Licence | Status |
 |---|---|---|---|
-| `three` | `0.186.0` | MIT | **VERIFIED** 2026-09-23 — the only 3D dependency a generated site takes (§0) [↗](https://registry.npmjs.org/three/latest) |
+| `three` | `0.186.1` | MIT | **VERIFIED** 2026-10-19 — the only 3D dependency a generated site takes (§0); the latest, published 2026-09-24; against `0.186.0` it changes only the WebGPU and node-material builds, which no generated site loads [↗](https://registry.npmjs.org/three/0.186.1) |
 | `@react-three/fiber` | `9.8.0` | MIT | **VERIFIED** 2026-09-23 — the spike's; generated sites do not use it (§0) [↗](https://registry.npmjs.org/@react-three/fiber/latest) |
 | `@react-three/drei` | `10.7.9` | — | **VERIFIED** 2026-10-19 — the spike's; the latest, published 2026-09-25; peers met by fiber 9.8.0, react 19.2.8, three 0.186.0 [↗](https://registry.npmjs.org/@react-three/drei/10.7.9) |
 | `@react-three/postprocessing` | `3.0.5` | — | **VERIFIED** [↗](https://registry.npmjs.org/@react-three/postprocessing/latest) |
@@ -688,7 +688,7 @@ before pinning if this document is more than a few weeks old.**
 | `vite-react-ssg` | `0.9.2` | MIT | **VERIFIED** — pre-1.0 [↗](https://registry.npmjs.org/vite-react-ssg/latest) |
 | `@types/react` | `19.2.18` | MIT | **VERIFIED** 2026-10-16 — a generated project's devDependency, so its author's `tsc --noEmit` passes; the latest of the 19.2 line (published 2026-07-30), matching `react` 19.2.8 (`19.3.0` describes React 19.3); brings `csstype ^3.2.2` (MIT) [↗](https://registry.npmjs.org/@types/react/19.2.18) |
 | `@types/react-dom` | `19.2.7` | MIT | **VERIFIED** 2026-10-16 — a generated project's devDependency; the latest of the 19.2 line (published 2026-09-03); no dependencies, peer `@types/react ^19.2.0` [↗](https://registry.npmjs.org/@types/react-dom/19.2.7) |
-| `@types/three` | `0.186.0` | MIT | **VERIFIED** 2026-10-16 — a generated 3D project's devDependency, only beside `three`; matches `three` 0.186.0 (§0, published 2026-09-11) [↗](https://registry.npmjs.org/@types/three/0.186.0) |
+| `@types/three` | `0.186.0` | MIT | **VERIFIED** 2026-10-16 — a generated 3D project's devDependency, only beside `three`; matches the `three` 0.186 line (§0, published 2026-09-11; there is no `0.186.1` of it) [↗](https://registry.npmjs.org/@types/three/0.186.0) |
 
 ### Author-side (never a compiler dependency)
 

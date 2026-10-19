@@ -82,7 +82,7 @@ export const PINS = {
   vite: '8.2.2',
   typescript: '7.0.2',
   /** Only a site that uses 3D depends on it (scene-spec §5). */
-  three: '0.186.0',
+  three: '0.186.1',
   /**
    * The type declarations a site author's `tsc` needs to check the generated
    * project: React's (the 19.2 line, matching `react`) for every site, and

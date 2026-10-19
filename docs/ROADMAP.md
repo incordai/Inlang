@@ -282,7 +282,7 @@ by scissor (scene-spec §5), the 8-rung ladder and probe, the seeded
 procedural scene (the ported generator reproduces the spike's cross-engine
 hash `cc723c2a1b107de4`), Draco models with the decoder self-hosted, camera
 `fixed`/`scroll`/`parallax`/`orbit`, and gallery `orbit`'s image ring. Only
-a site that declares a 3D view gets `three` (0.186.0) and the runtime; its
+a site that declares a 3D view gets `three` (0.186.1) and the runtime; its
 entry loads the 3D chunk lazily after paint, and never at `static` or under
 reduced motion. `pnpm test:3d` checks it in Chromium (and smoke-tests
 Firefox and WebKit). Headless WebGL is software, so none of it is device

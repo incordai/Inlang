@@ -263,7 +263,7 @@ try {
         readFileSync(join(proj, 'src/az3d', f), 'utf8') === readFileSync(join(threeDir, f), 'utf8')),
       shipped.join(' '));
     const pkg = JSON.parse(readFileSync(join(proj, 'package.json'), 'utf8'));
-    check('a 3D site depends on three, at the verified pin', pkg.dependencies.three === '0.186.0', pkg.dependencies.three);
+    check('a 3D site depends on three, at the verified pin', pkg.dependencies.three === '0.186.1', pkg.dependencies.three);
   }
   // hero-spec §8 / scene-spec §5: the server renders the VIEW — its box, its
   // seed, its sandboxed model — never a renderer. The runtime starts later,

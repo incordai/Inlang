@@ -161,7 +161,7 @@
     "type.weight-display"
   ],
   "deps": {
-    "three": "0.186.0"
+    "three": "0.186.1"
   },
   "targets": [
     "web"
