@@ -163,7 +163,7 @@ export function sanitizeSvg(source: string, file: string, prefix = ''): EmittedN
     throw new SvgError(`icon: '${file}' is over ${MAX_SVG_BYTES} bytes — an icon is a few shapes`);
   }
   refuseRawNonChars(source, file);
-  let text = source.replace(/^\uFEFF/, '').replace(/^\s*<\?xml\s[^?]*\?>/, '').replace(/<!--[\s\S]*?-->/g, '');
+  let text = source.replace(/^\uFEFF/, '').replace(/^\s*<\?xml\s[^?]*\?>/, '');
   if (/<!DOCTYPE|<!ENTITY|<!\[CDATA\[|<\?/i.test(text)) {
     throw new SvgError(`icon: '${file}' has a DOCTYPE, entity, CDATA or processing instruction — export it as plain SVG`);
   }
@@ -182,6 +182,15 @@ export function sanitizeSvg(source: string, file: string, prefix = ''): EmittedN
       throw new SvgError(`icon: '${file}' has text outside any element — it is not a plain SVG`);
     }
     if (lt < 0) break;
+    // A comment is skipped whole where the scan meets it, never cut out of
+    // the text first: cutting would join what stood on either side of it
+    // (`<pa<!-- -->th`) into markup the file never wrote.
+    if (text.startsWith('<!--', lt)) {
+      const end = text.indexOf('-->', lt + 4);
+      if (end < 0) throw new SvgError(`icon: '${file}' has a comment that is never closed`);
+      at = end + 3;
+      continue;
+    }
     tag.lastIndex = lt;
     const m = tag.exec(text);
     if (!m) throw new SvgError(`icon: '${file}' is not well-formed near "${text.slice(lt, lt + 24)}"`);

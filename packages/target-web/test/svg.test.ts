@@ -89,6 +89,19 @@ test('SECURITY: DOCTYPE, entities, CDATA and processing instructions are refused
   for (const source of refused) assert.throws(() => sanitizeSvg(source, './i.svg'), SvgError, source);
 });
 
+test('SECURITY: a comment is skipped where it stands, never cut out — what surrounds it cannot join into markup', () => {
+  for (const source of [
+    '<svg viewBox="0 0 1 1"><pa<!-- -->th d="M0 0"/></svg>',   // a tag name split by a comment
+    '<svg viewBox="0 0 1 1"><g<!-- x -->/></svg>',             // a comment inside a tag
+    '<svg viewBox="0 0 1 1"><g id="a"<!-- -->/></svg>',        // after an attribute
+    '<svg viewBox="0 0 1 1"><!-- never closed <g/></svg>',     // a comment that never ends
+  ]) {
+    assert.throws(() => sanitizeSvg(source, './bad.svg'), (e: unknown) => e instanceof SvgError && e.message.includes("'./bad.svg'"), source);
+  }
+  const kept = sanitizeSvg('<!-- a --><svg viewBox="0 0 1 1"><!-- b --><g id="k"><!-- c --><path d="M0 0"/></g><!-- d --></svg><!-- e -->', './i.svg');
+  assert.deepEqual(walk(kept).map((n) => n.tag), ['svg', 'g', 'path'], 'CONTROL: comments between elements are fine');
+});
+
 test('malformed or non-icon files are refused with a message naming the file', () => {
   for (const source of [
     '<svg viewBox="0 0 1 1"><path d="M0 0"></svg>',            // unclosed
