@@ -254,6 +254,10 @@ test('the exact bytes the model is given: the rows as data after the site conten
     assert.equal(seen.length, 1);
     const expected = systemText(prompt, context, '/members', rowsSection('questions', ['{"question":"Can I cancel?","answer":"Cancel any time.","price":"29.00 USD"}']));
     assert.equal(seen[0].system, expected, 'exactly the prompt, the content, the rows and the page');
+    // §19.19: the fixed prefix ends where the rows begin — the text a question without rows sends, byte for byte.
+    const fixed = systemText(prompt, context, '/members');
+    assert.equal(seen[0].fixed, fixed.length);
+    assert.equal(seen[0].system.slice(0, seen[0].fixed), fixed);
     assert.deepEqual(seen[0].turns, [{ role: 'user', text: 'Can I cancel?' }]);
     const sent = JSON.stringify(seen[0]);
     for (const never of [PRIVATE, 'owner-only-mark', email, account, '198.51.100.7', '127.0.0.1', 'guides']) {

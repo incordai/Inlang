@@ -2,7 +2,7 @@
  * @az server env
  * Purpose: the configuration: every key, validation, refuse to start naming bad keys.
  * Spec: docs/backend-spec.md §4 (chat keys: docs/chat-block-spec.md §11.1; tool keys: §21.2.2; map and geocoder keys: §21.4)
- * Exports: loadConfig, KEYS, keepsAccounts, urlProblem, CHAT_LIMITS, parseRate, ChatConfig, ChatRate, TOOL_KEYS, TOOL_LIMITS, TOOL_NAME, TOOL_WORD, toolKey,
+ * Exports: loadConfig, KEYS, keepsAccounts, urlProblem, CHAT_LIMITS, CHAT_APIS, CHAT_HEADERS_LIMITS, parseRate, ChatApi, ChatConfig, ChatRate, TOOL_KEYS, TOOL_LIMITS, TOOL_NAME, TOOL_WORD, toolKey,
  *   toolSecretKeys, paramValueOk, paramsProblem, isDay, ChatTool, ChatToolShape, ToolParam, ToolParamType, ToolFieldType, MapConfig,
  *   GeocoderConfig, MAP_KEYS_LIMITS, BUNDLED_WORLD, LoadOptions
  * Edit guide: server keys are never AZ_PUBLIC_; defaults are safe.
@@ -89,10 +89,12 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_ADMIN_EMAILS', about: 'Who may use /admin: verified account addresses, comma-separated. An unverified account with a listed address is not an admin. Empty: nobody.', when: (s) => s.data === true, required: false, example: '' },
   { name: 'AZ_FILES_DIR', about: 'Where uploaded images are stored, outside anything served statically. Created on first start; back it up with the database.', when: (s) => s.images === true, required: false, example: './data/files' },
   { name: 'AZ_UPLOAD_MAX_MB', about: `The largest image upload, in MB (default ${UPLOAD_MB.default}, at most ${UPLOAD_MB.max}).`, when: (s) => s.images === true, required: false, example: String(UPLOAD_MB.default) },
-  { name: 'AZ_CHAT_API', about: 'The chat model\'s wire shape: `completions` (the common chat-completions streaming shape, hosted or a local model server). `fake` replays AZ_CHAT_FAKE_FILE and is refused unless AZ_BACKEND_PUBLIC_URL is on localhost.', when: (s) => s.chat === true, required: true, example: 'completions' },
-  { name: 'AZ_CHAT_URL', about: 'The model API\'s base URL; answers are requested from <url>/chat/completions. https, or plain http only for localhost (a model server on this machine). Required for completions.', when: (s) => s.chat === true, required: false, example: '' },
-  { name: 'AZ_CHAT_KEY', about: 'Sent as `Authorization: Bearer <key>` to the model API. May be empty for a local model server.', when: (s) => s.chat === true, required: false, secret: true },
-  { name: 'AZ_CHAT_MODEL', about: 'The model id, passed to the API as written. Required for completions.', when: (s) => s.chat === true, required: false, example: '' },
+  { name: 'AZ_CHAT_API', about: 'The chat model\'s wire shape, the one your provider or model server speaks: `completions` (the common chat-completions streaming shape, hosted or a local model server; asked at <url>/chat/completions), `messages` (named stream events with a system field and a prompt-cache marker; <url>/messages), `contents` (candidates with parts; <url>/models/<model>:streamGenerateContent), or `local` (one JSON object per line, as local model servers answer; <url>/api/chat). `fake` replays AZ_CHAT_FAKE_FILE and is refused unless AZ_BACKEND_PUBLIC_URL is on localhost. Changing the shape, URL or model takes a restart, never a rebuild.', when: (s) => s.chat === true, required: true, example: 'completions' },
+  { name: 'AZ_CHAT_URL', about: 'The model API\'s base URL; the shape\'s own path is added to it (see AZ_CHAT_API). https, or plain http only for localhost (a model server on this machine). Required for every shape but fake.', when: (s) => s.chat === true, required: false, example: '' },
+  { name: 'AZ_CHAT_KEY', about: 'The model API\'s key, sent only to AZ_CHAT_URL: as `Authorization: Bearer <key>` for completions and local, as `x-api-key` for messages, or in the header AZ_CHAT_KEY_HEADER names. May be empty for a local model server.', when: (s) => s.chat === true, required: false, secret: true },
+  { name: 'AZ_CHAT_KEY_HEADER', about: 'Optional: the request header AZ_CHAT_KEY is sent in, as written, when your provider reads it from another than the shape\'s usual one. Required with a key for contents, which has no usual one. A header name (letters, digits and -), never one the server sets itself.', when: (s) => s.chat === true, required: false, example: '' },
+  { name: 'AZ_CHAT_HEADERS', about: 'Optional: other request headers your provider requires (a version header, say), as `name=value`, comma-separated, at most 8, each value printable text of at most 256 characters without a comma. Never the key (that is AZ_CHAT_KEY) or a header the server sets itself.', when: (s) => s.chat === true, required: false, secret: true },
+  { name: 'AZ_CHAT_MODEL', about: 'The model id, passed to the API as written (for contents it goes in the URL\'s path: letters, digits, . _ and - only). Required for every shape but fake; there is no default model.', when: (s) => s.chat === true, required: false, example: '' },
   { name: 'AZ_CHAT_DAILY_TOKENS', about: 'Tokens (input + output) all chats together may spend per UTC day; past it every message answers budget_exhausted until midnight UTC (default 300000, 1000–100000000).', when: (s) => s.chat === true, required: false, example: '300000' },
   { name: 'AZ_CHAT_MAX_OUTPUT_TOKENS', about: 'The most tokens one answer may use (default 600, 100–2000).', when: (s) => s.chat === true, required: false, example: '600' },
   { name: 'AZ_CHAT_PER_ADDRESS', about: 'Messages one address may send: `<n>/hour`, `<n>/day`, or both comma-separated (default 20/hour,60/day). An IPv6 address counts as its /64.', when: (s) => s.chat === true, required: false, example: '20/hour,60/day' },
@@ -467,10 +469,27 @@ export function parseRate(value: string): ChatRate | null {
 }
 
 /** The chat settings (chat-block-spec §11.1); present only for a site with chat. */
+/** AZ_CHAT_API's values (chat-block-spec §4.3, §19.19): the wire shapes a real model is asked in, and the scripted `fake`. */
+export const CHAT_APIS = ['completions', 'messages', 'contents', 'local', 'fake'] as const;
+export type ChatApi = typeof CHAT_APIS[number];
+
+/** AZ_CHAT_HEADERS' bounds, and the headers neither it nor AZ_CHAT_KEY_HEADER may name: the server's own, and the usual key headers. */
+export const CHAT_HEADERS_LIMITS = {
+  count: 8,
+  valueMax: 256,
+  nameMax: 64,
+  reserved: ['accept', 'accept-encoding', 'authorization', 'connection', 'content-length', 'content-type', 'cookie', 'expect', 'host', 'keep-alive',
+    'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'x-api-key'],
+} as const;
+
 export interface ChatConfig {
-  readonly api: 'completions' | 'fake';
+  readonly api: ChatApi;
   readonly url: string;
   readonly key: string;
+  /** AZ_CHAT_KEY_HEADER, lower-cased: the header the key is sent in; '' for the shape's usual one. */
+  readonly keyHeader: string;
+  /** AZ_CHAT_HEADERS: the operator's other request headers, names lower-cased, in the order given. */
+  readonly headers: readonly (readonly [string, string])[];
   readonly model: string;
   readonly dailyTokens: number;
   readonly maxOutputTokens: number;
@@ -815,24 +834,42 @@ function geocoderUrlProblem(value: string): string | null {
 /** The chat keys (chat-block-spec §11.1), every problem named. */
 function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: string) => string, publicUrl: string, problems: string[], map = false): ChatConfig {
   const api = get('AZ_CHAT_API').toLowerCase();
-  if (api && api !== 'completions' && api !== 'fake') problems.push('AZ_CHAT_API must be completions or fake');
+  const known = (CHAT_APIS as readonly string[]).includes(api);
+  if (api && !known) problems.push('AZ_CHAT_API must be completions, messages, contents, local or fake');
   const url = get('AZ_CHAT_URL');
   const model = get('AZ_CHAT_MODEL');
+  const key = get('AZ_CHAT_KEY');
+  const keyHeader = get('AZ_CHAT_KEY_HEADER').toLowerCase();
   const fakeFile = get('AZ_CHAT_FAKE_FILE');
-  if (api === 'completions') {
-    if (!url) problems.push('AZ_CHAT_URL is missing — the model API\'s base URL (required for completions)');
+  const real = known && api !== 'fake';
+  if (real) {
+    if (!url) problems.push(`AZ_CHAT_URL is missing — the model API's base URL (required for ${api})`);
     else {
       const p = urlProblem(url, { base: false });
       if (p) problems.push(`AZ_CHAT_URL ${p}`);
     }
-    if (!model) problems.push('AZ_CHAT_MODEL is missing — the model id (required for completions)');
+    if (!model) problems.push(`AZ_CHAT_MODEL is missing — the model id (required for ${api})`);
     // A model id is one line of printable text.
     else if (model.length > CHAT_LIMITS.modelMax || /[\u0000-\u001f\u007f]/.test(model)) {
       problems.push(`AZ_CHAT_MODEL must be at most ${CHAT_LIMITS.modelMax} characters, without control characters`);
+    } else if (api === 'contents' && !/^[A-Za-z0-9._-]+$/.test(model)) {
+      // The contents shape puts the id in the URL's path: nothing in it may change where the request goes.
+      problems.push('AZ_CHAT_MODEL must be letters, digits, . _ and - only for contents — the id goes in the URL\'s path');
     }
     if (fakeFile) problems.push('AZ_CHAT_FAKE_FILE is only read with AZ_CHAT_API=fake — remove it');
+    if (keyHeader) {
+      if (keyHeader.length > CHAT_HEADERS_LIMITS.nameMax || !HEADER_NAME.test(keyHeader)) {
+        problems.push(`AZ_CHAT_KEY_HEADER must be a header name: letters, digits and -, at most ${CHAT_HEADERS_LIMITS.nameMax} characters`);
+      } else if (keyHeader !== 'x-api-key' && (CHAT_HEADERS_LIMITS.reserved as readonly string[]).includes(keyHeader)) {
+        problems.push('AZ_CHAT_KEY_HEADER must not name a header the server sets itself — leave it unset for Authorization: Bearer');
+      } else if (!key) problems.push('AZ_CHAT_KEY_HEADER names the header AZ_CHAT_KEY is sent in — set AZ_CHAT_KEY too, or remove it');
+    } else if (api === 'contents' && key) {
+      problems.push('AZ_CHAT_KEY_HEADER is missing — the contents shape has no usual key header; name the one your provider reads the key from');
+    }
   }
+  const headers = real ? chatHeaders(get('AZ_CHAT_HEADERS'), keyHeader, problems) : [];
   if (api === 'fake') {
+    for (const k of ['AZ_CHAT_KEY_HEADER', 'AZ_CHAT_HEADERS']) if (get(k)) problems.push(`${k} is only sent to a real model — remove it with AZ_CHAT_API=fake`);
     if (!fakeFile) problems.push('AZ_CHAT_FAKE_FILE is missing — AZ_CHAT_API=fake replays scripted answers from it');
     if (publicUrl && !onLoopback(publicUrl)) {
       problems.push('AZ_CHAT_API=fake is for development only — it needs AZ_BACKEND_PUBLIC_URL on localhost; use completions for a real model');
@@ -861,9 +898,11 @@ function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: 
     problems.push('AZ_CHAT_MODERATION_KEY is only sent to AZ_CHAT_MODERATION_URL — set that too, or remove the key');
   }
   return {
-    api: api === 'fake' ? 'fake' : 'completions',
+    api: known ? api as ChatApi : 'completions',
     url: url.replace(/\/+$/, ''),
-    key: get('AZ_CHAT_KEY'),
+    key,
+    keyHeader: real ? keyHeader : '',
+    headers,
     model,
     dailyTokens: bounded(get, 'AZ_CHAT_DAILY_TOKENS', CHAT_LIMITS.dailyTokens, problems),
     maxOutputTokens: bounded(get, 'AZ_CHAT_MAX_OUTPUT_TOKENS', CHAT_LIMITS.maxOutputTokens, problems),
@@ -887,6 +926,46 @@ function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: 
       perAccount: rate('AZ_CHAT_SHARES_PER_ACCOUNT', CHAT_LIMITS.sharesPerAccount),
     },
   };
+}
+
+/** A request header's name as AZ_CHAT_KEY_HEADER and AZ_CHAT_HEADERS give it, lower-cased. */
+const HEADER_NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * AZ_CHAT_HEADERS (chat-block-spec §19.19): `name=value` pairs, every
+ * problem named and no value quoted — a gateway may treat a header as a
+ * credential. Neither the server's own headers nor the key's may be set.
+ */
+function chatHeaders(raw: string, keyHeader: string, problems: string[]): (readonly [string, string])[] {
+  const parts = raw.split(',').map((p) => p.trim()).filter((p) => p !== '');
+  if (parts.length > CHAT_HEADERS_LIMITS.count) {
+    problems.push(`AZ_CHAT_HEADERS lists ${parts.length} headers — at most ${CHAT_HEADERS_LIMITS.count}`);
+    return [];
+  }
+  const out: (readonly [string, string])[] = [];
+  for (const part of parts) {
+    const eq = part.indexOf('=');
+    const name = eq < 0 ? '' : part.slice(0, eq).trim().toLowerCase();
+    const value = eq < 0 ? '' : part.slice(eq + 1).trim();
+    if (name === '' || name.length > CHAT_HEADERS_LIMITS.nameMax || !HEADER_NAME.test(name)) {
+      problems.push(`AZ_CHAT_HEADERS must be name=value pairs, comma-separated, each name letters, digits and -, at most ${CHAT_HEADERS_LIMITS.nameMax} characters`);
+      return [];
+    }
+    if ((CHAT_HEADERS_LIMITS.reserved as readonly string[]).includes(name) || name === keyHeader) {
+      problems.push('AZ_CHAT_HEADERS must not set a header the server sets itself or the key\'s header — the key goes in AZ_CHAT_KEY');
+      return [];
+    }
+    if (value === '' || value.length > CHAT_HEADERS_LIMITS.valueMax || !/^[\x20-\x7e]+$/.test(value)) {
+      problems.push(`AZ_CHAT_HEADERS values must be printable text of at most ${CHAT_HEADERS_LIMITS.valueMax} characters`);
+      return [];
+    }
+    if (out.some(([n]) => n === name)) {
+      problems.push('AZ_CHAT_HEADERS names one header twice');
+      return [];
+    }
+    out.push([name, value]);
+  }
+  return out;
 }
 
 /** The geocoder's keys, when a chat shows maps (§21.4.2): null without AZ_GEOCODER_URL. */

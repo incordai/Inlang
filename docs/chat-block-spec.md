@@ -486,7 +486,9 @@ interface ChatAdapter {
 | `AZ_CHAT_API` | Wire shape | When |
 |---|---|---|
 | `completions` | `POST <AZ_CHAT_URL>/chat/completions`, `{ model, messages, stream: true, max_tokens }`, bearer key; reads `data:` deltas until `[DONE]` [R5] | **C1.** Covers hosted APIs that speak this shape and local model servers on loopback |
-| `messages` | the other common streaming shape (a `system` field, typed content blocks, named stream events) [R6] | C4, if the owner wants a second shape (Q2) |
+| `messages` | `POST <AZ_CHAT_URL>/messages`, `{ model, max_tokens, system: [blocks], messages, stream: true }`, `x-api-key`; reads named events until `message_stop`; the system text's fixed prefix carries a cache marker [R6] | **built (#42, §19.19)** |
+| `contents` | `POST <AZ_CHAT_URL>/models/<model>:streamGenerateContent?alt=sse`, `{ systemInstruction, contents, generationConfig }`, the key in `AZ_CHAT_KEY_HEADER`; reads `data:` candidates until a `finishReason` [R12] | **built (#42, §19.19)** |
+| `local` | `POST <AZ_CHAT_URL>/api/chat`, `{ model, messages, stream: true, options }`, no key or a bearer one; reads one JSON object per line until `done: true` [R13] | **built (#42, §19.19)**: local model servers, on loopback |
 | `fake` | scripted streams from a fixture file | tests and `az dev` only; the server refuses to start with it unless `AZ_CHAT_FAKE_FILE` is set and the profile is development |
 
 The values name **wire shapes, never companies**: `completions` is the
@@ -948,9 +950,10 @@ in the panel, if ever.
 
 | Key | Needed | Meaning |
 |---|---|---|
-| `AZ_CHAT_API` | sites with `chat` | wire shape: `completions` (C1); `messages` not built — Q2's condition, §19.8 |
+| `AZ_CHAT_API` | sites with `chat` | wire shape: `completions` (C1), `messages`, `contents` or `local` (§19.19) |
 | `AZ_CHAT_URL` | sites with `chat` | the API base URL; https, or http on loopback for a local model server |
-| `AZ_CHAT_KEY` | usually | bearer key (secret); may be empty for a local server |
+| `AZ_CHAT_KEY` | usually | the key (secret); may be empty for a local server |
+| `AZ_CHAT_KEY_HEADER`, `AZ_CHAT_HEADERS` | optional | the header the key is sent in (`contents` needs it), and other headers the provider requires (§19.19) |
 | `AZ_CHAT_MODEL` | sites with `chat` | the model id, passed through as text |
 | `AZ_CHAT_DAILY_TOKENS` | optional | global budget, default 300 000 |
 | `AZ_CHAT_MAX_OUTPUT_TOKENS` | optional | per answer, default 600 |
@@ -1206,7 +1209,9 @@ described and must be re-read before C1 relies on it.
 | R3 | `EventSource` issues GET only, no custom headers; `withCredentials` sets credentials mode "include" | WHATWG HTML — Server-sent events, https://html.spec.whatwg.org/multipage/server-sent-events.html |
 | R4 | `log` is a live-region role (fetched excerpt truncated; its implicit `aria-live` value `polite` to re-verify); `aria-busy` marks content being updated | WAI-ARIA 1.2, https://www.w3.org/TR/wai-aria-1.2/#log |
 | R5 | Chat-completions streaming: `stream: true`, `data:` JSON chunks with `choices[].delta.content`, terminated by `data: [DONE]`; optional usage in the final chunk — **not fetched (403)** | OpenAI API reference, https://platform.openai.com/docs/api-reference/chat/create |
-| R6 | A second streaming shape with a top-level `system` field, typed content blocks and named stream events — **not fetched**; to be read before C4 | Anthropic Messages API streaming, https://docs.anthropic.com/en/api/messages-streaming |
+| R6 | A second streaming shape: `POST /v1/messages` with `x-api-key` and a required version header; `system` a string or text blocks, `cache_control: {"type":"ephemeral"}` on a block marking the cache prefix; events `message_start` (its `usage`), `content_block_start`, `content_block_delta` (`text_delta`), `content_block_stop`, `message_delta` (cumulative `usage`), `message_stop`, any number of `ping`, and `error` in the stream; total input = `cache_read_input_tokens` + `cache_creation_input_tokens` + `input_tokens` — **fetched 2026-10-19** (the earlier URL redirects) | Anthropic Messages streaming, https://platform.claude.com/docs/en/api/messages-streaming · prompt caching, https://platform.claude.com/docs/en/build-with-claude/prompt-caching |
+| R12 | A third streaming shape: `POST /v1beta/{model}:streamGenerateContent?alt=sse`, key in `x-goog-api-key`; body `contents[]` (`role` user/model, `parts[].text`), `systemInstruction`, `generationConfig.maxOutputTokens`; `data:` chunks of `candidates[].content.parts[].text` with `finishReason`, and `usageMetadata` (`promptTokenCount`, `candidatesTokenCount`, `cachedContentTokenCount`, `thoughtsTokenCount`) — **fetched 2026-10-19** | Gemini API, https://ai.google.dev/api/generate-content |
+| R13 | A local model server's chat: `POST /api/chat` `{ model, messages, stream, options.num_predict }` on port 11434; newline-delimited JSON objects with `message.content` and `done`; the last `done: true` with `prompt_eval_count`, `eval_count` — **fetched 2026-10-19** | Ollama API, https://github.com/ollama/ollama/blob/main/docs/api.md |
 | R7 | Prior art (C5–C8, docs only): a trip planner whose answers are generated UI — moodboards, chat, a day-by-day itinerary on a map (a vector map library over a free tile service), weather and hotel prices from several public APIs | openui-trip-planner, https://github.com/thesysdev/openui-trip-planner (fetched 2026-10-16) |
 | R8 | Prior art: a sports dashboard whose chat answers are streamed charts and tables; the model calls named server tools for live data through a rate-limited, cached client; its README notes rate limiting should be added before wider use | openui-f1-dashboard, https://github.com/thesysdev/openui-f1-dashboard (fetched 2026-10-16) |
 | R9 | Prior art: answers stream as interactive UI — maps, charts, sliders, forms, date pickers bound to variables; threads and messages kept in the browser's localStorage so they survive a reload | open-intelligent-ui, https://github.com/thesysdev/open-intelligent-ui (fetched 2026-10-16) |
@@ -2640,6 +2645,107 @@ centred, at least 700 px, its title inside; it snapshots, in Chromium and
 both schemes, the panel before a question, each answer and the answered
 panel at 360, 390, 768, 1024 and 1440 (`.visual-out/chat-panel/`, each drawn
 twice and byte-compared).
+
+### 19.19 The provider and model at runtime: more wire shapes (#42, 2026-10-19)
+
+**The owner's decision (#32, #42).** The provider is dynamic: hosted mode
+uses the operator's `.env` choice, changeable with a restart and never a
+rebuild; local mode (#41) uses the user's own default provider, local
+models included. Q2's "completions only" and §19.8's "messages not built"
+are superseded. The server side is built here; the app side — detecting a
+user's default, the app's settings and the OS keychain — belongs to the
+local-mode sidecar (#41) and the app runtime (#37), which construct an
+adapter from a `ModelChoice` (below) instead of an `.env`.
+
+**The shapes.** `AZ_CHAT_API` is `completions`, `messages`, `contents`,
+`local` or `fake` (§4.3's table). Each is named by its wire shape, read from
+its publisher's reference (§18 R5, R6, R12, R13), spoken with Node's own
+`fetch` and streams in `chat-adapters.ts` — no SDK, no new dependency. All
+four real shapes share one reader (`streamFrom`): a non-2xx is
+`AdapterError('status', n)` with the body cancelled unread; the body is read
+under `RESPONSE_MAX` (2 MB) and framed under `SSE_LINE_MAX` (64 KB a line,
+`createSseReader` for the event-stream shapes, a line reader for `local`);
+a stream that ends before its shape's end (`[DONE]`, `message_stop`, a
+`finishReason` or `promptFeedback.blockReason`, `done: true`) is
+`malformed`; an error the provider reports inside a begun stream is the new
+kind `upstream`; a lost connection is `network`; an abort stays an abort and
+cancels the upstream read. An error's message is still its kind and at most
+a status — never a provider's words — and that is all the log and the probe
+print. Keep-alive frames (`ping`, comments, blank lines) yield nothing, so the
+route's first-token (15 s) and between-chunk (20 s) bounds and the probe's
+hold for every shape.
+
+**Usage.** `completions` as §19.16. `messages`: the counts of
+`message_start`, overridden by each later `message_delta` (cumulative);
+input = `input_tokens` + `cache_read_input_tokens` +
+`cache_creation_input_tokens`, `cached` = the part read, so the budget sees
+the whole input. `contents`: the last `usageMetadata`; input =
+`promptTokenCount` (it includes the cached part), output = candidates +
+thinking (both billed as output), `cached` = `cachedContentTokenCount` when
+no more than the input. `local`: `prompt_eval_count` and `eval_count`; a
+local server reports no cached count.
+
+**The cache marker.** `messages` caches only up to a marker, so the route now
+tells the adapter where the fixed part ends: `ChatStreamRequest.fixed`, the
+length of the system text before the chosen pages and the rows (§19.16,
+§19.17), from `systemParts` — `systemText` and that length, the same
+function, so the cut is exact, not searched for. The adapter sends the
+prefix as a text block with `cache_control: { type: "ephemeral" }` and the
+rest, if any, as a second block. A test checks, at the route, that the
+fixed prefix is the text a question without rows sends, byte for byte.
+`completions` and `contents` cache a prefix by themselves and send no
+marker; the field is optional and the other shapes ignore it.
+
+**Keys and headers.** `AZ_CHAT_KEY` goes in the shape's usual header —
+`Authorization: Bearer` for `completions` and `local`, `x-api-key` for
+`messages` — or in `AZ_CHAT_KEY_HEADER`, which `contents` needs: its usual
+header carries a company's name, which the code never does (owner's rule),
+so the operator names it. A version header a provider requires (R6) is the
+operator's too, in `AZ_CHAT_HEADERS` (`name=value`, comma-separated, ≤ 8,
+values printable and ≤ 256 characters, marked secret so it is blank in
+`.env.example` and covered by the bundle scan). The server's own headers
+always win; neither key may name `host`, `content-type`, `accept`,
+`authorization` and the other headers the server or the transport sets, and
+`AZ_CHAT_HEADERS` may not hold the key's header.
+
+**Validation at start (env.ts).** An unknown shape; a missing URL or model
+for any real shape (no default model); http off loopback (the existing
+`urlProblem`: plain http only to `localhost`, `127.0.0.1`, `[::1]` — a local
+model server on another machine needs https); a `contents` model id outside
+letters, digits, `. _ -` (it goes in the URL's path); a `contents` key with no
+key header; a key header without a key; a malformed, reserved, duplicate or
+oversized header; either header key with `fake`. Each problem names its key
+and never a value. `az doctor`'s chat .env line names the shape when it
+passes and, beside the server's refusals, a URL that already ends in the
+path its shape adds (`/chat/completions`, `/messages`, `/models`,
+`/api/chat`). `az backend probe` prints the shape, the model and the
+endpoint's origin, never the key or a header's value.
+
+**Found and fixed on the way.** `createSseReader` reset the running line
+count whenever a line ended, after `push` had already counted the unfinished
+line that followed — so a line that began in a chunk where another ended
+escaped `SSE_LINE_MAX`, bounded only by `RESPONSE_MAX`. The count is now
+only `push`'s (`chat-sse.test.ts` has the case; it failed before).
+
+**Tests.** `chat-wire-shapes.test.ts`: each of the three new shapes against a
+loopback stub speaking its documented format — text split anywhere, usage
+and cached counts, every error status with the body kept out of the error,
+an error inside the stream, malformed, cut-off and empty bodies, a 70 KB
+line and a body past 2 MB, an unreachable server, abort closing the upstream
+connection, and the probe's first-token and between-chunk bounds against a
+silent stream, one that stops after its first piece, and one that only sends
+keep-alives; each shape's request (path, key header, the operator's
+headers, turns, output cap, the cache marker); `createAdapter` choosing by
+`AZ_CHAT_API`; and `az backend probe` from a server folder on `messages`
+with a version header. `chat-route.test.ts` the new keys' validation;
+`doctor-chat.test.ts` the doctor line per shape. No real provider is
+called; `test:chat` still runs on `fake`.
+
+**Not built here.** Finding the user's default provider in local mode (#41):
+standard environment variables carry company names, so the list belongs in
+the sidecar's configuration, not in this code; and nothing is sent anywhere
+before the user confirms. The app's provider setting and keychain storage
+(#41, #37).
 
 ---
 

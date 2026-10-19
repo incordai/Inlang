@@ -188,9 +188,10 @@ one schema for all three readers:
 | `AZ_ADMIN_EMAILS` | sites with `data` | verified addresses that may use `/admin` (data-spec §11); empty = nobody |
 | `AZ_FILES_DIR` | sites with an `image` field | where uploaded images are stored (`./data/files`), outside anything served statically (data-spec §8) |
 | `AZ_UPLOAD_MAX_MB` | sites with an `image` field | the largest upload, 1–20 MB (default 5) |
-| `AZ_CHAT_API` | sites with `chat` | the model's wire shape: `completions` (the common chat-completions streaming shape), or `fake` (scripted answers from `AZ_CHAT_FAKE_FILE`; refused unless `AZ_BACKEND_PUBLIC_URL` is on localhost — the generated server's "development profile") |
-| `AZ_CHAT_URL`, `AZ_CHAT_MODEL` | `completions` | the API base (https; http only on localhost) — answers come from `<url>/chat/completions` — and the model id, passed as written |
-| `AZ_CHAT_KEY` | optional | bearer key (secret; empty for a local model server) |
+| `AZ_CHAT_API` | sites with `chat` | the model's wire shape (chat-block-spec §4.3, §19.19): `completions` (the common chat-completions streaming shape), `messages` (named stream events, with a prompt-cache marker), `contents` (candidates with parts) or `local` (one JSON object per line, as local model servers answer); or `fake` (scripted answers from `AZ_CHAT_FAKE_FILE`; refused unless `AZ_BACKEND_PUBLIC_URL` is on localhost — the generated server's "development profile") |
+| `AZ_CHAT_URL`, `AZ_CHAT_MODEL` | every shape but `fake` | the API base (https; http only on localhost) — the shape's path is added: `/chat/completions`, `/messages`, `/models/<model>:streamGenerateContent`, `/api/chat` — and the model id, passed as written (for `contents`, letters, digits, `. _ -` only); no default model |
+| `AZ_CHAT_KEY` | optional | the key (secret; empty for a local model server), sent as a bearer token for `completions` and `local`, as `x-api-key` for `messages`, or in `AZ_CHAT_KEY_HEADER` |
+| `AZ_CHAT_KEY_HEADER`, `AZ_CHAT_HEADERS` | optional | the header the key goes in (required with a key for `contents`), and other headers the provider requires as `name=value` pairs (≤ 8, secret); neither may name a header the server sets itself |
 | `AZ_CHAT_DAILY_TOKENS`, `AZ_CHAT_MAX_OUTPUT_TOKENS` | optional | the day's budget for all chats (300 000; 1 000–100 000 000) and one answer's cap (600; 100–2 000) |
 | `AZ_CHAT_PER_ADDRESS`, `AZ_CHAT_PER_ACCOUNT` | optional | `<n>/hour`, `<n>/day` or both (`20/hour,60/day`; `100/day`) |
 | `AZ_CHAT_CONCURRENCY`, `AZ_CHAT_TIMEOUT_SECONDS` | optional | answers at once (4; 1–64; four times as many wait ≤ 10 s) and one answer's longest time (60; 10–300 — the first token within 15 s, each next within 20 s) |

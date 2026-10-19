@@ -56,6 +56,10 @@ test('a line past the cap throws, before it is decoded; CONTROL: one at the cap 
   const split = createSseReader(16);
   split.push(enc.encode('data: xxxxx'));
   assert.throws(() => split.push(enc.encode('xxxxxx')), SseLimitError);
+  // …also when it began in a push where an earlier line ended: that line's end does not reset the count of the one after it.
+  const after = createSseReader(16);
+  after.push(enc.encode('event: x\ndata: xxxxx'));
+  assert.throws(() => after.push(enc.encode('xxxxxx')), SseLimitError);
 });
 
 test('work is linear: a 4 MB stream of short events is read in bounded time', () => {

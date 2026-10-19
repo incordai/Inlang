@@ -38,7 +38,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { ChatAdapter } from './chat-adapters.ts';
 import { ANSWER_WORDS, createAnswerParser, type AnswerWord, type DropReason } from './chat-answer.ts';
-import { cacheLine, CHAT_TIMING, rulesFor, systemText, underCacheMinimum, type ChatContext, type ChatTiming } from './chat.ts';
+import { cacheLine, CHAT_TIMING, rulesFor, systemParts, underCacheMinimum, type ChatContext, type ChatTiming } from './chat.ts';
 import { probeTools, type ToolProbe } from './chat-tools.ts';
 import type { ChatTool } from './env.ts';
 
@@ -155,8 +155,9 @@ async function askOne(
     }
   };
   try {
+    const system = systemParts(o.prompts[o.context.chats[page].prompt], o.context, page, '', shapes);
     for await (const chunk of o.adapter.stream({
-      system: systemText(o.prompts[o.context.chats[page].prompt], o.context, page, '', shapes), turns: [{ role: 'user', text: PROBE_QUESTIONS[question] }],
+      system: system.text, fixed: system.fixed, turns: [{ role: 'user', text: PROBE_QUESTIONS[question] }],
       maxOutputTokens: o.maxOutputTokens, signal: ac.signal,
     })) {
       clearTimeout(idle);
@@ -244,7 +245,7 @@ async function main(argv: readonly string[]): Promise<number> {
     return 1;
   }
   // Where it asks, never with what key.
-  process.stderr.write(`probe: ${chat.api} model ${JSON.stringify(chat.model)}${chat.api === 'completions' ? ` at ${new URL(chat.url).origin}` : ''}\n`);
+  process.stderr.write(`probe: ${chat.api} model ${JSON.stringify(chat.model)}${chat.api !== 'fake' ? ` at ${new URL(chat.url).origin}` : ''}\n`);
   let prompts: Record<string, string>;
   try {
     prompts = Object.fromEntries([...new Set(Object.values(context.chats).map((c) => c.prompt))].map((f) => [f, read(f)]));

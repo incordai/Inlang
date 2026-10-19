@@ -260,10 +260,22 @@ readable), to the model named in \`.env\`, and streams the answer back. The
   dropped — never the key, never the answer's words. It exits 1 when an
   answer is empty, fails, or holds a component the parser refused; try
   another model then.
-- \`AZ_CHAT_API=completions\` speaks the common chat-completions streaming
-  shape (\`POST <AZ_CHAT_URL>/chat/completions\`, \`stream: true\`), which hosted
-  APIs and local model servers offer. \`AZ_CHAT_URL\` is https, or plain http
-  only for a model server on localhost. \`AZ_CHAT_KEY\` stays in \`.env\`.
+- **The model is yours to choose, in \`.env\`** — a restart changes it, never a
+  rebuild. \`AZ_CHAT_API\` names the wire shape your provider or model server
+  speaks, and the server asks at \`AZ_CHAT_URL\` plus that shape's path:
+  \`completions\` (the common chat-completions streaming shape,
+  \`/chat/completions\`, which hosted APIs and local model servers offer),
+  \`messages\` (named stream events, \`/messages\`; the fixed part of the
+  system text is sent with a prompt-cache marker), \`contents\`
+  (\`/models/<AZ_CHAT_MODEL>:streamGenerateContent\`; set
+  \`AZ_CHAT_KEY_HEADER\` to the header your provider reads the key from) or
+  \`local\` (one JSON object per line, \`/api/chat\`, as local model servers
+  answer — no key needed). \`AZ_CHAT_MODEL\` is the model id; there is no
+  default. \`AZ_CHAT_URL\` is https, or plain http only for a model server
+  on localhost. \`AZ_CHAT_KEY\` stays in \`.env\` and is sent only to that
+  URL; a header your provider also requires (a version header, say) goes
+  in \`AZ_CHAT_HEADERS\` as \`name=value\`. A provider's error body is never
+  shown or logged — only its HTTP status.
 - \`AZ_CHAT_API=fake\` replays the answers in \`AZ_CHAT_FAKE_FILE\`; it is
   refused unless \`AZ_BACKEND_PUBLIC_URL\` is on localhost (development).
 - **Cost.** Per answer: input = the chat's \`chat/prompt-<n>.txt\` + \`chat/context.json\`

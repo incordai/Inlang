@@ -125,7 +125,7 @@ test('chat .env: the keys by name only — the fake model, a URL with the comple
   const p = built();
   const good = await check('chat-env', p);
   assert.equal(good.status, 'pass', good.line);
-  assert.equal(good.line, 'chat .env: the model keys are valid; no moderation hook (optional); shares on — names checked, no value printed');
+  assert.equal(good.line, 'chat .env: the model keys are valid for the completions shape; no moderation hook (optional); shares on — names checked, no value printed');
 
   p.setEnv({ AZ_CHAT_URL: 'https://models.example.test/v1/chat/completions' });
   const path = await check('chat-env', p);
@@ -153,7 +153,39 @@ test('chat .env: the keys by name only — the fake model, a URL with the comple
   p.setEnv({ AZ_CHAT_MODERATION_URL: 'http://judge.example.test/check', AZ_CHAT_MODERATION_KEY: JUDGE_KEY });
   assert.equal((await check('chat-env', p)).line, 'chat .env: 1 problem — AZ_CHAT_MODERATION_URL is refused by the server');
   p.setEnv({ AZ_CHAT_MODERATION_URL: 'https://judge.example.test/check', AZ_CHAT_MODERATION_KEY: JUDGE_KEY, AZ_CHAT_SHARES: 'off' });
-  assert.equal((await check('chat-env', p)).line, 'chat .env: the model keys are valid; moderation hook on (it fails closed); new shares off — names checked, no value printed');
+  assert.equal((await check('chat-env', p)).line, 'chat .env: the model keys are valid for the completions shape; moderation hook on (it fails closed); new shares off — names checked, no value printed');
+});
+
+test('chat .env §19.19: each wire shape passes by name, a URL with its shape\'s path fails, and a key header or extra header the server refuses is named — never its value', async () => {
+  const p = built();
+  const HEADER_VALUE = 'k9k9-header-value';
+  for (const api of ['messages', 'contents', 'local']) {
+    p.setEnv({ AZ_CHAT_API: api, ...(api === 'contents' ? { AZ_CHAT_KEY_HEADER: 'x-model-key' } : {}) });
+    const ok = await check('chat-env', p);
+    assert.equal(ok.status, 'pass', ok.line);
+    assert.equal(ok.line, `chat .env: the model keys are valid for the ${api} shape; no moderation hook (optional); shares on — names checked, no value printed`);
+  }
+  const paths: [string, string, string][] = [
+    ['messages', 'https://models.example.test/v1/messages', '/messages'],
+    ['local', 'http://127.0.0.1:11434/api/chat/', '/api/chat'],
+    ['contents', 'https://models.example.test/v1/models/model-a:streamGenerateContent', '/models'],
+  ];
+  for (const [api, url, added] of paths) {
+    p.setEnv({ AZ_CHAT_API: api, AZ_CHAT_URL: url, ...(api === 'contents' ? { AZ_CHAT_KEY_HEADER: 'x-model-key' } : {}) });
+    const r = await check('chat-env', p);
+    assert.equal(r.status, 'fail', `${api}: ${r.line}`);
+    assert.equal(r.line, `chat .env: 1 problem — AZ_CHAT_URL ends in ${added} — the server adds that path, so it would ask ${added}${added}`);
+  }
+  // contents with a key and no header to send it in: the key would go nowhere, so the server refuses to start.
+  p.setEnv({ AZ_CHAT_API: 'contents' });
+  assert.equal((await check('chat-env', p)).line, 'chat .env: 1 problem — AZ_CHAT_KEY_HEADER is refused by the server');
+  p.setEnv({ AZ_CHAT_API: 'messages', AZ_CHAT_HEADERS: `content-type=${HEADER_VALUE}` });
+  assert.equal((await check('chat-env', p)).line, 'chat .env: 1 problem — AZ_CHAT_HEADERS is refused by the server');
+  p.setEnv({ AZ_CHAT_API: 'other' });
+  assert.equal((await check('chat-env', p)).line, 'chat .env: 1 problem — AZ_CHAT_API is refused by the server');
+  // CONTROL: the operator's version header is fine.
+  p.setEnv({ AZ_CHAT_API: 'messages', AZ_CHAT_HEADERS: `x-version=${HEADER_VALUE}` });
+  assert.equal((await check('chat-env', p)).status, 'pass');
 });
 
 /** A planted tool key: never in a report either. */

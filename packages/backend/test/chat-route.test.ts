@@ -379,13 +379,13 @@ test('env: chat keys are checked only for a chat site, each problem named', () =
   const r = loadConfig({ ...base, ...good }, setup, 'Studio');
   assert.ok(r.ok && r.config.chat);
   assert.deepEqual({ ...r.config.chat, url: r.config.chat.url }, {
-    api: 'completions', url: 'https://models.example.test/v1', key: '', model: 'model-a', dailyTokens: 300_000, maxOutputTokens: 600,
+    api: 'completions', url: 'https://models.example.test/v1', key: '', keyHeader: '', headers: [], model: 'model-a', dailyTokens: 300_000, maxOutputTokens: 600,
     perAddress: { hour: 20, day: 60 }, perAccount: { day: 100 }, concurrency: 4, timeoutMs: 60_000, enabled: true, match: true, cacheMinTokens: 1_024, fakeFile: '', moderation: null,
     tools: [], toolCallsPerAddress: { hour: 120 }, geocoder: null,
     shares: { enabled: true, days: 30, max: 10_000, perAddress: { hour: 10, day: 30 }, perAccount: { day: 30 } },
   });
   const cases: [Record<string, string>, RegExp][] = [
-    [{ AZ_CHAT_API: 'other' }, /^AZ_CHAT_API must be completions or fake/],
+    [{ AZ_CHAT_API: 'other' }, /^AZ_CHAT_API must be completions, messages, contents, local or fake$/],
     [{ ...good, AZ_CHAT_URL: '' }, /^AZ_CHAT_URL is missing/],
     [{ ...good, AZ_CHAT_URL: 'http://models.example.test' }, /^AZ_CHAT_URL must use https/],
     [{ ...good, AZ_CHAT_URL: 'https://models.example.test/?k=1' }, /^AZ_CHAT_URL must not have \? or #/],
@@ -421,4 +421,66 @@ test('env: chat keys are checked only for a chat site, each problem named', () =
   // A loopback server may use the fake model, and a local model server over http.
   assert.ok(loadConfig({ ...base, AZ_BACKEND_PUBLIC_URL: 'http://127.0.0.1:8787', AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: './x.json' }, setup, 'Studio').ok);
   assert.deepEqual(problems({ ...good, AZ_CHAT_URL: 'http://localhost:11434/v1' }), []);
+});
+
+test('env §19.19: every wire shape is a choice, each with its URL, model and key header checked, and the operator\'s headers bounded — names only', () => {
+  const base = {
+    AZ_SESSION_SECRET: SECRET, AZ_BACKEND_PUBLIC_URL: 'https://api.studio.test', AZ_ALLOWED_ORIGINS: 'https://studio.test',
+    AZ_EMAIL_FROM: 'x <x@studio.test>', AZ_SMTP_HOST: 'smtp.studio.test', AZ_SMTP_PORT: '587',
+  };
+  const setup = { database: 'sqlite' as const, email: 'smtp' as const, chat: true };
+  const load = (env: Record<string, string>) => loadConfig({ ...base, ...env }, setup, 'Studio');
+  const problems = (env: Record<string, string>) => {
+    const r = load(env);
+    return r.ok ? [] : r.problems;
+  };
+  const SECRET_VALUE = 'hv-7f3a9c';
+  // Each shape starts with a URL and a model; the shape is what the operator wrote, lower-cased.
+  for (const api of ['completions', 'messages', 'contents', 'local'] as const) {
+    const r = load({ AZ_CHAT_API: api.toUpperCase(), AZ_CHAT_URL: 'https://models.example.test/v1/', AZ_CHAT_MODEL: 'model-a' });
+    assert.ok(r.ok && r.config.chat, `${api}: ${r.ok ? '' : r.problems.join(' | ')}`);
+    assert.equal(r.config.chat.api, api);
+    assert.equal(r.config.chat.url, 'https://models.example.test/v1');
+    assert.match(problems({ AZ_CHAT_API: api, AZ_CHAT_MODEL: 'model-a' }).join('\n'), new RegExp(`^AZ_CHAT_URL is missing — the model API's base URL \\(required for ${api}\\)$`, 'm'));
+    assert.match(problems({ AZ_CHAT_API: api, AZ_CHAT_URL: 'https://models.example.test' }).join('\n'), new RegExp(`^AZ_CHAT_MODEL is missing — the model id \\(required for ${api}\\)$`, 'm'));
+    // Plain http only to this machine, for every shape.
+    assert.match(problems({ AZ_CHAT_API: api, AZ_CHAT_URL: 'http://models.example.test', AZ_CHAT_MODEL: 'm' }).join('\n'), /^AZ_CHAT_URL must use https/m);
+    assert.deepEqual(problems({ AZ_CHAT_API: api, AZ_CHAT_URL: 'http://127.0.0.1:11434', AZ_CHAT_MODEL: 'm' }), [], api);
+  }
+  const shape = (api: string, more: Record<string, string> = {}) => ({ AZ_CHAT_API: api, AZ_CHAT_URL: 'https://models.example.test/v1', AZ_CHAT_MODEL: 'model-a', ...more });
+  // The key header and the operator's headers reach the config, names lower-cased.
+  const set = load(shape('contents', { AZ_CHAT_KEY: SECRET_VALUE, AZ_CHAT_KEY_HEADER: 'X-Model-Key', AZ_CHAT_HEADERS: 'X-Version=2024-01-01, x-tier = gold' }));
+  assert.ok(set.ok && set.config.chat);
+  assert.equal(set.config.chat.keyHeader, 'x-model-key');
+  assert.deepEqual(set.config.chat.headers, [['x-version', '2024-01-01'], ['x-tier', 'gold']]);
+  const cases: [Record<string, string>, RegExp][] = [
+    [shape('contents', { AZ_CHAT_KEY: SECRET_VALUE }), /^AZ_CHAT_KEY_HEADER is missing — the contents shape has no usual key header/],
+    [shape('contents', { AZ_CHAT_MODEL: 'models/../x' }), /^AZ_CHAT_MODEL must be letters, digits, \. _ and - only for contents/],
+    [shape('contents', { AZ_CHAT_MODEL: 'a?b' }), /^AZ_CHAT_MODEL must be letters, digits, \. _ and - only for contents/],
+    [shape('completions', { AZ_CHAT_KEY_HEADER: 'x-model-key' }), /^AZ_CHAT_KEY_HEADER names the header AZ_CHAT_KEY is sent in — set AZ_CHAT_KEY too/],
+    [shape('completions', { AZ_CHAT_KEY: SECRET_VALUE, AZ_CHAT_KEY_HEADER: 'bad header' }), /^AZ_CHAT_KEY_HEADER must be a header name/],
+    [shape('completions', { AZ_CHAT_KEY: SECRET_VALUE, AZ_CHAT_KEY_HEADER: 'Host' }), /^AZ_CHAT_KEY_HEADER must not name a header the server sets itself/],
+    [shape('completions', { AZ_CHAT_KEY: SECRET_VALUE, AZ_CHAT_KEY_HEADER: 'authorization' }), /^AZ_CHAT_KEY_HEADER must not name a header the server sets itself/],
+    [shape('messages', { AZ_CHAT_HEADERS: 'x-version' }), /^AZ_CHAT_HEADERS must be name=value pairs/],
+    [shape('messages', { AZ_CHAT_HEADERS: `bad name=${SECRET_VALUE}` }), /^AZ_CHAT_HEADERS must be name=value pairs/],
+    [shape('messages', { AZ_CHAT_HEADERS: `content-type=${SECRET_VALUE}` }), /^AZ_CHAT_HEADERS must not set a header the server sets itself or the key's header/],
+    [shape('messages', { AZ_CHAT_HEADERS: `x-api-key=${SECRET_VALUE}` }), /^AZ_CHAT_HEADERS must not set a header the server sets itself or the key's header/],
+    [shape('completions', { AZ_CHAT_KEY: SECRET_VALUE, AZ_CHAT_KEY_HEADER: 'x-model-key', AZ_CHAT_HEADERS: `X-Model-Key=${SECRET_VALUE}` }), /^AZ_CHAT_HEADERS must not set a header the server sets itself or the key's header/],
+    [shape('messages', { AZ_CHAT_HEADERS: `x-a=${SECRET_VALUE}\u0007` }), /^AZ_CHAT_HEADERS values must be printable text of at most 256 characters$/],
+    [shape('messages', { AZ_CHAT_HEADERS: `x-a=${'v'.repeat(257)}` }), /^AZ_CHAT_HEADERS values must be printable text/],
+    [shape('messages', { AZ_CHAT_HEADERS: 'x-a=1,X-A=2' }), /^AZ_CHAT_HEADERS names one header twice$/],
+    [shape('messages', { AZ_CHAT_HEADERS: Array.from({ length: 9 }, (_, i) => `x-h${i}=v`).join(',') }), /^AZ_CHAT_HEADERS lists 9 headers — at most 8$/],
+    [{ AZ_BACKEND_PUBLIC_URL: 'http://127.0.0.1:8787', AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: './x.json', AZ_CHAT_KEY_HEADER: 'x-k' }, /^AZ_CHAT_KEY_HEADER is only sent to a real model/],
+    [{ AZ_BACKEND_PUBLIC_URL: 'http://127.0.0.1:8787', AZ_CHAT_API: 'fake', AZ_CHAT_FAKE_FILE: './x.json', AZ_CHAT_HEADERS: 'x-a=1' }, /^AZ_CHAT_HEADERS is only sent to a real model/],
+  ];
+  for (const [env, want] of cases) {
+    const got = problems(env);
+    assert.ok(got.some((p) => want.test(p)), `${JSON.stringify(env)}: ${got.join(' | ')}`);
+    // A problem names the key, never what it held.
+    assert.ok(got.every((p) => !p.includes(SECRET_VALUE)), got.join(' | '));
+  }
+  // CONTROL: x-api-key may carry the key for any shape; a header without a key is only a header.
+  assert.deepEqual(problems(shape('completions', { AZ_CHAT_KEY: SECRET_VALUE, AZ_CHAT_KEY_HEADER: 'x-api-key' })), []);
+  assert.deepEqual(problems(shape('local', { AZ_CHAT_HEADERS: 'x-a=1' })), []);
+  assert.deepEqual(problems(shape('contents')), [], 'contents without a key needs no key header');
 });

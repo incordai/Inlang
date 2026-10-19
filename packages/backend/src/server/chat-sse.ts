@@ -71,7 +71,6 @@ export function createSseReader(lineMax: number = SSE_LINE_MAX) {
       if (partner) continue;
       take(line, out);
       line = '';
-      lineBytes = 0;
     }
     if (start < text.length) {
       pendingCr = false;

@@ -14,7 +14,8 @@
  * - **chat .env** — the server's own validation of the chat keys
  *   (env.ts loadConfig) reduced to key names, and what it lets through but a
  *   deployment must not have: the scripted `fake` model, and a model URL
- *   that already ends in `/chat/completions` (the server adds that path).
+ *   that already ends in its shape's path, `/chat/completions` say (the
+ *   server adds that path).
  * - **chat tools** — the operator's data tools (§21.2), when any is
  *   declared: each declaration and its `_SAMPLE` as the server loads them,
  *   by key name; a tool the probe cannot call (required parameters and no
@@ -48,6 +49,7 @@ import { stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseEnv } from 'node:util';
 import { SERVER_DIR } from '../../backend/src/emit.ts';
+import { WIRE_PATHS, type WireApi } from '../../backend/src/server/chat-adapters.ts';
 import { BUNDLED_WORLD, loadConfig, toolKey, type Setup } from '../../backend/src/server/env.ts';
 import type { Check, CheckResult, DoctorContext } from './doctor.ts';
 import { readRegular } from './shipped.ts';
@@ -78,13 +80,10 @@ async function chatServer(serverDir: string): Promise<ChatServer | null> {
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
-/** The path the completions shape is asked at; the server adds it to AZ_CHAT_URL. */
-const COMPLETIONS_PATH = '/chat/completions';
-
 /**
  * Why a deployment must not run with these chat keys: the server's own
  * refusals (key names only — some of its messages quote a value), the fake
- * model, and a URL with the completions path already on it.
+ * model, and a URL with its shape's path already on it (WIRE_PATHS).
  */
 export function chatEnvProblems(setup: ChatServer, env: Readonly<Record<string, string>>): string[] {
   const loaded = loadConfig(env, { database: setup.database, email: setup.email, ...(setup.images === true ? { images: true } : {}), chat: true }, 'site');
@@ -94,14 +93,18 @@ export function chatEnvProblems(setup: ChatServer, env: Readonly<Record<string, 
   const api = (env.AZ_CHAT_API ?? '').trim().toLowerCase();
   if (api === 'fake') out.push('AZ_CHAT_API=fake answers from a script, for development only');
   const url = (env.AZ_CHAT_URL ?? '').trim();
-  if (api === 'completions' && url !== '') {
+  if (Object.hasOwn(WIRE_PATHS, api) && url !== '') {
+    const added = WIRE_PATHS[api as WireApi];
     let path = '';
     try {
       path = new URL(url).pathname.replace(/\/+$/, '');
     } catch {
       // A URL the server refuses is named above.
     }
-    if (path.endsWith(COMPLETIONS_PATH)) out.push(`AZ_CHAT_URL ends in ${COMPLETIONS_PATH} — the server adds that path, so it would ask ${COMPLETIONS_PATH}${COMPLETIONS_PATH}`);
+    // contents asks <url>/models/<model>:…, so a URL already in /models/ is one too.
+    if (path.endsWith(added) || (api === 'contents' && path.includes(`${added}/`))) {
+      out.push(`AZ_CHAT_URL ends in ${added} — the server adds that path, so it would ask ${added}${added}`);
+    }
   }
   return out;
 }
@@ -147,14 +150,15 @@ const chatEnv: Check = {
         line: `chat .env: ${count(problems.length, 'problem')} — ${problems[0]}`,
         fix: [
           ...problems.slice(1),
-          'set AZ_CHAT_API=completions with AZ_CHAT_URL (the API\'s base, …/v1) and AZ_CHAT_MODEL; az dev uses the fake model without any of them',
+          'set AZ_CHAT_API to the shape your provider speaks (completions, messages, contents or local) with AZ_CHAT_URL (the API\'s base, …/v1) and AZ_CHAT_MODEL; az dev uses the fake model without any of them',
           example,
         ],
       };
     }
     const moderation = (got.env.AZ_CHAT_MODERATION_URL ?? '').trim() !== '' ? 'moderation hook on (it fails closed)' : 'no moderation hook (optional)';
     const shares = (got.env.AZ_CHAT_SHARES ?? 'on').trim().toLowerCase() === 'off' ? 'new shares off' : 'shares on';
-    return { status: 'pass', line: `chat .env: the model keys are valid; ${moderation}; ${shares} — names checked, no value printed` };
+    const api = (got.env.AZ_CHAT_API ?? '').trim().toLowerCase();
+    return { status: 'pass', line: `chat .env: the model keys are valid for the ${api} shape; ${moderation}; ${shares} — names checked, no value printed` };
   },
 };
 
