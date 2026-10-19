@@ -84,6 +84,9 @@ importers:
       '@az/chat-render':
         specifier: workspace:*
         version: link:../chat-render
+      '@az/chat-runtime':
+        specifier: workspace:*
+        version: link:../chat-runtime
     devDependencies:
       '@az/chat-answer':
         specifier: workspace:*

@@ -68,7 +68,7 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   backend: ['chat-answer', 'chat-instructions'],
   'chat-instructions': ['chat-answer'],
   overlay: ['chat-render'],
-  'chat-react': ['chat-render'],
+  'chat-react': ['chat-render', 'chat-runtime'],
   'chat-runtime': ['chat-answer', 'chat-instructions', 'chat-render', 'backend'],
 };
 
@@ -142,13 +142,14 @@ test('the chat renderer imports only its siblings, and its map module the three 
   }
 });
 
-test('the React components import only their siblings, the renderer and React — never a site\'s runtime or the compiler (chat-block-spec §22.3)', () => {
+test('the React components import only their siblings, the renderer, the chat session and React — never a site\'s runtime, the compiler or a module that holds a key (chat-block-spec §22.3, §22.5)', () => {
   const files = sources('packages/chat-react');
-  assert.ok(files.length >= 1, 'CONTROL: the components\' sources are found');
+  assert.ok(files.length >= 2, 'CONTROL: the components\' sources are found');
+  assert.ok(importsOf(join(ROOT, 'packages/chat-react/src/use-az-chat.ts')).includes('#chat-runtime/session.ts'), 'CONTROL: the hook\'s import is read');
   for (const file of files) {
     for (const spec of importsOf(file)) {
-      assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec) || /^#chat-render\/(?:themes\/)?[a-z0-9-]+\.ts$/.test(spec) || spec === 'react',
-        `chat-react/${file.split(/[\\/]/).pop()} imports '${spec}' — only its siblings, #chat-render/ and react`);
+      assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec) || /^#chat-render\/(?:themes\/)?[a-z0-9-]+\.ts$/.test(spec) || spec === '#chat-runtime/session.ts' || spec === 'react',
+        `chat-react/${file.split(/[\\/]/).pop()} imports '${spec}' — only its siblings, #chat-render/, #chat-runtime/session.ts and react`);
     }
   }
 });

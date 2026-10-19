@@ -101,7 +101,7 @@ mcp      → (nothing but node:*)          (the CLI injects every operation)
 chat-answer → (nothing)                 (runs in Node, a browser, an app webview)
 chat-instructions → chat-answer (by alias)
 chat-render → (nothing; its map module: the three pinned map packages)
-chat-react → chat-render (by alias), react
+chat-react → chat-render, chat-runtime (its session only) (by alias), react
 chat-runtime → chat-answer, chat-instructions, chat-render (by alias); its Node bridge → backend chat-adapters (by alias)
 ```
 

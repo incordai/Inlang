@@ -9,6 +9,7 @@ site's panel has ([chat-block-spec §22.3](../../docs/chat-block-spec.md)).
 |---|---|
 | `<AzAnswer events theme components destinations … />` (`@az/chat-react/az-answer.ts`) | one answer, drawn as its events arrive |
 | `loadTheme(name)`, `THEME_NAMES` | a theme module by name, each its own chunk |
+| `useAzChat(runtime, conversation)` (`@az/chat-react/use-az-chat.ts`) | a chat window's state: `{ turns, busy, answeredLocally, hostedOffered, left, ask, stop, askHosted }` — each site turn's `events` for `<AzAnswer>` |
 
 Written with `createElement`, not JSX, so it runs as TypeScript with no
 build step like the rest of the repository; an app's bundler takes it as it
@@ -66,6 +67,24 @@ document.documentElement.dataset.azExample = 'drawn';
 
 Unmounting stops the answer's charts and maps and leaves nothing in the
 page. A map's library loads only when an answer holds a map.
+
+## `useAzChat`
+
+The headless half of a chat window: `@az/chat-runtime`'s session
+(`session.ts`) read through `useSyncExternalStore`. The kept conversation
+loads on mount, and an answer still coming stops on unmount. `runtime` is
+`createChatRuntime`'s; in a page, one over a transport — the sidecar or
+the operator's server — since a key is never in browser code:
+
+```js
+const chat = useAzChat(runtime, conversationId);
+chat.turns.map((t) => (t.role === 'site' ? createElement(AzAnswer, { events: t.events, theme, components }) : t.text));
+```
+
+`ask(question)` is refused while an answer is coming; `askHosted()` asks
+the last question of the operator's server only after the runtime offered
+it (`hostedOffered`). The `<AzChat>` window itself is #38's remaining part
+(chat-block-spec §22.5).
 
 ## Tests
 

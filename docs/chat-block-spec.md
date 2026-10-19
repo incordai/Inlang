@@ -4079,6 +4079,7 @@ and the generated server and site use the package.
 | the renderer core | `packages/chat-render` (`@az/chat-render`) | #36 |
 | `<AzAnswer>` for React apps | `packages/chat-react` (`@az/chat-react`) | #36 |
 | the chat runtime | `packages/chat-runtime` (`@az/chat-runtime`) | #37 |
+| `useAzChat`, a chat window's state (the `<AzChat>` window to come) | `packages/chat-react`, `packages/chat-runtime` | #38 |
 
 **How a package is used without a second copy.** A package imports only its
 own files and the chat packages it builds on, by an alias —
@@ -4352,3 +4353,35 @@ example.
 **Not here.** The desktop app's Rust model bridge (#39) and the local-mode
 sidecar (#41): both are ModelBridge or ChatTransport implementations this
 runtime takes as they are.
+
+### 22.5 The chat window's state — `useAzChat` (#38, in part)
+
+**What is new.** `createChatSession(runtime, conversation)`
+(`@az/chat-runtime/session.ts`) is a chat window's headless state:
+snapshots of `{ turns, busy, answeredLocally, hostedOffered, left }`, each
+change a new snapshot; `ask(question, { via })` (one at a time; an empty
+question is not asked), `stop()`, `askHosted()` (the last question again of
+the operator's server, only after the runtime offered it) and `load()` (a
+kept conversation drawn again from its stored events). An answer that ends
+with neither `done` nor an error, or whose asker throws, is failed as
+`unavailable`, never left coming. It is framework-free and draws nothing.
+
+`useAzChat(runtime, conversation)` (`@az/chat-react`) is that session read
+through `useSyncExternalStore`, the kept conversation loaded on mount and
+the answer coming stopped on unmount. The app draws its own window and each
+answer's `events` with `<AzAnswer>`. In a page the runtime is one over a
+transport, since a key is never in browser code; the dependency rules let
+`chat-react` import only `#chat-runtime/session.ts` of the runtime.
+
+**Tested.** `packages/chat-runtime/test/session.test.ts` (the snapshots of
+a streamed answer, one question at a time with its CONTROL, a stop, a
+throwing asker, the hosted offer, a reload) and
+`packages/chat-react/test/use-az-chat.test.ts` (the hook rendered with
+React's server renderer).
+
+**Not yet (#38).** The `<AzChat>` window itself: the theme's chat section
+(its form, transcript, suggested questions, stop, retry and status line)
+driven by the site panel's own code, extracted from overlay `chat.ts` into
+the renderer; its greeting, suggestions and title as props in place of the
+shell's; its layout from the host; and its run in Chromium, Firefox and
+WebKit (`test:chat-lib`).

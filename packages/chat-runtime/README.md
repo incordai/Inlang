@@ -92,6 +92,7 @@ done  19 questions left; kept as "We ship within two working days.\n\ncta \"Cont
 | `@az/chat-runtime/node-bridge.ts` | `nodeModelBridge({ url, key, model })`: a provider of the completions shape, through the server's adapter. Node only |
 | `@az/chat-runtime/transport.ts` | `httpTransport({ source, base, token })`: `POST <base>/chat`, the token in the Authorization header only, no cookie; the base https, or http on this machine |
 | `@az/chat-runtime/history.ts` | `HistoryStore`; `memoryHistory()`, `webStorageHistory(localStorage)` — capped, read back checked whole |
+| `@az/chat-runtime/session.ts` | `createChatSession(runtime, conversation)`: a chat window's headless state — snapshots of its turns and each answer's events, `ask`, `stop`, `askHosted`, `load` (what `useAzChat` reads) |
 | `@az/chat-runtime/budget.ts` | `createBudget`, `BUDGET_DEFAULTS` (the server's: 300 000 tokens a UTC day, 20 questions a conversation, 600 output tokens an answer), `memoryBudgetStore`, `webStorageBudgetStore` |
 
 `createChatRuntime` takes:

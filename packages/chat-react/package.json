@@ -8,14 +8,16 @@
     "./*.ts": "./src/*.ts"
   },
   "imports": {
-    "#chat-render/*": "@az/chat-render/*"
+    "#chat-render/*": "@az/chat-render/*",
+    "#chat-runtime/*": "@az/chat-runtime/*"
   },
   "peerDependencies": {
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "dependencies": {
-    "@az/chat-render": "workspace:*"
+    "@az/chat-render": "workspace:*",
+    "@az/chat-runtime": "workspace:*"
   },
   "devDependencies": {
     "react": "19.2.8",
