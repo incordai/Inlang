@@ -4079,7 +4079,7 @@ and the generated server and site use the package.
 | the renderer core | `packages/chat-render` (`@az/chat-render`) | #36 |
 | `<AzAnswer>` for React apps | `packages/chat-react` (`@az/chat-react`) | #36 |
 | the chat runtime | `packages/chat-runtime` (`@az/chat-runtime`) | #37 |
-| `useAzChat`, a chat window's state (the `<AzChat>` window to come) | `packages/chat-react`, `packages/chat-runtime` | #38 |
+| the chat window: its core, `useAzChat` and `<AzChat>` | `packages/chat-render`, `packages/chat-react`, `packages/chat-runtime` | #38 |
 
 **How a package is used without a second copy.** A package imports only its
 own files and the chat packages it builds on, by an alias —
@@ -4354,7 +4354,7 @@ example.
 sidecar (#41): both are ModelBridge or ChatTransport implementations this
 runtime takes as they are.
 
-### 22.5 The chat window's state — `useAzChat` (#38, in part)
+### 22.5 The chat window — its core, `useAzChat` and `<AzChat>` (#38)
 
 **What is new.** `createChatSession(runtime, conversation)`
 (`@az/chat-runtime/session.ts`) is a chat window's headless state:
@@ -4379,9 +4379,51 @@ throwing asker, the hosted offer, a reload) and
 `packages/chat-react/test/use-az-chat.test.ts` (the hook rendered with
 React's server renderer).
 
-**Not yet (#38).** The `<AzChat>` window itself: the theme's chat section
-(its form, transcript, suggested questions, stop, retry and status line)
-driven by the site panel's own code, extracted from overlay `chat.ts` into
-the renderer; its greeting, suggestions and title as props in place of the
-shell's; its layout from the host; and its run in Chromium, Firefox and
-WebKit (`test:chat-lib`).
+**The window's core** (`@az/chat-render/chat-panel.ts`). What a site's
+panel did in its controller (overlay `chat.ts` runShell) but its float —
+the form (Enter sends, Shift+Enter a new line, an IME composition never
+cut short, the input growing to its cap), the suggested questions, the
+transcript following the newest words and Jump to latest, Stop and Escape,
+Try again and New chat, the history controls, the status region's
+sentences at most one update in 1.5 s, and each answer's place, drawing,
+bar and end — is `runPanel(panelPartsOf(shell), config, driver, signal)`.
+The driver answers: the site's panel gives it the request and its event
+stream, the kept conversation, the session's reader, the float and Share
+(overlay `chat.ts`, behaviour unchanged, `test:chat`); an app's window
+gives it a chat session. `chat-panel.ts` is one more file `az build`
+copies into a chat site's `src/az/chat-render/`.
+
+**`<AzChat>`** (`@az/chat-react/az-chat.ts`):
+`createElement(AzChat, { runtime, conversation, theme, components, destinations, title, greeting, suggestions })`.
+The theme's shell is built (chat-templates.ts), the app's title, greeting
+and suggested questions written into it as text (none, the suggestions'
+list goes), its ids suffixed per window, and the core run over
+`createChatSession(runtime, conversation)` by `sessionWindow`: a question
+the window shows is asked of the session, each snapshot's new events are
+drawn into the answer the window began, a failure is the window's fixed
+copy for its code (Try again for `busy` and `unavailable`), a stop keeps
+what was drawn, the questions left are the note, and a kept conversation
+loaded on mount is drawn as it was. The session is read imperatively, so
+a word is drawn without a React render. Its layout is the host's: the
+element (`className`) the app sizes holds the window
+(`[data-az-chat-root][data-az-chat-window]`, rules in each theme's
+stylesheet from target-web `chat-library.ts`), and the transcript scrolls
+in what the rest leaves. Clear history and New chat are not offered (the
+conversation is the runtime's history, the app's to forget); the
+operator's server offered after the user's own fails is `useAzChat`'s
+(`hostedOffered`, `askHosted()`), for a window of the app's own.
+
+**Tested.** `packages/chat-react/test/az-chat.test.ts` (what the core is
+told as a session streams: each event once, then whole, failed with its
+code, stopped, or full; a kept conversation drawn once); `test:chat-lib`
+in Chromium, Firefox and WebKit under `script-src 'self'; style-src
+'self'`: `<AzChat>` in an element the page's stylesheet sizes, asking the
+test server's `/chat` through the runtime's transport — the app's title,
+greeting and suggestions; a suggestion answered whole (FAQ, the listed
+link only, a chart, the follow-up, the bar) with its status lines and the
+questions left; the window exactly its element's size, the transcript
+scrolling inside; Enter sends, Escape stops and keeps the words drawn,
+focus stays in the input; a refusal's copy and Try again; no style
+attribute, handler or repeated id; nothing after unmount; the README's
+window example answered. The site's panel over the same core:
+`test:chat` (`chat-e2e`, `chat-public-e2e`).

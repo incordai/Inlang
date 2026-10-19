@@ -33,14 +33,15 @@ export function exampleChecks(readme: URL, example: URL): void {
 }
 
 /**
- * A browser example: the README shows the file exactly; scripts/chat-lib-e2e.mjs opens it in three browsers (it serves it at
- * /example/<package>/<name>, as `--serve` does for a person) and checks it draws.
+ * A browser example: the README shows the file exactly, as its `index`th `ts` block (the first by default);
+ * scripts/chat-lib-e2e.mjs opens it in three browsers (it serves it at /example/<package>/<name>, as `--serve` does for a
+ * person) and checks it draws.
  */
-export function browserExampleShown(readme: URL, example: URL): void {
+export function browserExampleShown(readme: URL, example: URL, index = 0): void {
   const md = readFileSync(readme, 'utf8');
-  test('the README shows the example file exactly, and how to run it', () => {
+  test(`the README shows the example file ${fileURLToPath(example).split(/[\\/]/).pop()} exactly, and how to run it`, () => {
     const code = readFileSync(fileURLToPath(example), 'utf8');
-    assert.equal(fenced(md, 'ts')[0], code);
+    assert.equal(fenced(md, 'ts')[index], code);
     assert.match(code, /^\/\/ Run: node scripts\/chat-lib-e2e\.mjs --serve/);
   });
 }

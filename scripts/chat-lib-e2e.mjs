@@ -17,6 +17,12 @@
  *     byte (chat-text.ts over node:crypto), and a tampered answer's tag fails;
  *   - the instruction builder (#35): buildInstructions gives the text Node
  *     gives for the same app input — rules, content, tools, rows;
+ *   - <AzChat> (#38) in a box the page's stylesheet sizes, asking this
+ *     server's /chat through the runtime's transport: the app's title,
+ *     greeting and suggestions; a suggestion answered whole, the window
+ *     filling its box and its transcript scrolling inside; Escape stopping
+ *     an answer; Try again after a refusal; no inline style, no shared id;
+ *     nothing after unmount; and its README example drawing;
  *   - no Content-Security-Policy violation (with a CONTROL that the watch
  *     sees one), and no request leaves the page's own origin.
  */
@@ -89,16 +95,20 @@ document.documentElement.dataset.azReady = 'yes';
 
 /** The answer page's script: the renderer core and <AzAnswer> (scripts/chat-lib-e2e/answer.js). */
 const ANSWER_HARNESS = readFileSync(fileURLToPath(new URL('./chat-lib-e2e/answer.js', import.meta.url)), 'utf8');
+/** The window page's script: <AzChat> over the chat runtime (scripts/chat-lib-e2e/window.js). */
+const WINDOW_HARNESS = readFileSync(fileURLToPath(new URL('./chat-lib-e2e/window.js', import.meta.url)), 'utf8');
+/** The window page's own stylesheet: the app gives the window's element (its className) its box. */
+const APP_CSS = '.chat-box { block-size: 480px; inline-size: 360px; }\n';
 
 /** The packages an app's page may load, by the alias name it imports them with. */
-const PACKAGES = ['chat-answer', 'chat-instructions', 'chat-render', 'chat-react'];
+const PACKAGES = ['chat-answer', 'chat-instructions', 'chat-render', 'chat-react', 'chat-runtime'];
 
 /** The page's policy: its own scripts, styles and requests only — no inline script or style, nothing from elsewhere. */
 const POLICY = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'";
 
-const page = (script, theme = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+const page = (script, theme = null, css = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="${POLICY}" />
-<title>Chat library</title>${theme ? `<link rel="stylesheet" href="/pkg/chat-render/themes/${theme}.css" />` : ''}<script type="module" src="${script}"></script></head>
+<title>Chat library</title>${theme ? `<link rel="stylesheet" href="/pkg/chat-render/themes/${theme}.css" />` : ''}${css ? `<link rel="stylesheet" href="${css}" />` : ''}<script type="module" src="${script}"></script></head>
 <body><main id="root"><h1>Chat library</h1><div id="app"></div><p id="status" role="status"></p></main></body></html>`;
 
 /** React and React DOM as one module of their CommonJS builds, each run in its own scope — an app's bundler does the same. */
@@ -147,6 +157,46 @@ function moduleOf(name, path) {
 /** Every request the pages make, by path: the tests read which modules a page loaded, and when. */
 const requested = [];
 
+/** The chat server's stand-in for the window (the chat API, chat-block-spec §4.2): the checker's events for MODEL_ANSWER. */
+let windowEvents = null;
+/** Questions refused once already: "Refuse once …" is refused (busy) the first time it is asked, answered the next. */
+const refusedOnce = new Set();
+const sse = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+async function chatAnswer(req, res) {
+  let raw = '';
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > 64_000) break;
+  }
+  let question = '';
+  try {
+    const body = JSON.parse(raw);
+    const lastMessage = Array.isArray(body.messages) ? body.messages[body.messages.length - 1] : null;
+    if (typeof lastMessage?.text === 'string') question = lastMessage.text;
+  } catch { /* no question: answered all the same */ }
+  if (question.startsWith('Refuse once') && !refusedOnce.has(question)) {
+    refusedOnce.add(question);
+    res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ error: 'busy' }));
+    return;
+  }
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+  if (question.startsWith('Wait')) {
+    // An answer that stops coming: its first words, then nothing until the window stops it (or the step's deadline).
+    res.write(sse('text', { s: 'Thinking about it' }));
+    const end = setTimeout(() => res.end(), STEP_MS);
+    res.on('close', () => clearTimeout(end));
+    return;
+  }
+  windowEvents ??= await checkerEvents(MODEL_ANSWER);
+  for (const e of windowEvents) {
+    if (e.type === 'text') res.write(sse('text', { s: e.s }));
+    else if (e.type === 'hold') res.write(sse('hold', { word: e.word }));
+    else if (e.type === 'block') res.write(sse('block', e.block));
+  }
+  res.end(sse('done', { tag: 'a'.repeat(43), conversation: 'c'.repeat(22), text: 'An answer.', left: 2 }));
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   requested.push(url.pathname);
@@ -159,6 +209,10 @@ const server = createServer((req, res) => {
     const theme = url.searchParams.get('theme');
     return send(200, 'text/html; charset=utf-8', page('/answer.js', theme !== null && /^(?:midnight|paper|signal|clay|petal|volt)$/.test(theme) ? theme : 'midnight'));
   }
+  if (url.pathname === '/chat' && req.method === 'POST') return void chatAnswer(req, res);
+  if (url.pathname === '/window.html') return send(200, 'text/html; charset=utf-8', page('/window.js', 'midnight', '/app.css'));
+  if (url.pathname === '/window.js') return send(200, 'text/javascript; charset=utf-8', WINDOW_HARNESS);
+  if (url.pathname === '/app.css') return send(200, 'text/css; charset=utf-8', APP_CSS);
   if (url.pathname === '/harness.js') return send(200, 'text/javascript; charset=utf-8', HARNESS);
   if (url.pathname === '/answer.js') return send(200, 'text/javascript; charset=utf-8', ANSWER_HARNESS);
   if (url.pathname === '/vendor/react-cjs.js') return send(200, 'text/javascript; charset=utf-8', reactBundle());
@@ -188,7 +242,7 @@ await new Promise((ok) => server.listen(SERVING ? SERVE_PORT : 0, '127.0.0.1', o
 const origin = `http://127.0.0.1:${server.address().port}`;
 if (SERVING) {
   run.clear();
-  console.log(`chat-lib-e2e --serve: ${origin}/example/chat-react/answer and ${origin}/example/chat-render/answer, for ${human(SERVE_MS)} (Ctrl+C ends it)`);
+  console.log(`chat-lib-e2e --serve: ${origin}/example/chat-react/answer, ${origin}/example/chat-react/chat and ${origin}/example/chat-render/answer, for ${human(SERVE_MS)} (Ctrl+C ends it)`);
   setTimeout(() => process.exit(0), SERVE_MS).unref();
   await new Promise(() => undefined);
 }
@@ -319,6 +373,89 @@ async function answerChecks(name, ctx) {
   }
 }
 
+/**
+ * <AzChat> in one engine (#38): the window in a box the page's stylesheet sizes, the app's strings in it, asking the server's
+ * /chat through the runtime: a suggestion answered whole; Escape stopping an answer; Try again after a refusal; nothing inline,
+ * no id twice; nothing after unmount; and the README example drawing its window.
+ */
+async function windowChecks(name, ctx) {
+  const page = await ctx.newPage();
+  await page.goto(`${origin}/window.html`, { waitUntil: 'load', timeout: STEP_MS });
+  await page.waitForFunction(() => document.documentElement.dataset.azReady === 'yes', null, { timeout: STEP_MS });
+  const props = { ...ANSWER_OPTIONS, className: 'chat-box', theme: 'midnight', title: 'Ask Acme', greeting: 'Hi! Ask me about orders.', suggestions: ['How fast do you ship?', 'Do you ship abroad?'] };
+  await within(STEP_MS, `${name} window render`, () => page.evaluate((p) => window.azWindow.render(p), props));
+  await page.waitForFunction(() => document.querySelector('[data-az-chat-window] .az-chat-title') !== null, null, { timeout: STEP_MS });
+  const describe = () => page.evaluate(() => window.azWindow.describe());
+  const until = (what, fn) => within(STEP_MS, `${name} ${what}`, () => page.waitForFunction(fn, null, { timeout: STEP_MS }));
+  const input = '[data-az-chat-window] [data-az-chat-input]';
+  const first = await describe();
+  check(name, '<AzChat>: the app\'s title, greeting and suggested questions, as text; the window fills the box the page gives it',
+    first.title === 'Ask Acme' && first.greeting === 'Hi! Ask me about orders.' && JSON.stringify(first.asks) === JSON.stringify(props.suggestions)
+      && first.asksShown && first.messages.length === 1 && JSON.stringify(first.root) === JSON.stringify(first.box) && first.box[1] === 480,
+    JSON.stringify(first).slice(0, 300));
+
+  await page.click('[data-az-chat-window] [data-az-chat-ask]');
+  await until('answered', () => {
+    const items = document.querySelectorAll('[data-az-chat-window] [data-az-chat-transcript] > li');
+    return items.length === 3 && items[2].getAttribute('aria-busy') === 'false';
+  });
+  const answered = await describe();
+  check(name, '<AzChat>: a suggestion is asked and answered whole — FAQ, the listed link only, a chart, the follow-up, the bar; the suggestions go',
+    JSON.stringify(answered.messages) === '["site","visitor","site"]' && answered.faq[0] === 'Do you ship?' && JSON.stringify(answered.links) === '["/contact"]'
+      && answered.svg > 0 && answered.follows[0] === 'How do I cancel?' && answered.bar === 1 && !answered.asksShown && answered.send && !answered.stop,
+    JSON.stringify({ ...answered, lastText: undefined }).slice(0, 400));
+  check(name, '<AzChat>: the status region says the answer, the note the questions left; the box holds the window, the transcript scrolls inside it',
+    /follow-up question/.test(answered.status) && answered.note === '2 questions left in this chat.' && JSON.stringify(answered.root) === JSON.stringify(answered.box)
+      && answered.transcriptInBox && answered.transcriptScrolls,
+    JSON.stringify({ status: answered.status, note: answered.note, root: answered.root, box: answered.box, inBox: answered.transcriptInBox, scrolls: answered.transcriptScrolls }));
+
+  await page.fill(input, 'Wait for it');
+  await page.press(input, 'Enter');
+  await until('streaming', () => document.querySelector('[data-az-chat-window] [data-az-chat-transcript] > li:last-child')?.textContent.includes('Thinking about it') === true);
+  const coming = await describe();
+  await page.keyboard.press('Escape');
+  await until('stopped', () => document.querySelector('[data-az-chat-window] [data-az-chat-note]')?.textContent === 'Stopped.');
+  const stopped = await describe();
+  check(name, '<AzChat>: Enter sends; while it answers Stop shows; Escape stops it, the words it drew stay, focus stays in the input',
+    coming.stop && !coming.send && coming.lastBusy === 'true' && stopped.send && !stopped.stop && stopped.lastText.includes('Thinking about it')
+      && stopped.lastBusy === 'false' && stopped.focused && /Stopped\./.test(stopped.status),
+    JSON.stringify({ coming: { stop: coming.stop, busy: coming.lastBusy }, stopped: { ...stopped, lastText: undefined } }).slice(0, 300));
+
+  const refused = `Refuse once ${name}`;
+  await page.fill(input, refused);
+  await page.press(input, 'Enter');
+  await until('refused', () => document.querySelector('[data-az-chat-window] [data-az-chat-retry]')?.hidden === false);
+  const busy = await describe();
+  await page.click('[data-az-chat-window] [data-az-chat-retry]');
+  await until('retried', () => {
+    const last = document.querySelector('[data-az-chat-window] [data-az-chat-transcript] > li:last-child');
+    return last?.classList.contains('az-chat-message--site') === true && last.getAttribute('aria-busy') === 'false';
+  });
+  const retried = await describe();
+  const visitors = (d) => d.messages.filter((m) => m === 'visitor').length;
+  check(name, '<AzChat>: a refused question says the fixed copy and offers Try again; Try again asks it once more and it is answered',
+    busy.error === 'Chat is busy — try again in a moment.' && busy.retry && busy.messages[busy.messages.length - 1] === 'visitor'
+      && retried.error === '' && !retried.retry && retried.faq[0] === 'Do you ship?' && visitors(retried) === visitors(busy),
+    JSON.stringify({ busy: { error: busy.error, retry: busy.retry }, retried: { error: retried.error, faq: retried.faq, messages: retried.messages } }));
+  check(name, '<AzChat>: nothing inline — no style attribute, no handler — and no id twice', retried.styled === 0 && retried.handlers === 0 && retried.duplicateIds === 0,
+    JSON.stringify({ styled: retried.styled, handlers: retried.handlers, duplicateIds: retried.duplicateIds }));
+  const gone = await within(STEP_MS, `${name} window unmount`, () => page.evaluate(() => window.azWindow.unmount()));
+  check(name, '<AzChat>: unmounted, nothing of it is left in the page', gone.windows === 0 && gone.children === 0, JSON.stringify(gone));
+  await closeWithin(page, CLOSE_MS, `${name} window page.close`);
+
+  // The README's window example, as a person runs it (`--serve`): its window, its suggestion answered.
+  const ex = await ctx.newPage();
+  await ex.goto(`${origin}/example/chat-react/chat`, { waitUntil: 'load', timeout: STEP_MS });
+  await ex.waitForFunction(() => document.querySelector('[data-az-chat-window] .az-chat-title')?.textContent === 'Ask Acme', null, { timeout: STEP_MS });
+  await ex.click('[data-az-chat-window] [data-az-chat-ask]');
+  await ex.waitForFunction(() => {
+    const last = document.querySelector('[data-az-chat-window] [data-az-chat-transcript] > li:last-child');
+    return last?.getAttribute('aria-busy') === 'false' && last.querySelector('svg') !== null;
+  }, null, { timeout: STEP_MS });
+  check(name, 'the chat-react README window example draws its window, and its suggestion is answered with a chart', true);
+  await closeWithin(ex, CLOSE_MS, `${name} chat example.close`);
+}
+
 const failures = [];
 const check = (engine, what, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${engine.padEnd(8)} ${what}${ok || !detail ? '' : ` — ${detail}`}`);
@@ -372,6 +509,9 @@ try {
 
       progress.last = `${name}: answer`;
       await answerChecks(name, ctx);
+
+      progress.last = `${name}: window`;
+      await windowChecks(name, ctx);
 
       check(name, 'no Content-Security-Policy violation', (sinks[name] ?? []).length === 0, (sinks[name] ?? []).join(' | '));
       check(name, 'no request leaves the page\'s origin', away.length === 0, away.join(' '));

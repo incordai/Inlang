@@ -2,7 +2,7 @@
  * @az module chat-library
  * Purpose: the chat's page shell as an app draws it without a build — the chat word's own panel, its templates and their stylesheet, for one theme.
  * Spec: docs/chat-block-spec.md §22.3
- * Exports: chatLibrarySet, ChatLibrarySet, LIBRARY_ROOT
+ * Exports: chatLibrarySet, ChatLibrarySet, LIBRARY_ROOT, LIBRARY_WINDOW
  * Edit guide: the shell is exactly what the chat word emits for a page and the target compiles for it — no styling of its own here
  *   but the page-level rules a site's theme.css has, scoped to the library's root; deterministic.
  * Tests: scripts/lib/chat-themes.test.mjs
@@ -31,6 +31,9 @@ import { emitPages, type EmitterMap } from './tree.ts';
 
 /** The attribute the renderer's root element carries, beside `data-az-theme="<name>"`. */
 export const LIBRARY_ROOT = 'data-az-chat-root';
+
+/** The attribute a whole window's root carries beside it (`<AzChat>`): the window fills the host's box. */
+export const LIBRARY_WINDOW = 'data-az-chat-window';
 
 export interface ChatLibrarySet {
   /** The theme's name, as `data-az-theme` names it. */
@@ -64,6 +67,7 @@ export function chatLibrarySet(spec: Spec, emitters: EmitterMap): ChatLibrarySet
   // The page-level rules weigh what a site's do (an element, or nothing): inside :where() the scope adds nothing, so a
   // generated class still wins over the reset, exactly as on a site's page.
   const at = `:where(${root})`;
+  const win = `${root}[${LIBRARY_WINDOW}]`;
   const base: Scheme = named.defaultScheme ?? 'light';
   const other: Scheme = base === 'light' ? 'dark' : 'light';
   const indent = (css: string) => css.trimEnd().split('\n').map((l) => `  ${l}`).join('\n');
@@ -94,6 +98,13 @@ ${indent(scopedSchemeCss(named, other, `${root}:not([data-scheme="${base}"])`))}
 }
 ${scopedSchemeCss(named, other, `${root}[data-scheme="${other}"]`).trimEnd()}
 ${scoped(mapCss(theme)).trimEnd()}
+
+/* An app's whole window (<AzChat>, chat-block-spec §22.5): the host's box is its size — the section and its panel fill it,
+   and the transcript scrolls in the height the rest leaves. Three attributes and a class outweigh the section's own classes. */
+${win} { display: flex; flex-direction: column; block-size: 100%; min-block-size: 0; }
+${win} > .az-chat { display: flex; flex: 1 1 auto; flex-direction: column; min-block-size: 0; padding: 0; }
+${win} .az-chat-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-block-size: 0; max-width: none; }
+${win} .az-chat-transcript { flex: 1 1 auto; min-block-size: 0; max-block-size: none; }
 
 /* The chat word's own classes, compiled as a site's build compiles them. */
 ${styled.css}`;
