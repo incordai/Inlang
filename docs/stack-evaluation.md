@@ -73,7 +73,7 @@ network poisoned (`spike-m0/scripts/model.test.ts`). drei's `useGLTF` is not
 used on this path: its default decoder location is a public CDN.
 
 **Author-side encoding tools (§9), spike devDependencies only:**
-`@gltf-transform/core` `4.5.0` and `@gltf-transform/extensions` `4.5.0`
+`@gltf-transform/core` `4.5.1` and `@gltf-transform/extensions` `4.5.1`
 (MIT; the `KHR_draco_mesh_compression` writer), `draco3dgltf` `1.5.7`
 (Apache-2.0; the reference Draco encoder, the build three's decoder is
 paired with). `@gltf-transform/functions` is deliberately not added — its image
@@ -670,7 +670,7 @@ before pinning if this document is more than a few weeks old.**
 |---|---|---|---|
 | `three` | `0.186.0` | MIT | **VERIFIED** 2026-09-23 — the only 3D dependency a generated site takes (§0) [↗](https://registry.npmjs.org/three/latest) |
 | `@react-three/fiber` | `9.8.0` | MIT | **VERIFIED** 2026-09-23 — the spike's; generated sites do not use it (§0) [↗](https://registry.npmjs.org/@react-three/fiber/latest) |
-| `@react-three/drei` | `10.7.8` | — | **VERIFIED** [↗](https://registry.npmjs.org/@react-three/drei/latest) |
+| `@react-three/drei` | `10.7.9` | — | **VERIFIED** 2026-10-19 — the spike's; the latest, published 2026-09-25; peers met by fiber 9.8.0, react 19.2.8, three 0.186.0 [↗](https://registry.npmjs.org/@react-three/drei/10.7.9) |
 | `@react-three/postprocessing` | `3.0.5` | — | **VERIFIED** [↗](https://registry.npmjs.org/@react-three/postprocessing/latest) |
 | `postprocessing` | `6.39.4` | Zlib | **VERIFIED** — required peer, must be pinned explicitly [↗](https://registry.npmjs.org/postprocessing/latest) |
 | `react` | `19.2.8` | MIT | **VERIFIED** [↗](https://registry.npmjs.org/react/latest) |
