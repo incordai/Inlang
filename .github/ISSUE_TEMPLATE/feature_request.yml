@@ -1,0 +1,23 @@
+name: Feature request
+description: A new word, variant, check or command, or a change to one.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What a site author, visitor or operator cannot do today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: How it would read in a `.az` file or a command, if you have a shape in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: What a test or a check would show once it works.

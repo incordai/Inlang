@@ -1,0 +1,42 @@
+name: Bug report
+description: Something az compiles, checks or runs does the wrong thing.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Security problems go through private reporting (SECURITY.md), never here. Leave keys, passwords and tokens out of everything below.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The smallest `.az` file and the commands that show it.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The exact error or `AZ` code, and the relevant part of the output.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit you ran, from `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system, Node version, and the browser if the page is involved.
+    validations:
+      required: true
