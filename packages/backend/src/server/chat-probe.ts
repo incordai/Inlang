@@ -31,13 +31,13 @@
  * Every answer is bounded by the server's own timeouts; the whole run by
  * PROBE_MS, past which the questions left are reported as not asked.
  *
- * Copied into a generated server with a chat; imports only its siblings and node built-ins.
+ * Copied into a generated server with a chat; imports only its siblings, the answer checker (#chat-answer) and node built-ins.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { ChatAdapter } from './chat-adapters.ts';
-import { ANSWER_WORDS, createAnswerParser, type AnswerWord, type DropReason } from './chat-answer.ts';
+import { ANSWER_WORDS, createAnswerParser, type AnswerWord, type DropReason } from '#chat-answer/chat-answer.ts';
 import { cacheLine, CHAT_TIMING, rulesFor, systemParts, underCacheMinimum, type ChatContext, type ChatTiming } from './chat.ts';
 import { probeTools, type ToolProbe } from './chat-tools.ts';
 import type { ChatTool } from './env.ts';

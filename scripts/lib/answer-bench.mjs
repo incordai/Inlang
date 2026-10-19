@@ -26,7 +26,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAnswerParser } from '../../packages/backend/src/server/chat-answer.ts';
+import { createAnswerParser } from '../../packages/chat-answer/src/chat-answer.ts';
 import { build } from '../../packages/cli/src/az.ts';
 import { ROOT, WORDS, literal } from './token-bench.mjs';
 

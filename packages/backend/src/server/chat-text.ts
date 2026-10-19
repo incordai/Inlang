@@ -16,12 +16,16 @@
  * the conversation id, the turn's index and its exact text, under a key
  * derived from AZ_SESSION_SECRET — and a `site` turn without its tag is
  * refused. A visitor's own turns need none: they are untrusted either way.
+ * What a tag covers and how its key is derived are the answer checker's
+ * (chat-answer history-tag.ts), the one definition an app's Web Crypto
+ * tagger shares; this file computes them with node:crypto.
  *
- * Copied into a generated server; imports only its siblings and node built-ins.
+ * Copied into a generated server; imports only its siblings, the answer checker and node built-ins.
  */
 
 import { createHmac } from 'node:crypto';
-import { ANSWER_LIMITS } from './chat-answer.ts';
+import { ANSWER_LIMITS } from '#chat-answer/chat-answer.ts';
+import { HISTORY_KEY_LABEL, tagMessage } from '#chat-answer/history-tag.ts';
 import { safeEqual } from './crypto.ts';
 
 /** A visitor message, after trimming (chat-block-spec §6.5). */
@@ -35,11 +39,11 @@ const SITE_MAX = ANSWER_LIMITS.record;
 export const CONVERSATION_ID = /^[A-Za-z0-9_-]{16,64}$/;
 
 /** The history key: one HMAC step away from the session secret, so a tag is never a token digest. */
-export const historyKey = (secret: Buffer): Buffer => createHmac('sha256', secret).update('az-chat-history-v1').digest();
+export const historyKey = (secret: Buffer): Buffer => createHmac('sha256', secret).update(HISTORY_KEY_LABEL).digest();
 
 /** The tag of answer number `index` (its position in `messages`) in `conversation`. */
 export function tagTurn(key: Buffer, conversation: string, index: number, text: string): string {
-  return createHmac('sha256', key).update(`${conversation}\n${index}\n${text}`).digest('base64url');
+  return createHmac('sha256', key).update(tagMessage(conversation, index, text)).digest('base64url');
 }
 
 export function checkTag(key: Buffer, conversation: string, index: number, text: string, tag: unknown): boolean {

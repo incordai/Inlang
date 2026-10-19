@@ -62,15 +62,16 @@
  * reason — the visitor left, a timeout, a cap — so an abandoned answer
  * stops costing tokens. Nothing is stored but the day's counts.
  *
- * Copied into a generated server; imports only its siblings and node built-ins.
+ * Copied into a generated server; imports only its siblings, the answer checker (#chat-answer) and node built-ins.
  */
 
 import type { ServerResponse } from 'node:http';
 import type { ChatRequest, ChatRoutes } from './app.ts';
 import type { ChatAdapter } from './chat-adapters.ts';
 import type { KnowsRun } from './chat-knows.ts';
-import { ANSWER_LIMITS, ANSWER_WORDS, createAnswerParser, QUOTE_WORDS, type AnswerBlock, type AnswerEvent, type AnswerPreset, type AnswerQuote, type AnswerRules, type AnswerWord, type DropReason } from './chat-answer.ts';
-import { clampText, RICH_WORDS, resolveRich, type FiguresRun, type RichBlock } from './chat-rich.ts';
+import { ANSWER_LIMITS, ANSWER_WORDS, QUOTE_WORDS, type AnswerPreset, type AnswerQuote, type AnswerRules, type AnswerWord } from '#chat-answer/chat-answer.ts';
+import { clampText, RICH_WORDS, type FiguresRun } from '#chat-answer/chat-rich.ts';
+import { createAnswerChecker, type CheckerDone, type SentEvent } from '#chat-answer/checker.ts';
 import { toolsText, type Tools } from './chat-tools.ts';
 import { siteOutline, type SiteOutline } from './chat-outline.ts';
 import { bestMatch, choosePages, matchCandidates, type MatchCandidate } from './chat-match.ts';
@@ -83,7 +84,8 @@ import { createModeration, type Moderation } from './chat-moderation.ts';
 import { createUsage, utcDay } from './chat-usage.ts';
 import { randomToken } from './crypto.ts';
 import type { Db } from './db.ts';
-import type { ChatConfig, ChatToolShape } from './env.ts';
+import type { ChatConfig } from './env.ts';
+import type { ChatToolShape } from '#chat-answer/tool-shape.ts';
 import { BodyError, send, SECURITY_HEADERS } from './http.ts';
 
 /** Characters per token when a provider reports no usage — a conservative estimate (§6.5, INFERENCE). */
@@ -526,11 +528,16 @@ async function* siteChunks(text: string): AsyncGenerator<{ readonly text: string
   yield { text };
 }
 
-/** One event as the page receives it: prose, or a component ready to fill. */
-type Sent = { readonly type: 'text'; readonly s: string } | { readonly type: 'block'; readonly block: Record<string, unknown> };
-const wire = (e: Sent): string => (e.type === 'text' ? sseEvent('text', { s: e.s }) : sseEvent('block', e.block));
+/** One event as the page receives it, on the wire: prose, or a component ready to fill. */
+const wire = (e: SentEvent): string => (e.type === 'text' ? sseEvent('text', { s: e.s }) : sseEvent('block', e.block));
 
-const isRich = (b: AnswerBlock): b is RichBlock => (RICH_WORDS as readonly string[]).some((w) => Object.hasOwn(b, w));
+/** The model's stream ended because a timer or the visitor stopped it: a failed answer, never a finished one. */
+class StoppedError extends Error {
+  constructor() {
+    super('stopped');
+    this.name = 'StoppedError';
+  }
+}
 
 export function createChat(o: ChatOptions): ChatRoutes {
   for (const [page, c] of Object.entries(o.context.chats)) {
@@ -615,59 +622,44 @@ export function createChat(o: ChatOptions): ChatRoutes {
     });
     // The page learns at once that its answer is coming, before the first token.
     res.flushHeaders();
-    const parser = createAnswerParser(rulesFor(o.context, page, toolShapes, o.geocoder !== undefined));
-    // Tool calls and lookups stop when the visitor leaves; a capped answer still fills the components it sent.
-    const toolRun = o.tools ? o.tools.forAnswer(req.ip, req.closed) : null;
-    const geocodeRun = o.geocoder ? o.geocoder.forAnswer(req.ip, req.closed) : null;
-    /** Every event sent, as the share tag covers them; and what a rich component's resolving dropped. */
-    const sent_: Sent[] = [];
-    const resolvedDrops: DropReason[] = [];
-    /** The components the parser passed that the route then dropped whole: the history notes them instead (§19.16). */
-    const lost = new Map<AnswerBlock, DropReason>();
-    let bytes = 0;
-    const day = utcDay(started);
-    // In order, each rich component resolved first; nothing is written to a connection the visitor already closed.
-    const write = async (events: readonly AnswerEvent[]) => {
-      for (const e of events) {
-        let out: Sent;
-        if (e.type === 'text') out = e;
-        else if (isRich(e.block)) {
-          // Issue #28: the page learns which kind of component is coming before its figures are read — its kind only.
-          const word = RICH_WORDS.find((w) => Object.hasOwn(e.block, w));
-          if (word && !res.destroyed) res.write(sseEvent('hold', { word }));
-          const r = await resolveRich(e.block, o.figures ?? null, day, toolRun, o.context.images.map((i) => i.key), (why) => resolvedDrops.push(why), geocodeRun);
-          if (r === null) { resolvedDrops.push('figures'); lost.set(e.block, 'figures'); continue; }
-          out = { type: 'block', block: r };
-        } else out = { type: 'block', block: e.block as unknown as Record<string, unknown> };
-        // The whole answer stays within what one share may hold (§20.7).
-        const size = Buffer.byteLength(JSON.stringify(out), 'utf8');
-        if (bytes + size > SHARE_LIMITS.eventsBytes) {
-          if (e.type === 'block') { resolvedDrops.push('too_long'); lost.set(e.block, 'too_long'); }
-          continue;
-        }
-        bytes += size;
-        sent_.push(out);
-        if (!res.destroyed) res.write(wire(out));
-      }
-    };
-    let reported: { input: number; output: number; cached?: number } | null = null;
-    let outcome: 'done' | 'capped' | 'unavailable' | 'gone' | 'empty' = 'done';
-    try {
+    // The answer checker (chat-answer checker.ts) under this page's rules: tool calls and lookups stop when the visitor
+    // leaves; a capped answer still fills the components it sent. The site's images are the keys a card may name.
+    const rules = rulesFor(o.context, page, toolShapes, o.geocoder !== undefined);
+    const checker = createAnswerChecker({
+      components: rules.show, quotes: rules.quotes, destinations: rules.destinations, presets: rules.presets, tools: rules.tools,
+      images: o.context.images.map((i) => i.key), day: utcDay(started), eventsBytes: SHARE_LIMITS.eventsBytes,
+      data: {
+        ...(o.figures ? { figures: o.figures } : {}),
+        ...(o.tools ? { tools: o.tools.forAnswer(req.ip, req.closed) } : {}),
+        ...(o.geocoder ? { geocode: o.geocoder.forAnswer(req.ip, req.closed) } : {}),
+      },
+    });
+    type Usage = { input: number; output: number; cached?: number };
+    // Set by the model's stream below, read once it ends: typed as both, so the read is not narrowed to the null it starts as.
+    let reported = null as Usage | null;
+    type Outcome = 'done' | 'capped' | 'unavailable' | 'gone' | 'empty';
+    // `capped` is set by the checker's callback: typed as every outcome, so later reads are not narrowed past it.
+    let outcome = 'done' as Outcome;
+    /** The model's text, each chunk restarting the idle timer. A stream the timers or the visitor stopped is a failure, not an end. */
+    async function* modelText(): AsyncGenerator<string, void, undefined> {
       const chunks = site ? siteChunks(site.text) : o.adapter.stream({ system, fixed, turns: sent, maxOutputTokens: o.config.maxOutputTokens, signal: ac.signal });
       for await (const chunk of chunks) {
         clearTimeout(idle);
         idle = setTimeout(stop, timing.betweenMs);
         if (chunk.usage) reported = chunk.usage;
-        if (!chunk.text) continue;
-        await write(parser.push(chunk.text));
-        // A cap passed (prose, components): stop reading, and stop the model.
-        if (parser.ended) {
-          outcome = 'capped';
-          ac.abort();
-          break;
-        }
+        if (chunk.text) yield chunk.text;
       }
-      if (ac.signal.aborted && outcome !== 'capped') outcome = req.closed.aborted ? 'gone' : 'unavailable';
+      if (ac.signal.aborted) throw new StoppedError();
+    }
+    // A cap passed (prose, components): stop the model at once; the checker reads no more of it and fills what it sent.
+    const answer = checker.read(modelText(), { onCapped: () => { outcome = 'capped'; ac.abort(); } });
+    let done: CheckerDone | null = null;
+    try {
+      for await (const e of answer) {
+        if (e.type === 'done') done = e;
+        // Issue #28: a hold names only the coming component's kind. Nothing is written to a connection the visitor closed.
+        else if (!res.destroyed) res.write(e.type === 'hold' ? sseEvent('hold', { word: e.word }) : wire(e));
+      }
     } catch (e) {
       outcome = req.closed.aborted ? 'gone' : 'unavailable';
       if (!ac.signal.aborted) log(`chat: model failed: ${(e as Error)?.name === 'AdapterError' ? (e as Error).message : (e as Error)?.name ?? 'Error'}`);
@@ -677,16 +669,13 @@ export function createChat(o: ChatOptions): ChatRoutes {
       clearTimeout(whole);
       req.closed.removeEventListener('abort', stop);
     }
-    // The last line and any component still open, once the answer is whole.
-    if (outcome === 'done' || outcome === 'capped') await write(parser.end());
-    const record = parser.record;
-    if ((outcome === 'done' || outcome === 'capped') && record.trim() === '') outcome = 'empty';
-    // What the model is sent back next time, and so what the tag covers: the page sends this text, never the events.
-    const history = parser.history(lost);
+    // An answer cut off still spent what it had read: its record so far.
+    const record = done?.record ?? answer.record;
+    if (done !== null && record.trim() === '') outcome = 'empty';
     // A connection the visitor closed has nobody left to tell.
     if (!res.destroyed) {
       const question = turns.at(-1)?.text ?? '';
-      const events = mergeText(sent_);
+      const events = mergeText(done?.events ?? []);
       const at = now();
       // With shares on, the tags that let the page keep exactly this answer under a link (§20.7).
       const share = o.config.shares.enabled && events.length > 0
@@ -694,15 +683,16 @@ export function createChat(o: ChatOptions): ChatRoutes {
         : {};
       // An answer of the site's own says so (§19.17): a matched one, so the page can offer to ask the model instead.
       const by = site ? { by: site.by } : {};
-      const last = outcome === 'done' || outcome === 'capped'
-        ? sseEvent('done', { tag: tagTurn(key, conversation, index, history), left, conversation, text: history, ...share, ...by })
+      // What the model is sent back next time, and so what the tag covers: the page sends this text, never the events.
+      const last = done !== null && (outcome === 'done' || outcome === 'capped')
+        ? sseEvent('done', { tag: tagTurn(key, conversation, index, done.history), left, conversation, text: done.history, ...share, ...by })
         : outcome === 'gone' ? '' : sseEvent('error', { code: 'unavailable' });
       res.end(last);
     }
     // Spent whatever happened: the provider's count when it gave one, else an estimate; an answer of the site's own spent none.
     const input = site ? 0 : reported?.input ?? estimate(system.length + sent.reduce((n, t) => n + t.text.length, 0));
     const output = site ? 0 : reported?.output ?? estimate(record.length);
-    const dropped = [...parser.dropped, ...resolvedDrops];
+    const dropped = done?.dropped ?? answer.dropped;
     // The part of the input the provider read from its prompt cache, only as it reported it (§19.16).
     const cached = reported?.cached ?? 0;
     await usage.add(utcDay(started), input, output, dropped.length, cached, site !== null);

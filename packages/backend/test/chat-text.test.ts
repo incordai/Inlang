@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import {
   checkTag, historyKey, HISTORY_CHARS, HISTORY_TURNS, readChatRequest, tagTurn, trimHistory, VISITOR_MAX, type ChatTurn,
 } from '../src/server/chat-text.ts';
-import { cleanText } from '../src/server/chat-answer.ts';
+import { cleanText } from '#chat-answer/chat-answer.ts';
 
 const key = historyKey(randomBytes(32));
 const CONV = 'c'.repeat(22);

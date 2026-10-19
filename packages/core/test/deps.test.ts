@@ -42,7 +42,8 @@ function sources(pkg: string): string[] {
 function importsOf(file: string): string[] {
   const text = readFileSync(file, 'utf8');
   const specs: string[] = [];
-  for (const m of text.matchAll(/(?:^|\n)\s*(?:import|export)[^'"\n]*from\s*['"]([^'"]+)['"]/g)) {
+  // An import's names may span lines (`import {\n  a,\n} from './x.ts'`): the clause runs to `from` across newlines, never past a quote or a `;`.
+  for (const m of text.matchAll(/(?:^|\n)\s*(?:import|export)\s[^'";]*?from\s*['"]([^'"]+)['"]/g)) {
     specs.push(m[1]);
   }
   for (const m of text.matchAll(/import\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.push(m[1]);
@@ -55,7 +56,63 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp', 'chat-answer'];
+
+/**
+ * The chat packages (ARCHITECTURE §2, chat-block-spec §22) are imported by an
+ * alias, `#<package>/<file>.ts`, which each importer's package.json maps: to
+ * the workspace package here, to the copied folder in a generated server or
+ * site. Which package may import which alias; every other `#` import fails.
+ */
+const ALIASES: Readonly<Record<string, readonly string[]>> = {
+  backend: ['chat-answer'],
+};
+
+/** What is wrong with `pkg`'s alias imports (`#name/…`), as messages: an alias it may not use, or one its package.json does not map to that package. */
+function aliasProblems(pkg: string, specs: readonly string[], manifest: { imports?: Record<string, string>; dependencies?: Record<string, string> }): string[] {
+  const out: string[] = [];
+  for (const spec of specs.filter((s) => s.startsWith('#'))) {
+    const m = /^#([a-z-]+)\/[a-z0-9-]+\.ts$/.exec(spec);
+    const name = m?.[1];
+    if (!name || !(ALIASES[pkg] ?? []).includes(name)) { out.push(`${pkg} imports '${spec}' — not an alias it may use`); continue; }
+    if (manifest.imports?.[`#${name}/*`] !== `@az/${name}/*` || manifest.dependencies?.[`@az/${name}`] !== 'workspace:*') {
+      out.push(`${pkg}'s package.json does not map '#${name}/*' to the workspace package @az/${name}`);
+    }
+  }
+  return out;
+}
+
+const manifestOf = (pkg: string) => JSON.parse(readFileSync(join(ROOT, 'packages', pkg, 'package.json'), 'utf8')) as { imports?: Record<string, string>; dependencies?: Record<string, string> };
+
+test('every alias import is one its package may use, mapped to that workspace package — ARCHITECTURE §2', () => {
+  for (const pkg of PACKAGES) {
+    const specs = sources(`packages/${pkg}`).flatMap(importsOf);
+    assert.deepEqual(aliasProblems(pkg, specs, manifestOf(pkg)), []);
+  }
+  for (const [pkg, names] of Object.entries(ALIASES)) {
+    for (const name of names) assert.ok(existsSync(join(ROOT, 'packages', name, 'src')), `CONTROL: the aliased package ${name} exists`);
+    assert.ok(sources(`packages/${pkg}`).flatMap(importsOf).some((s) => s.startsWith('#')), `CONTROL: ${pkg} really imports by alias`);
+  }
+});
+
+test('CONTROL: the alias rule refuses an alias a package may not use and one its manifest does not map', () => {
+  const ok = { imports: { '#chat-answer/*': '@az/chat-answer/*' }, dependencies: { '@az/chat-answer': 'workspace:*' } };
+  assert.deepEqual(aliasProblems('backend', ['#chat-answer/checker.ts'], ok), []);
+  assert.equal(aliasProblems('core', ['#chat-answer/checker.ts'], ok).length, 1, 'core may use no alias');
+  assert.equal(aliasProblems('backend', ['#chat-answer/checker.ts'], {}).length, 1, 'an unmapped alias');
+  assert.equal(aliasProblems('backend', ['#chat-answer/../core/src/x.ts'], ok).length, 1, 'an alias path that leaves the package');
+});
+
+test('the answer checker imports only its siblings — no node:*, no other package: it runs in a browser and an app webview (chat-block-spec §22)', () => {
+  const files = sources('packages/chat-answer');
+  assert.ok(files.length >= 6, 'CONTROL: the checker sources are found');
+  assert.ok(importsOf(join(ROOT, 'packages/chat-answer/src/checker.ts')).includes('./chat-answer.ts'), 'CONTROL: its imports are read');
+  for (const file of files) {
+    for (const spec of importsOf(file)) {
+      assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec), `chat-answer/${file.split(/[\\/]/).pop()} imports '${spec}' — only its own siblings`);
+    }
+  }
+});
 
 test('every package has sources to check — CONTROL', () => {
   // Without this, an empty glob would make every rule below pass vacuously.
@@ -137,12 +194,13 @@ test('CONTROL: the scene-runtime rule reads real imports', () => {
   assert.ok(stage && importsOf(stage).includes('three'), 'stage.ts imports three');
 });
 
-test('the backend server imports only its siblings and node built-ins — it is copied whole into server/src', () => {
+test('the backend server imports only its siblings, node built-ins and the chat packages copied beside it — it is copied whole into server/src', () => {
   const server = sources('packages/backend').filter((f) => f.includes(`${sep}server${sep}`));
   assert.ok(server.length > 5, 'CONTROL: the server sources are found');
   for (const file of server) {
     for (const spec of importsOf(file)) {
-      assert.ok(spec.startsWith('./') || spec.startsWith('node:'), `backend server imports '${spec}' — only siblings and node:*`);
+      assert.ok(spec.startsWith('./') || spec.startsWith('node:') || ALIASES.backend.some((a) => spec.startsWith(`#${a}/`)),
+        `backend server imports '${spec}' — only siblings, node:* and ${ALIASES.backend.map((a) => `#${a}/`).join(', ')}`);
     }
   }
 });
@@ -184,7 +242,7 @@ test('mcp imports only its siblings and node built-ins — the CLI injects every
 });
 
 test('nothing imports from cli — ARCHITECTURE §2', () => {
-  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend']) {
+  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'chat-answer']) {
     for (const file of sources(`packages/${pkg}`)) {
       for (const spec of importsOf(file)) {
         assert.ok(crossPackage(spec) !== 'cli', `${pkg} imports from cli (${spec})`);

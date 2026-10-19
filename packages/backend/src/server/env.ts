@@ -3,7 +3,7 @@
  * Purpose: the configuration: every key, validation, refuse to start naming bad keys.
  * Spec: docs/backend-spec.md §4 (chat keys: docs/chat-block-spec.md §11.1; tool keys: §21.2.2; map and geocoder keys: §21.4)
  * Exports: loadConfig, KEYS, keepsAccounts, urlProblem, CHAT_LIMITS, CHAT_APIS, CHAT_HEADERS_LIMITS, parseRate, ChatApi, ChatConfig, ChatRate, TOOL_KEYS, TOOL_LIMITS, TOOL_NAME, TOOL_WORD, toolKey,
- *   toolSecretKeys, paramValueOk, paramsProblem, isDay, ChatTool, ChatToolShape, ToolParam, ToolParamType, ToolFieldType, MapConfig,
+ *   toolSecretKeys, paramsProblem, ChatTool, MapConfig,
  *   GeocoderConfig, MAP_KEYS_LIMITS, BUNDLED_WORLD, LoadOptions
  * Edit guide: server keys are never AZ_PUBLIC_; defaults are safe.
  * Tests: packages/backend/test/backend.test.ts, packages/backend/test/chat-route.test.ts
@@ -19,8 +19,14 @@
  * Nothing here is ever sent to a browser — none of these names carries the
  * `AZ_PUBLIC_` prefix that a site build inlines.
  *
- * Copied into a generated server; imports nothing.
+ * A tool's parameter and field types, and the check of a parameter's value,
+ * are the answer checker's (chat-answer tool-shape.ts): one rule for what a
+ * model writes, an operator's sample and every call's body.
+ *
+ * Copied into a generated server; imports only the answer checker's tool shape.
  */
+
+import { isDay, paramValueOk, type ChatToolShape, type ToolFieldType, type ToolParam } from '#chat-answer/tool-shape.ts';
 
 export type Database = 'sqlite' | 'postgres' | 'mysql';
 export type EmailWay = 'smtp' | 'api';
@@ -186,30 +192,6 @@ export const TOOL_NAME = /^[a-z][a-z0-9]{0,23}$/;
 export const TOOL_WORD = /^[a-z][a-z0-9_]{0,31}$/;
 /** Words that start the aggregate after the parameters: never a parameter's name, or a request would read two ways. */
 const TOOL_RESERVED: ReadonlySet<string> = new Set(['count', 'sum', 'avg', 'min', 'max', 'columns', 'title', 'by', 'from', 'tool']);
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-export type ToolParamType = 'int' | 'number' | 'bool' | 'date' | 'enum' | 'text';
-export type ToolFieldType = 'text' | 'number' | 'date' | 'bool';
-
-/** One declared parameter: bounds for int, number and date; values for enum; a length for text. */
-export interface ToolParam {
-  readonly type: ToolParamType;
-  readonly min: number | string | null;
-  readonly max: number | string | null;
-  readonly values: readonly string[] | null;
-  readonly maxLength: number;
-  readonly required: boolean;
-}
-
-/** What the answer parser and the model know of a tool: never its URL or key. */
-export interface ChatToolShape {
-  readonly name: string;
-  readonly params: Readonly<Record<string, ToolParam>>;
-  readonly fields: Readonly<Record<string, ToolFieldType>>;
-  readonly label: string;
-  readonly about: string;
-}
-
 /** A tool as the server calls it. */
 export interface ChatTool extends ChatToolShape {
   readonly url: string;
@@ -219,30 +201,8 @@ export interface ChatTool extends ChatToolShape {
   readonly sample: Readonly<Record<string, string | number | boolean>> | null;
 }
 
-/** A real calendar day written `YYYY-MM-DD`. */
-export function isDay(v: unknown): v is string {
-  if (typeof v !== 'string' || !DATE.test(v)) return false;
-  const d = new Date(`${v}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
-}
-
 /** Text an operator wrote for a person: one line, no control characters, within `max` characters. */
 const plainText = (v: string, max: number) => v.length > 0 && [...v].length <= max && !/[\u0000-\u001f\u007f-\u009f]/.test(v);
-
-/** Whether `v`, a JSON value, is a value `p` takes — the one check for a sample and for every call's body. */
-export function paramValueOk(p: ToolParam, v: unknown): boolean {
-  switch (p.type) {
-    case 'int':
-    case 'number':
-      if (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) > 1e15) return false;
-      if (p.type === 'int' && !Number.isInteger(v)) return false;
-      return (p.min === null || v >= (p.min as number)) && (p.max === null || v <= (p.max as number));
-    case 'bool': return typeof v === 'boolean';
-    case 'date': return isDay(v) && (p.min === null || v >= (p.min as string)) && (p.max === null || v <= (p.max as string));
-    case 'enum': return typeof v === 'string' && (p.values ?? []).includes(v);
-    case 'text': return typeof v === 'string' && v.trim() !== '' && [...v].length <= p.maxLength;
-  }
-}
 
 /** `{ "<param>": value }` checked against `params`: every name declared, every required one there, every value its type. */
 export function paramsProblem(params: Readonly<Record<string, ToolParam>>, v: unknown): string | null {

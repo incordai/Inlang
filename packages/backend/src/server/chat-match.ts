@@ -32,10 +32,10 @@
  * choose among what the author or the build wrote; nothing here returns,
  * echoes or stores them.
  *
- * Copied into a generated server with chat; imports chat-answer.ts's types.
+ * Copied into a generated server with chat; imports the answer checker's types (#chat-answer).
  */
 
-import type { AnswerPreset, AnswerQuote, AnswerWord } from './chat-answer.ts';
+import type { AnswerPreset, AnswerQuote, AnswerWord } from '#chat-answer/chat-answer.ts';
 
 /** The bars a match must clear, and the bounds of the work one question costs. */
 export const MATCH_LIMITS = {

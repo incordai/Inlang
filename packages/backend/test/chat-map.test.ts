@@ -13,10 +13,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnswerParser, type AnswerEvent, type AnswerRules } from '../src/server/chat-answer.ts';
-import { resolveRich, RICH_FORMS, type FiguresRun, type GeocodeRun, type RichBlock } from '../src/server/chat-rich.ts';
-import { coordinateOf, MAP_LIMITS, mapLines, mapWords, microDegrees, roundCoordinate } from '../src/server/chat-map.ts';
-import { parseNumber } from '../src/server/chat-rich.ts';
+import { createAnswerParser, type AnswerEvent, type AnswerRules } from '#chat-answer/chat-answer.ts';
+import { resolveRich, RICH_FORMS, type FiguresRun, type GeocodeRun, type RichBlock } from '#chat-answer/chat-rich.ts';
+import { coordinateOf, MAP_LIMITS, mapLines, mapWords, microDegrees, roundCoordinate } from '#chat-answer/chat-map.ts';
+import { parseNumber } from '#chat-answer/chat-rich.ts';
 
 const RULES: AnswerRules = { show: ['map'], quotes: [], destinations: [] };
 const GEO: AnswerRules = { ...RULES, geocoder: true };

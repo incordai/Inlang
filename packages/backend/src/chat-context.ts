@@ -33,7 +33,7 @@
 import { generatedJson } from '../../core/src/generated.ts';
 import { blocksFor, type Spec, type SpecBlock } from '../../core/src/spec.ts';
 import type { AnswerCheck } from '../../core/src/chat.ts';
-import { ANSWER_FORMS, ANSWER_LIMITS, ANSWER_WORDS, ASK_FORM, createAnswerParser, type AnswerPreset, type AnswerRules, type AnswerWord } from './server/chat-answer.ts';
+import { ANSWER_FORMS, ANSWER_LIMITS, ANSWER_WORDS, ASK_FORM, createAnswerParser, type AnswerPreset, type AnswerRules, type AnswerWord } from '#chat-answer/chat-answer.ts';
 
 /** The site context's largest size, in characters of its pages (§8.1). */
 export const CONTEXT_MAX = 24_000;

@@ -10,22 +10,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { connect, createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { copyServer } from './helpers.ts';
 import { SECURITY_HEADERS } from '../src/server/http.ts';
 
-const SERVER_SRC = fileURLToPath(new URL('../src/server/', import.meta.url));
 /** A start that hangs is a failure, not a wait. */
 const START_MS = 20_000;
 
 /** A server folder whose data step fails on its second statement. */
 function brokenServer(): string {
   const dir = mkdtempSync(join(tmpdir(), 'az-main-'));
-  cpSync(SERVER_SRC, join(dir, 'src'), { recursive: true });
+  copyServer(dir, false);
   writeFileSync(join(dir, 'az.config.json'), JSON.stringify({ siteName: 'Shop', database: 'sqlite', email: 'smtp', data: true }));
   const units = [
     { sql: 'CREATE TABLE azd_probe (v TEXT UNIQUE)' },
@@ -91,7 +90,7 @@ const MARKER = 'probe-marker-5c1e';
 
 test('SECURITY the started server: a request Node cannot parse, over raw TCP, is answered with every security header', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'az-main-raw-'));
-  cpSync(SERVER_SRC, join(dir, 'src'), { recursive: true });
+  copyServer(dir, false);
   // The email API way: the server then needs no package beyond Node's own.
   writeFileSync(join(dir, 'az.config.json'), JSON.stringify({ siteName: 'Shop', database: 'sqlite', email: 'api' }));
   const port = await freePort();

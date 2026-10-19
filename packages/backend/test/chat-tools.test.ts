@@ -14,8 +14,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createAnswerParser, type AnswerEvent, type AnswerRules } from '../src/server/chat-answer.ts';
-import { resolveRich, type RichBlock, type ToolRequest } from '../src/server/chat-rich.ts';
+import { createAnswerParser, type AnswerEvent, type AnswerRules } from '#chat-answer/chat-answer.ts';
+import { resolveRich, type RichBlock, type ToolRequest } from '#chat-answer/chat-rich.ts';
 import { aggregateTool, callTool, createTools, probeTools, toolCacheKey, toolMinute, toolRows, toolsText, TOOL_RESULT } from '../src/server/chat-tools.ts';
 import { loadConfig, toolSecretKeys, type ChatTool } from '../src/server/env.ts';
 import { createWindows } from '../src/server/chat-limits.ts';

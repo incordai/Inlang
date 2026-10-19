@@ -9,14 +9,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { copyServer } from './helpers.ts';
 
-const SERVER_SRC = fileURLToPath(new URL('../src/server/', import.meta.url));
 const START_MS = 20_000;
 const STOP_MS = 5_000;
 const FETCH_MS = 10_000;
@@ -31,7 +30,7 @@ const freePort = () => new Promise<number>((ok, fail) => {
 /** A server folder: `chat` writes the chat files and keeps the chat modules; without it they are left out, as the CLI copies. */
 function serverDir(chat: boolean): string {
   const dir = mkdtempSync(join(tmpdir(), 'az-chat-main-'));
-  cpSync(SERVER_SRC, join(dir, 'src'), { recursive: true, filter: (src) => chat || !/[\\/]chat[^\\/]*\.ts$/.test(src) });
+  copyServer(dir, chat, (src) => chat || !/[\\/]chat[^\\/]*\.ts$/.test(src));
   writeFileSync(join(dir, 'az.config.json'), JSON.stringify({ siteName: 'Shop', database: 'sqlite', email: 'api', ...(chat ? { chat: true } : {}) }));
   if (chat) {
     mkdirSync(join(dir, 'chat'));
@@ -127,7 +126,9 @@ test('a broken scripted-answers file stops the start with its problem, not a sta
 
 test('a server without the chat modules (a site without a chat) starts and answers /chat 404', async () => {
   const dir = serverDir(false);
-  assert.ok(!readdirSync(join(dir, 'src')).some((f) => f.startsWith('chat')), 'CONTROL: no chat module was copied');
+  assert.ok(!readdirSync(join(dir, 'src')).some((f) => f.startsWith('chat') && f.endsWith('.ts')), 'CONTROL: no chat module was copied');
+  // The answer checker's folder holds only the tool shape env.ts reads, as the CLI copies it without a chat.
+  assert.deepEqual(readdirSync(join(dir, 'src/chat-answer')), ['tool-shape.ts']);
   const port = await freePort();
   const child = spawn(process.execPath, ['src/main.ts'], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], env: env(dir, port) });
   try {

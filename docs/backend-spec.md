@@ -308,13 +308,16 @@ For a site with `backend`, beside the site:
 
 ```
 server/
-  package.json        exact pins, only the drivers the setup uses (and the image library only with an image field); "start": "node src/main.ts"
+  package.json        exact pins, only the drivers the setup uses (and the image library only with an image field); "start": "node src/main.ts";
+                      "imports" mapping each chat package's alias to its folder below
   az.config.json      site name and the two choices — no secrets
   .env.example        §4
   .gitignore          .env, data/, node_modules/
   README.md           the runbook: local run, keys, deploy (same site, https, proxy)
   src/*.ts            the server, copied verbatim from packages/backend/src/server
                       (data-*.ts only with tables, chat*.ts only with a chat)
+  src/chat-answer/    the answer checker, copied verbatim from packages/chat-answer/src
+                      (chat-block-spec §22.1); without a chat only tool-shape.ts, which env.ts reads
   chat/prompt-<n>.txt with a chat: each chat's fixed instructions, teaching only
                       the components its show lists (chat-block-spec §19.16)
   chat/context.json   with a chat: the site's public pages as text (protected

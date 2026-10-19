@@ -7,13 +7,15 @@
  * file in fixtures/chat-attacks/ with the events it must become; rules.json
  * is the chat page they are judged on.
  *
- * Read by packages/backend/test/chat-attacks.test.ts (the parser and the
- * route) and scripts/chat-e2e.mjs (the same answers, through the real page,
- * in three browsers), so both judge exactly the same cases.
+ * Read by packages/chat-answer/test/checker.test.ts and
+ * scripts/chat-lib-e2e.mjs (the package's own entry points, in Node
+ * and in three browsers), packages/backend/test/chat-attacks.test.ts (the
+ * parser and the route) and scripts/chat-e2e.mjs (the same answers, through
+ * the real page, in three browsers), so all of them judge exactly the same cases.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
-import type { AnswerRules } from '../src/server/chat-answer.ts';
+import type { AnswerRules } from '../src/chat-answer.ts';
 
 const DIR = new URL('./fixtures/chat-attacks/', import.meta.url);
 

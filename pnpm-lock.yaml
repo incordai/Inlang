@@ -62,7 +62,13 @@ importers:
 
   packages/auth-runtime: {}
 
-  packages/backend: {}
+  packages/backend:
+    dependencies:
+      '@az/chat-answer':
+        specifier: workspace:*
+        version: link:../chat-answer
+
+  packages/chat-answer: {}
 
   packages/cli:
     dependencies:

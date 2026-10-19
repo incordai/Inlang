@@ -41,7 +41,7 @@ import { IconError } from '../../target-web/src/head.ts';
 import { MarkdownError, markdownText } from '../../target-web/src/markdown.ts';
 import { AUTH_DIR, BACKEND_URL_FILES, GUARD_DIR } from '../../target-web/src/auth.ts';
 import { THREE_DIR } from '../../target-web/src/three.ts';
-import { backendFiles, BASEMAP_SOURCE, SERVER_DIR } from '../../backend/src/emit.ts';
+import { backendFiles, BASEMAP_SOURCE, SERVER_DIR, SERVER_PACKAGES } from '../../backend/src/emit.ts';
 import { BUNDLED_WORLD } from '../../backend/src/server/env.ts';
 import { CONTEXT_MAX, chatBackend, checkPreset, type BackendChat } from '../../backend/src/chat-context.ts';
 import type { Served } from './serve.ts';
@@ -382,7 +382,9 @@ export function build(options: BuildOptions): BuildOutcome {
          ...copied('../../backend/src/server/', `${SERVER_DIR}/src`, (f) => (tables !== undefined || !f.startsWith('data-'))
            && (chat !== undefined || !f.startsWith('chat'))
            // A chat's figures and the rows it knows read the tables (chat-block-spec §20.5, §8.2): with both only.
-           && ((f !== 'chat-query.ts' && f !== 'chat-knows.ts') || (chat !== undefined && tables !== undefined)))]
+           && ((f !== 'chat-query.ts' && f !== 'chat-knows.ts') || (chat !== undefined && tables !== undefined))),
+         // The chat packages it imports by alias, each whole into server/src/<name>/ — without a chat, only what every server reads.
+         ...SERVER_PACKAGES.flatMap((p) => copied(`../../${p.name}/src/`, `${SERVER_DIR}/src/${p.name}`, (f) => chat !== undefined || p.withoutChat.includes(f)))]
       : []),
   ].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
   // A preview says so on every page, with the whole file's problems.

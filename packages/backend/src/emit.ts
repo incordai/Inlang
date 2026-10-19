@@ -2,7 +2,7 @@
  * @az module backend-emit
  * Purpose: the server/ files az build writes for a site that declares backend.
  * Spec: docs/backend-spec.md §2
- * Exports: backendFiles, envExample, envFile, BACKEND_PINS, SERVER_DIR, BASEMAP_SOURCE
+ * Exports: backendFiles, envExample, envFile, BACKEND_PINS, SERVER_DIR, BASEMAP_SOURCE, SERVER_PACKAGES, serverImports
  * Edit guide: dependencies only for the chosen database/email; pins exact.
  * Tests: packages/backend/test/emit.test.ts, packages/backend/test/chat-context.test.ts
  */
@@ -51,6 +51,22 @@ export const BACKEND_PINS = {
 export const NODE_ENGINE = '>=22.18';
 
 export const SERVER_DIR = 'server';
+
+/**
+ * The chat packages a generated server imports by `#<name>/<file>.ts`
+ * (ARCHITECTURE §2): each package's `src/` is copied whole into
+ * `server/src/<name>/` — the same files the repository runs, never a second
+ * copy — and the server's package.json maps the alias there. A server
+ * without a chat gets only `withoutChat`: the files the modules every server
+ * has import (env.ts reads a tool's shape and check from the answer checker).
+ */
+export const SERVER_PACKAGES: readonly { readonly name: string; readonly withoutChat: readonly string[] }[] = [
+  { name: 'chat-answer', withoutChat: ['tool-shape.ts'] },
+];
+
+/** The server's package.json `imports`: each alias to its copied folder. */
+export const serverImports = (): Record<string, string> =>
+  Object.fromEntries(SERVER_PACKAGES.map((p) => [`#${p.name}/*`, `./src/${p.name}/*`]));
 
 /**
  * The default world basemap (chat-block-spec §19.15): made by
@@ -247,7 +263,7 @@ readable), to the model named in \`.env\`, and streams the answer back. The
 \`.az\` file never names a provider or a model.
 
 - **What reaches the page.** The model's text is parsed here
-  (\`src/chat-answer.ts\`) before a byte is sent: prose becomes text events;
+  (\`src/chat-answer/\`, the answer checker) before a byte is sent: prose becomes text events;
   the components a chat's \`show\` lists — the site's own pricing block,
   quoted; an FAQ, a feature list and a call to action, composed — become
   checked events; anything else is text, or dropped and counted
@@ -431,6 +447,7 @@ export function backendFiles(siteName: string, backend: SpecBackend, data?: Back
         type: 'module',
         engines: { node: NODE_ENGINE },
         scripts: { start: 'node src/main.ts' },
+        imports: serverImports(),
         ...(Object.keys(deps).length > 0 ? { dependencies: deps } : {}),
       }, null, 2)}\n`,
     },

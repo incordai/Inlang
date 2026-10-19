@@ -28,7 +28,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 import type { ChatRequest } from './app.ts';
-import { ANSWER_LIMITS, ANSWER_WORDS } from './chat-answer.ts';
+import { ANSWER_LIMITS, ANSWER_WORDS } from '#chat-answer/chat-answer.ts';
+import { EVENTS_BYTES } from '#chat-answer/checker.ts';
 import { createRateLimits, DAY_MS, HOUR_MS, type Windows } from './chat-limits.ts';
 import { CONVERSATION_ID } from './chat-text.ts';
 import { isUniqueViolation, type Db } from './db.ts';
@@ -36,8 +37,8 @@ import type { ChatConfig } from './env.ts';
 import { BodyError, createLimiter, send } from './http.ts';
 
 export const SHARE_LIMITS = {
-  /** The events JSON of one share, in UTF-8 bytes. */
-  eventsBytes: 48 * 1024,
+  /** The events JSON of one share, in UTF-8 bytes: what the answer checker holds one answer's events to. */
+  eventsBytes: EVENTS_BYTES,
   /** A visitor's question, when included (chat-block-spec §4.2's message cap). */
   question: 1000,
   /**

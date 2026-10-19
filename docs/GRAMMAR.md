@@ -587,7 +587,7 @@ that is not lowercase letters and digits, words joined by one `-` (at most
 32) · AZ1274 — a name twice in one chat · AZ1275 — a body that is not
 exactly one component · AZ1276 — a component the chat's `show` does not
 list, or a line that is no component (`ask`, `text`, `use`) · AZ1277 — a
-body the chat server's own answer parser would drop (its reason code named;
+body the chat server's own answer parser (`@az/chat-answer`) would drop (its reason code named;
 `az check` and `az build` give the compiler that parser), or whose `from`
 names no table a signed-out visitor can read, or that asks the operator's
 tools. The body counts in §2's nesting depth like any line: under a `chat

@@ -39,6 +39,7 @@ drifts.
 | auth (word, target wiring, auth runtime) | `pnpm verify`, `pnpm test:auth`; `pnpm test:cloud-auth` for the token-endpoint profile (Docker) |
 | the backend or data tables | `pnpm verify`, `pnpm test:backend-db` (Docker), `pnpm test:data`, `pnpm test:auth` |
 | chat (the word, its runtime, the `/chat` route) | the backend row, plus `pnpm test:chat` |
+| a chat library package (`packages/chat-*`) | `pnpm verify`, `pnpm test:chat-lib`; the chat row too, since `az build` copies the packages into every chat site |
 | docs only | `pnpm verify` (word READMEs, the root README and docs/WORDS.md are tested) |
 
 `pnpm gate` with no argument runs all 12 items for every word; `--self-test`
@@ -108,6 +109,7 @@ works — a change that breaks one is sent back:
 | `packages/scene-runtime` | the 3D runtime: one renderer per page, posters as fallback |
 | `packages/auth-runtime` | the sign-in forms' browser runtime |
 | `packages/backend` | the generated server's source and its emitter |
+| `packages/chat-answer` | the chat's answer checker, for the generated server and for any app (chat-block-spec §22) |
 | `packages/cli` | the `az` binary |
 | `packages/mcp` | the MCP server behind `az mcp` |
 | `docs/` | product, grammar, architecture, one spec per block, verification |

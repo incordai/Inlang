@@ -35,7 +35,7 @@ import { parseQuery, selectList } from './data-query.ts';
 import { outRow, type Field, type Table } from './data-values.ts';
 import { QueryTimeout, type Db } from './db.ts';
 import type { Database } from './env.ts';
-import { clampText } from './chat-rich.ts';
+import { clampText } from '#chat-answer/chat-rich.ts';
 import type { ContextTable } from './chat.ts';
 
 /** chat-block-spec §8.2. */

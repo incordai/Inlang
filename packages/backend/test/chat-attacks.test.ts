@@ -1,5 +1,5 @@
 /**
- * The injection corpus (fixtures/chat-attacks/, chat-block-spec §6.1, §12)
+ * The injection corpus (packages/chat-answer/test/fixtures/chat-attacks/, chat-block-spec §6.1, §12)
  * against the filter: each hostile answer, replayed by the `fake` model,
  * must become exactly its expected events — through the answer parser
  * alone, and through POST /chat end to end — with the dropped components
@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApp } from '../src/server/app.ts';
 import { createFakeAdapter, parseFakeScript } from '../src/server/chat-adapters.ts';
-import { createAnswerParser, type AnswerEvent, type AnswerRules } from '../src/server/chat-answer.ts';
+import { createAnswerParser, type AnswerEvent, type AnswerRules } from '#chat-answer/chat-answer.ts';
 import { createSseReader } from '../src/server/chat-sse.ts';
 import { historyKey, checkTag } from '../src/server/chat-text.ts';
 import { createUsage, migrateChat, utcDay } from '../src/server/chat-usage.ts';
@@ -22,7 +22,7 @@ import { loadConfig } from '../src/server/env.ts';
 import { createOidc } from '../src/server/oidc.ts';
 import { createStore } from '../src/server/store.ts';
 import { client, listen, SECRET, SITE } from './helpers.ts';
-import { chunksOf, corpusCases, corpusRules } from './chat-corpus.ts';
+import { chunksOf, corpusCases, corpusRules } from '../../chat-answer/test/corpus.ts';
 
 const CASES = corpusCases();
 const RULES: AnswerRules = corpusRules();

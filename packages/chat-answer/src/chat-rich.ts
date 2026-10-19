@@ -1,10 +1,10 @@
 /**
- * @az server chat-rich
+ * @az module chat-rich
  * Purpose: an answer's charts, tables, stat cards, image cards, dashboards, explores and maps — read from the model's lines, checked and clamped, and their `from` figures filled by the server.
  * Spec: docs/chat-block-spec.md §20.2, §20.3, §20.5, §20.6, §21.2.3, §21.3, §21.4
  * Exports: RICH_WORDS, RichWord, RICH_LIMITS, RICH_FORMS, RichLine, RichBlock, RichChart, RichTable, RichStat, RichCard, RichCards,
  *   RichDashboard, RichTile, RichRules, RichRead, Resolved, FiguresRun, ToolRequest, ToolShape, ToolsRun, ToolAnswer, GeocodeRun, richBlock,
- *   resolveRich, clampText, parseNumber, richLines, richStandIn, linesCap
+ *   resolveRich, clampText, parseNumber, richLines, richStandIn, linesCap, utf8Bytes
  * Edit guide: the model's numbers are numbers or the component goes; its words never reach SQL (a `from` is resolved by
  *   chat-query.ts against the public schema) nor a URL (a `from tool` names a declared tool and typed values, called by
  *   chat-tools.ts); `src` is set here and nowhere else; an image is a build key, never a URL.
@@ -62,12 +62,13 @@
  * figures get `src: tool` with the operator's label. The model never reads
  * what a tool answered: the answer's record holds the request line only.
  *
- * Copied into a generated server with chat; imports env.ts's parameter checks and types.
+ * Part of the answer checker package (packages/chat-answer); imports only its
+ * siblings — the tool shapes and checks, and the shapes a data source answers in.
  */
 
 import type { LineToken } from './chat-answer.ts';
-import type { CardsResult, Figures, PinsResult, RowsResult } from './chat-query.ts';
-import { isDay, paramValueOk, type ChatToolShape, type ToolParam } from './env.ts';
+import type { CardsResult, Figures, PinsResult, RowsResult } from './figures.ts';
+import { isDay, paramValueOk, type ChatToolShape, type ToolParam } from './tool-shape.ts';
 import { bindExplore, EXPLORE_LIMITS, exploreLines, readExplore, type ExploreCell, type ExploreColumn, type RichExplore } from './chat-explore.ts';
 import { MAP_LIMITS, mapLines, readMap, type MapLost, type RichMap } from './chat-map.ts';
 
@@ -291,6 +292,15 @@ export function clampText(s: string, max: number): string {
   }
   return `${out.trimEnd()}…`;
 }
+
+const encoder = new TextEncoder();
+
+/**
+ * `s`'s length in UTF-8 bytes — what a share or a stream counts against its
+ * byte caps. The same count Node's Buffer.byteLength gives (a lone surrogate
+ * is U+FFFD's three bytes in both), without a Node-only API.
+ */
+export const utf8Bytes = (s: string): number => encoder.encode(s).length;
 
 const quoted = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
 const numberText = (n: number): string => String(n);
@@ -954,7 +964,7 @@ export async function resolveRich(
     if (bound.views.length === 0) return null;
     const out: Resolved = { title: x.title, ...meta, columns, rows, controls: x.controls, views: bound.views };
     // One answer's events are at most 48 KB (§20.7): an explore that would crowd it out is the note — never cut rows, which would change its figures.
-    if (Buffer.byteLength(JSON.stringify({ explore: out }), 'utf8') > EXPLORE_LIMITS.bytes) return x.source.kind === 'rows' ? null : 'unavailable';
+    if (utf8Bytes(JSON.stringify({ explore: out })) > EXPLORE_LIMITS.bytes) return x.source.kind === 'rows' ? null : 'unavailable';
     return out;
   };
 

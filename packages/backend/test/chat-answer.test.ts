@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ANSWER_FORMS, ANSWER_LIMITS, createAnswerParser, lineTokens, type AnswerEvent, type AnswerRules,
-} from '../src/server/chat-answer.ts';
+} from '#chat-answer/chat-answer.ts';
 import { createSseReader } from '../src/server/chat-sse.ts';
 
 const RULES: AnswerRules = {

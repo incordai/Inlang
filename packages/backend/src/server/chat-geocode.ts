@@ -27,12 +27,12 @@
  * The browser never calls the geocoder, and the model never reads what it
  * answered: the page receives a pin labelled "Approximate location".
  *
- * Copied into a generated server with chat; imports only its siblings.
+ * Copied into a generated server with chat; imports only its siblings and the answer checker (#chat-answer).
  */
 
 import { createRateLimits, type Windows } from './chat-limits.ts';
-import type { GeocodeRun } from './chat-rich.ts';
-import { roundCoordinate } from './chat-map.ts';
+import type { GeocodeRun } from '#chat-answer/chat-rich.ts';
+import { roundCoordinate } from '#chat-answer/chat-map.ts';
 import type { ChatRate } from './env.ts';
 import { BodyTooLarge, readCapped } from './outbound.ts';
 

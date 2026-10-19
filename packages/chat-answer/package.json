@@ -1,0 +1,10 @@
+{
+  "name": "@az/chat-answer",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./*.ts": "./src/*.ts"
+  }
+}

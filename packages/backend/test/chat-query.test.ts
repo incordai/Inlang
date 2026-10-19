@@ -17,7 +17,7 @@ import { selectAggregate } from '../src/server/data-query.ts';
 import {
   QUERY_LIMITS, createQueries, isoWeek, parseCards, parseFigures, parsePins, parseRows, queryable, weekGroups, type QueryRequest, type QueryTable,
 } from '../src/server/chat-query.ts';
-import { clampText } from '../src/server/chat-rich.ts';
+import { clampText } from '#chat-answer/chat-rich.ts';
 
 const GOOD = 'a-long-enough-password';
 const DAY = 24 * 60 * 60 * 1000;

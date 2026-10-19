@@ -1,5 +1,5 @@
 /**
- * @az server chat-map
+ * @az module chat-map
  * Purpose: an answer's map — pins, places and routes read from the model's lines and checked whole, or a site table's rows asked by name; and its canonical lines.
  * Spec: docs/chat-block-spec.md §21.4.2, §21.4.4
  * Exports: MAP_LIMITS, MapPin, MapPlace, MapRoute, RichMap, MapReader, MapRead, MapLost, readMap, mapLines, coordinateOf, roundCoordinate, microDegrees,
@@ -29,7 +29,7 @@
  * the server answers from a public table (chat-query.ts parsePins); its words
  * are checked for shape here and against the schema there.
  *
- * Copied into a generated server with chat; imports only its siblings.
+ * Part of the answer checker package (packages/chat-answer); imports only its siblings.
  */
 
 import type { LineToken } from './chat-answer.ts';

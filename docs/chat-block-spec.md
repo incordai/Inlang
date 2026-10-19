@@ -8,7 +8,10 @@ chat is complete** (§19: what was built, and where it differs; C3 is §19.7, C4
 links in answers, on the owner's Q13–Q15; §19.6: as built) · **C5–C8 specified 2026-10-16** (§21:
 follow-ups, formatting and history, operator tools, interactive controls, maps, on
 the owner's Q16–Q19; **C5 built 2026-10-16**, §19.9) · Extends backend-spec.md,
-data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12)
+data-spec.md §4.7 and §10 · Renamed from `chat-spec.md` at C0 (Q12) ·
+**§22: the chat as a library** (epic #32, 2026-10-19) — the checker, the
+instructions, the renderer, the runtime and the window as packages an app
+runs without `az build`, which `az build` itself uses
 
 The owner's goal: **a visitor on an az site asks a question and gets an
 answer from an AI, where the answer can be the site's own components** — a
@@ -121,7 +124,9 @@ owner should confirm the reading (Q1).
 - vector search, embeddings, or any retrieval index (no new storage, no new
   dependency) [R2 LLM08];
 - voice, file upload, multi-modal input;
-- a chat widget on a site without the built-in backend;
+- a chat widget on a site without the built-in backend — **changed by epic
+  #32 (2026-10-19)**: §22 makes the chat's parts packages an app runs
+  without `az build`; an az site still uses the built-in backend;
 - per-visitor memory across visits;
 - choosing a provider or model in the `.az` file;
 - a provider's own SDK in the generated server.
@@ -519,7 +524,8 @@ format:
 | `chat` word: manifest, emitter (shell + templates), README, previews | `packages/words/chat/` |
 | `model default`, AZ1250–AZ1258, `INHERITABLE` + `chat` | `packages/core/src/backend.ts`, `link.ts`, `spec.ts` |
 | prompt and context generation (deterministic) | `packages/backend/src/chat-context.ts` (build side) → `server/chat/prompt.txt`, `server/chat/context.json` |
-| route, limits, queue, answer parser, adapters, usage table | `packages/backend/src/server/chat*.ts`, copied verbatim like the rest |
+| route, limits, queue, adapters, usage table | `packages/backend/src/server/chat*.ts`, copied verbatim like the rest |
+| the answer parser and checker (§22.1) | `packages/chat-answer/src/`, copied verbatim into `server/src/chat-answer/` and imported as `#chat-answer/…` |
 | the page runtime (send, stream read, validate, fill) | `packages/overlay/src/runtime/chat.ts`, `chat-logic.ts`, beside `rows.ts` |
 | env keys | `packages/backend/src/server/env.ts` `KEYS`, `when: (s) => s.chat === true` |
 
@@ -1018,7 +1024,7 @@ Same stack as today: `node --test`, Playwright, Docker for real databases.
   byte offset (including inside a UTF-8 sequence and inside a string escape)
   give the same events; linear-time bound on adversarial input as
   `html-scan.test.ts` measures it.
-- **The injection corpus** (`packages/backend/test/fixtures/chat-attacks/`):
+- **The injection corpus** (`packages/chat-answer/test/fixtures/chat-attacks/`):
   model outputs that attempt every row of §6.1 — forbidden words and
   variants, script and event-handler strings, every scheme, off-list hosts,
   look-alike routes, markdown images and links, HTML entities, bidi and
@@ -1292,13 +1298,13 @@ Against §14's C2 row:
 |---|---|
 | `show pricing\|faq\|cta\|feature` | built; the AZ1214 refusal is gone (a site-level `chat` keeps it, C3). A word outside the four is still AZ1254 with its reason |
 | reserved codes | **AZ1255** raised (`show pricing` with no pricing block a signed-out visitor can see — a pricing block only on an `auth protect` page does not count, since quoting it would put protected prices in a public page). AZ1252, AZ1253, AZ1257's `knows` half and AZ1258 belong to `knows` (C3) and stay reserved |
-| the answer parser and typed events | built: `server/chat-answer.ts`, a dedicated line lexer (GRAMMAR §1.5's three escapes), not `lex.ts` — §5.3's INFERENCE replaced. Events `text`, `block` (`quote`, `faq`, `cta`, `feature`, §4.2's shapes), `done`, `error`; nothing else reaches the page |
+| the answer parser and typed events | built: `chat-answer/chat-answer.ts`, a dedicated line lexer (GRAMMAR §1.5's three escapes), not `lex.ts` — §5.3's INFERENCE replaced. Events `text`, `block` (`quote`, `faq`, `cta`, `feature`, §4.2's shapes), `done`, `error`; nothing else reaches the page |
 | a line that does not parse is text; a failing component is dropped | built, as §5.3. Dropped components count in `az_chat_usage.dropped` and the log line (`dropped 2 (destination,shape)` — reasons, never text) |
 | pricing quote-only | built: `show pricing /route` (`#2` for a page's second) quotes; a composed `pricing` line is dropped whatever follows it |
 | templates rendered by the words' own emitters | built through a new optional `EmitContext.embed` (core emit-contract): the target injects every emitter, so no word imports another. Each quotable pricing block is embedded exactly as its page renders it; faq and feature items are those words' own `from` templates (`fromFill` markers); a call to action is the button primitive, one template per kind of destination (route, https, mailto, tel). Ids and radio groups are suffixed per template and per copy; behaviour marks are parked as `data-az-chat-behaviour` and restored on each copy, so the behaviour runtime wires a quoted billing switch or an FAQ like any late content |
 | the client fills templates with text only | built: `textContent` on marker text nodes; the one URL write is `setDestination`, after `allowedDestination` (a unit test holds it to one place) |
 | the destination allow-list | built (core `chatAnswers`): every declared route, every `route#anchor` the file writes as a destination whose route exists, every exact `https://`, `mailto:` and `tel:` value in the file — lower-case scheme, nothing a browser reads past. A destination only a protected page holds is left out. Checked on the server and again in the page |
-| the injection corpus | built: `packages/backend/test/fixtures/chat-attacks/`, 15 cases and `rules.json`, read by `chat-attacks.test.ts` (the parser, at once and in pieces; the route end to end) and by `test:chat` (the real page, three engines) |
+| the injection corpus | built: `packages/chat-answer/test/fixtures/chat-attacks/`, 15 cases and `rules.json`, read by `chat-attacks.test.ts` (the parser, at once and in pieces; the route end to end) and by `test:chat` (the real page, three engines) |
 | `az backend probe <server-dir>` | built: `server/chat-probe.ts`, run in the server folder by the CLI (so it reads `.env` as `main.ts` does); bounded per answer by the server's own timeouts, 10 minutes in all (the CLI kills it at 16). Asks prose, then one question per component some chat shows, on the first page that shows it. Prints per answer: streamed, first-text and total time, the provider's tokens, events, drops and why — never the key or the answer's words. Exits 1 on an empty, failed, timed-out or unasked answer, or on any dropped component (a model that writes a component the filter refuses is one not to pin); `--json` gives the same as JSON |
 | the token benchmark | built into `pnpm bench:tokens` (docs/token-benchmark.md §7); the numbers are in §5.2 and §13 |
 
@@ -1357,7 +1363,7 @@ Against §20 (the rows of §20.10 and the tests of §20.9):
 | Item | State |
 |---|---|
 | `show chart table stats cards dashboard` | built: values of `show`, never words (`CHAT_RICH_WORDS`, core chat.ts); the manifest's `show` takes nine values. A page that writes `chart …` is refused as an unknown word, as before. **AZ1270** (`show dashboard` with nothing it can hold) and **AZ1259** (an author's page at `/chat/shared`, any case) are raised, each with a case and a CONTROL (`core/test/chat-rich-decl.test.ts`) |
-| the answer format | built on C2's parser (`server/chat-answer.ts`): the five words are keywords that hold a line; a line with a rich head's shape (`chart <kind> "…"`, `table "…"`, `stats`, `cards`, `dashboard "…"`) is held with its child lines (depth 1–2, at most 160) and read whole by `server/chat-rich.ts` — any other line starting with the word is prose (`table of contents` stays text). The answer's caps (240 points, 6 `from` requests) are the parser's; the 48 KB events cap is the route's |
+| the answer format | built on C2's parser (`chat-answer/chat-answer.ts`): the five words are keywords that hold a line; a line with a rich head's shape (`chart <kind> "…"`, `table "…"`, `stats`, `cards`, `dashboard "…"`) is held with its child lines (depth 1–2, at most 160) and read whole by `chat-answer/chat-rich.ts` — any other line starting with the word is prose (`table of contents` stays text). The answer's caps (240 points, 6 `from` requests) are the parser's; the 48 KB events cap is the route's |
 | `src` | set only by the server: `model` for numbers the model wrote, `site` (with `asOf`, the UTC day) for figures from `from`. Nothing a model writes can set it (`chat-rich.test.ts`: `src site` on a head or a line is a shape, not a source) |
 | server figures | built: `server/chat-query.ts` — the tables `grant(read, null)` lists and not owner-only; their non-private fields; `count`/`sum`/`avg`/`min`/`max`, `by` a choice, flag, date or datetime (`day`/`month`/`year`, UTC with no time zone on any engine), one `where`; rows and cards through `parseQuery` → `selectList(…, null, false)` → `outRow(…, null, …)`, the anonymous list's own code. Every read is `allWithin(…, LIST_DEADLINE_MS)`; a cancelled read, or a total past 2⁵³, is the `unavailable` note. 60 s cache, 500 entries. The module ships only with chat **and** tables (`az build` copies it then only); `figuresRun` is injected into the route, so a chat without data never loads it |
 | rendering | built: `overlay/runtime/chat-chart.ts` (pure: validation, nice ticks, band and linear scales, bar/line/area/pie/donut paths, label thinning, coordinates to 0.01, the summary and the table equivalent), `chat-figures.ts` (pure checks of table, stats, cards, dashboard), `chat-draw.ts` (the DOM: clones of the word's templates, SVG by `createElementNS` with allow-listed geometry attributes and a class per part). The word's templates are `words/chat/figures.ts` |
@@ -1556,7 +1562,7 @@ Against §21.1 (its tests, §21.1.7):
 
 | Item | State |
 |---|---|
-| follow-up questions (`ask "…"`) | built: `server/chat-answer.ts` — `ask` holds a line; `ask STRING` alone is the form (any other line starting with the word is prose: `ask me anything` stays text); 1–80 characters, no line break, at most 3 (the 4th and later `too_many`, the answer goes on), not counted as components, a child line `shape`; each is a `block { ask }` and its canonical line in the record. The page (`chat-logic.ts` `{ kind: 'ask' }`, `chat-prose.ts` `followUps`) collects them while the answer streams and draws them once it is `done`, as the answer's last part, a list "Follow-up questions" of the button primitive's secondary buttons; a tap is `ask()` — the same path as typing; announced once, "2 follow-up questions." Share accepts the key (`chat-share.ts` `BLOCK_KEYS`, events per answer `2 × (4 + 3) + 1`); the shared page draws none |
+| follow-up questions (`ask "…"`) | built: `chat-answer/chat-answer.ts` — `ask` holds a line; `ask STRING` alone is the form (any other line starting with the word is prose: `ask me anything` stays text); 1–80 characters, no line break, at most 3 (the 4th and later `too_many`, the answer goes on), not counted as components, a child line `shape`; each is a `block { ask }` and its canonical line in the record. The page (`chat-logic.ts` `{ kind: 'ask' }`, `chat-prose.ts` `followUps`) collects them while the answer streams and draws them once it is `done`, as the answer's last part, a list "Follow-up questions" of the button primitive's secondary buttons; a tap is `ask()` — the same path as typing; announced once, "2 follow-up questions." Share accepts the key (`chat-share.ts` `BLOCK_KEYS`, events per answer `2 × (4 + 3) + 1`); the shared page draws none |
 | fences on the server | built: a line at the margin starting ```` ``` ```` opens a code block; inside it every line is prose (no keyword is read, no child line is taken); only the backticks alone, trailing spaces allowed, close it — the page's rule, to the character |
 | the prose subset | built: `overlay/runtime/chat-markdown.ts` (pure: `proseBlocks`, `proseInlines`, `spokenText`), one pass with a stack of depth 2, code-span closers found by a per-length index so nothing is rescanned; `chat-prose.ts` draws it from the word's templates (`[data-az-chat-prose]`: `strong`, `em`, inline `code`, `ul > li`, `ol`, the code block with its bar and `pre[tabindex=0]`, the follow-up list) by `cloneNode` and `textContent` only — no `createElement`; a numbered list's start is the `start` property; the code block's `aria-label` is "Code" or "Code, <lang>" |
 | Copy code | built: `navigator.clipboard.writeText` of the code element's `textContent`; "Code copied." or "Copy did not work — select the code to copy it." in the status region; on the shared page too |
@@ -1618,7 +1624,7 @@ provider-native function calling — the `from tool` line is the subset's
 | Item | State |
 |---|---|
 | declarations (`.env`) | built: `server/env.ts` — `AZ_CHAT_TOOLS` (`[a-z][a-z0-9]{0,23}`, ≤ 8, no repeat), `AZ_CHAT_TOOL_<NAME>_URL` (https, or http on loopback; no user name or password, no `#`; the query string is the operator's), `_KEY` (`TOOL_KEYS` `secret: true`; never in `.env.example`), `_PARAMS` (≤ 6; `int`/`number`/`date` with `min`/`max`, `enum` with 1–24 `values`, `text` with `maxLength` ≤ 80, `bool`; `required`; any other key refused), `_FIELDS` (1–8 of `text`/`number`/`date`/`bool`), `_LABEL` (1–40, one line), `_ABOUT` (≤ 200), `_TIMEOUT_MS` (100–5 000, default 2 000), `_SAMPLE` (checked by the same `paramsProblem` every call's body is), `AZ_CHAT_TOOL_CALLS_PER_ADDRESS` (default `120/hour`). Validated by `loadConfig` at start: the server refuses to run naming each bad key, and no message quotes a value |
-| the answer format | built: `server/chat-rich.ts` — `from tool <name> {<param> <value>} (count \| sum\|avg\|min\|max <field>) [by <field>]` in a `chart`, `stat` (also a dashboard's tiles) or `table`, and `… columns <field>…` in a `table`. The name must be a declared tool, each parameter declared and given once, every required one there, each value of its type and in its bounds (`int`/`number` by the answer grammar's numbers, `bool` `yes`/`no`, `date` a real `YYYY-MM-DD`, `enum` exactly a declared value, bare or quoted, `text` a quoted one-line string within `maxLength`); otherwise the component is dropped as **`tool`** (a new `DropReason`). The record holds the canonical request line, never a row |
+| the answer format | built: `chat-answer/chat-rich.ts` — `from tool <name> {<param> <value>} (count \| sum\|avg\|min\|max <field>) [by <field>]` in a `chart`, `stat` (also a dashboard's tiles) or `table`, and `… columns <field>…` in a `table`. The name must be a declared tool, each parameter declared and given once, every required one there, each value of its type and in its bounds (`int`/`number` by the answer grammar's numbers, `bool` `yes`/`no`, `date` a real `YYYY-MM-DD`, `enum` exactly a declared value, bare or quoted, `text` a quoted one-line string within `maxLength`); otherwise the component is dropped as **`tool`** (a new `DropReason`). The record holds the canonical request line, never a row |
 | no invented tool | built: only the tools the server started with are names; `forAnswer` refuses any other before a socket opens (`chat-tools-route.test.ts`: an invented tool is dropped and the endpoint never asked) |
 | the call | built: `server/chat-tools.ts` `callTool` — the body re-checked, then `POST` of the values as a JSON object to the declared URL, `authorization: Bearer <key>` when set, `redirect: 'error'`, one `AbortSignal.timeout` for the request and the body, joined with the visitor leaving; read only from exactly `200` with `content-type: application/json`, through `outbound.ts`'s `readCapped` at 256 KB; a JSON array of ≤ 200 rows, each exactly the declared fields, each value its type (text cleaned as the model's is and ≤ 200 characters, numbers finite and ≤ 10¹⁵, dates real days) — one row wrong refuses the reply |
 | aggregation | built: `aggregateTool` — `count`, `sum`/`avg`/`min`/`max` of a number field, `by` a text field (largest first, ≤ 24 or 6 for a pie, `more`) or a date field (the latest days, oldest first); a table's `columns` are the first 20 rows; values kept to 15 significant digits, a figure past 10¹⁵ is the note |
@@ -1719,7 +1725,7 @@ it changes only what the page holds (O11).
 | Item | State |
 |---|---|
 | `show explore` | built: a value of `show`, never a word (core `CHAT_RICH_WORDS`; the manifest's `show` takes ten values; a page that writes `explore …` is refused as an unknown word). A dashboard cannot hold one — AZ1270 counts only chart, table, stats and cards; AZ1272 (a table named `tool`) applies to it, since it takes `from`. A site whose chat shows it gets the six series colours (`usesSeries`) and the figure, table, stats and paint templates |
-| the answer format | built: `server/chat-explore.ts`, read with `chat-rich.ts`'s own reader (its strings, numbers, `from` and `from tool`), held by `chat-answer.ts` like every rich component (`explore STRING` alone is the head; any other line starting with the word is prose). Every line one level in, in order: the data (`columns` and its `row`s; or one `from <table> columns f… [sort f [desc]]`; or one `from tool <name> {param value} columns f…`), then the controls, then the views. Up to 213 child lines (the columns, 200 rows, 4 controls, 4 forms, 4 views); a deeper line, a line out of order or none of the forms drops the explore |
+| the answer format | built: `chat-answer/chat-explore.ts`, read with `chat-rich.ts`'s own reader (its strings, numbers, `from` and `from tool`), held by `chat-answer.ts` like every rich component (`explore STRING` alone is the head; any other line starting with the word is prose). Every line one level in, in order: the data (`columns` and its `row`s; or one `from <table> columns f… [sort f [desc]]`; or one `from tool <name> {param value} columns f…`), then the controls, then the views. Up to 213 child lines (the columns, 200 rows, 4 controls, 4 forms, 4 views); a deeper line, a line out of order or none of the forms drops the explore |
 | data | built: 1–6 columns, 1–200 rows. The model's rows are typed by column — all bare numbers (the answer grammar's numbers only: no NaN, Infinity, exponent or separator), all bare real days (`2024-02-29` yes, `2023-02-29` no), or all strings; any mix is no explore. A site table's rows are the anonymous list's (`parseQuery` → `selectList(…, null, false)` → `outRow`, paged by the list's own keyset cursor, at most 100 a page and 200 in all, each page under the 2 s deadline), a `date` or `datetime` field a day; a tool's are its checked reply's (≤ 200, `date` fields days, `bool` "Yes"/"No"). Text cells are categories: at most 24 code points, clamped at a grapheme boundary |
 | controls | built: ≤ 4 inputs (`slider`, `date`, `toggle`, `field`), names `[a-z][a-z0-9]{0,15}`, unique; a slider's min < max, 0 < step ≤ max − min, ≤ 1 000 steps, its value (default its min) on the step grid; a date's bounds and value (default its min) within 1900-01-01–2100-12-31; a toggle's 2–4 options of ≤ 24, unique; a `field … number min max` (starts at its min) or `field … choice` of 2–8 options (starts at its first); a `form "legend" apply` or `form "legend" send "question"` owns the fields written since the form before it — a field with no form after it, or a form with none, is no explore |
 | views | built: 1–4 — `view table [where …]`, `view stat "label" <aggregate> [where …] [unit …]`, `view chart <kind> "title" <aggregate> by <column> [where …] [unit …]`; `where <column> <op> <operand>`, `op` one of the six, the operand one `$variable`, string, number or day; the aggregate `count` or `sum`/`avg`/`min`/`max` of a number column. Each view is bound on the server to column indexes and typed operands; one that names a column, a variable or a type that does not fit — or holds a second operator, a parenthesis, a function, an unknown aggregate — is dropped by itself (`view`, a new `DropReason`), the rest of the explore standing; none left drops it. The model's own rows bind as the answer is read, so its record holds only the views that stand; a server's or a tool's bind when the rows come, and a view lost then is counted the same |
@@ -1812,7 +1818,7 @@ third-party tile host by default (O12), geocoding optional and server-side
 |---|---|
 | `show map` | built: a value of `show`, never a word (core `CHAT_RICH_WORDS`; the manifest's `show` takes eleven values; `map …` on a page is an unknown word). A dashboard cannot hold one (AZ1270 counts chart, table, stats and cards only); AZ1272 applies, since it takes `from`. A site whose chat shows it gets the series colours (`usesSeries`), the map and popup templates, the map runtime files and the three map packages — and no other site does |
 | the libraries (Q19a) | built: `maplibre-gl` **6.14.0** (6.13.0 when built, below), `pmtiles` 4.5.0, `@protomaps/basemaps` 5.7.2, pinned exactly in a map site's `package.json` (target-web `PINS`, `pins.test.ts` against stack-evaluation §13's VERIFIED rows and the repository's own development dependencies); vetted again in stack-evaluation §19 — licences, `npm audit` 0, `pnpm audit` clean |
-| the answer format | built: `server/chat-map.ts`, read with `chat-rich.ts`'s reader. `map "title"` with `pin`, `place` and `route` lines (`point`s one level under a route), or `map "title" from <table> label f lat f lon f [where f v]`. 1–24 pins and places, 0–2 routes of 2–50 points, labels clamped to 40 code points, a title to 80; a coordinate is the answer grammar's number within ±90/±180 with at most six decimals, or its pin — or its route — goes alone (`number`); a map with no pin left is dropped. A `place` without `AZ_GEOCODER_URL` drops alone (`not_shown`), an address past 120 code points too (`too_long`); three places an answer. Pins and route points count toward the answer's 240 points. The record holds the canonical lines; nothing the model writes is a zoom, a centre or a URL |
+| the answer format | built: `chat-answer/chat-map.ts`, read with `chat-rich.ts`'s reader. `map "title"` with `pin`, `place` and `route` lines (`point`s one level under a route), or `map "title" from <table> label f lat f lon f [where f v]`. 1–24 pins and places, 0–2 routes of 2–50 points, labels clamped to 40 code points, a title to 80; a coordinate is the answer grammar's number within ±90/±180 with at most six decimals, or its pin — or its route — goes alone (`number`); a map with no pin left is dropped. A `place` without `AZ_GEOCODER_URL` drops alone (`not_shown`), an address past 120 code points too (`too_long`); three places an answer. Pins and route points count toward the answer's 240 points. The record holds the canonical lines; nothing the model writes is a zoom, a centre or a URL |
 | the event | built: `{ map: { title, src, asOf?, pins: [{ label, lat, lon, src }], routes } }` — `src` `model` (pins `model` or `geocoded`, no day) or `site` (pins `site`, the day, no route), set by the server only; re-checked whole by the page (`overlay/runtime/chat-map.ts validMap`), the share store and the kept conversation (`RICH_BLOCKS`, `BLOCK_KEYS`) |
 | from a table | built: `chat-query.ts parsePins` — the label a text or choice field, the coordinates `number` fields, never money, never private; `where` a choice or a flag, sent as the list route's own equality parameter; up to 24 rows of the anonymous list, newest first; a row without both coordinates in range is no pin; no row is the unavailable note |
 | geocoding (Q19g) | built: `server/chat-geocode.ts` — `GET <AZ_GEOCODER_URL>?q=<address>` (the operator's own query kept, a `q` of its own refused at start), https or loopback, `redirect: 'error'`, 2 s for the request and the body, ≤ 16 KB, a 200 JSON reply only: a list or `{ results }`, the first result's `lat` and `lon` (or `lng`) as numbers or decimal strings, in range — nothing else read; a day's cache per normalised address (found and not found alike, 1 000 entries); `AZ_GEOCODER_PER_ADDRESS` (default 60/hour) in the database windows every instance shares, a cached address not a call; the log `chat: geocode <found|none|why> <ms>` — never the address. A place found nowhere is dropped (`place`, a new `DropReason`); a map whose places all failed is the note. The browser never calls it; the model never reads what it found |
@@ -4051,3 +4057,87 @@ axe.
   (C6).
 - No expression language, no eval (C7).
 - No geocoding or routing service (C8).
+
+---
+
+## 22. The chat as a library (epic #32, 2026-10-19)
+
+The owner's decision (epic #32): az's chat — the answer language, its
+components and its runtime parts — becomes usable in any chat app, not only
+an `az build` site, starting with a desktop app whose UI is React in an app
+webview. The code lives in this repository as packages beside the others, so
+`az build` and the library always share one implementation: each piece below
+is the code the server and the site already ran, moved into its package,
+and the generated server and site use the package.
+
+| Piece | Package | Issue |
+|---|---|---|
+| the answer checker | `packages/chat-answer` (`@az/chat-answer`) | #33 |
+
+**How a package is used without a second copy.** A package imports only its
+own files and the chat packages it builds on, by an alias —
+`#chat-answer/checker.ts` — never by a relative path into another package.
+Each importer's `package.json` maps the alias: in this repository to the
+workspace package (`"#chat-answer/*": "@az/chat-answer/*"`, with
+`"@az/chat-answer": "workspace:*"`); in a generated server to the folder
+`az build` copies the package's `src/` into (`server/src/chat-answer/`,
+`"#chat-answer/*": "./src/chat-answer/*"`). The same files run in both
+places. The dependency rules (`packages/core/test/deps.test.ts`) hold every
+alias to a table of which package may import which.
+
+The packages are `private` and not published to any registry; publishing,
+and the packages' names and scope, are the owner's decision (epic #32,
+"still open").
+
+### 22.1 The answer checker — `@az/chat-answer` (#33)
+
+**What moved.** The server's answer parser and validator — `chat-answer.ts`,
+`chat-rich.ts`, `chat-explore.ts`, `chat-map.ts` — from
+`packages/backend/src/server/` to `packages/chat-answer/src/`, unchanged in
+behaviour; with them the two things they read from the server: a tool's
+shape and the one check of a parameter's value (`tool-shape.ts`, from
+`env.ts`, which now imports it), and the shapes a data source answers in
+(`figures.ts`, from `chat-query.ts`). The one Node-only call
+(`Buffer.byteLength`) became `utf8Bytes`, the same count without Node. The
+injection corpus moved with them (`packages/chat-answer/test/fixtures/chat-attacks/`).
+
+**The entry point**, `checker.ts`, is what the chat route did around the
+parser, now in one call the route makes:
+
+```ts
+const checker = createAnswerChecker({
+  components: ['faq', 'chart', 'table', 'stats', 'cards', 'dashboard', 'explore', 'map'],
+  destinations: ['/pricing', 'https://example.com/contact'],
+  quotes, images, presets, tools,
+  data: { figures, tools, geocode },   // who answers `from …`, `from tool …` and a map's `place`; each optional
+});
+for await (const event of checker.read(modelText, { onCapped: stopTheModel })) emit(event);
+```
+
+Its events are the stream's: `text`, `hold` (a rich component's kind, while
+its figures are read, issue #28), `block` (the component filled), and
+`done` with the answer's `record` and `history` (§19.16), its drop reasons
+and its events as sent. Every cap, drop reason and label is the parser's and
+the resolver's, as before; the events stay within `EVENTS_BYTES` (48 KB, one
+share, §20.7 — the share route reads the same constant). A cap calls
+`onCapped` at once, so the caller stops the model before the rest is
+resolved; a stream that throws ends the answer with no `done`, and
+`read(…).record` and `.dropped` say what was read.
+
+**History tags.** What a tag covers (`tagMessage`: the conversation id, the
+answer's position, its history text) and how its key is derived
+(`HISTORY_KEY_LABEL`) are defined once, in `history-tag.ts`; the server
+computes them with `node:crypto` (`chat-text.ts`), and `webCryptoTags(secret)`
+with Web Crypto for a browser, an app webview or a sidecar — the same tag for
+the same secret, held to it in Node and in three browsers.
+
+**Where it runs.** No `node:` import, no Node-only global (a test scans the
+sources), no import from `core`, `target-web`, `cli` or any other package (the
+dependency rules). In Chromium, Firefox and WebKit, `scripts/chat-lib-e2e.mjs`
+(`pnpm test:chat-lib`, also run by `test:chat`) loads the package as a page
+under a policy that allows only its own scripts and runs the whole injection
+corpus through `createAnswerChecker`, at once and in pieces.
+
+**The generated server** copies the package into `server/src/chat-answer/`
+and maps `#chat-answer/*` there in its `package.json`. A server without a
+chat gets only `tool-shape.ts`, the one file every server's `env.ts` reads.

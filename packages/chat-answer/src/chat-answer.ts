@@ -1,10 +1,10 @@
 /**
- * @az server chat-answer
+ * @az module chat-answer
  * Purpose: the answer parser: a model's text, read line by line, becomes the closed set of page events — prose, or a component validated whole.
  * Spec: docs/backend-spec.md §5 (docs/chat-block-spec.md §5.3, §6.1, §6.2, §20.3, §21.1.2, §21.2.3, §21.4.2)
  * Exports: createAnswerParser, cleanText, stripText, AnswerParser, AnswerEvent, AnswerBlock, AnswerRules, AnswerQuote, AnswerPreset, DropReason, ANSWER_LIMITS, ANSWER_WORDS, ANSWER_FORMS, ASK_FORM, FENCE, QUOTE_WORDS, lineTokens, quoteKey
  * Edit guide: linear in the characters read, no regular expression that can backtrack; a line that does not parse is prose; a component that breaks a rule is dropped whole and never shown as syntax.
- * Tests: packages/backend/test/chat-answer.test.ts, packages/backend/test/chat-attacks.test.ts
+ * Tests: packages/backend/test/chat-answer.test.ts, packages/backend/test/chat-attacks.test.ts, packages/chat-answer/test/checker.test.ts
  */
 
 /**
@@ -64,11 +64,12 @@
  * their `from` figures and rows are filled by the route (chat.ts) before the
  * page sees them.
  *
- * Copied into a generated server; imports chat-rich.ts, and env.ts's tool types.
+ * Part of the answer checker package (packages/chat-answer), which `az build`
+ * copies into a generated server's src/chat-answer/; imports only its siblings.
  */
 
 import { linesCap, RICH_FORMS, RICH_LIMITS, RICH_WORDS, richBlock, richLines, richStandIn, type RichBlock, type RichLine, type RichWord } from './chat-rich.ts';
-import type { ChatToolShape } from './env.ts';
+import type { ChatToolShape } from './tool-shape.ts';
 
 /** Every cap the parser holds (chat-block-spec §5.3, §6.1). The prompt is generated from these too. */
 export const ANSWER_LIMITS = {

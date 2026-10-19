@@ -12,8 +12,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnswerParser, type AnswerEvent, type AnswerRules } from '../src/server/chat-answer.ts';
-import { RICH_LIMITS, clampText, parseNumber, resolveRich, type FiguresRun, type RichBlock } from '../src/server/chat-rich.ts';
+import { createAnswerParser, type AnswerEvent, type AnswerRules } from '#chat-answer/chat-answer.ts';
+import { RICH_LIMITS, clampText, parseNumber, resolveRich, type FiguresRun, type RichBlock } from '#chat-answer/chat-rich.ts';
 
 const RULES: AnswerRules = {
   show: ['cta', 'chart', 'table', 'stats', 'cards', 'dashboard'],

@@ -2,7 +2,7 @@
  * @az server chat-query
  * Purpose: the figures an answer's chart, table, stat, cards or map ask for — a closed set of requests over public tables, run as an anonymous read.
  * Spec: docs/chat-block-spec.md §20.5, §20.6, §21.3, §21.4.2
- * Exports: QueryTable, QueryRequest, QueryResult, Figures, RowsResult, CardsResult, PinsResult, CardImage, QUERY_LIMITS, queryable,
+ * Exports: QueryTable, QueryRequest, QueryResult, QUERY_LIMITS, queryable,
  *   parseFigures, parseRows, parseCards, parsePins, createQueries, Queries, QueriesOptions, figuresRun, isoWeek, weekGroups
  * Edit guide: the model's words only ever SELECT from closed lists and exact schema names — nothing it writes reaches SQL text.
  *   Every read is the anonymous one (`grant(read, null)`, user null); a private field is not in the schema the words are matched to.
@@ -33,8 +33,9 @@ import { AGGREGATE_FILTER, AGGREGATE_GROUP, AGGREGATE_MEASURE, cursorOf, LIMIT_M
 import { outRow, type Field, type Table } from './data-values.ts';
 import { QueryTimeout, type Db, type Value } from './db.ts';
 import type { Database } from './env.ts';
-import { clampText, type FiguresRun } from './chat-rich.ts';
-import { MAP_LIMITS, mapWords, microDegrees } from './chat-map.ts';
+import { clampText, type FiguresRun } from '#chat-answer/chat-rich.ts';
+import { MAP_LIMITS, mapWords, microDegrees } from '#chat-answer/chat-map.ts';
+import type { CardImage, CardsResult, Figures, PinsResult, RowsResult } from '#chat-answer/figures.ts';
 import type { ContextTable } from './chat.ts';
 
 /** chat-block-spec §20.2 / §20.5. */
@@ -74,38 +75,6 @@ export type QueryRequest =
   | { readonly kind: 'cards'; readonly table: QueryTable; readonly title: Field; readonly text: Field | null; readonly image: Field | null; readonly sort: string; readonly key: string }
   /** `filter`: one more list parameter, the `where` as the list route takes it (`status=open`, `open=on`). */
   | { readonly kind: 'pins'; readonly table: QueryTable; readonly label: Field; readonly lat: Field; readonly lon: Field; readonly filter: readonly [string, string] | null; readonly key: string };
-
-/** One number, or groups in display order, with the unit the measure carries. */
-export interface Figures {
-  readonly kind: 'figures';
-  readonly unit: string | null;
-  readonly value: number | null;
-  readonly groups: readonly (readonly [string, number])[] | null;
-  /** More groups existed than were read. */
-  readonly more: boolean;
-  /** The grouping was by date: groups run oldest to newest. */
-  readonly dated: boolean;
-}
-
-export interface RowsResult {
-  readonly kind: 'rows';
-  /** `date`: a `YYYY-MM-DD` day (a date, or a datetime's UTC day) — an explore compares them (§21.3); a table shows them as text. */
-  readonly columns: readonly { readonly label: string; readonly type: 'text' | 'number' | 'date'; readonly unit: string | null }[];
-  readonly rows: readonly (readonly (string | number | null)[])[];
-}
-
-export interface CardImage { readonly url: string; readonly width: number; readonly height: number; readonly variants: readonly { readonly url: string; readonly width: number }[] }
-
-export interface CardsResult {
-  readonly kind: 'cards';
-  readonly items: readonly { readonly title: string; readonly text: string | null; readonly image: CardImage | null; readonly row: { readonly table: string; readonly id: string; readonly field: string } | null }[];
-}
-
-/** A map's pins from a table (§21.4.2): each row with a label and both coordinates in range, read from millionths of a degree. */
-export interface PinsResult {
-  readonly kind: 'pins';
-  readonly pins: readonly { readonly label: string; readonly lat: number; readonly lon: number }[];
-}
 
 export type QueryResult = { readonly ok: true; readonly result: Figures | RowsResult | CardsResult | PinsResult } | { readonly ok: false };
 

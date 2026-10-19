@@ -338,8 +338,8 @@ taught (`show pricing /pricing`, `faq` with `item`/`text`, `cta "…" /route`,
 `feature`, and the rich components of chat-block-spec §20.3: `dashboard`,
 `stat`, `chart`, `table`, `cards`), as a compact JSON document of the same
 events, or as markdown. Each answer below is written all three ways, and
-each `.az` form is first run through the real answer parser (server
-`chat-answer.ts`): it must hold exactly the blocks its JSON form carries,
+each `.az` form is first run through the real answer parser
+(`packages/chat-answer/src/chat-answer.ts`): it must hold exactly the blocks its JSON form carries,
 so this compares one content in three spellings. Markdown cannot quote a
 block, so where the `.az` form quotes the site's pricing the markdown form
 spells out the table (the chat e2e site's two plans, as their page renders

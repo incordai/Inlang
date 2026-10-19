@@ -23,6 +23,8 @@ const SCOPE: [string, boolean][] = [
   ['packages/theme/src', false], ['packages/target-web/src', false],
   ['packages/overlay/src', true], ['packages/scene-runtime/src', true],
   ['packages/auth-runtime/src', true], ['packages/backend/src', true],
+  // The chat library's packages (chat-block-spec §22).
+  ['packages/chat-answer/src', false],
   // The words folder's own modules (registry.ts); each word folder's modules are added below.
   ['packages/words', false],
 ];
@@ -126,7 +128,7 @@ test('CONTROL: the checker rejects a header that is missing, incomplete or false
 test('CONTROL: the scope covers every package and every word', () => {
   const all = files();
   assert.ok(all.length >= 85, `only ${all.length} files in scope`);
-  for (const d of ['core', 'cli', 'mcp', 'theme', 'target-web', 'overlay', 'scene-runtime', 'auth-runtime', 'backend', 'words']) {
+  for (const d of ['core', 'cli', 'mcp', 'theme', 'target-web', 'overlay', 'scene-runtime', 'auth-runtime', 'backend', 'words', 'chat-answer']) {
     assert.ok(all.some((f) => f.startsWith(`packages/${d}/`)), d);
   }
   assert.ok(all.includes('packages/words/registry.ts'), 'the emitter registry is in scope');

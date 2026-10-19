@@ -11,7 +11,7 @@ import { chatBackend, checkPreset, CONTEXT_MAX, type BackendChat } from '../src/
 import { backendFiles, envExample } from '../src/emit.ts';
 import { KEYS, loadConfig } from '../src/server/env.ts';
 import { parseChatContext, ROWS_HEADING, rulesFor, systemText } from '../src/server/chat.ts';
-import { createAnswerParser } from '../src/server/chat-answer.ts';
+import { createAnswerParser } from '#chat-answer/chat-answer.ts';
 import { manifests } from './data-fixture.ts';
 
 const SITE = `az 1

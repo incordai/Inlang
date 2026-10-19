@@ -4,7 +4,10 @@
  * signs RS256 id_tokens with a rotatable key. Test-only.
  */
 
+import { cpSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { createApp } from '../src/server/app.ts';
 import { migrateChat, usageReport } from '../src/server/chat-usage.ts';
@@ -19,6 +22,27 @@ import { createOidc } from '../src/server/oidc.ts';
 import { createStore } from '../src/server/store.ts';
 import type { Message } from '../src/server/email.ts';
 import type { Tiles } from '../src/server/chat-tiles.ts';
+import { SERVER_PACKAGES, serverImports } from '../src/emit.ts';
+
+/** The server's own sources, as the CLI copies them into a site's server/src/. */
+export const SERVER_SRC = fileURLToPath(new URL('../src/server/', import.meta.url));
+
+/**
+ * A server folder's sources as `az build` copies them (cli az.ts): the
+ * server's own files that `keep` lets through, each chat package it imports
+ * by alias into src/<name>/ (whole with a chat, else only `withoutChat`), and
+ * a package.json that maps the aliases there — so a started server resolves
+ * exactly what a generated one does.
+ */
+export function copyServer(dir: string, chat: boolean, keep: (src: string) => boolean = () => true): void {
+  cpSync(SERVER_SRC, join(dir, 'src'), { recursive: true, filter: keep });
+  for (const p of SERVER_PACKAGES) {
+    const from = fileURLToPath(new URL(`../../${p.name}/src/`, import.meta.url));
+    mkdirSync(join(dir, 'src', p.name), { recursive: true });
+    for (const f of readdirSync(from).filter((f) => f.endsWith('.ts') && (chat || p.withoutChat.includes(f)))) cpSync(join(from, f), join(dir, 'src', p.name, f));
+  }
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module', imports: serverImports() }));
+}
 
 export const SITE = 'http://127.0.0.1:5173';
 export const SECRET = randomBytes(32).toString('base64url');

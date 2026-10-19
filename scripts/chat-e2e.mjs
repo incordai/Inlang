@@ -163,7 +163,7 @@ import { CLI, ROOT, buildSites } from './visual/pipeline.mjs';
 import { closeWithin, watchdog, human } from './lib/bounded.mjs';
 import { cspResult, violationControl, watchedContext } from './visual/csp.mjs';
 import { selfSignedCert } from './lib/self-signed.mjs';
-import { chunksOf, corpusCases, corpusRules } from '../packages/backend/test/chat-corpus.ts';
+import { chunksOf, corpusCases, corpusRules } from '../packages/chat-answer/test/corpus.ts';
 import { mapFixture } from './lib/map-fixture.mjs';
 import sharp from 'sharp';
 import { THEMES, DEFAULT_THEME } from '../packages/theme/src/index.ts';
@@ -546,7 +546,7 @@ const RICH = {
   ].join('\n'),
 };
 
-/** The injection corpus (packages/backend/test/fixtures/chat-attacks/): each hostile answer, and the rules it is judged on. */
+/** The injection corpus (packages/chat-answer/test/fixtures/chat-attacks/): each hostile answer, and the rules it is judged on. */
 const CORPUS = corpusCases();
 const RULES = corpusRules();
 

@@ -35,14 +35,15 @@
  * page: nothing here is ever added to what the model reads, in this answer
  * or the next, so text an endpoint returns can at most be a table cell.
  *
- * Copied into a generated server with a chat; imports only its siblings.
+ * Copied into a generated server with a chat; imports only its siblings and the answer checker (#chat-answer).
  */
 
-import { cleanText } from './chat-answer.ts';
+import { cleanText } from '#chat-answer/chat-answer.ts';
 import { createRateLimits, type Windows } from './chat-limits.ts';
-import type { Figures, RowsResult } from './chat-query.ts';
-import { clampText, type ToolAnswer, type ToolCards, type ToolRequest, type ToolShape, type ToolsRun } from './chat-rich.ts';
-import { isDay, paramsProblem, type ChatRate, type ChatTool, type ChatToolShape, type ToolFieldType, type ToolParam } from './env.ts';
+import type { Figures, RowsResult } from '#chat-answer/figures.ts';
+import { clampText, type ToolAnswer, type ToolCards, type ToolRequest, type ToolShape, type ToolsRun } from '#chat-answer/chat-rich.ts';
+import { paramsProblem, type ChatRate, type ChatTool } from './env.ts';
+import { isDay, type ChatToolShape, type ToolFieldType, type ToolParam } from '#chat-answer/tool-shape.ts';
 import { BodyTooLarge, readCapped } from './outbound.ts';
 
 /** chat-block-spec §21.2.4: what one reply may be, and how long one is kept. */

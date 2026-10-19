@@ -28,6 +28,8 @@ az/
 │   │                  a site that uses 3D
 │   ├── backend/       @az/backend — the optional built-in backend: the server/ files
 │   │                  `az build` writes, OpenAPI, data DDL, and the server itself (src/server/)
+│   ├── chat-answer/   @az/chat-answer — the chat's answer checker: parser, rich components,
+│   │                  tool shapes, history tags; copied into a server's src/chat-answer/
 │   ├── mcp/           @az/mcp — `az mcp`: MCP over stdio, the tool schemas, the root sandbox
 │   └── cli/           @az/cli — the `az` binary: build, dev, spec, check, lint, migrate,
 │                      eject, backend, mcp, explain, palette, prompt, doctor, audit
@@ -88,8 +90,19 @@ cli      → everything
 auth-runtime → (nothing)                 (copied whole into a site that uses auth)
 scene-runtime → three                   (copied whole into a site that uses 3D)
 backend  → core (types, data)           (its server/ is node built-ins + pinned drivers only)
+         → chat-answer (by alias)       (its server/ also imports #chat-answer/…)
 mcp      → (nothing but node:*)          (the CLI injects every operation)
+chat-answer → (nothing)                 (runs in Node, a browser, an app webview)
 ```
+
+The chat packages (chat-block-spec §22) are imported by an **alias**,
+`#<package>/<file>.ts`, never by a relative path into another package: the
+importer's `package.json` maps it — in this repository to the workspace
+package (`"#chat-answer/*": "@az/chat-answer/*"` and a `workspace:*`
+dependency), in a generated server to the folder `az build` copies the
+package's `src/` into (`server/src/chat-answer/`). The same files run in
+both places, so a library user and an az site never run two copies. The
+rules test holds each alias to the table of which package may import which.
 
 `mcp` serves `az mcp` (docs/mcp.md): the protocol, the tool schemas and the
 root sandbox. Nothing may import from `cli`, and the tools need the CLI's
@@ -98,9 +111,17 @@ operations, so the dependency runs the other way: `cli/src/mcp.ts` builds a
 server. A tool and its command therefore cannot drift apart.
 
 `backend` is the optional built-in server (backend-spec.md). Its `src/server/`
-imports only its siblings and `node:*` — the drivers it may load are one
+imports only its siblings, `node:*` and the chat packages it names in
+`SERVER_PACKAGES` (`src/emit.ts`) — the drivers it may load are one
 closed, pinned list (`drivers.ts`) — because the CLI copies it verbatim into a
-site's `server/src/`; `src/emit.ts` writes the rest of `server/`.
+site's `server/src/`, and each of those packages into `server/src/<name>/`;
+`src/emit.ts` writes the rest of `server/`, its `package.json` mapping the
+aliases.
+
+`chat-answer` is the answer checker (chat-block-spec §22.1): what a model
+wrote becomes checked events here, for the built-in server and for an app
+alike. It imports only its own files and no Node-only API, so it runs in a
+browser and an app webview as it runs in Node.
 
 `auth-runtime` (M4) is the adapter layer a generated site runs: the §3
 contract, the `hosted` and `session` adapters and the form behaviour. It

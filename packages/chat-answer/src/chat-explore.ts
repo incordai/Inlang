@@ -1,5 +1,5 @@
 /**
- * @az server chat-explore
+ * @az module chat-explore
  * Purpose: an answer's explore — one data set, its controls and its views — read from the model's lines, checked whole, and its views bound to the data's columns.
  * Spec: docs/chat-block-spec.md §21.3
  * Exports: EXPLORE_LIMITS, EXPLORE_OPS, EXPLORE_FNS, ExploreOp, ExploreFn, ExploreColumnType, ExploreColumn, ExploreCell, ExploreControl,
@@ -37,11 +37,11 @@
  * is dropped by itself (counted `view`); a line the forms do not have drops
  * the whole explore.
  *
- * Copied into a generated server with chat; imports only its siblings.
+ * Part of the answer checker package (packages/chat-answer); imports only its siblings.
  */
 
 import type { LineToken } from './chat-answer.ts';
-import { isDay } from './env.ts';
+import { isDay } from './tool-shape.ts';
 
 /** chat-block-spec §21.3.3. The page holds the same (overlay chat-explore.ts EXPLORE_CAPS). */
 export const EXPLORE_LIMITS = {

@@ -14,11 +14,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnswerParser, type AnswerEvent, type AnswerRules } from '../src/server/chat-answer.ts';
-import { clampText, resolveRich, RICH_FORMS, type FiguresRun, type RichBlock, type ToolsRun } from '../src/server/chat-rich.ts';
-import { EXPLORE_LIMITS } from '../src/server/chat-explore.ts';
-import type { ChatToolShape } from '../src/server/env.ts';
-import type { RowsResult } from '../src/server/chat-query.ts';
+import { createAnswerParser, type AnswerEvent, type AnswerRules } from '#chat-answer/chat-answer.ts';
+import { clampText, resolveRich, RICH_FORMS, type FiguresRun, type RichBlock, type ToolsRun } from '#chat-answer/chat-rich.ts';
+import { EXPLORE_LIMITS } from '#chat-answer/chat-explore.ts';
+import type { ChatToolShape } from '#chat-answer/tool-shape.ts';
+import type { RowsResult } from '#chat-answer/figures.ts';
 
 const TOOL: ChatToolShape = {
   name: 'standings', label: 'Race results', about: '',
