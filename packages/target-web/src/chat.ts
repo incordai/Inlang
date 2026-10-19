@@ -47,7 +47,7 @@ export const CHAT_RUNTIME_FILES: readonly string[] = ['chat.ts', 'chat-shared.ts
 export const CHAT_RENDER_DIR = 'chat-render';
 
 /** The renderer's files a site with a chat block ships (row-image.ts with a `from` block too, data-rows.ts ROWS_RENDER_FILES). */
-export const CHAT_RENDER_FILES: readonly string[] = ['chat-logic.ts', 'chat-chart.ts', 'chat-chart-ui.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-busy.ts', 'chat-bar.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts', 'chat-answer-view.ts', 'row-image.ts'];
+export const CHAT_RENDER_FILES: readonly string[] = ['chat-logic.ts', 'chat-chart.ts', 'chat-chart-ui.ts', 'chat-figures.ts', 'chat-draw.ts', 'chat-busy.ts', 'chat-bar.ts', 'chat-markdown.ts', 'chat-prose.ts', 'chat-history.ts', 'chat-explore.ts', 'chat-explore-draw.ts', 'chat-answer-view.ts', 'chat-panel.ts', 'row-image.ts'];
 
 /** The map runtime (§21.4.3), renderer files copied only into a site whose chat shows maps — its pure checks, its drawing, and the library's. */
 export const MAP_RUNTIME_FILES: readonly string[] = ['chat-map.ts', 'chat-map-draw.ts', 'chat-map-gl.ts'];

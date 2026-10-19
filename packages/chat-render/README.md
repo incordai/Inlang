@@ -64,6 +64,7 @@ policy of `script-src 'self'; style-src 'self'` holds.
 | `@az/chat-render/chat-answer-mount.ts` | `mountAnswer(container, { theme, components, destinations, images, scheme, backend, tiles, onAsk, onAnnounce, onCopy })` → `{ push(event), reset(), destroy(), root, answer, ended }` — the framework-free core |
 | `@az/chat-render/themes/<name>.ts`, `themes/<name>.css` | the six themes (midnight, paper, signal, clay, petal, volt): the shell, and its stylesheet scoped to `[data-az-chat-root][data-az-theme="<name>"]` |
 | `@az/chat-render/chat-templates.ts` | `chatShell(doc, theme, scheme)`, `buildTemplate`, `hostImages` — the shell as DOM |
+| `@az/chat-render/chat-panel.ts` | `panelPartsOf(shell)`, `runPanel(parts, config, driver, signal)` — the chat window: the form, the transcript and its following, the suggested questions, Stop, Try again, the status region, each answer drawn as its events arrive; the driver answers (an az site's request, or an app's chat session) |
 | `@az/chat-render/chat-answer-view.ts` | `liveAnswer`, `answerDrawer`, `drawBlock` — the drawing the site's panel and `mountAnswer` share |
 | `@az/chat-render/chat-logic.ts`, `chat-history.ts`, … | the page runtime's pure rules: event shapes, copy, follow, the kept conversation |
 
