@@ -26,7 +26,7 @@ import {
   CHARS_PER_TOKEN, ENCODINGS, PRIMARY_ENCODING, REPRESENTATIONS, corpus, loadCounters, measure, summarise,
 } from './lib/token-bench.mjs';
 import { ANSWER_FORMS, measureAnswers, measureChatInput } from './lib/answer-bench.mjs';
-import { BUDGET_PATH, CHAT_PROMPT_TEXTS, measureChatPrompts, measureMatch, measureSelection, overBudget, readBudget, underBudget } from './lib/chat-prompt-bench.mjs';
+import { BUDGET_PATH, cacheLines, CHAT_PROMPT_TEXTS, measureChatPrompts, measureMatch, measureSelection, overBudget, readBudget, underBudget } from './lib/chat-prompt-bench.mjs';
 
 /** The JSON's name when --json names no file: in a fresh private folder (mkdtemp), never at a name in the shared temp folder another account could guess and link elsewhere. */
 const DEFAULT_JSON_NAME = 'az-token-benchmark.json';
@@ -174,6 +174,7 @@ async function main(argv) {
   const over = overBudget(chatPrompts, budget);
   console.log(chatPromptLines(chatPrompts, over, underBudget(chatPrompts, budget)));
   console.log(selectionLines(selection, PRIMARY_ENCODING));
+  console.log(`\neach fixture's fixed system text against the common prompt-cache minimum, ${PRIMARY_ENCODING}:\n${cacheLines(chatPrompts, PRIMARY_ENCODING).join('\n')}`);
   console.log(matchLines(match));
   jsonOut ??= join(mkdtempSync(join(tmpdir(), 'az-token-benchmark-')), DEFAULT_JSON_NAME);
   writeFileSync(jsonOut, `${JSON.stringify({

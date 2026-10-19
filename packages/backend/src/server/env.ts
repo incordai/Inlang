@@ -101,6 +101,7 @@ export const KEYS: readonly KeySpec[] = [
   { name: 'AZ_CHAT_TIMEOUT_SECONDS', about: 'The longest one answer may take, in seconds (default 60, 10–300). The first token must come within 15 s, and each next within 20 s.', when: (s) => s.chat === true, required: false, example: '60' },
   { name: 'AZ_CHAT_ENABLED', about: '`off` switches chat off at once (every message answers disabled); `on` is the default.', when: (s) => s.chat === true, required: false, example: 'on' },
   { name: 'AZ_CHAT_MATCH', about: '`off` asks the model every question; `on`, the default, answers a question that clearly asks for one of the site\'s own answers — a preset with keywords, or an faq item — with it, without the model, offering the visitor "Ask the AI instead" (chat-block-spec §19.17).', when: (s) => s.chat === true, required: false, example: 'on' },
+  { name: 'AZ_CHAT_CACHE_MIN_TOKENS', about: 'The fewest tokens of a prompt prefix your provider caches (default 1024, the common hosted minimum; 0 to say nothing): az doctor and az backend probe say which chats\' fixed system text is shorter, so it is never cached (chat-block-spec §19.17).', when: (s) => s.chat === true, required: false, example: '1024' },
   { name: 'AZ_CHAT_SHARES', about: '`off` stops new share links (chat-block-spec §20.7): the Share button is not offered and a share is refused; links already made keep working until they expire. `on` is the default.', when: (s) => s.chat === true, required: false, example: 'on' },
   { name: 'AZ_CHAT_SHARE_DAYS', about: 'Days a shared answer stays readable before it is deleted (default 30, 1–365).', when: (s) => s.chat === true, required: false, example: '30' },
   { name: 'AZ_CHAT_SHARE_MAX', about: 'Shared answers kept at once, all visitors together; past it a share is refused until older ones expire (default 10000, 1–1000000).', when: (s) => s.chat === true, required: false, example: '10000' },
@@ -443,6 +444,8 @@ export const CHAT_LIMITS = {
   /** chat-block-spec §20.7: share links. */
   shareDays: { default: 30, min: 1, max: 365 },
   shareMax: { default: 10_000, min: 1, max: 1_000_000 },
+  /** chat-block-spec §19.17: the provider's prompt-cache minimum, in tokens; 0 says nothing. */
+  cacheMinTokens: { default: 1_024, min: 0, max: 1_000_000 },
   sharesPerAddress: '10/hour,30/day',
   sharesPerAccount: '30/day',
 } as const;
@@ -478,6 +481,8 @@ export interface ChatConfig {
   readonly enabled: boolean;
   /** AZ_CHAT_MATCH: a clear match for one of the site's own answers is answered with it, without the model (§19.17). */
   readonly match: boolean;
+  /** AZ_CHAT_CACHE_MIN_TOKENS: the shortest prompt prefix the provider caches (§19.17); 0 when the operator says none. */
+  readonly cacheMinTokens: number;
   readonly fakeFile: string;
   /** The input-moderation hook (chat-block-spec §6.8): null when AZ_CHAT_MODERATION_URL is unset. */
   readonly moderation: { readonly url: string; readonly key: string } | null;
@@ -868,6 +873,7 @@ function chatConfig(env: Readonly<Record<string, string | undefined>>, get: (k: 
     timeoutMs: bounded(get, 'AZ_CHAT_TIMEOUT_SECONDS', CHAT_LIMITS.timeoutSeconds, problems) * 1000,
     enabled: enabled !== 'off',
     match: match !== 'off',
+    cacheMinTokens: bounded(get, 'AZ_CHAT_CACHE_MIN_TOKENS', CHAT_LIMITS.cacheMinTokens, problems),
     fakeFile,
     moderation: moderationUrl ? { url: moderationUrl, key: moderationKey } : null,
     tools: chatTools(env, get, problems),

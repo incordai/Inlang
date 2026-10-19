@@ -380,7 +380,7 @@ test('env: chat keys are checked only for a chat site, each problem named', () =
   assert.ok(r.ok && r.config.chat);
   assert.deepEqual({ ...r.config.chat, url: r.config.chat.url }, {
     api: 'completions', url: 'https://models.example.test/v1', key: '', model: 'model-a', dailyTokens: 300_000, maxOutputTokens: 600,
-    perAddress: { hour: 20, day: 60 }, perAccount: { day: 100 }, concurrency: 4, timeoutMs: 60_000, enabled: true, match: true, fakeFile: '', moderation: null,
+    perAddress: { hour: 20, day: 60 }, perAccount: { day: 100 }, concurrency: 4, timeoutMs: 60_000, enabled: true, match: true, cacheMinTokens: 1_024, fakeFile: '', moderation: null,
     tools: [], toolCallsPerAddress: { hour: 120 }, geocoder: null,
     shares: { enabled: true, days: 30, max: 10_000, perAddress: { hour: 10, day: 30 }, perAccount: { day: 30 } },
   });
@@ -394,6 +394,7 @@ test('env: chat keys are checked only for a chat site, each problem named', () =
     [{ ...good, AZ_CHAT_DAILY_TOKENS: '999' }, /^AZ_CHAT_DAILY_TOKENS must be a whole number, 1000–100000000/],
     [{ ...good, AZ_CHAT_SHARES: 'maybe' }, /^AZ_CHAT_SHARES must be on or off/],
     [{ ...good, AZ_CHAT_MATCH: 'sometimes' }, /^AZ_CHAT_MATCH must be on or off/],
+    [{ ...good, AZ_CHAT_CACHE_MIN_TOKENS: '-1' }, /^AZ_CHAT_CACHE_MIN_TOKENS must be a whole number, 0–1000000/],
     [{ ...good, AZ_CHAT_SHARE_DAYS: '0' }, /^AZ_CHAT_SHARE_DAYS must be a whole number, 1–365/],
     [{ ...good, AZ_CHAT_SHARE_DAYS: '366' }, /^AZ_CHAT_SHARE_DAYS must be a whole number, 1–365/],
     [{ ...good, AZ_CHAT_SHARE_MAX: 'lots' }, /^AZ_CHAT_SHARE_MAX must be a whole number, 1–1000000/],

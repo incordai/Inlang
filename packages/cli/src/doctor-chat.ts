@@ -8,7 +8,7 @@
  */
 
 /**
- * A site with chat has four more things that can be wrong before it goes
+ * A site with chat has five more things that can be wrong before it goes
  * live, each its own line:
  *
  * - **chat .env** — the server's own validation of the chat keys
@@ -31,6 +31,9 @@
  *   and a third-party tile archive the build was given
  *   (AZ_PUBLIC_MAP_TILES_URL), named by its origin — it learns where every
  *   visitor looks.
+ * - **chat cache** — each chat page's fixed system text against the
+ *   provider's prompt-cache minimum (AZ_CHAT_CACHE_MIN_TOKENS, §19.17): a
+ *   warning naming the pages under it, never a failure.
  * - **chat context** — the built `server/chat/context.json` as the server
  *   reads it: the tables a chat knows must still be ones a signed-out
  *   visitor may read and only admins write (the start-up check,
@@ -225,6 +228,50 @@ const chatBudget: Check = {
       };
     }
     return { status: 'pass', line: `chat budget: ${line}` };
+  },
+};
+
+/**
+ * chat cache (chat-block-spec §19.17): each chat page's fixed system text —
+ * what a provider's prompt cache can keep — against AZ_CHAT_CACHE_MIN_TOKENS
+ * (default 1024, the common hosted minimum). A page under it is billed whole
+ * on every question: a warning, with the numbers, never a failure — the
+ * cache is the provider's, and the minimum the operator's to set.
+ */
+const chatCache: Check = {
+  id: 'chat-cache',
+  title: 'chat cache',
+  run: async (ctx) => {
+    const got = await serverAndEnv(ctx, 'chat cache');
+    if ('status' in got) return got;
+    const loaded = loadConfig(got.env, { database: got.setup.database, email: got.setup.email, chat: true }, 'site');
+    if (!loaded.ok || !loaded.config.chat) return { status: 'skip', line: 'chat cache: judged once the server\'s keys are valid — see the chat .env line' };
+    const min = loaded.config.chat.cacheMinTokens;
+    if (min === 0) return { status: 'skip', line: 'chat cache: AZ_CHAT_CACHE_MIN_TOKENS=0 — not judged' };
+    const text = await readRegular(join(got.server, 'chat', 'context.json'));
+    const { cacheLine, parseChatContext, underCacheMinimum } = await import('../../backend/src/server/chat.ts');
+    const context = text === null ? null : parseChatContext(text);
+    if (context === null || typeof context === 'string') return { status: 'skip', line: 'chat cache: no context.json the server reads — see the chat budget line' };
+    const files = [...new Set(Object.values(context.chats).map((c) => c.prompt))];
+    const prompts: Record<string, string> = {};
+    for (const f of files) {
+      const p = await readRegular(join(got.server, 'chat', f));
+      if (p === null) return { status: 'skip', line: 'chat cache: a prompt file context.json names is missing — see the chat budget line' };
+      prompts[f] = p;
+    }
+    const tools = loaded.config.chat.tools.map(({ name, params, fields, label, about }) => ({ name, params, fields, label, about }));
+    const pages = Object.keys(context.chats).length;
+    const under = underCacheMinimum(prompts, context, min, tools, loaded.config.chat.geocoder !== null);
+    const line = cacheLine(under, pages, min);
+    if (line === null) return { status: 'pass', line: `chat cache: every chat page's fixed system text is at least the ${min}-token cache minimum` };
+    return {
+      status: 'warn',
+      line: `chat cache: ${line}`,
+      fix: [
+        'nothing is wrong: a short fixed text is cheap anyway; set AZ_CHAT_CACHE_MIN_TOKENS to your provider\'s own minimum (0 to stop this line)',
+        'az backend probe server reports the cached tokens your provider counts on each question',
+      ],
+    };
   },
 };
 
@@ -451,4 +498,4 @@ const chatMap: Check = {
 };
 
 /** The chat's doctor checks, in the order they print. */
-export const CHAT_DOCTOR_CHECKS: readonly Check[] = [chatEnv, chatToolsCheck, chatMap, chatBudget, chatContext];
+export const CHAT_DOCTOR_CHECKS: readonly Check[] = [chatEnv, chatToolsCheck, chatMap, chatBudget, chatCache, chatContext];

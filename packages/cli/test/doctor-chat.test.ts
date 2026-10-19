@@ -100,11 +100,25 @@ async function check(id: string, p: { dir: string; file: string; out: string }) 
 
 test('chat checks run between backend .env and build secrets, and skip a site without chat', async () => {
   const ids = CHECKS.map((c) => c.id);
-  assert.deepEqual(ids.slice(ids.indexOf('backend-env'), ids.indexOf('build-secrets') + 1), ['backend-env', 'chat-env', 'chat-tools', 'chat-map', 'chat-budget', 'chat-context', 'build-secrets']);
+  assert.deepEqual(ids.slice(ids.indexOf('backend-env'), ids.indexOf('build-secrets') + 1), ['backend-env', 'chat-env', 'chat-tools', 'chat-map', 'chat-budget', 'chat-cache', 'chat-context', 'build-secrets']);
   const plain = mkdtempSync(join(tmpdir(), 'az-doctor-chat-'));
   writeFileSync(join(plain, 'site.az'), 'az 1\nsite aurora\npage /\n  hero center\n    title "Hi"\n');
   const p = { dir: plain, file: join(plain, 'site.az'), out: join(plain, '.az-build') };
-  for (const id of ['chat-env', 'chat-tools', 'chat-map', 'chat-budget', 'chat-context']) assert.equal((await check(id, p)).status, 'skip', id);
+  for (const id of ['chat-env', 'chat-tools', 'chat-map', 'chat-budget', 'chat-cache', 'chat-context']) assert.equal((await check(id, p)).status, 'skip', id);
+});
+
+test('chat cache (§19.17): a page whose fixed system text is under the provider\'s cache minimum is a warning with its numbers; the minimum is the operator\'s', async () => {
+  const p = built();
+  const under = await check('chat-cache', p);
+  assert.equal(under.status, 'warn', under.line);
+  assert.match(under.line, /^chat cache: 1 of 1 chat page sends a fixed system text of about \d+ tokens, under the provider's prompt-cache minimum of 1024 \(AZ_CHAT_CACHE_MIN_TOKENS\): \//);
+  p.setEnv({ AZ_CHAT_CACHE_MIN_TOKENS: '100' });
+  assert.equal((await check('chat-cache', p)).status, 'pass');
+  p.setEnv({ AZ_CHAT_CACHE_MIN_TOKENS: '0' });
+  assert.equal((await check('chat-cache', p)).status, 'skip');
+  // CONTROL: a value the server refuses is the chat .env line's to name.
+  p.setEnv({ AZ_CHAT_CACHE_MIN_TOKENS: 'lots' });
+  assert.equal((await check('chat-cache', p)).status, 'skip');
 });
 
 test('chat .env: the keys by name only — the fake model, a URL with the completions path, a refused key, moderation without its URL; CONTROL passes', async () => {

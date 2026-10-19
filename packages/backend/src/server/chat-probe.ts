@@ -38,7 +38,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { ChatAdapter } from './chat-adapters.ts';
 import { ANSWER_WORDS, createAnswerParser, type AnswerWord, type DropReason } from './chat-answer.ts';
-import { CHAT_TIMING, rulesFor, systemText, type ChatContext, type ChatTiming } from './chat.ts';
+import { cacheLine, CHAT_TIMING, rulesFor, systemText, underCacheMinimum, type ChatContext, type ChatTiming } from './chat.ts';
 import { probeTools, type ToolProbe } from './chat-tools.ts';
 import type { ChatTool } from './env.ts';
 
@@ -70,13 +70,17 @@ export interface ProbeAnswer {
   readonly streamed: boolean;
   readonly firstMs: number | null;
   readonly totalMs: number;
-  /** The provider's own counts, or null when it reported none. */
-  readonly tokens: { readonly input: number; readonly output: number } | null;
+  /** The provider's own counts, or null when it reported none; `cached`, the part of the input it read from its prompt cache, when it said (§19.16). */
+  readonly tokens: { readonly input: number; readonly output: number; readonly cached?: number } | null;
   readonly events: { readonly text: number; readonly blocks: Readonly<Record<string, number>> };
   readonly dropped: readonly DropReason[];
 }
 
-export interface ProbeResult { readonly ok: boolean; readonly answers: readonly ProbeAnswer[]; readonly tools: readonly ToolProbe[] }
+export interface ProbeResult {
+  readonly ok: boolean; readonly answers: readonly ProbeAnswer[]; readonly tools: readonly ToolProbe[];
+  /** The chat pages whose fixed system text is under the provider's cache minimum (§19.17): a note, never a failure. */
+  readonly cache?: { readonly min: number; readonly pages: number; readonly under: readonly { readonly page: string; readonly tokens: number }[] };
+}
 
 /** The block kind an event carries: quote, faq, cta, feature. */
 const kindOf = (block: object) => Object.keys(block)[0];
@@ -92,6 +96,8 @@ export async function probeChat(o: {
   readonly now?: () => number; readonly timing?: ChatTiming; readonly budgetMs?: number;
   /** The operator's data tools, each called once with its sample; fetch is replaceable in tests. */
   readonly tools?: readonly ChatTool[]; readonly fetch?: typeof fetch;
+  /** AZ_CHAT_CACHE_MIN_TOKENS (§19.17): the pages under it are reported; 0 or absent, none. */
+  readonly cacheMinTokens?: number;
 }): Promise<ProbeResult> {
   const now = o.now ?? Date.now;
   const timing = o.timing ?? CHAT_TIMING;
@@ -118,7 +124,10 @@ export async function probeChat(o: {
   // Each tool once, one after another, each bounded by its own timeout (≤ 5 s).
   const tools = await probeTools(o.tools ?? [], { now, ...(o.fetch ? { fetch: o.fetch } : {}) });
   const ok = answers.every((a) => a.outcome === 'ok' && a.dropped.length === 0) && tools.every((t) => t.outcome === 'ok');
-  return { ok, answers, tools };
+  const min = o.cacheMinTokens ?? 0;
+  const shapes = (o.tools ?? []).map(({ name, params, fields, label, about }) => ({ name, params, fields, label, about }));
+  const cache = min > 0 ? { min, pages: pages.length, under: underCacheMinimum(o.prompts, o.context, min, shapes) } : undefined;
+  return { ok, answers, tools, ...(cache ? { cache } : {}) };
 }
 
 async function askOne(
@@ -135,7 +144,7 @@ async function askOne(
   const parser = createAnswerParser(rulesFor(o.context, page, shapes));
   let pieces = 0;
   let firstMs: number | null = null;
-  let tokens: { input: number; output: number } | null = null;
+  let tokens: { input: number; output: number; cached?: number } | null = null;
   let text = 0;
   const blocks: Record<string, number> = {};
   let outcome = 'ok';
@@ -182,7 +191,7 @@ export function probeReport(r: ProbeResult): string {
       `streamed ${a.streamed ? 'yes' : 'no'}`,
       `first ${a.firstMs === null ? '—' : `${a.firstMs}ms`}`,
       `total ${a.totalMs}ms`,
-      `tokens ${a.tokens ? `${a.tokens.input}/${a.tokens.output}` : 'not reported'}`,
+      `tokens ${a.tokens ? `${a.tokens.input}/${a.tokens.output}${a.tokens.cached !== undefined ? ` (cached ${a.tokens.cached})` : ''}` : 'not reported'}`,
       `text events ${a.events.text}`,
       `components ${blocks}`,
       `dropped ${a.dropped.length === 0 ? 'none' : a.dropped.join(', ')}`,
@@ -191,6 +200,9 @@ export function probeReport(r: ProbeResult): string {
   for (const t of r.tools) {
     lines.push(`${t.outcome === 'ok' ? 'PASS' : 'FAIL'} tool ${t.tool} · outcome ${t.outcome} · total ${t.ms}ms · rows ${t.rows}`);
   }
+  // §19.17: a note, not a verdict — the prompt cache is the provider's, and a short prefix is still a working chat.
+  const cache = r.cache ? cacheLine(r.cache.under, r.cache.pages, r.cache.min) : null;
+  if (cache) lines.push(`NOTE cache: ${cache}`);
   lines.push(r.ok
     ? `probe: every answer arrived and parsed with nothing dropped${r.tools.length > 0 ? `; every tool answered rows of its declared fields` : ''}`
     : 'probe: FAILED — an answer was empty, failed, or held a component the filter dropped, or a tool failed (see above); try another model or a larger AZ_CHAT_MAX_OUTPUT_TOKENS, or fix the tool or its AZ_CHAT_TOOL_<NAME>_SAMPLE');
@@ -240,7 +252,7 @@ async function main(argv: readonly string[]): Promise<number> {
     process.stderr.write('backend: cannot probe — a chat/prompt-<n>.txt that context.json names cannot be read; rebuild the site to regenerate server/\n');
     return 1;
   }
-  const result = await probeChat({ adapter, prompts, context, maxOutputTokens: chat.maxOutputTokens, timeoutMs: chat.timeoutMs, tools: chat.tools });
+  const result = await probeChat({ adapter, prompts, context, maxOutputTokens: chat.maxOutputTokens, timeoutMs: chat.timeoutMs, tools: chat.tools, cacheMinTokens: chat.cacheMinTokens });
   process.stdout.write(argv.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : probeReport(result));
   return result.ok ? 0 : 1;
 }

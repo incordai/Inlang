@@ -145,6 +145,21 @@ export function measureSelection(counters) {
   return { questions: CHAT_LARGE_QUESTIONS.length, average, missed };
 }
 
+/** The common hosted prompt-cache minimum (chat-block-spec §19.16, §19.17; AZ_CHAT_CACHE_MIN_TOKENS' default). */
+export const CACHE_MIN_TOKENS = 1024;
+
+/**
+ * Each fixture's fixed system text against the cache minimum (§19.17): the
+ * system text the budget counts is the whole prefix a question shares —
+ * under the minimum, a provider that caches only past it never does.
+ */
+export function cacheLines(measured, encoding) {
+  return Object.entries(measured).map(([fixture, texts]) => {
+    const n = texts.system.tokens[encoding];
+    return `  ${fixture.padEnd(6)} ${String(n).padStart(5)} tokens — ${n >= CACHE_MIN_TOKENS ? 'at or past' : 'under'} the ${CACHE_MIN_TOKENS}-token minimum`;
+  });
+}
+
 /**
  * The topic matcher's corpus (packages/backend/test/fixtures/chat-match/,
  * §19.17): how many of its questions the server answers without the model,

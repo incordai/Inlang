@@ -231,3 +231,19 @@ test('az backend probe calls each data tool once with its sample: a tool of the 
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
 });
+
+test('§19.17: the probe notes a chat whose fixed system text is under the cache minimum — never a failure; AZ_CHAT_CACHE_MIN_TOKENS=0 says nothing', async () => {
+  const m = await modelServer((q) => ({ text: GOOD[q] ?? 'Fine.' }));
+  try {
+    const r = await probe(m.url, { cacheMinTokens: 1024 });
+    assert.equal(r.ok, true, 'a short prefix is still a working chat');
+    assert.deepEqual(r.cache?.under.map((u) => u.page), ['/']);
+    assert.ok(r.cache!.under[0].tokens > 0 && r.cache!.under[0].tokens < 1024);
+    assert.match(probeReport(r), /^NOTE cache: 1 of 1 chat page sends a fixed system text of about \d+ tokens, under the provider's prompt-cache minimum of 1024 \(AZ_CHAT_CACHE_MIN_TOKENS\): \//m);
+    // CONTROL: past the minimum, and with none, there is no note.
+    assert.deepEqual((await probe(m.url, { cacheMinTokens: 10 })).cache?.under, []);
+    const none = await probe(m.url);
+    assert.equal(none.cache, undefined);
+    assert.doesNotMatch(probeReport(none), /NOTE cache/);
+  } finally { await m.close(); }
+});

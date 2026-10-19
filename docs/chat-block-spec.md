@@ -2473,6 +2473,31 @@ English (`<html lang="en">`), and a question in another language shares no
 term with the candidates, so it falls to the model by the same rule — the
 five other-language questions in the corpus all do.
 
+**The prompt-cache minimum (issue 25).** `AZ_CHAT_CACHE_MIN_TOKENS` (server
+`.env`, default 1 024 — the common hosted minimum §19.16 cites — 0 to say
+nothing) is the shortest prefix the operator's provider caches. Server
+`chat.ts fixedTokens` counts, for each chat page, the system text a
+question shares (without rows, cut before a large site's chosen pages) at
+four characters a token (`PREFIX_CHARS_PER_TOKEN`: the fixtures measure
+3.9–4.3; the budget's three would over-count and hide a short prefix).
+`az doctor` has a `chat cache` line — a warning naming the pages under the
+minimum and their size, never a failure — and `az backend probe` a `NOTE
+cache:` line; the probe also reports each answer's `cached` tokens when the
+provider says them, which is how an operator measures what their provider
+caches. `pnpm bench:tokens` prints each fixture against 1 024: `all` 1 732
+and `large` 1 822 at or past it, `faq` 659 under it (it was 918 before the
+shorter text, under it too).
+
+Not done, and why: the issue's first step — running the fixtures against
+real providers to record `cached_tokens` — needs a provider account and
+spends money; it is the owner's to run (`az backend probe server`, which
+now reports the counts). And no padding: growing a short chat's prefix past
+the minimum with more of the site content is moot on a small site, which is
+already sent whole, and padding it with anything else is a cost on every
+question that pays back only if the provider's cached price and the cache's
+hit rate make it so — neither of which the server can know. The doctor
+line gives the operator the numbers to decide.
+
 ---
 
 ## 20. C2b — rich answers: charts, tables, stats, image cards, dashboards, share links

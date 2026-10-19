@@ -466,6 +466,13 @@ share it answers from the site's own presets and faq items — 33 (50%), all
 questions to the model would each pay the system text and the answer. A
 suggested question with an answer of its own is the same: 0 tokens.
 
+The bench also prints each fixture's system text — the prefix every
+question on its page shares — against the common prompt-cache minimum of
+1 024 tokens (chat-block-spec §19.17, issue 25): `all` 1 732 and `large`
+1 822 at or past it, `faq` 659 under it, so a provider that caches only
+past the minimum never caches the `faq` chat. `az doctor` and `az backend
+probe` say the same of a built site, against `AZ_CHAT_CACHE_MIN_TOKENS`.
+
 Answers in the taught forms, and what each later question pays again for
 them as history (`o200k_base`, the parser's own history):
 
