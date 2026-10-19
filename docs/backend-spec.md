@@ -318,6 +318,8 @@ server/
                       (data-*.ts only with tables, chat*.ts only with a chat)
   src/chat-answer/    the answer checker, copied verbatim from packages/chat-answer/src
                       (chat-block-spec §22.1); without a chat only tool-shape.ts, which env.ts reads
+  src/chat-instructions/ with a chat: what the model is told, copied verbatim from
+                      packages/chat-instructions/src (chat-block-spec §22.2)
   chat/prompt-<n>.txt with a chat: each chat's fixed instructions, teaching only
                       the components its show lists (chat-block-spec §19.16)
   chat/context.json   with a chat: the site's public pages as text (protected

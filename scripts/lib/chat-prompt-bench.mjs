@@ -13,8 +13,10 @@
  *
  *   prompt   the chat's generated prompt file, as `az build` writes it
  *   context  server/chat/context.json, as `az build` writes it
- *   system   the whole system text the server sends for one question on the
- *            chat's page (server chat.ts systemText), with no `knows` rows
+ *   system   the whole system text one question on the chat's page is sent,
+ *            with no `knows` rows: the instruction builder's (chat-instructions
+ *            buildInstructions, chat-block-spec §22.2) from the build's own
+ *            input, held to be byte for byte what the server sends (chat.ts systemText)
  *
  * The prompt is generated from the components' tables, so each new
  * component or rule makes every chat request dearer; the budget makes that
@@ -27,8 +29,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build } from '../../packages/cli/src/az.ts';
+import { build, specOf } from '../../packages/cli/src/az.ts';
+import { blocksFor } from '../../packages/core/src/spec.ts';
+import { promptInputOf } from '../../packages/backend/src/chat-context.ts';
 import { parseChatContext, systemText } from '../../packages/backend/src/server/chat.ts';
+import { buildInstructions } from '../../packages/chat-instructions/src/instructions.ts';
 import { corpusContext, judgeCorpus } from '../../packages/backend/test/chat-match-corpus.ts';
 import { manifests } from '../../packages/backend/test/data-fixture.ts';
 import { ROOT, WORDS } from './token-bench.mjs';
@@ -97,10 +102,25 @@ export function chatPromptTexts(fixture) {
     const context = parseChatContext(contextFile.content);
     if (typeof context === 'string') throw new Error(`${fixture.file}: context.json ${context}`);
     const prompt = promptFileOf(outcome.files, context, fixture.page);
-    return { prompt, context: contextFile.content, system: systemText(prompt, context, fixture.page), parsed: context };
+    const spec = JSON.parse(specOf({ source, wordsDir: WORDS, projectWordsDir: null }).json ?? 'null');
+    if (!spec) throw new Error(`${fixture.file}: no Spec`);
+    const input = instructionsInput(spec, context, fixture.page);
+    const system = buildInstructions(input);
+    // One source: the builder an app calls gives exactly what the server sends.
+    if (system !== systemText(prompt, context, fixture.page)) throw new Error(`${fixture.file}: buildInstructions differs from the server's system text`);
+    return { prompt, context: contextFile.content, system, parsed: context, input };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** What an app would pass buildInstructions for the chat on `page`: the build's own pieces, read back from its Spec and context.json. */
+export function instructionsInput(spec, context, page) {
+  const chat = blocksFor(spec, spec.pages.find((p) => p.route === page)).find((b) => b.word === 'chat');
+  return {
+    ...promptInputOf(spec, chat), content: context.content, quotes: context.quotes, destinations: context.destinations,
+    tables: context.tables, images: context.images, page,
+  };
 }
 
 /** Every fixture's texts counted: `{ [fixture]: { [text]: { chars, tokens: { [encoding]: n } } } }`. */
@@ -127,16 +147,17 @@ export function measureChatPrompts(counters) {
  */
 export function measureSelection(counters) {
   const fixture = CHAT_PROMPT_FIXTURES.find((f) => f.name === 'large');
-  const { prompt, parsed } = chatPromptTexts(fixture);
+  const { prompt, parsed, input } = chatPromptTexts(fixture);
   const average = { chosen: {}, whole: {} };
   const missed = [];
   for (const [enc, fn] of Object.entries(counters)) {
     let chosen = 0;
     let whole = 0;
     for (const q of CHAT_LARGE_QUESTIONS) {
-      const text = systemText(prompt, parsed, fixture.page, '', [], false, [q.ask]);
+      const text = buildInstructions({ ...input, asked: [q.ask] });
+      if (text !== systemText(prompt, parsed, fixture.page, '', [], false, [q.ask])) throw new Error(`the large fixture: buildInstructions differs from the server's for "${q.ask}"`);
       chosen += fn(text);
-      whole += fn(systemText(prompt, parsed, fixture.page, '', [], false, [q.ask], false));
+      whole += fn(buildInstructions({ ...input, asked: [q.ask], select: false }));
       if (enc === Object.keys(counters)[0] && !text.includes(`\n${parsed.outline.pages.find((p) => p.route === q.page).full}\n`)) missed.push(q.ask);
     }
     average.chosen[enc] = Math.round(chosen / CHAT_LARGE_QUESTIONS.length);

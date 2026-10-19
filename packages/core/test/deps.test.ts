@@ -56,7 +56,7 @@ function crossPackage(spec: string): string | null {
   return m ? m[1] : null;
 }
 
-const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp', 'chat-answer'];
+const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'mcp', 'chat-answer', 'chat-instructions'];
 
 /**
  * The chat packages (ARCHITECTURE §2, chat-block-spec §22) are imported by an
@@ -65,7 +65,8 @@ const PACKAGES = ['core', 'target-web', 'cli', 'overlay', 'auth-runtime', 'scene
  * site. Which package may import which alias; every other `#` import fails.
  */
 const ALIASES: Readonly<Record<string, readonly string[]>> = {
-  backend: ['chat-answer'],
+  backend: ['chat-answer', 'chat-instructions'],
+  'chat-instructions': ['chat-answer'],
 };
 
 /** What is wrong with `pkg`'s alias imports (`#name/…`), as messages: an alias it may not use, or one its package.json does not map to that package. */
@@ -110,6 +111,18 @@ test('the answer checker imports only its siblings — no node:*, no other packa
   for (const file of files) {
     for (const spec of importsOf(file)) {
       assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec), `chat-answer/${file.split(/[\\/]/).pop()} imports '${spec}' — only its own siblings`);
+    }
+  }
+});
+
+test('the instructions import only their siblings and the answer checker — no node:*: they run in a browser and an app webview (chat-block-spec §22.2)', () => {
+  const files = sources('packages/chat-instructions');
+  assert.ok(files.length >= 5, 'CONTROL: the instructions sources are found');
+  assert.ok(importsOf(join(ROOT, 'packages/chat-instructions/src/system-text.ts')).includes('#chat-answer/chat-rich.ts'), 'CONTROL: its imports are read');
+  for (const file of files) {
+    for (const spec of importsOf(file)) {
+      assert.ok(/^\.\/[a-z0-9-]+\.ts$/.test(spec) || /^#chat-answer\/[a-z0-9-]+\.ts$/.test(spec),
+        `chat-instructions/${file.split(/[\\/]/).pop()} imports '${spec}' — only its siblings and #chat-answer/`);
     }
   }
 });
@@ -242,7 +255,7 @@ test('mcp imports only its siblings and node built-ins — the CLI injects every
 });
 
 test('nothing imports from cli — ARCHITECTURE §2', () => {
-  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'chat-answer']) {
+  for (const pkg of ['core', 'target-web', 'overlay', 'auth-runtime', 'scene-runtime', 'backend', 'chat-answer', 'chat-instructions']) {
     for (const file of sources(`packages/${pkg}`)) {
       for (const spec of importsOf(file)) {
         assert.ok(crossPackage(spec) !== 'cli', `${pkg} imports from cli (${spec})`);

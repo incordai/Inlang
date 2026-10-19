@@ -10,7 +10,8 @@ import { compile, type Spec, type SpecBlock } from '../../core/src/index.ts';
 import { chatBackend, checkPreset, CONTEXT_MAX, type BackendChat } from '../src/chat-context.ts';
 import { backendFiles, envExample } from '../src/emit.ts';
 import { KEYS, loadConfig } from '../src/server/env.ts';
-import { parseChatContext, ROWS_HEADING, rulesFor, systemText } from '../src/server/chat.ts';
+import { parseChatContext, rulesFor, systemText } from '../src/server/chat.ts';
+import { ROWS_HEADING } from '#chat-instructions/system-text.ts';
 import { createAnswerParser } from '#chat-answer/chat-answer.ts';
 import { manifests } from './data-fixture.ts';
 

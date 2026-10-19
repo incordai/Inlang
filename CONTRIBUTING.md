@@ -110,6 +110,7 @@ works — a change that breaks one is sent back:
 | `packages/auth-runtime` | the sign-in forms' browser runtime |
 | `packages/backend` | the generated server's source and its emitter |
 | `packages/chat-answer` | the chat's answer checker, for the generated server and for any app (chat-block-spec §22) |
+| `packages/chat-instructions` | what a chat's model is told, for the build, the generated server and any app |
 | `packages/cli` | the `az` binary |
 | `packages/mcp` | the MCP server behind `az mcp` |
 | `docs/` | product, grammar, architecture, one spec per block, verification |

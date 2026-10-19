@@ -58,10 +58,12 @@ export const SERVER_DIR = 'server';
  * `server/src/<name>/` — the same files the repository runs, never a second
  * copy — and the server's package.json maps the alias there. A server
  * without a chat gets only `withoutChat`: the files the modules every server
- * has import (env.ts reads a tool's shape and check from the answer checker).
+ * has import (env.ts reads a tool's shape and check from the answer checker);
+ * the instructions (what the model is told) only with a chat.
  */
 export const SERVER_PACKAGES: readonly { readonly name: string; readonly withoutChat: readonly string[] }[] = [
   { name: 'chat-answer', withoutChat: ['tool-shape.ts'] },
+  { name: 'chat-instructions', withoutChat: [] },
 ];
 
 /** The server's package.json `imports`: each alias to its copied folder. */

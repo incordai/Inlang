@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { compile, type Manifest } from '../../core/src/index.ts';
 import { chatBackend, checkPreset } from '../src/chat-context.ts';
-import { bestMatch, matchCandidates } from '../src/server/chat-match.ts';
+import { bestMatch, matchCandidates } from '#chat-instructions/chat-match.ts';
 import { parseChatContext, type ChatContext } from '../src/server/chat.ts';
 
 const DIR = new URL('./fixtures/chat-match/', import.meta.url);

@@ -67,8 +67,17 @@ importers:
       '@az/chat-answer':
         specifier: workspace:*
         version: link:../chat-answer
+      '@az/chat-instructions':
+        specifier: workspace:*
+        version: link:../chat-instructions
 
   packages/chat-answer: {}
+
+  packages/chat-instructions:
+    dependencies:
+      '@az/chat-answer':
+        specifier: workspace:*
+        version: link:../chat-answer
 
   packages/cli:
     dependencies:

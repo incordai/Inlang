@@ -204,8 +204,8 @@ const chatBudget: Check = {
     })();
     // chat-knows.ts KNOWS_LIMITS.tableChars, read only when a chat knows a table (that module ships with tables only).
     const tableChars = known > 0 ? (await import('../../backend/src/server/chat-knows.ts')).KNOWS_LIMITS.tableChars : 0;
-    // The tools' lines in the per-request system text (chat-tools.ts toolsText), on a page that may use them.
-    const toolChars = chat.tools.length > 0 ? (await import('../../backend/src/server/chat-tools.ts')).toolsText(chat.tools).length : 0;
+    // The tools' lines in the per-request system text (chat-instructions tools-text.ts), on a page that may use them.
+    const toolChars = chat.tools.length > 0 ? (await import('../../chat-instructions/src/tools-text.ts')).toolsText(chat.tools).length : 0;
     const costOf = (prompt: number) => answerCost({
       prompt: prompt + toolChars, context: context.length, knows: known, maxOutput: chat.maxOutputTokens,
       charsPerToken: CHARS_PER_TOKEN, historyChars: HISTORY_CHARS, tableChars,

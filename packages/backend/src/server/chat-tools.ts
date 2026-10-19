@@ -2,7 +2,7 @@
  * @az server chat-tools
  * Purpose: the operator's data tools — a `from tool` request POSTed to its declared URL, the reply bounded and checked row by row, aggregated for the page; never shown to the model.
  * Spec: docs/chat-block-spec.md §21.2 (§21.2.2–§21.2.5)
- * Exports: TOOL_RESULT, ToolRow, CallOutcome, callTool, toolRows, aggregateTool, toolCacheKey, toolMinute, toolsText, createTools, Tools,
+ * Exports: TOOL_RESULT, ToolRow, CallOutcome, callTool, toolRows, aggregateTool, toolCacheKey, toolMinute, createTools, Tools,
  *   ToolsOptions, probeTools, ToolProbe
  * Edit guide: fetch only, no SDK, no vendor names; the URL is the operator's, never the model's — the model's words are typed values
  *   in a JSON body; no redirect is followed; one bound for the request and the body; one row wrong and the whole reply is refused;
@@ -43,7 +43,7 @@ import { createRateLimits, type Windows } from './chat-limits.ts';
 import type { Figures, RowsResult } from '#chat-answer/figures.ts';
 import { clampText, type ToolAnswer, type ToolCards, type ToolRequest, type ToolShape, type ToolsRun } from '#chat-answer/chat-rich.ts';
 import { paramsProblem, type ChatRate, type ChatTool } from './env.ts';
-import { isDay, type ChatToolShape, type ToolFieldType, type ToolParam } from '#chat-answer/tool-shape.ts';
+import { isDay, type ChatToolShape, type ToolFieldType } from '#chat-answer/tool-shape.ts';
 import { BodyTooLarge, readCapped } from './outbound.ts';
 
 /** chat-block-spec §21.2.4: what one reply may be, and how long one is kept. */
@@ -258,63 +258,6 @@ export const toolCacheKey = (req: ToolRequest): string =>
 
 /** The minute a reply was read, as the page shows it: `YYYY-MM-DDTHH:MMZ`, UTC. */
 export const toolMinute = (ms: number): string => `${new Date(ms).toISOString().slice(0, 16)}Z`;
-
-/** A parameter as the model is told it: its type, its bounds or values, whether it is required. */
-function paramText(name: string, p: ToolParam): string {
-  const parts: string[] = [p.type === 'bool' ? 'yes or no' : p.type === 'date' ? 'a date, YYYY-MM-DD' : p.type === 'text' ? `text in double quotes, at most ${p.maxLength} characters` : p.type === 'int' ? 'a whole number' : p.type];
-  if (p.type === 'enum') parts[0] = `one of ${(p.values ?? []).join(', ')}`;
-  if (p.min !== null && p.max !== null) parts.push(`${p.min} to ${p.max}`);
-  else if (p.min !== null) parts.push(`at least ${p.min}`);
-  else if (p.max !== null) parts.push(`at most ${p.max}`);
-  if (p.required) parts.push('required');
-  return `${name} (${parts.join(', ')})`;
-}
-
-/** A value of `p` for an example line: its lower bound, its first value, or a placeholder of its type. */
-function exampleValue(p: ToolParam): string {
-  switch (p.type) {
-    case 'int': case 'number': return String(p.min ?? 1);
-    case 'date': return String(p.min ?? '2026-01-01');
-    case 'bool': return 'yes';
-    case 'enum': {
-      const v = (p.values ?? ['a'])[0];
-      return /^[A-Za-z0-9._-]+$/.test(v) ? v : JSON.stringify(v);
-    }
-    case 'text': return '"a value"';
-  }
-}
-
-/**
- * The tools as the model is told them in the per-request system text
- * (§21.2.2, §8.3): generated from the validated declarations, so the build's
- * chat prompt files stay a function of the .az file. Never a URL, never a key.
- */
-export function toolsText(shapes: readonly ChatToolShape[]): string {
-  if (shapes.length === 0) return '';
-  const lines = shapes.map((t) => {
-    const params = Object.entries(t.params);
-    return `- ${t.name}${t.about ? ` — ${t.about}` : ''} Parameters: ${params.length > 0 ? params.map(([n, p]) => paramText(n, p)).join(', ') : 'none'}. Each row: ${Object.entries(t.fields).map(([n, f]) => `${n} (${f})`).join(', ')}.`;
-  });
-  const first = shapes[0];
-  const args = Object.entries(first.params).filter(([, p]) => p.required).map(([n, p]) => `${n} ${exampleValue(p)}`);
-  const fields = Object.entries(first.fields);
-  const num = fields.find(([, f]) => f === 'number')?.[0];
-  const group = fields.find(([, f]) => f === 'text' || f === 'date')?.[0];
-  const head = ['from tool', first.name, ...args].join(' ');
-  const texts = fields.filter(([, f]) => f === 'text').map(([n]) => n);
-  const examples = [
-    ...(group ? [`chart bar "A title" ${head} ${num ? `sum ${num}` : 'count'} by ${group}`] : []),
-    `table "A title" ${head} columns ${fields.slice(0, 3).map(([n]) => n).join(' ')}`,
-    `stats\n  stat "A label" ${head} ${num ? `max ${num}` : 'count'}`,
-    ...(texts.length > 0 ? [`cards ${head} title ${texts[0]}${texts.length > 1 ? ` text ${texts[1]}` : ''}`] : []),
-  ];
-  return [
-    'The operator\'s tools a chart, table, stat or cards may take live figures "from tool" (the visitor sees them with their source; you never see what they answer, so never state their figures yourself):',
-    ...lines,
-    'Write the tool\'s name, then each parameter and its value, then what to show: count, or sum, avg, min or max of a number field, optionally "by" a text or date field (a chart needs "by"; a stat takes "by" only a date field, for the latest) — or, in a table, "columns" and up to 6 fields — or, in cards, "title" and a text field, then optionally "text" and a text field and "image" and a text field that holds a site image\'s key. At most 3 tool requests in one answer. For example:',
-    ...examples,
-  ].join('\n');
-}
 
 export interface ToolsOptions {
   readonly tools: readonly ChatTool[];

@@ -15,6 +15,8 @@
  *     events, drops and history Node expects of it;
  *   - its Web Crypto history tags are the built-in server's tags, byte for
  *     byte (chat-text.ts over node:crypto), and a tampered answer's tag fails;
+ *   - the instruction builder (#35): buildInstructions gives the text Node
+ *     gives for the same app input — rules, content, tools, rows;
  *   - no Content-Security-Policy violation (with a CONTROL that the watch
  *     sees one), and no request leaves the page's own origin.
  */
@@ -31,6 +33,7 @@ import { closeWithin, human, watchdog, within } from './lib/bounded.mjs';
 import { violationControl, watchedContext } from './visual/csp.mjs';
 import { chunksOf, corpusCases, corpusRules } from '../packages/chat-answer/test/corpus.ts';
 import { historyKey, tagTurn } from '../packages/backend/src/server/chat-text.ts';
+import { buildInstructions } from '../packages/chat-instructions/src/instructions.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -42,7 +45,7 @@ const progress = { last: 'start' };
 const run = watchdog(RUN_MS, 'chat-lib-e2e', progress);
 
 /** The packages an app's page may load, by the alias name it imports them with. */
-const PACKAGES = ['chat-answer'];
+const PACKAGES = ['chat-answer', 'chat-instructions'];
 
 /** The page's policy: its own scripts and requests only — no inline script or style, nothing from elsewhere. */
 const POLICY = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'";
@@ -55,6 +58,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
 /** The page's script: the packages' entry points, called from the test by name. */
 const HARNESS = `import { createAnswerChecker } from '/pkg/chat-answer/checker.ts';
 import { webCryptoTags } from '/pkg/chat-answer/history-tag.ts';
+import { buildInstructions } from '/pkg/chat-instructions/instructions.ts';
 
 async function* stream(pieces) { for (const p of pieces) yield p; }
 const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
@@ -79,6 +83,7 @@ window.azLib = {
     }
     return out;
   },
+  instructions(input) { return buildInstructions(input); },
   async tags(secret, items) {
     const t = await webCryptoTags(bytes(secret));
     const out = [];
@@ -125,6 +130,14 @@ const TAGGED = [
   { conversation: 'abcdefghijklmnop0123', index: 3, text: 'Two lines\nof history — with ünïcode' },
 ];
 const KEY = historyKey(SECRET);
+/** An app's instructions input, with every part a question can add. */
+const APP_INPUT = {
+  appName: 'Acme', components: ['faq', 'chart', 'cta', 'map'], destinations: ['/contact'], geocoder: true, page: '/help', rows: '{"status":"paid"}', asked: ['Do you ship?'],
+  tables: [{ name: 'orders', fields: [{ name: 'status', type: 'choice', choices: ['paid', 'open'] }] }],
+  tools: [{ name: 'standings', label: 'Race results', about: '', params: {}, fields: { driver: 'text', points: 'number' } }],
+  content: { site: { name: 'Acme', description: 'Lamps.' }, pages: [{ route: '/help', blocks: [{ block: 'faq', title: 'Questions', questions: [{ question: 'Do you ship?', answer: 'Yes.' }] }] }], notes: ['Ships in two days — ünïcode.'] },
+  rules: { extra: ['Answer in English.'] },
+};
 
 const failures = [];
 const check = (engine, what, ok, detail = '') => {
@@ -172,6 +185,10 @@ try {
       const tags = await within(STEP_MS, `${name} tags`, () => page.evaluate(([s, items]) => window.azLib.tags(s, items), [SECRET.toString('base64'), TAGGED]));
       check(name, 'Web Crypto history tags are the server\'s tags, byte for byte', tags.every((t, i) => t.tag === tagTurn(KEY, TAGGED[i].conversation, TAGGED[i].index, TAGGED[i].text)));
       check(name, 'a tag checks for its own answer, and a tampered answer\'s fails', tags.every((t) => t.ok === true && t.tampered === false));
+
+      progress.last = `${name}: instructions`;
+      const told = await within(STEP_MS, `${name} instructions`, () => page.evaluate((input) => window.azLib.instructions(input), APP_INPUT));
+      check(name, 'buildInstructions gives the text Node gives for the same app input', told === buildInstructions(APP_INPUT) && told.includes('from tool'), told.slice(0, 80));
 
       check(name, 'no Content-Security-Policy violation', (sinks[name] ?? []).length === 0, (sinks[name] ?? []).join(' | '));
       check(name, 'no request leaves the page\'s origin', away.length === 0, away.join(' '));

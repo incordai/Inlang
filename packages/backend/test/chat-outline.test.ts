@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compile } from '../../core/src/index.ts';
 import { chatBackend } from '../src/chat-context.ts';
-import { outlineString, siteOutline } from '../src/server/chat-outline.ts';
+import { outlineString, siteOutline } from '#chat-instructions/chat-outline.ts';
 import { parseChatContext, systemText } from '../src/server/chat.ts';
 import { manifests } from './data-fixture.ts';
 

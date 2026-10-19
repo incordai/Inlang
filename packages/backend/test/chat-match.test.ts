@@ -9,8 +9,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compile } from '../../core/src/index.ts';
 import { chatBackend } from '../src/chat-context.ts';
-import { choosePages, terms } from '../src/server/chat-match.ts';
-import { CONTENT_LIMITS, PAGES_HEADING, parseChatContext, systemText, type ChatContext } from '../src/server/chat.ts';
+import { choosePages, terms } from '#chat-instructions/chat-match.ts';
+import { CONTENT_LIMITS, PAGES_HEADING } from '#chat-instructions/system-text.ts';
+import { parseChatContext, systemText, type ChatContext } from '../src/server/chat.ts';
 import { manifests } from './data-fixture.ts';
 
 test('terms: lower-cased, NFC, split at anything but letters and digits, no stop words, plurals stemmed, each once', () => {

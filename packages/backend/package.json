@@ -5,9 +5,11 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#chat-answer/*": "@az/chat-answer/*"
+    "#chat-answer/*": "@az/chat-answer/*",
+    "#chat-instructions/*": "@az/chat-instructions/*"
   },
   "dependencies": {
-    "@az/chat-answer": "workspace:*"
+    "@az/chat-answer": "workspace:*",
+    "@az/chat-instructions": "workspace:*"
   }
 }

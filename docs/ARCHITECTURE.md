@@ -30,6 +30,8 @@ az/
 │   │                  `az build` writes, OpenAPI, data DDL, and the server itself (src/server/)
 │   ├── chat-answer/   @az/chat-answer — the chat's answer checker: parser, rich components,
 │   │                  tool shapes, history tags; copied into a server's src/chat-answer/
+│   ├── chat-instructions/ @az/chat-instructions — what a chat's model is told: fixed rules,
+│   │                  content outline, the per-question system text; copied beside it
 │   ├── mcp/           @az/mcp — `az mcp`: MCP over stdio, the tool schemas, the root sandbox
 │   └── cli/           @az/cli — the `az` binary: build, dev, spec, check, lint, migrate,
 │                      eject, backend, mcp, explain, palette, prompt, doctor, audit
@@ -90,9 +92,10 @@ cli      → everything
 auth-runtime → (nothing)                 (copied whole into a site that uses auth)
 scene-runtime → three                   (copied whole into a site that uses 3D)
 backend  → core (types, data)           (its server/ is node built-ins + pinned drivers only)
-         → chat-answer (by alias)       (its server/ also imports #chat-answer/…)
+         → chat-answer, chat-instructions (by alias)  (its server/ imports #chat-answer/…, #chat-instructions/…)
 mcp      → (nothing but node:*)          (the CLI injects every operation)
 chat-answer → (nothing)                 (runs in Node, a browser, an app webview)
+chat-instructions → chat-answer (by alias)
 ```
 
 The chat packages (chat-block-spec §22) are imported by an **alias**,
@@ -121,7 +124,11 @@ aliases.
 `chat-answer` is the answer checker (chat-block-spec §22.1): what a model
 wrote becomes checked events here, for the built-in server and for an app
 alike. It imports only its own files and no Node-only API, so it runs in a
-browser and an app webview as it runs in Node.
+browser and an app webview as it runs in Node. `chat-instructions` is what
+the model is told (§22.2): the build writes its fixed rules to each chat's
+prompt file, the server assembles the rest per question, an app calls
+`buildInstructions` — one text for the same input. It imports only its own
+files and the answer checker's forms and caps.
 
 `auth-runtime` (M4) is the adapter layer a generated site runs: the §3
 contract, the `hosted` and `session` adapters and the form behaviour. It

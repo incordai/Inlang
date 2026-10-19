@@ -1,5 +1,5 @@
 /**
- * @az server chat-match
+ * @az module chat-match
  * Purpose: deterministic keyword scoring of a visitor's question: which pages a large site sends in full, and which author's answer a clear question gets without the model.
  * Spec: docs/chat-block-spec.md §19.17
  * Exports: terms, scoreCandidates, bestMatch, choosePages, matchCandidates, MATCH_LIMITS, MatchCandidate, Scored
@@ -32,7 +32,8 @@
  * choose among what the author or the build wrote; nothing here returns,
  * echoes or stores them.
  *
- * Copied into a generated server with chat; imports the answer checker's types (#chat-answer).
+ * Part of the instructions package (packages/chat-instructions): the server's
+ * route matches with it too. Imports only its siblings and the answer checker's types (#chat-answer).
  */
 
 import type { AnswerPreset, AnswerQuote, AnswerWord } from '#chat-answer/chat-answer.ts';

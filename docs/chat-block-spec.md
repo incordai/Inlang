@@ -524,6 +524,7 @@ format:
 | `chat` word: manifest, emitter (shell + templates), README, previews | `packages/words/chat/` |
 | `model default`, AZ1250–AZ1258, `INHERITABLE` + `chat` | `packages/core/src/backend.ts`, `link.ts`, `spec.ts` |
 | prompt and context generation (deterministic) | `packages/backend/src/chat-context.ts` (build side) → `server/chat/prompt.txt`, `server/chat/context.json` |
+| what the model is told: the fixed rules and the per-question assembly (§22.2) | `packages/chat-instructions/src/`, called by the build and copied into `server/src/chat-instructions/` |
 | route, limits, queue, adapters, usage table | `packages/backend/src/server/chat*.ts`, copied verbatim like the rest |
 | the answer parser and checker (§22.1) | `packages/chat-answer/src/`, copied verbatim into `server/src/chat-answer/` and imported as `#chat-answer/…` |
 | the page runtime (send, stream read, validate, fill) | `packages/overlay/src/runtime/chat.ts`, `chat-logic.ts`, beside `rows.ts` |
@@ -4073,6 +4074,7 @@ and the generated server and site use the package.
 | Piece | Package | Issue |
 |---|---|---|
 | the answer checker | `packages/chat-answer` (`@az/chat-answer`) | #33 |
+| the instruction builder | `packages/chat-instructions` (`@az/chat-instructions`) | #35 |
 
 **How a package is used without a second copy.** A package imports only its
 own files and the chat packages it builds on, by an alias —
@@ -4141,3 +4143,52 @@ corpus through `createAnswerChecker`, at once and in pieces.
 **The generated server** copies the package into `server/src/chat-answer/`
 and maps `#chat-answer/*` there in its `package.json`. A server without a
 chat gets only `tool-shape.ts`, the one file every server's `env.ts` reads.
+
+### 22.2 The instruction builder — `@az/chat-instructions` (#35)
+
+**What moved.** What the model is told, from three places into one package:
+the fixed rules (`CHAT_PROMPT` and its parts, from the build's
+`chat-context.ts`, now `chat-prompt.ts`), the per-question assembly (from the
+server's `chat.ts` `systemParts`, now `system-text.ts`, with `ROWS_HEADING`,
+`PAGES_HEADING`, `CONTENT_LIMITS` and the tools rule), the content outline
+and the page chooser (`chat-outline.ts`, `chat-match.ts`, whole), and the
+tools' lines (`toolsText`, from `chat-tools.ts`, now `tools-text.ts`).
+
+**The function.**
+
+```ts
+const system = buildInstructions({
+  appName: 'Acme',
+  components: ['faq', 'chart', 'cta'], presets, quotes, destinations,
+  tables,                      // the data source's queryable schema: names, field types, public fields only
+  content: { site, pages, notes },   // the app's own knowledge: pages in context.json's shape, plain-text notes
+  rules: { extra: ['Answer in English.'] },   // after the fixed rules
+  page, rows, asked,           // what one question changes
+});
+```
+
+The order is #5's cache order: the fixed rules (and the app's own after
+them), the content between `<site-content>` tags as data, then what the
+question changes. `instructionParts` also says how many leading characters
+are the same for every question. `fixedInstructions` is the fixed part
+alone: `az build` writes it, after its generated line, to each chat's prompt
+file; the server's `systemText` reads that file and context.json and calls
+the same assembly. A test holds `buildInstructions`, for the input the build
+read from the `.az` file, to the server's text byte for byte — every
+component, tools, places, rows, a large site's chosen pages — and the
+chat-prompt token budget (#14, `pnpm bench:tokens`) measures
+`buildInstructions`, with the same check.
+
+**An app's input.** A note is one quoted, escaped line (`note "…"`): nothing
+in it can close the content section. Extra rules are at most 8 lines of 300
+characters; an unknown component or a name that is not one line throws — it
+is the app's configuration, not the model's. Tools are taught only to a chat
+whose components take their figures, a place only where a map is shown, as
+on the server. The fixed rules keep the site's wording ("the website", "the
+site content"), so an az site's text does not change.
+
+**Where it runs.** Its own files and `#chat-answer/` only (the dependency
+rules), no Node-only API (a test scans the sources); `test:chat-lib` builds
+an app's instructions in Chromium, Firefox and WebKit and gets Node's text.
+The generated server copies it into `server/src/chat-instructions/` with a
+chat.

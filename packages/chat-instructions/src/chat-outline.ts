@@ -1,5 +1,5 @@
 /**
- * @az server chat-outline
+ * @az module chat-outline
  * Purpose: the site content as the model reads it: an outline of context.json's public pages, each page as a summary and in full.
  * Spec: docs/chat-block-spec.md §8.3, §19.17
  * Exports: siteOutline, outlineString, SiteOutline, OutlinePage
@@ -31,7 +31,8 @@
  * question needs in full (chat.ts systemText, §19.17). The words of each
  * page are kept for that choice (chat-match.ts).
  *
- * Copied into a generated server with chat; imports chat-match.ts.
+ * Part of the instructions package (packages/chat-instructions), which `az build`
+ * copies into a generated server's src/chat-instructions/; imports only its siblings.
  */
 
 import { MATCH_LIMITS, terms } from './chat-match.ts';

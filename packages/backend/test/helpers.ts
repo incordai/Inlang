@@ -38,8 +38,9 @@ export function copyServer(dir: string, chat: boolean, keep: (src: string) => bo
   cpSync(SERVER_SRC, join(dir, 'src'), { recursive: true, filter: keep });
   for (const p of SERVER_PACKAGES) {
     const from = fileURLToPath(new URL(`../../${p.name}/src/`, import.meta.url));
-    mkdirSync(join(dir, 'src', p.name), { recursive: true });
-    for (const f of readdirSync(from).filter((f) => f.endsWith('.ts') && (chat || p.withoutChat.includes(f)))) cpSync(join(from, f), join(dir, 'src', p.name, f));
+    const files = readdirSync(from).filter((f) => f.endsWith('.ts') && (chat || p.withoutChat.includes(f)));
+    if (files.length > 0) mkdirSync(join(dir, 'src', p.name), { recursive: true });
+    for (const f of files) cpSync(join(from, f), join(dir, 'src', p.name, f));
   }
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module', imports: serverImports() }));
 }

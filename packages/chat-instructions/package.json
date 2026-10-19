@@ -1,0 +1,16 @@
+{
+  "name": "@az/chat-instructions",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./*.ts": "./src/*.ts"
+  },
+  "imports": {
+    "#chat-answer/*": "@az/chat-answer/*"
+  },
+  "dependencies": {
+    "@az/chat-answer": "workspace:*"
+  }
+}

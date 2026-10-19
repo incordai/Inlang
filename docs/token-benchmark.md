@@ -401,8 +401,11 @@ it to a recorded budget: `scripts/token-benchmark/chat-all.az`, whose chat
 may show every component, `chat-faq.az`, the same site whose chat shows
 `faq` only, and `chat-large.az`, forty pages (since issue 27, below). Each is built (its data lock recorded first) and three texts
 are counted in both encodings: the chat's prompt file, `context.json`, and
-the whole system text the server sends for one question on the chat's page
-(no `knows` rows). A count over its budget, or one the budget does not
+the whole system text one question on the chat's page is sent (no `knows`
+rows) — measured as the instruction builder makes it
+(`@az/chat-instructions` `buildInstructions`, chat-block-spec §22.2) from the
+build's own input, which the bench holds to be byte for byte what the server
+sends. A count over its budget, or one the budget does not
 name, fails the unit test and makes `pnpm bench:tokens` exit 1; a count
 under it is printed as room. The budget is changed by hand, in the change
 that moves the prompt, so a saving cannot slip back unnoticed.
