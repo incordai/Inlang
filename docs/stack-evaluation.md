@@ -842,12 +842,17 @@ ESM-only, and runs on the repo's Node:
 
 | Package | Pinned | Role |
 |---|---|---|
-| `mdast-util-from-markdown` | `2.0.3` | the parser's syntax tree — the only module `markdown.ts` calls |
-| `micromark` | `4.0.2` | the CommonMark tokenizer underneath it |
+| `mdast-util-from-markdown` | `2.1.0` | the parser's syntax tree — the only module `markdown.ts` calls |
+| `micromark` | `4.0.3` | the CommonMark tokenizer underneath it |
 | `micromark-extension-gfm-table` | `2.1.2` | tables |
 | `mdast-util-gfm-table` | `2.0.0` | tables, as tree nodes |
 | `micromark-extension-gfm-strikethrough` | `2.1.0` | strikethrough |
-| `mdast-util-gfm-strikethrough` | `2.0.0` | strikethrough, as tree nodes |
+| `mdast-util-gfm-strikethrough` | `2.0.1` | strikethrough, as tree nodes |
+
+On 2026-10-19 `micromark` `4.0.3`, `mdast-util-from-markdown` `2.1.0` and
+`mdast-util-gfm-strikethrough` `2.0.1` replaced `4.0.2`, `2.0.3` and `2.0.0`:
+each is the latest release, past the 7-day `minimumReleaseAge`, and its notes
+list fixes, performance work and one additive listener API, no breaking change.
 
 **Why a syntax tree, not an HTML compiler.** text-spec §11's criterion is a
 parser that never emits raw HTML. The tree meets it by construction: raw HTML
