@@ -329,9 +329,9 @@ Node ≥ 22.18 runs the TypeScript directly. `/health` answers `{"ok":true}`.
 | Package | Version | Licence | Why | Alternative considered |
 |---|---|---|---|---|
 | `node:sqlite` | Node built-in | — | SQLite with no package or native build | a native SQLite package (needs install scripts) |
-| `pg` | 8.23.0 | MIT | the de facto PostgreSQL driver, pure JS | none mature enough |
-| `mysql2` | 3.24.4 | MIT | the de facto MySQL driver, pure JS | the older `mysql` (unmaintained) |
-| `nodemailer` | 10.0.10 | MIT-0 | mature SMTP client, zero dependencies, handles TLS/STARTTLS/auth | a hand-rolled SMTP client (rejected: security-sensitive) |
+| `pg` | 8.23.1 | MIT | the de facto PostgreSQL driver, pure JS | none mature enough |
+| `mysql2` | 3.24.5 | MIT | the de facto MySQL driver, pure JS | the older `mysql` (unmaintained) |
+| `nodemailer` | 10.0.16 | MIT-0 | mature SMTP client, zero dependencies, handles TLS/STARTTLS/auth | a hand-rolled SMTP client (rejected: security-sensitive) |
 | `sharp` | 0.35.5 | Apache-2.0; bundles libvips 8.18.7, **LGPL-3.0-or-later** (dynamically linked, unmodified) | image uploads (data-spec §8): decodes JPEG/PNG/WebP/AVIF under a loader allow-list and re-encodes to WebP without metadata, so a photo's GPS never reaches the disk; prebuilt per platform, ~20 MB installed (19–29 MB measured across macOS, Linux glibc/musl, Windows); installs with `--ignore-scripts` | the same libvips as WebAssembly (measured ~2× slower and ~3× the memory on a 24 MP photo; full-size output failed); a metadata-only stripper (rejected: keeps the uploaded bytes, so polyglots and malformed files pass) — `docs/stack-evaluation.md` §14 |
 
 A generated server installs only what its setup uses — SQLite + API installs
