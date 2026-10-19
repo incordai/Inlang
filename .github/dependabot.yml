@@ -13,6 +13,17 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
+    ignore:
+      # Its WebKit reports a style-src-attr violation for any <select>, even on
+      # a page with no style attribute; later releases are still offered.
+      - dependency-name: playwright
+        versions: ['1.64.0']
+      # The types follow the React the repository runs, held below 19.3
+      # (stack-evaluation); remove this when React itself moves.
+      - dependency-name: '@types/react'
+        versions: ['>=19.3.0']
+      - dependency-name: '@types/react-dom'
+        versions: ['>=19.3.0']
     groups:
       dev-dependencies:
         dependency-type: development
