@@ -31,7 +31,7 @@ test('drivers: every loadable module is a built-in or a pinned package', () => {
 
 test('dependencies: only what the setup uses — a SQLite + API server installs nothing', () => {
   assert.deepEqual(serverDependencies({ database: 'sqlite', email: 'api' }), {});
-  assert.deepEqual(serverDependencies({ database: 'postgres', email: 'smtp' }), { pg: '8.23.1', nodemailer: '10.0.16' });
+  assert.deepEqual(serverDependencies({ database: 'postgres', email: 'smtp' }), { pg: '8.23.1', nodemailer: '10.1.0' });
   assert.deepEqual(serverDependencies({ database: 'mysql', email: 'api' }), { mysql2: '3.24.5' });
 });
 

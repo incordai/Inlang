@@ -42,7 +42,7 @@ export interface BackendData {
 export const BACKEND_PINS = {
   pg: '8.23.1',
   mysql2: '3.24.5',
-  nodemailer: '10.0.16',
+  nodemailer: '10.1.0',
   /** The image library (data-spec §8, §16 Q6): only a site with an image field installs it. */
   sharp: '0.35.5',
 } as const;

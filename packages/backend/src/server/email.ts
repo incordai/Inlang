@@ -31,21 +31,23 @@ export interface Mailer { send(m: Message): Promise<void> }
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
 
 /**
- * How long one send may wait on the mail service: the whole API request, and
- * each SMTP stage (DNS, connect, greeting, a silent socket). A hung service
- * then fails the send instead of holding it, and its connection, forever.
+ * How long one send may wait on the mail service: the whole API request; over
+ * SMTP, setting the session up (DNS, connect, greeting and a STARTTLS
+ * handshake, which the library counts together against connectionTimeout),
+ * then each silence of the socket. A hung service then fails the send instead
+ * of holding it, and its connection, forever.
  */
 const EMAIL_TIMEOUT_MS = 10_000;
 
 /**
- * How long one SMTP send may take in total. The stage timeouts above fire
- * only on silence, so a server that sends a byte every few seconds would hold
- * the send, and its connection, for as long as it likes. A healthy server
- * takes well under a second for one short message; 30 s is three stage
- * bounds, room for a slow but honest DNS, connect, TLS, login and data
- * exchange. Sends run off the request path, so the wait costs one connection,
- * never a visitor's answer. (The API post is already capped in total by its
- * EMAIL_TIMEOUT_MS signal.)
+ * How long one SMTP send may take in total. Once the session is set up the
+ * timeout above fires only on silence, so a server that sends a byte every
+ * few seconds would hold the send, and its connection, for as long as it
+ * likes. A healthy server takes well under a second for one short message;
+ * 30 s is three stage bounds, room for a slow but honest DNS, connect, TLS,
+ * login and data exchange. Sends run off the request path, so the wait costs
+ * one connection, never a visitor's answer. (The API post is already capped
+ * in total by its EMAIL_TIMEOUT_MS signal.)
  */
 const EMAIL_DEADLINE_MS = 30_000;
 

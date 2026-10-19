@@ -39,8 +39,8 @@ importers:
         specifier: 3.24.5
         version: 3.24.5(@types/node@26.6.5)
       nodemailer:
-        specifier: 10.0.16
-        version: 10.0.16
+        specifier: 10.1.0
+        version: 10.1.0
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -974,8 +974,8 @@ packages:
     resolution: {integrity: sha512-Tz09sEL2EEuv5fFowm419c1+a/jSMiBjI9gHxVLrVdbUkkNUUfjsVYs9pVZu5oCon/kmRh9TfLEObFtkVxmY0w==}
     engines: {node: '>=8.0.0'}
 
-  nodemailer@10.0.16:
-    resolution: {integrity: sha512-VL9xKErxN+el77o8eBOuYKUPMyEx7F9hfnDCuiUKJRp9v3wnWMOudYgP/SWbwSHy8rUL4cylobuXtki1LpQS7A==}
+  nodemailer@10.1.0:
+    resolution: {integrity: sha512-fXW8AulB25aOTuwfRYV6lqHyfz2VM4rr4SGXH03mE7x5znEUpzL5mu6anARUpZN7744Ziwkmr4AxSLPJsBQspg==}
     engines: {node: '>=20.0.0'}
 
   open@8.4.2:
@@ -2155,7 +2155,7 @@ snapshots:
     dependencies:
       lru.min: 1.1.5
 
-  nodemailer@10.0.16: {}
+  nodemailer@10.1.0: {}
 
   open@8.4.2:
     dependencies:

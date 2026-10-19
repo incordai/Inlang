@@ -277,11 +277,13 @@ front of one, works. Messages are plain text containing only the link the
 server made.
 
 A send never waits on the mail service without bound. The API post must
-finish within 10 s (`EMAIL_TIMEOUT_MS`). Over SMTP, each stage (DNS, connect,
-greeting, a silent socket) gets the same 10 s, and the whole send at most
-30 s (`EMAIL_DEADLINE_MS`): the stage bounds fire only on silence, so a server
-that answers a byte at a time would otherwise hold the send for hours. At the
-deadline that send's connection is destroyed. Sends run after the request is
+finish within 10 s (`EMAIL_TIMEOUT_MS`). Over SMTP, setting the session up
+(DNS, connect, the greeting and a STARTTLS handshake, counted together by
+the library) gets the same 10 s, then each silence of the socket 10 s, and
+the whole send at most 30 s (`EMAIL_DEADLINE_MS`): after setup the bound
+fires only on silence, so a server that answers a byte at a time would
+otherwise hold the send for hours. At the deadline that send's connection is
+destroyed. Sends run after the request is
 answered, so a slow service never delays a visitor; a failed send is logged
 by its error class only (`TimeoutError` for the API or whole-send deadline,
 `Error ETIMEDOUT` for an SMTP stage), never the address or the server's
@@ -290,9 +292,11 @@ reply.
 Both TLS paths are tested end to end over that socket
 (`packages/backend/test/email-tls.test.ts`): a local SMTP server with a
 certificate made at test time speaks implicit TLS and STARTTLS; the message
-and the sign-in go only over TLS, a server that drips a byte at a time after
-the handshake fails the send at the deadline with its connection closed, and
-an untrusted certificate or a server offering no STARTTLS fails the send with
+and the sign-in go only over TLS (to a server that offers PIPELINING too), a
+server that drips a byte at a time after the handshake fails the send at the
+deadline with its connection closed, a slow greeting and a STARTTLS
+handshake that never finishes fail it at the one setup bound, and an
+untrusted certificate or a server offering no STARTTLS fails the send with
 nothing sent in the clear. The certificate is always verified; the test
 names the one it trusts (`createMailer`'s `tls`, a test seam like its
 timeouts).
@@ -331,7 +335,7 @@ Node ≥ 22.18 runs the TypeScript directly. `/health` answers `{"ok":true}`.
 | `node:sqlite` | Node built-in | — | SQLite with no package or native build | a native SQLite package (needs install scripts) |
 | `pg` | 8.23.1 | MIT | the de facto PostgreSQL driver, pure JS | none mature enough |
 | `mysql2` | 3.24.5 | MIT | the de facto MySQL driver, pure JS | the older `mysql` (unmaintained) |
-| `nodemailer` | 10.0.16 | MIT-0 | mature SMTP client, zero dependencies, handles TLS/STARTTLS/auth | a hand-rolled SMTP client (rejected: security-sensitive) |
+| `nodemailer` | 10.1.0 | MIT-0 | mature SMTP client, zero dependencies, handles TLS/STARTTLS/auth | a hand-rolled SMTP client (rejected: security-sensitive) |
 | `sharp` | 0.35.5 | Apache-2.0; bundles libvips 8.18.7, **LGPL-3.0-or-later** (dynamically linked, unmodified) | image uploads (data-spec §8): decodes JPEG/PNG/WebP/AVIF under a loader allow-list and re-encodes to WebP without metadata, so a photo's GPS never reaches the disk; prebuilt per platform, ~20 MB installed (19–29 MB measured across macOS, Linux glibc/musl, Windows); installs with `--ignore-scripts` | the same libvips as WebAssembly (measured ~2× slower and ~3× the memory on a 24 MP photo; full-size output failed); a metadata-only stripper (rejected: keeps the uploaded bytes, so polyglots and malformed files pass) — `docs/stack-evaluation.md` §14 |
 
 A generated server installs only what its setup uses — SQLite + API installs

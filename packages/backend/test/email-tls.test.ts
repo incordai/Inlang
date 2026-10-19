@@ -5,11 +5,13 @@
  * with a certificate made at test time (scripts/lib/self-signed.mjs); the
  * mailer trusts that one certificate and still verifies it.
  *
- * Proven: the message arrives, and only over TLS; a server that drips a byte
- * at a time after the handshake fails the send at the deadline as
- * TimeoutError, and its connection is closed; a certificate the mailer does
- * not trust, or a server that offers no STARTTLS, fails the send with
- * nothing sent in the clear.
+ * Proven: the message arrives, and only over TLS — also to a server that
+ * offers PIPELINING; a server that drips a byte at a time after the
+ * handshake fails the send at the deadline as TimeoutError, and its
+ * connection is closed; a slow greeting and a STARTTLS handshake the server
+ * never finishes share one setup bound, which fails the send before the
+ * deadline; a certificate the mailer does not trust, or a server that offers
+ * no STARTTLS, fails the send with nothing sent in the clear.
  */
 
 import { test } from 'node:test';
@@ -29,6 +31,8 @@ const DRIP_MS = 100;
 const DEADLINE_MS = 1_000;
 /** How far past the deadline a send may end — timers and a TLS teardown, not another deadline. */
 const DEADLINE_SLACK_MS = 500;
+/** The setup bound the slow-setup test sets (connect, greeting and STARTTLS share it): over a second, so its waits are not timer noise. */
+const SETUP_MS = 1_000;
 /** How long a closed send's connection may take to reach the fake as closed. */
 const CLOSE_MS = 1_000;
 
@@ -53,6 +57,12 @@ interface FakeOptions {
   readonly drip?: boolean;
   /** STARTTLS mode only: false leaves it out of EHLO's answer. */
   readonly offerStartTls?: boolean;
+  /** Offer PIPELINING once the session is TLS, as nearly every real server does: the envelope then comes as one batch. */
+  readonly pipelining?: boolean;
+  /** Greet this long after the connection, not at once. */
+  readonly greetAfterMs?: number;
+  /** STARTTLS mode only: answer STARTTLS, then never take part in the TLS handshake. */
+  readonly stallStartTls?: boolean;
 }
 
 /**
@@ -98,11 +108,16 @@ async function smtpFake(cert: { readonly key: string; readonly cert: string }, o
         const offer = options.mode === 'starttls' && !overTls && options.offerStartTls !== false;
         if (verb.startsWith('EHLO')) {
           // Sign-in is offered once the session is TLS, as a careful server does.
-          io.write(offer ? '250-fake\r\n250 STARTTLS\r\n' : overTls ? '250-fake\r\n250 AUTH PLAIN LOGIN\r\n' : '250 fake\r\n');
+          const pipelining = options.pipelining ? '250-PIPELINING\r\n' : '';
+          io.write(offer ? '250-fake\r\n250 STARTTLS\r\n' : overTls ? `250-fake\r\n${pipelining}250 AUTH PLAIN LOGIN\r\n` : '250 fake\r\n');
         } else if (verb.startsWith('AUTH')) {
           io.write(overTls ? '235 signed in\r\n' : '530 TLS first\r\n');
         } else if (verb.startsWith('STARTTLS') && !offer) {
           io.write('502 not offered\r\n');
+        } else if (verb.startsWith('STARTTLS') && options.stallStartTls) {
+          io.removeListener('data', onData);
+          io.write('220 go ahead\r\n');
+          return;
         } else if (verb.startsWith('STARTTLS')) {
           io.removeListener('data', onData);
           io.write('220 go ahead\r\n', () => {
@@ -122,7 +137,10 @@ async function smtpFake(cert: { readonly key: string; readonly cert: string }, o
       }
     };
     io.on('data', onData);
-    if (greet) io.write('220 fake ready\r\n');
+    if (greet && options.greetAfterMs !== undefined) {
+      const t = setTimeout(() => io.write('220 fake ready\r\n'), options.greetAfterMs);
+      raw.once('close', () => clearTimeout(t));
+    } else if (greet) io.write('220 fake ready\r\n');
   };
 
   const track = (server: Server) => server.on('connection', (s: Socket) => {
@@ -210,6 +228,22 @@ for (const mode of ['implicit', 'starttls'] as const) {
     } finally { await fake.close(); }
   });
 
+  test(`email smtp ${mode}: a server that offers PIPELINING gets the envelope after TLS and sign-in, and the message arrives`, async () => {
+    const fake = await smtpFake(pem, { mode, pipelining: true });
+    try {
+      const mailer = await createMailer(smtpConfig(fake.port), { fetch: (...a) => fetch(...a), deadlineMs: HUNG_MS - 1_000, tls });
+      const r = await within(mailer.send(MESSAGE), HUNG_MS);
+      assert.deepEqual(r, { hung: false, error: undefined });
+      assert.equal(fake.messages.length, 1, 'one message');
+      assert.equal(fake.messages[0].overTls, true, 'it was sent after TLS was up');
+      assert.match(fake.messages[0].data, /Open this link: https:\/\/www\.example\.org\/reset#t/);
+      const at = (re: RegExp) => fake.commands.findIndex((c) => re.test(c));
+      const [auth, mail, rcpt, data] = [/^AUTH/i, /^MAIL FROM:/i, /^RCPT TO:/i, /^DATA$/i].map(at);
+      assert.ok(auth >= 0 && auth < mail && mail < rcpt && rcpt < data, `sign-in, then MAIL, RCPT and DATA: ${JSON.stringify(fake.commands)}`);
+      assert.ok(await eventually(() => fake.open() === 0, CLOSE_MS), `${fake.open()} connection(s) still open after the send`);
+    } finally { await fake.close(); }
+  });
+
   test(`email smtp ${mode}: a server that drips a byte at a time after the handshake fails the send at the deadline, and its connection is closed`, async () => {
     const fake = await smtpFake(pem, { mode, drip: true });
     try {
@@ -241,6 +275,23 @@ for (const mode of ['implicit', 'starttls'] as const) {
     } finally { await fake.close(); }
   });
 }
+
+test('email smtp starttls: a slow greeting and a STARTTLS handshake that never finishes share one setup bound, which fails the send before the deadline', async () => {
+  // Each wait alone is inside the bound; together they are past it. The deadline is well past both.
+  const fake = await smtpFake(pem, { mode: 'starttls', greetAfterMs: SETUP_MS * 0.8, stallStartTls: true });
+  try {
+    const mailer = await createMailer(smtpConfig(fake.port), { fetch: (...a) => fetch(...a), timeoutMs: SETUP_MS, deadlineMs: SETUP_MS * 4, tls: { secure: false, ca: pem.cert } });
+    const started = Date.now();
+    const r = await within(mailer.send(MESSAGE), HUNG_MS);
+    const took = Date.now() - started;
+    assert.equal(r.hung, false, `the send was still waiting after ${HUNG_MS} ms`);
+    assert.equal(!r.hung && (r.error as { code?: unknown }).code, 'ETIMEDOUT');
+    assert.ok(took >= SETUP_MS && took < SETUP_MS + DEADLINE_SLACK_MS, `failed after ${took} ms, the setup bound is ${SETUP_MS} ms`);
+    assert.equal(fake.messages.length, 0);
+    assert.ok(!fake.commands.some((c) => /^(AUTH|MAIL|RCPT|DATA)/i.test(c)), `nothing past STARTTLS in the clear: ${JSON.stringify(fake.commands)}`);
+    assert.ok(await eventually(() => fake.open() === 0, CLOSE_MS), `${fake.open()} connection(s) still open`);
+  } finally { await fake.close(); }
+});
 
 test('email smtp starttls: CONTROL: a server that offers no STARTTLS fails the send — never sent in the clear', async () => {
   const fake = await smtpFake(pem, { mode: 'starttls', offerStartTls: false });
