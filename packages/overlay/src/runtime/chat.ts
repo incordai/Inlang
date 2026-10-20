@@ -441,10 +441,11 @@ function runShell(p: Parts, config: ChatConfig, options: ChatOptions, signal: Ab
     });
   }
 
-  // §9: Escape stops an answer (the window's own listener, which runs first); with none coming, it closes a float.
+  // §9: Escape stops an answer (the window's own listener, which runs first and marks the key handled); with none
+  // coming, it closes a float. The mark decides, not whether an answer is still busy: a stop can end it at once.
   on(p.host, 'keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (panel.busy) { /* the window stopped it */ } else if (isOpen()) { e.preventDefault(); closeFloat(); } else return;
+    if (e.defaultPrevented) { /* the window stopped an answer */ } else if (isOpen()) { e.preventDefault(); closeFloat(); } else return;
     escaped = true;
     win?.setTimeout(() => { escaped = false; }, 0);
   });
