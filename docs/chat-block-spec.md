@@ -4251,7 +4251,7 @@ Each render pushes only the events not drawn yet; a shorter list or another
 first event starts again; a change to what it is drawn under redraws it;
 unmounting stops everything. `theme` is a theme module or its name, loaded
 on first use. Written with `createElement`, so it runs with no build step.
-React 19.2.8 is its peer dependency (and a development dependency here).
+React 19.3.0 is its peer dependency (and a development dependency here).
 
 **Safety.** Every model string is text; the one URL the answer writes is a
 destination on the allow-list (`setDestination`), the one image address a

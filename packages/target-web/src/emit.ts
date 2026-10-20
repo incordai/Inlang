@@ -78,18 +78,18 @@ export interface EmittedFile {
  * document and the compiler cannot quietly disagree about what ships.
  */
 export const PINS = {
-  react: '19.2.8',
+  react: '19.3.0',
   vite: '8.2.2',
   typescript: '7.0.2',
   /** Only a site that uses 3D depends on it (scene-spec §5). */
   three: '0.186.1',
   /**
    * The type declarations a site author's `tsc` needs to check the generated
-   * project: React's (the 19.2 line, matching `react`) for every site, and
+   * project: React's (the 19.3 line, matching `react`) for every site, and
    * three's (matching `three`) only beside it. Development only; never shipped.
    */
-  typesReact: '19.2.18',
-  typesReactDom: '19.2.7',
+  typesReact: '19.3.0',
+  typesReactDom: '19.3.0',
   typesThree: '0.186.0',
   /**
    * Only a site whose chat shows maps depends on these (chat-block-spec
@@ -1212,7 +1212,7 @@ ${frameCss(theme)}${schemeCss(named)}${gradientCss(isPaired(named))}${patternCss
       /**
        * The project's dependencies.
        *
-       * Versions are EXACT, never ranges: `^19.2.8` would let two builds of
+       * Versions are EXACT, never ranges: `^19.3.0` would let two builds of
        * one source resolve differently, which breaks the determinism claim
        * before a single line of AZ is involved. Every pin is a row of
        * stack-evaluation.md's verified table, and a test compares the two.

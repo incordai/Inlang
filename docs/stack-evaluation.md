@@ -28,7 +28,7 @@ which the owner may overrule.
 | 9 | **gltfjsx** | **AUTHOR-SIDE TOOL, and only via `raw`** | output determinism is undocumented; it competes with the emitter rather than feeding it |
 | 10 | **Spline** | **AUTHOR-SIDE TOOL, asset export only** | the runtime embed is a network call in the visitor's page; the GLB export is fine and the free tier exports geometry only |
 | 11 | **Blender** | **AUTHOR-SIDE TOOL — correct choice** | GLB + Draco is the right path; the official exporter is Khronos-maintained and bundled |
-| — | React major | **DECIDED** | React 19; R3F `9.8.0` widened its peer to `>=19 <19.4`, so the pinned `19.2.8` has room (§0) |
+| — | React major | **DECIDED** | React 19; R3F `9.8.x` takes `>=19 <19.4`, so the pinned `19.3.0` is inside it (§0) |
 | — | three ceiling | **DECIDED — a moving window, reviewed with each pin bump** | `postprocessing 6.39.5` widened its peer to `three < 0.187.0`; `0.186.1` is inside it (§0) |
 
 ---
@@ -43,7 +43,7 @@ Every version below was read from `registry.npmjs.org` on **2026-09-23**.
 | `@types/three` | **`0.186.0`** | latest, matches `three` |
 | `@react-three/fiber` | **`9.8.0`** | latest, published 2026-09-22; peers `react >=19 <19.4`, `three >=0.156` |
 | `@react-three/drei` | **`10.7.8`** | latest; peers `react ^19`, `three >=0.159`, `@react-three/fiber ^9.0.0` |
-| `react`, `react-dom` | `19.2.8` (unchanged) | inside fiber's `>=19 <19.4`; `19.3.0` exists and is not required by anything here |
+| `react`, `react-dom` | `19.3.0` (from `19.2.8`, 2026-10-19) | inside fiber's `>=19 <19.4`; `19.3.1` (2026-10-14) changes only server-component transport, which nothing here uses, and is inside the 7-day release age until 2026-10-21 |
 
 **The three ceiling (§1, §8).** The ceiling was never about three: it is
 `postprocessing`'s peer range. On 2026-08-21 that was `>= 0.168.0 < 0.186.0`;
@@ -119,13 +119,14 @@ old, not stale.
 **FACT.** The pinned `8.17.10` declares `"react": ">=18.0"`, `"three":
 ">=0.133"` ([registry](https://registry.npmjs.org/@react-three/fiber/8.17.10)).
 
-**FACT.** React current: **`19.2.8`**
+**FACT.** React current: **`19.3.1`**; the pinned `19.3.0` (§0)
 ([registry](https://registry.npmjs.org/react/latest)).
 
 **The upper bound is the finding.** R3F 9.7.0 does not say `>=19`. It says
 `>=19 <19.3`, and React is at 19.2.8 — **one minor release from falling out of
 the declared range.** A word manifest that pins `react` exactly is protected;
-a `^` anywhere in the emitted `package.json` is not.
+a `^` anywhere in the emitted `package.json` is not. (R3F 9.8.x widened the range
+to `<19.4`, and React moved to `19.3.0` inside it on 2026-10-19.)
 
 `motion-tiers-spec.md:475` flags `frameloop="demand"`, `performance.regress()`
 and `<Canvas performance>` for verification "against `@react-three/fiber@8.17.10`
@@ -673,7 +674,7 @@ before pinning if this document is more than a few weeks old.**
 | `@react-three/drei` | `10.7.9` | — | **VERIFIED** 2026-10-19 — the spike's; the latest, published 2026-09-25; peers met by fiber 9.8.0, react 19.2.8, three 0.186.0 [↗](https://registry.npmjs.org/@react-three/drei/10.7.9) |
 | `@react-three/postprocessing` | `3.0.5` | — | **VERIFIED** [↗](https://registry.npmjs.org/@react-three/postprocessing/latest) |
 | `postprocessing` | `6.39.4` | Zlib | **VERIFIED** — required peer, must be pinned explicitly [↗](https://registry.npmjs.org/postprocessing/latest) |
-| `react` | `19.2.8` | MIT | **VERIFIED** [↗](https://registry.npmjs.org/react/latest) |
+| `react` | `19.3.0` | MIT | **VERIFIED** 2026-10-19 — published 2026-09-09; `react-dom` 19.3.0 peers `react ^19.3.0` and brings `scheduler ^0.28.0` (MIT) [↗](https://registry.npmjs.org/react/19.3.0) |
 | `motion` | `13.1.1` | MIT | **VERIFIED** — current package name [↗](https://registry.npmjs.org/motion/latest) |
 | `framer-motion` | `13.1.1` | MIT | **VERIFIED** — same version line; upgrade guide says swap to `motion` [↗](https://registry.npmjs.org/framer-motion/latest) |
 | `maplibre-gl` | `6.14.0` | BSD-3-Clause | **VERIFIED** 2026-10-19 — only a site whose chat shows maps (§19); the newest release older than the 7-day `minimumReleaseAge` (published 2026-10-11; `6.15.0`, published 2026-10-18, is 1 day old); against `6.13.0` its worker file, dependencies and policy needs are unchanged (§19) [↗](https://registry.npmjs.org/maplibre-gl/6.14.0) |
@@ -686,8 +687,8 @@ before pinning if this document is more than a few weeks old.**
 |---|---|---|---|
 | `vite` | `8.2.2` | MIT | **VERIFIED** [↗](https://registry.npmjs.org/vite/latest) |
 | `vite-react-ssg` | `0.9.2` | MIT | **VERIFIED** — pre-1.0 [↗](https://registry.npmjs.org/vite-react-ssg/latest) |
-| `@types/react` | `19.2.18` | MIT | **VERIFIED** 2026-10-16 — a generated project's devDependency, so its author's `tsc --noEmit` passes; the latest of the 19.2 line (published 2026-07-30), matching `react` 19.2.8 (`19.3.0` describes React 19.3); brings `csstype ^3.2.2` (MIT) [↗](https://registry.npmjs.org/@types/react/19.2.18) |
-| `@types/react-dom` | `19.2.7` | MIT | **VERIFIED** 2026-10-16 — a generated project's devDependency; the latest of the 19.2 line (published 2026-09-03); no dependencies, peer `@types/react ^19.2.0` [↗](https://registry.npmjs.org/@types/react-dom/19.2.7) |
+| `@types/react` | `19.3.0` | MIT | **VERIFIED** 2026-10-19 — a generated project's devDependency, so its author's `tsc --noEmit` passes; the latest (published 2026-09-09), matching `react` 19.3.0; brings `csstype ^3.2.2` (MIT) [↗](https://registry.npmjs.org/@types/react/19.3.0) |
+| `@types/react-dom` | `19.3.0` | MIT | **VERIFIED** 2026-10-19 — a generated project's devDependency; the latest (published 2026-09-09); no dependencies, peer `@types/react ^19.3.0` [↗](https://registry.npmjs.org/@types/react-dom/19.3.0) |
 | `@types/three` | `0.186.0` | MIT | **VERIFIED** 2026-10-16 — a generated 3D project's devDependency, only beside `three`; matches the `three` 0.186 line (§0, published 2026-09-11; there is no `0.186.1` of it) [↗](https://registry.npmjs.org/@types/three/0.186.0) |
 
 ### Author-side (never a compiler dependency)

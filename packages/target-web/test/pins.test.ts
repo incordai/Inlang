@@ -50,7 +50,7 @@ function verifiedVersion(pkg: string): string | null {
 test('CONTROL: the table is readable and marks versions VERIFIED', () => {
   // If the table format changed, every lookup below would return null and the
   // comparisons would silently pass against nothing.
-  assert.equal(verifiedVersion('react'), '19.2.8', 'react row not found or not VERIFIED');
+  assert.equal(verifiedVersion('react'), '19.3.0', 'react row not found or not VERIFIED');
   assert.equal(verifiedVersion('vite'), '8.2.2', 'vite row not found or not VERIFIED');
   assert.equal(verifiedVersion('nosuchpackage'), null, 'a missing package must read as null');
 });
