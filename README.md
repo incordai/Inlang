@@ -1,4 +1,14 @@
-# Incord Intelligent Language (inlang) <img src="https://github.com/user-attachments/assets/5548318d-30b0-4d60-a3a7-97269dbb5d61" width="25px" alt="incordai" />
+<div align="center">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="/assets/inlang-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="/assets/inlang-logo-light.svg">
+    <img alt="INCORD" src="/assets/inlang-logo-light.svg" width="840">
+  </picture>
+</p>
+</div>
+
+# Incord Intelligent Language (inlang) 
 
 **Describe a website in short words; inlang compiles them into a
 pre-rendered, locked-down site — and the words are designed so an AI
