@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 707 108" width="707" height="108" role="img" aria-label="INLANG">
+<title>INLANG</title>
+<style>.cut{stroke-dasharray:55 160;stroke-dashoffset:55;animation:run 3s linear infinite}@keyframes run{0%{stroke-dashoffset:55}16.67%{stroke-dashoffset:-100}100%{stroke-dashoffset:-100}}@media (prefers-reduced-motion:reduce){.cut{animation:none;stroke-dasharray:none}}</style>
+<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<g fill="#0B0D12" fill-rule="evenodd">
+<path transform="translate(0,0)" d="M0,0 H29 V14 H0 Z M0,17 H29 V100 H0 Z"/>
+<path transform="translate(37,0)" d="M0,0 H86 A28,28 0 0 1 112.4,22 L124,80 H95 L86.2,36 A12,12 0 0 0 74,26 H27 V100 H0 Z M95.6,83 H124.6 L128,100 H99 Z"/>
+<path transform="translate(171,0)" d="M0,17 H27 V74 H119 V100 H28 A28,28 0 0 1 0,72 Z M0,0 H27 V14 H0 Z"/>
+<path transform="translate(306,0)" d="M0,100 L20,0 H102 A22,22 0 0 1 124,22 V80 H97 V70 H35 L29,100 Z M43.8,26 H97 V48 H39.4 Z M97,83 H124 V100 H97 Z"/>
+<path transform="translate(446,0)" d="M0,0 H86 A28,28 0 0 1 112.4,22 L124,80 H95 L86.2,36 A12,12 0 0 0 74,26 H27 V100 H0 Z M95.6,83 H124.6 L128,100 H99 Z"/>
+<path transform="translate(580,0)" d="M28,0 H98 V26 H40 A13,13 0 0 0 27,39 V74 H92 V63 H64 V40 H119 V100 H0 V28 A28,28 0 0 1 28,0 Z M101,0 H119 V26 H101 Z"/>
+</g>
+<g fill="none" stroke="#FF7A1A" stroke-width="2.6" stroke-linecap="round" filter="url(#glow)">
+<line class="cut" style="animation-delay:0s" pathLength="100" x1="0" y1="15.5" x2="29" y2="15.5"/>
+<line class="cut" style="animation-delay:0.5s" pathLength="100" x1="132.3" y1="81.5" x2="161.3" y2="81.5"/>
+<line class="cut" style="animation-delay:1s" pathLength="100" x1="171" y1="15.5" x2="198" y2="15.5"/>
+<line class="cut" style="animation-delay:1.5s" pathLength="100" x1="403" y1="81.5" x2="430" y2="81.5"/>
+<line class="cut" style="animation-delay:2s" pathLength="100" x1="541.3" y1="81.5" x2="570.3" y2="81.5"/>
+<line class="cut" style="animation-delay:2.5s" pathLength="100" x1="679.5" y1="0" x2="679.5" y2="26"/>
+</g>
+</svg>
