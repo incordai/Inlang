@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@axe-core/playwright':
-        specifier: 4.13.0
-        version: 4.13.0(playwright-core@1.63.0)
+        specifier: 4.14.0
+        version: 4.14.0(playwright-core@1.64.1)
       '@protomaps/basemaps':
         specifier: 5.7.2
         version: 5.7.2
@@ -27,8 +27,8 @@ importers:
         specifier: 0.186.0
         version: 0.186.0
       gpt-tokenizer:
-        specifier: 4.0.0
-        version: 4.0.0
+        specifier: 4.0.3
+        version: 4.0.3
       lighthouse:
         specifier: 13.5.0
         version: 13.5.0(@opentelemetry/core@2.12.0(@opentelemetry/api@1.9.1))
@@ -36,17 +36,17 @@ importers:
         specifier: 6.14.0
         version: 6.14.0
       mysql2:
-        specifier: 3.24.5
-        version: 3.24.5(@types/node@26.6.5)
+        specifier: 3.24.6
+        version: 3.24.6(@types/node@26.6.5)
       nodemailer:
-        specifier: 10.1.0
-        version: 10.1.0
+        specifier: 10.1.2
+        version: 10.1.2
       pg:
         specifier: 8.23.1
         version: 8.23.1
       playwright:
-        specifier: 1.63.0
-        version: 1.63.0
+        specifier: 1.64.1
+        version: 1.64.1
       pmtiles:
         specifier: 4.5.0
         version: 4.5.0
@@ -92,11 +92,11 @@ importers:
         specifier: workspace:*
         version: link:../chat-answer
       react:
-        specifier: 19.3.0
-        version: 19.3.0
+        specifier: 19.3.1
+        version: 19.3.1
       react-dom:
-        specifier: 19.3.0
-        version: 19.3.0(react@19.3.0)
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
 
   packages/chat-render: {}
 
@@ -158,8 +158,9 @@ importers:
 
 packages:
 
-  '@axe-core/playwright@4.13.0':
-    resolution: {integrity: sha512-6YLx+kxXu5GJceG4ozFg+33a2EMTdjYwWGloJ3sb9Kta5pp+ZNS53uxGVog5JetIY8s++P5UrtX+cri+u0VAVg==}
+  '@axe-core/playwright@4.14.0':
+    resolution: {integrity: sha512-SGUhG5PIHd2eMdpgBF2PyQLOhX+qyDR2PT4cmoS4Qk2ak+jX/rrSvst9l0PGv5WTHolKpUMvVmoHpr4cZgf1RQ==}
+    engines: {node: '>=22.12.0'}
     peerDependencies:
       playwright-core: '>= 1.0.0'
 
@@ -682,6 +683,10 @@ packages:
     resolution: {integrity: sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==}
     engines: {node: '>=4'}
 
+  axe-core@4.14.0:
+    resolution: {integrity: sha512-9WTZxEjsZ7b13TH8JPmbV2z8CHbl80/2hm3XPEG4JgNdQLK81IBRXmSxHfMAOkSqQeRxT/0dwNDz2GOm3zzpcQ==}
+    engines: {node: '>=4'}
+
   bidi-js@1.1.0:
     resolution: {integrity: sha512-fX1Onk0tdVPC7obPWB5EbJ1z7NVhLq4m2xZLq2YXBkxzMXIGRpNMU88n0EPgWseKl12J7zXs7qrDxPK4sRs2fg==}
 
@@ -811,8 +816,8 @@ packages:
   gl-matrix@3.4.4:
     resolution: {integrity: sha512-latSnyDNt/8zYUB6VIJ6PCh2jBjJX6gnDsoCZ7LyW7GkqrD51EWwa9qCoGixj8YqBtETQK/xY7OmpTF8xz1DdQ==}
 
-  gpt-tokenizer@4.0.0:
-    resolution: {integrity: sha512-YAWIyzvuVUHEfW7tFfFAxH8qQb+Q3RU9nYOTy7skMNX5qzU6Q8jxTHZLyO56ug1vYvCR7wndzpd3jwD86/mhjQ==}
+  gpt-tokenizer@4.0.3:
+    resolution: {integrity: sha512-GrrPDreSy2c3ZgM/u+5JN+lnHTLrJKm7QAFfTD5J+vgcSP69C+fFIUaJWiey/QQ8lS5u79OvluKuEmGBAbOS4A==}
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
@@ -1019,8 +1024,8 @@ packages:
   murmurhash-js@1.0.0:
     resolution: {integrity: sha512-TvmkNhkv8yct0SVBSy+o8wYzXjE4Zz3PCesbfs8HiCXXdcTuocApFv11UWlNFWKYsP2okqrhb7JNlSm9InBhIw==}
 
-  mysql2@3.24.5:
-    resolution: {integrity: sha512-X6Ujsr2QSkkLpkQGjxzpKRAPn9nu4axpR63ntBzquFVEvPOArgbUQ1sJjFKI7hnaYtiVZxa17Z7q18KSubW0IQ==}
+  mysql2@3.24.6:
+    resolution: {integrity: sha512-enu73KhbAua2L3dIxjc6qg6ZJ7H3pt1BImZASWNWY5xSsmJ1ZuUPULTDGXgmJbI61vb+nJAG19IZclIq19UidQ==}
     engines: {node: '>= 8.0'}
     peerDependencies:
       '@types/node': '>= 8'
@@ -1029,8 +1034,8 @@ packages:
     resolution: {integrity: sha512-Tz09sEL2EEuv5fFowm419c1+a/jSMiBjI9gHxVLrVdbUkkNUUfjsVYs9pVZu5oCon/kmRh9TfLEObFtkVxmY0w==}
     engines: {node: '>=8.0.0'}
 
-  nodemailer@10.1.0:
-    resolution: {integrity: sha512-fXW8AulB25aOTuwfRYV6lqHyfz2VM4rr4SGXH03mE7x5znEUpzL5mu6anARUpZN7744Ziwkmr4AxSLPJsBQspg==}
+  nodemailer@10.1.2:
+    resolution: {integrity: sha512-rnQn9Rzh8RAwcp42MVsIvxbsv6YZ2a2/av+uyJ/LPU1+2QSlrRgFsWWZTKenyRUqkIl8urOI0c4+CEcmFdsvQw==}
     engines: {node: '>=20.0.0'}
 
   open@8.4.2:
@@ -1075,13 +1080,13 @@ packages:
   pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
-  playwright-core@1.63.0:
-    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+  playwright-core@1.64.1:
+    resolution: {integrity: sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==}
     engines: {node: '>=20'}
     hasBin: true
 
-  playwright@1.63.0:
-    resolution: {integrity: sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==}
+  playwright@1.64.1:
+    resolution: {integrity: sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -1117,13 +1122,13 @@ packages:
   quickselect@3.0.0:
     resolution: {integrity: sha512-XdjUArbK4Bm5fLLvlm5KpTFOiOThgfWWI4axAZDWg4E/0mKdZyI9tNEfds27qCi1ze/vwTR16kvmmGhRra3c2g==}
 
-  react-dom@19.3.0:
-    resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
+  react-dom@19.3.1:
+    resolution: {integrity: sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ==}
     peerDependencies:
-      react: ^19.3.0
+      react: ^19.3.1
 
-  react@19.3.0:
-    resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
+  react@19.3.1:
+    resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
     engines: {node: '>=0.10.0'}
 
   require-directory@2.1.1:
@@ -1325,10 +1330,10 @@ packages:
 
 snapshots:
 
-  '@axe-core/playwright@4.13.0(playwright-core@1.63.0)':
+  '@axe-core/playwright@4.14.0(playwright-core@1.64.1)':
     dependencies:
-      axe-core: 4.13.0
-      playwright-core: 1.63.0
+      axe-core: 4.14.0
+      playwright-core: 1.64.1
 
   '@dimforge/rapier3d-compat@0.12.0': {}
 
@@ -1741,6 +1746,8 @@ snapshots:
 
   axe-core@4.13.0: {}
 
+  axe-core@4.14.0: {}
+
   bidi-js@1.1.0:
     dependencies:
       require-from-string: 2.0.2
@@ -1852,7 +1859,7 @@ snapshots:
 
   gl-matrix@3.4.4: {}
 
-  gpt-tokenizer@4.0.0: {}
+  gpt-tokenizer@4.0.3: {}
 
   graceful-fs@4.2.11: {}
 
@@ -2207,7 +2214,7 @@ snapshots:
 
   murmurhash-js@1.0.0: {}
 
-  mysql2@3.24.5(@types/node@26.6.5):
+  mysql2@3.24.6(@types/node@26.6.5):
     dependencies:
       '@types/node': 26.6.5
       aws-ssl-profiles: 1.1.2
@@ -2222,7 +2229,7 @@ snapshots:
     dependencies:
       lru.min: 1.1.5
 
-  nodemailer@10.1.0: {}
+  nodemailer@10.1.2: {}
 
   open@8.4.2:
     dependencies:
@@ -2269,11 +2276,11 @@ snapshots:
     dependencies:
       split2: 4.2.0
 
-  playwright-core@1.63.0: {}
+  playwright-core@1.64.1: {}
 
-  playwright@1.63.0:
+  playwright@1.64.1:
     dependencies:
-      playwright-core: 1.63.0
+      playwright-core: 1.64.1
 
   pmtiles@4.5.0:
     dependencies:
@@ -2309,12 +2316,12 @@ snapshots:
 
   quickselect@3.0.0: {}
 
-  react-dom@19.3.0(react@19.3.0):
+  react-dom@19.3.1(react@19.3.1):
     dependencies:
-      react: 19.3.0
+      react: 19.3.1
       scheduler: 0.28.0
 
-  react@19.3.0: {}
+  react@19.3.1: {}
 
   require-directory@2.1.1: {}
 

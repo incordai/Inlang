@@ -12,16 +12,16 @@
     "#chat-runtime/*": "@az/chat-runtime/*"
   },
   "peerDependencies": {
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "dependencies": {
     "@az/chat-render": "workspace:*",
     "@az/chat-runtime": "workspace:*"
   },
   "devDependencies": {
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "@az/chat-answer": "workspace:*"
   }
 }
